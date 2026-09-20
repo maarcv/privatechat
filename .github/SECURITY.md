@@ -2,7 +2,7 @@
 
 ## Scope
 
-Everything in this repository: `core`, `store`, `server`, the clients and the reference deployment in `deploy/`. The threat model, with what the system promises and what it does not, is in [`docs/threat-model.md`](docs/threat-model.md). A finding that falls under "Outside the model" or "Accepted limitations" is welcome as a discussion, but it is not a vulnerability.
+Everything in this repository: `core`, `store`, `server`, the clients and the reference deployment in `deploy/`. The threat model, with what the system promises and what it does not, is in [`docs/threat-model.md`](../docs/threat-model.md). A finding that falls under "Outside the model" or "Accepted limitations" is welcome as a discussion, but it is not a vulnerability.
 
 ## How to report
 

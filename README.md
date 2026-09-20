@@ -25,12 +25,12 @@ The full list, the threat model and every decision are in [`docs/spec.md`](docs/
 
 ## How it is built
 
-- `core/` — cryptography (libsodium), wire format, session. No I/O, no clock.
-- `store/` — local storage: encrypted files with atomic commit. No database.
-- `server/` — mailbox with TTL over WebSocket. One binary, SQLite, no secrets.
+- `crates/core/` — cryptography (libsodium), wire format, session. No I/O, no clock.
+- `crates/store/` — local storage: encrypted files with atomic commit. No database.
+- `crates/server/` — mailbox with TTL over WebSocket. One binary, SQLite, no secrets.
 - `clients/` — desktop (Tauri), Android (Kotlin), iOS (Swift): thin layers over the core.
 
-Development follows specs (`specs/`) written before the code, with tests that cite every requirement. See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md).
+Development follows specs (`specs/`) written before the code, with tests that cite every requirement. See [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md).
 
 ## License
 

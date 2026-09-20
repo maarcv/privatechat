@@ -88,7 +88,7 @@ jobs:
           test "$(git ls-files inici | wc -l)" -eq 0
       - name: s000_t06_r06_root_files_exist
         run: |
-          for f in AGENTS.md CLAUDE.md README.md CONTRIBUTING.md SECURITY.md LICENSE CODEOWNERS assistant.example.md \
+          for f in AGENTS.md CLAUDE.md README.md LICENSE .github/CONTRIBUTING.md .github/SECURITY.md .github/CODEOWNERS docs/assistant.example.md \
                    Cargo.toml rust-toolchain.toml rustfmt.toml deny.toml .editorconfig .gitignore \
                    docs/spec.md docs/threat-model.md docs/adr/README.md docs/adr/TEMPLATE.md \
                    specs/TEMPLATE.md specs/README.md specs/vectors/README.md \
@@ -120,7 +120,7 @@ jobs:
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
           changed="$(git diff --name-only "$BASE"...HEAD)"
-          protected="$(printf '%s\n' "$changed" | grep -E '^(core/src/proto/|core/src/crypto/|specs/vectors/|specs/01[123]-)' || true)"
+          protected="$(printf '%s\n' "$changed" | grep -E '^(crates/core/src/proto/|crates/core/src/crypto/|specs/vectors/|specs/01[123]-)' || true)"
           if [ -z "$protected" ]; then echo "no protected paths touched"; exit 0; fi
           case ",$LABELS," in *,adr-not-needed,*) echo "label adr-not-needed present"; exit 0;; esac
           added_adr="$(git diff --name-only --diff-filter=A "$BASE"...HEAD | grep -E '^docs/adr/[0-9]{4}-.*\.md$' || true)"

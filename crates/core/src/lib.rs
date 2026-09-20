@@ -41,7 +41,7 @@ mod tests {
     /// Checked by reading the workspace `Cargo.toml`, which is the single source.
     #[test]
     fn s000_t03_r03_workspace_lints_deny_unwrap_and_arithmetic() {
-        let manifest = include_str!("../../Cargo.toml");
+        let manifest = include_str!("../../../Cargo.toml");
         for lint in [
             "unwrap_used = \"deny\"",
             "expect_used = \"deny\"",
@@ -57,7 +57,7 @@ mod tests {
     /// Spec 000, R7: the toolchain is pinned to one concrete stable version.
     #[test]
     fn s000_t07_r07_toolchain_is_pinned() {
-        let toolchain = include_str!("../../rust-toolchain.toml");
+        let toolchain = include_str!("../../../rust-toolchain.toml");
         assert!(toolchain.contains("channel = \"1.98.1\""));
         assert!(toolchain.contains("\"rustfmt\"") && toolchain.contains("\"clippy\""));
     }
@@ -65,7 +65,7 @@ mod tests {
     /// Spec 000, R8: `deny.toml` bans cryptographic and compression crates.
     #[test]
     fn s000_t08_r08_deny_bans_crypto_crates() {
-        let deny = include_str!("../../deny.toml");
+        let deny = include_str!("../../../deny.toml");
         for crate_name in [
             "ring",
             "openssl",

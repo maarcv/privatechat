@@ -27,5 +27,5 @@ clients/ios/DerivedData/
 .env
 *.local
 
-# Personal AI-assistant preferences (see CLAUDE.md and assistant.example.md)
+# Personal AI-assistant preferences (see CLAUDE.md and docs/assistant.example.md)
 /assistant.md

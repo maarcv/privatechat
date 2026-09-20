@@ -134,7 +134,7 @@ def check_s003_t03_r03_spec_refs_exist_in_plan(spec: str) -> None:
     plan = " ".join(table_after(spec, "## 10. SDD execution plan"))
     listed = set(re.findall(r"\b(\d{3}-[a-z][a-z0-9-]*)", plan))
     sources = [spec_body(spec), AGENTS.read_text(encoding="utf-8")]
-    for extra in ("README.md", "CONTRIBUTING.md"):
+    for extra in ("README.md", ".github/CONTRIBUTING.md"):
         p = ROOT / extra
         if p.exists():
             sources.append(p.read_text(encoding="utf-8"))

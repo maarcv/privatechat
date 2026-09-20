@@ -155,7 +155,7 @@ Test modules live at `foo/tests.rs`, declared from `foo.rs` with
 `#[cfg(test)] mod tests;`. Tests may build fixtures with indexing and plain
 arithmetic: the crate root relaxes exactly `unwrap_used`, `expect_used`,
 `indexing_slicing` and `arithmetic_side_effects` under `#[cfg(test)]`
-(see `core/src/lib.rs`). Production code never gets that relaxation.
+(see `crates/core/src/lib.rs`). Production code never gets that relaxation.
 
 ## 3. `Store` trait and `WriteBatch` — one commit per operation
 

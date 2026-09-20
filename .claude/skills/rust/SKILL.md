@@ -153,7 +153,7 @@ variant, so that the mutation table in the spec is a test you can write.
 
 ## `unsafe` and libsodium
 
-`#![forbid(unsafe_code)]` everywhere except `core/src/crypto/ffi.rs`, the one
+`#![forbid(unsafe_code)]` everywhere except `crates/core/src/crypto/ffi.rs`, the one
 file that calls `libsodium-sys-stable`. There:
 
 - `#![deny(unsafe_op_in_unsafe_fn)]`; every `unsafe {}` block has a
@@ -229,7 +229,7 @@ file that calls `libsodium-sys-stable`. There:
   field. Say which level a test is at in its name.
 - **`FailingStore`** that fails at commit *n*: reopen, assert the state equals
   the state before *n*.
-- **Fuzz targets** in `core/fuzz` for every `parse`, `decrypt`, `open_*`
+- **Fuzz targets** in `crates/core/fuzz` for every `parse`, `decrypt`, `open_*`
   (AGENTS 21). Keep targets tiny: bytes in, call, ignore result, no panics.
 - No `sleep`, no clock, no network in tests. Time is a parameter.
 - Prefer many small tests with precise names over one test with twenty asserts:

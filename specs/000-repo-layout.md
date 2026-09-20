@@ -15,10 +15,10 @@ Before any line of product code we need a monorepo where the spec is the source 
 
 - R1 The Cargo workspace with the crates `core`, `store` and `server` MUST compile empty with `cargo build --workspace --all-targets` without warnings.
 - R2 `cargo test --workspace` MUST pass, with the tests of this spec included.
-- R3 The workspace lints MUST deny in `core`, `store` and `server`: `unwrap_used`, `expect_used`, `panic`, `unreachable`, `indexing_slicing`, `arithmetic_side_effects`, `cast_possible_truncation`, `cast_sign_loss`, `todo`, `unimplemented`, `dbg_macro`, `print_stdout`, `print_stderr`, `undocumented_unsafe_blocks`; `unsafe_code` at `deny` in the workspace and `#![forbid(unsafe_code)]` in every crate until `core/src/crypto/ffi.rs` exists; `overflow-checks = true` in the `release` profile.
+- R3 The workspace lints MUST deny in `core`, `store` and `server`: `unwrap_used`, `expect_used`, `panic`, `unreachable`, `indexing_slicing`, `arithmetic_side_effects`, `cast_possible_truncation`, `cast_sign_loss`, `todo`, `unimplemented`, `dbg_macro`, `print_stdout`, `print_stderr`, `undocumented_unsafe_blocks`; `unsafe_code` at `deny` in the workspace and `#![forbid(unsafe_code)]` in every crate until `crates/core/src/crypto/ffi.rs` exists; `overflow-checks = true` in the `release` profile.
 - R4 The only server URL in the code MUST be the constant `privatechat_core::DEFAULT_SERVER_URL`, with the `wss://` scheme and, until there is a domain, the reserved TLD `.invalid`.
 - R5 `.gitignore` MUST exclude `/inici/`, `.DS_Store`, `/target`, `node_modules/`, `dist/`, `.env` and generated code (`bindings/**/generated/`); `git ls-files inici` MUST return zero files.
-- R6 The root MUST contain: `AGENTS.md`, `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `LICENSE` (MIT), `CODEOWNERS`, `assistant.example.md`, `Cargo.toml`, `rust-toolchain.toml`, `rustfmt.toml`, `deny.toml`, `.editorconfig`, `.gitignore`, `docs/spec.md`, `docs/threat-model.md`, `docs/adr/README.md`, `docs/adr/TEMPLATE.md`, `specs/TEMPLATE.md`, `specs/README.md`, `specs/vectors/README.md` and the five skills in `.claude/skills/`.
+- R6 The repository MUST contain, at the root: `AGENTS.md`, `CLAUDE.md`, `README.md`, `LICENSE` (MIT), `Cargo.toml`, `rust-toolchain.toml`, `rustfmt.toml`, `deny.toml`, `.editorconfig`, `.gitignore`; under `.github/`: `CONTRIBUTING.md`, `SECURITY.md`, `CODEOWNERS`; and `docs/assistant.example.md`, `docs/spec.md`, `docs/threat-model.md`, `docs/adr/README.md`, `docs/adr/TEMPLATE.md`, `specs/TEMPLATE.md`, `specs/README.md`, `specs/vectors/README.md` and the five skills in `.claude/skills/`.
 - R7 `rust-toolchain.toml` MUST pin the channel to a specific stable version (`1.98.1`) with `rustfmt` and `clippy`; `edition = "2024"` and `rust-version` in the workspace.
 - R8 `deny.toml` MUST ban across the whole workspace the crates in the AGENTS 2 list and the compression crates (AGENTS 24), allowing `rand`/`rand_core` only as a transitive dependency of `proptest`; allowed licenses: MIT, Apache-2.0, BSD-2/3, ISC, Unicode-3.0, Zlib, MPL-2.0; registry crates.io only.
 
@@ -30,13 +30,13 @@ Before any line of product code we need a monorepo where the spec is the source 
 
 ```
 /
-├─ Cargo.toml                (workspace: members core, store, server; [workspace.lints]; [profile.release])
-├─ core/   (lib privatechat_core)   store/  (lib privatechat_store)   server/ (bin privatechat-server)
+├─ Cargo.toml                (workspace: members crates/core, crates/store, crates/server; [workspace.lints]; [profile.release])
+├─ crates/core/ (lib privatechat_core)   crates/store/ (lib privatechat_store)   crates/server/ (bin privatechat-server)
 ├─ rust-toolchain.toml · rustfmt.toml · deny.toml · .editorconfig · .gitignore
-├─ AGENTS.md · CLAUDE.md · README.md · CONTRIBUTING.md · SECURITY.md · LICENSE · CODEOWNERS · assistant.example.md
+├─ AGENTS.md · CLAUDE.md · README.md · LICENSE
 ├─ .claude/skills/{architecture,rust,kotlin,swift,typescript-svelte}/SKILL.md
-├─ .github/{workflows/ci.yml, PULL_REQUEST_TEMPLATE.md, dependabot.yml}
-├─ docs/{spec.md, threat-model.md, adr/}    specs/{TEMPLATE.md, README.md, NNN-*.md, vectors/}
+├─ .github/{workflows/ci.yml, PULL_REQUEST_TEMPLATE.md, dependabot.yml, CONTRIBUTING.md, SECURITY.md, CODEOWNERS}
+├─ docs/{spec.md, threat-model.md, assistant.example.md, adr/}    specs/{TEMPLATE.md, README.md, NNN-*.md, vectors/}
 └─ scripts/{doc_lint.sh, doc_lint.py, check_requirements.sh, check_requirements.py}
 ```
 
@@ -78,7 +78,7 @@ pub const DEFAULT_SERVER_URL: &str = "wss://server.invalid";
 
 - No product code: `core`, `store` and `server` are skeletons with module documentation.
 - The final value of `DEFAULT_SERVER_URL` (open decision in §12).
-- `core/fuzz/` (spec 016) and `bindings/`, `clients/`, `deploy/` (phases 3–5).
+- `crates/core/fuzz/` (spec 016) and `bindings/`, `clients/`, `deploy/` (phases 3–5).
 
 ## Open questions
 

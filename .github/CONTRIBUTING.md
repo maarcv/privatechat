@@ -4,10 +4,10 @@ Thanks for reading this before touching anything. The project has two rules that
 
 ## Before you start
 
-1. Read [`AGENTS.md`](AGENTS.md) in full. It applies to people and to agents alike.
-2. Read [`docs/spec.md`](docs/spec.md) §3 (decisions), §4 (cryptographic model) and the spec of the feature you want to touch in `specs/`.
-3. Read [`.claude/skills/architecture/SKILL.md`](.claude/skills/architecture/SKILL.md) and the skill of your language. They are the coding standard.
-4. Working with an AI assistant? Copy [`assistant.example.md`](assistant.example.md) to `assistant.md` (git-ignored) and write your personal preferences there, such as the language you want to talk in. It never changes what goes into the repository.
+1. Read [`AGENTS.md`](../AGENTS.md) in full. It applies to people and to agents alike.
+2. Read [`docs/spec.md`](../docs/spec.md) §3 (decisions), §4 (cryptographic model) and the spec of the feature you want to touch in `specs/`.
+3. Read [`.claude/skills/architecture/SKILL.md`](../.claude/skills/architecture/SKILL.md) and the skill of your language. They are the coding standard.
+4. Working with an AI assistant? Copy [`docs/assistant.example.md`](../docs/assistant.example.md) to `assistant.md` (git-ignored) and write your personal preferences there, such as the language you want to talk in. It never changes what goes into the repository.
 
 ## Language
 
