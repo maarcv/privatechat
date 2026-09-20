@@ -1,11 +1,11 @@
 # 003 — Documentation lint
 
-Status: in review
+Status: implemented
 Phase: 0
 Related ADRs: —
 Depends on: 000, 002
 Blocks: 010
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-20
 
 ## Context
 
@@ -71,4 +71,4 @@ DOC_LINT_BASE=<ref>            # optional; base commit for R6
 
 ## History
 
-- 2026-09-20 draft · 2026-09-20 in review
+- 2026-09-20 draft · 2026-09-20 in review · 2026-09-20 accepted (Marc Vilardebó) · 2026-09-20 implemented

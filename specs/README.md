@@ -8,9 +8,9 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 
 | # | Spec | Phase | Status |
 | --- | --- | --- | --- |
-| 000 | 000-repo-layout | 0 | in review |
-| 001 | 001-ci | 0 | in review |
-| 002 | 002-adr-log | 0 | in review |
-| 003 | 003-doc-lint | 0 | in review |
+| 000 | 000-repo-layout | 0 | implemented |
+| 001 | 001-ci | 0 | implemented |
+| 002 | 002-adr-log | 0 | implemented |
+| 003 | 003-doc-lint | 0 | implemented |
 
 Phase 0 was bootstrapped with implementation and review in parallel; from spec 010 on, acceptance precedes code.

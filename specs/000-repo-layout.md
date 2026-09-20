@@ -1,11 +1,11 @@
 # 000 — Repository layout
 
-Status: in review
+Status: implemented
 Phase: 0
 Related ADRs: 0012, 0020, 0021, 0022
 Depends on: —
 Blocks: 001, 002, 003, 010
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-20
 
 ## Context
 
@@ -86,4 +86,4 @@ pub const DEFAULT_SERVER_URL: &str = "wss://server.invalid";
 
 ## History
 
-- 2026-09-20 draft · 2026-09-20 in review
+- 2026-09-20 draft · 2026-09-20 in review · 2026-09-20 accepted (Marc Vilardebó) · 2026-09-20 implemented

@@ -1,11 +1,11 @@
 # 002 — Architecture decision log
 
-Status: in review
+Status: implemented
 Phase: 0
 Related ADRs: all
 Depends on: 000
 Blocks: 003
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-20
 
 ## Context
 
@@ -63,4 +63,4 @@ The 22 ADRs in `docs/adr/` are the historical context of every decision and the 
 
 ## History
 
-- 2026-09-20 draft · 2026-09-20 in review
+- 2026-09-20 draft · 2026-09-20 in review · 2026-09-20 accepted (Marc Vilardebó) · 2026-09-20 implemented
