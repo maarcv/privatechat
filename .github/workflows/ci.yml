@@ -1,0 +1,150 @@
+# CI de la fase 0 (spec 001). Cada job és un requisit de docs/spec.md §10 «CI per fase».
+name: ci
+
+# s001_t10_r10_triggers_and_permissions: push a main/mvp, tota PR, només lectura.
+on:
+  push:
+    branches: [main, mvp]
+  pull_request:
+
+concurrency:
+  # s001_t05_r05_concurrency_cancels_previous_runs: una execució per branca.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          components: rustfmt
+      - name: s001_t01_r01_fmt_check
+        run: cargo fmt --all --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          components: clippy
+      - uses: Swatinem/rust-cache@v2 # s001_t06_r06_cargo_cache
+      - name: s001_t02_r02_clippy_denies_warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - name: s000_t01_r01_workspace_builds
+        run: cargo build --workspace --all-targets
+      - name: s000_t02_r02_workspace_tests_pass
+        run: cargo test --workspace
+
+  deny:
+    name: deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: s001_t03_r03_cargo_deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
+
+  doc-lint:
+    name: doc-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: s001_t04_r04_doc_lint
+        env:
+          DOC_LINT_BASE: ${{ github.event.pull_request.base.sha || '' }}
+        run: scripts/doc_lint.sh
+      - name: s000_t05_r05_inici_is_ignored
+        run: |
+          test ! -e inici || git check-ignore -q inici
+          test "$(git ls-files inici | wc -l)" -eq 0
+      - name: s000_t06_r06_root_files_exist
+        run: |
+          for f in AGENTS.md CLAUDE.md README.md CONTRIBUTING.md SECURITY.md LICENSE CODEOWNERS \
+                   Cargo.toml rust-toolchain.toml rustfmt.toml deny.toml .editorconfig .gitignore \
+                   docs/spec.md docs/threat-model.md docs/adr/README.md docs/adr/TEMPLATE.md \
+                   specs/TEMPLATE.md specs/README.md specs/vectors/README.md \
+                   .claude/skills/architecture/SKILL.md .claude/skills/rust/SKILL.md \
+                   .claude/skills/kotlin/SKILL.md .claude/skills/swift/SKILL.md \
+                   .claude/skills/typescript-svelte/SKILL.md; do
+            test -f "$f" || { echo "missing $f"; exit 1; }
+          done
+
+  check-requirements:
+    name: check-requirements
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: s001_t07_r07_every_requirement_has_a_test
+        run: scripts/check_requirements.sh
+
+  adr-guard:
+    name: adr-guard
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: s001_t08_r08_protected_paths_require_adr # també s002_t05_r05_format_changes_need_adr
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          changed="$(git diff --name-only "$BASE"...HEAD)"
+          protected="$(printf '%s\n' "$changed" | grep -E '^(core/src/proto/|core/src/crypto/|specs/vectors/|specs/01[123]-)' || true)"
+          if [ -z "$protected" ]; then echo "no protected paths touched"; exit 0; fi
+          case ",$LABELS," in *,adr-not-needed,*) echo "label adr-not-needed present"; exit 0;; esac
+          added_adr="$(git diff --name-only --diff-filter=A "$BASE"...HEAD | grep -E '^docs/adr/[0-9]{4}-.*\.md$' || true)"
+          if [ -z "$added_adr" ]; then
+            echo "Protected paths changed without a new ADR (AGENTS 3):"; echo "$protected"; exit 1
+          fi
+          echo "new ADR: $added_adr"
+
+  commit-lint:
+    name: commit-lint
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: s001_t09_r09_commit_subjects_have_prefix
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          bad=0
+          git log --no-merges --format=%s "$BASE"..HEAD | while IFS= read -r subject; do
+            if ! printf '%s' "$subject" | grep -Eq '^([0-9]{3}|docs|ci|chore|adr): '; then
+              echo "bad commit subject: $subject"; bad=1
+            fi
+          done
+          exit $bad

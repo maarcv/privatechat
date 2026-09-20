@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Every requirement R* of an accepted or implemented spec has a test T* (spec 001, AGENTS 6).
+
+For each `specs/NNN-*.md` with `Estat: acceptada` or `implementada`, every line
+`- R<k>` in `## Requisits` must be covered by an identifier `sNNN_tTT_rKK_` (two
+digits each), optionally prefixed (`check_s003_…`), somewhere in the tracked
+tree outside `specs/` and `docs/`: a Rust test name, a doc_lint check
+function, a CI step name or comment, a Kotlin/Swift/TS test name.
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def tracked_text() -> str:
+    files = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
+    chunks = []
+    for rel in files:
+        if rel.startswith("specs/") or rel.startswith("docs/"):
+            continue
+        p = ROOT / rel
+        try:
+            chunks.append(p.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, OSError):
+            continue
+    return "\n".join(chunks)
+
+
+def main() -> int:
+    corpus = tracked_text()
+    missing: list[str] = []
+    for spec in sorted((ROOT / "specs").glob("[0-9][0-9][0-9]-*.md")):
+        text = spec.read_text(encoding="utf-8")
+        state = re.search(r"^Estat: (.+)$", text, re.MULTILINE)
+        if not state or state.group(1).strip() not in {"acceptada", "implementada"}:
+            continue
+        nnn = spec.stem[:3]
+        start = text.find("## Requisits")
+        end = text.find("\n## ", start + 3)
+        section = text[start:end] if start >= 0 else ""
+        for m in re.finditer(r"^- R(\d+)\b", section, re.MULTILINE):
+            rr = f"{int(m.group(1)):02d}"
+            if not re.search(rf"(?<![A-Za-z0-9])s{nnn}_t\d\d_r{rr}_", corpus):
+                missing.append(f"{spec.name}: R{int(m.group(1))} has no test named s{nnn}_tTT_r{rr}_*")
+    if missing:
+        print("check_requirements: FAIL")
+        for line in missing:
+            print(" -", line)
+        return 1
+    print("check_requirements: ok")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
