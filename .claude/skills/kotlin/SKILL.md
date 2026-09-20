@@ -95,7 +95,7 @@ core (Rust)  via uniffi: Config, Channel, Session, Settings — opaque handles.
   position, animation).
 - `@Preview` for every screen-level Composable with representative states,
   including `Locked` and `Error`. Previews are documentation.
-- Strings in `res/values/strings.xml` (English default, Catalan), never
+- Strings in `res/values/strings.xml` (English default), never
   hard-coded. Content descriptions on every icon; minimum 48 dp touch targets;
   test with TalkBack once per screen.
 - Message lists use `LazyColumn` with stable `key = { it.serverId }`; never
