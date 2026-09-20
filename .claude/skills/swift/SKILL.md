@@ -18,7 +18,7 @@ Android, it belongs in `core` (architecture §1).
 - SwiftUI, iOS 16+. No UIKit except the thin wrappers the platform forces
   (camera for QR, `UIPasteboard`, screen-capture notifications).
 - SwiftPM for the app and the uniffi package. No CocoaPods, no Carthage.
-- No analytics, crash-reporting or ads SDKs (`docs/spec.md` §8 "Telemetria").
+- No analytics, crash-reporting or ads SDKs (`docs/spec.md` §8 "Telemetry").
 - Warnings are errors (`SWIFT_TREAT_WARNINGS_AS_ERRORS = YES`).
 
 ## Architecture inside the app
@@ -88,7 +88,7 @@ core (Rust)  via uniffi: Config, Channel, Session, Settings — opaque handles.
   Business state lives in the view model.
 - `#Preview` for every screen with representative states including `.locked`
   and `.failed`. Previews are documentation and catch layout bugs.
-- Strings in `Localizable.xcstrings` (Catalan default, English); never inline.
+- Strings in `Localizable.xcstrings` (English default, Catalan); never inline.
   Accessibility labels on every icon; Dynamic Type supported; VoiceOver
   checked once per screen.
 - Lists of messages use stable ids (`serverId`); never re-sort in a view.

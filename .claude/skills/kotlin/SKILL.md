@@ -17,7 +17,7 @@ messages beyond displaying them, stop: it belongs in `core` (architecture §1).
   XML layouts; a single `Activity`.
 - Gradle Kotlin DSL with a version catalog (`gradle/libs.versions.toml`). Every
   dependency has a one-line justification in the PR. No analytics, crash or
-  ads SDKs of any kind (`docs/spec.md` §8 "Telemetria").
+  ads SDKs of any kind (`docs/spec.md` §8 "Telemetry").
 - Coroutines and `Flow` for everything asynchronous. No RxJava, no callbacks,
   no `LiveData`.
 
@@ -95,7 +95,7 @@ core (Rust)  via uniffi: Config, Channel, Session, Settings — opaque handles.
   position, animation).
 - `@Preview` for every screen-level Composable with representative states,
   including `Locked` and `Error`. Previews are documentation.
-- Strings in `res/values/strings.xml` (Catalan default, English), never
+- Strings in `res/values/strings.xml` (English default, Catalan), never
   hard-coded. Content descriptions on every icon; minimum 48 dp touch targets;
   test with TalkBack once per screen.
 - Message lists use `LazyColumn` with stable `key = { it.serverId }`; never
@@ -111,7 +111,7 @@ core (Rust)  via uniffi: Config, Channel, Session, Settings — opaque handles.
   with `DEVICE_CREDENTIAL` is the app lock; there is no app PIN.
 - Lifecycle: `onStop` and screen-off → `Session.close()`, zero the key, drop
   the store handle. Reconnect in `onStart` with the core's cursor. No
-  foreground service, no WorkManager, no push (§8 "Segon pla").
+  foreground service, no WorkManager, no push (§8 "Background").
 - Manifest: `allowBackup="false"`, `dataExtractionRules` excluding everything,
   no `exported` components, no `usesCleartextTraffic`, no custom URL scheme.
 - Networking: OkHttp WebSocket with TLS 1.3 only, session resumption disabled,
@@ -137,6 +137,6 @@ core (Rust)  via uniffi: Config, Channel, Session, Settings — opaque handles.
   CI and must be clean. No `@Suppress` without a comment.
 - Reproducible builds: fixed Gradle wrapper, locked dependency versions, no
   build-time network access beyond dependency resolution. F-Droid requires
-  this (§8 "Integritat del codi").
+  this (§8 "Code integrity").
 - Debug builds only sign with the debug key; release signing happens in CI
   with the offline key.

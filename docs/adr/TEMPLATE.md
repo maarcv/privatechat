@@ -1,15 +1,15 @@
-# ADR NNNN — Títol (verb + objecte, ≤ 80 caràcters)
+# ADR NNNN — Title (verb + object, ≤ 80 characters)
 
-Data: AAAA-MM-DD · Estat: proposada | acceptada | obsoleta | substituïda per NNNN · Substitueix: NNNN (opcional)
+Date: YYYY-MM-DD · Status: proposed | accepted | deprecated | superseded by NNNN · Supersedes: NNNN (optional)
 
 ## Context
-Problema i restriccions. Enllaç a `docs/spec.md` §N i, si escau, a la troballa d'auditoria (§13 Ak / Bk).
+Problem and constraints. Link to `docs/spec.md` §N and, where applicable, to the audit finding (§13 Ak / Bk).
 
-## Decisió
-Una frase en present. Cap fórmula: si cal, referència a `docs/spec.md` §4.
+## Decision
+One sentence in the present tense. No formulas: if needed, a reference to `docs/spec.md` §4.
 
-## Alternatives descartades
-- Alternativa: motiu del descart.
+## Alternatives considered
+- Alternative: reason for rejection.
 
-## Conseqüències
-- Positives i negatives, i què cal fer (specs afectades).
+## Consequences
+- Positive and negative, and what needs doing (affected specs).

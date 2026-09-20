@@ -1,68 +1,68 @@
-# NNN — Nom de la feature
+# NNN — Feature name
 
-Estat: esborrany | en revisió | acceptada | implementada
-Fase: N
-ADR relacionades: 000X, 000Y
-Depèn de: NNN, NNN (specs que han d'estar `implementada`)
-Bloqueja: NNN
-Revisor humà: (nom) · Acceptada el: AAAA-MM-DD
+Status: draft | in review | accepted | implemented
+Phase: N
+Related ADRs: 000X, 000Y
+Depends on: NNN, NNN (specs that must be `implemented`)
+Blocks: NNN
+Human reviewer: (name) · Accepted on: YYYY-MM-DD
 
 ## Context
 
-Què resol aquesta feature i per què. Quina ADR ho justifica. Enllaç a la secció de `docs/spec.md` que ho descriu.
+What this feature solves and why. Which ADR justifies it. Link to the section of `docs/spec.md` that describes it.
 
-## Requisits
+## Requirements
 
-Numerats, verificables, una frase cada un. Cada R* usa MUST / NO POT, cita valors numèrics concrets (no «per exemple») i és comprovable amb un T*.
+Numbered, verifiable, one sentence each. Every R* uses MUST / MUST NOT, cites concrete numeric values (no "for example") and is checkable with a T*.
 
 - R1 …
 - R2 …
 
-## Límits
+## Limits
 
-Tot camp de longitud variable té aquí un màxim numèric. Tot enter extern té aquí el seu rang i què passa fora de rang.
+Every variable-length field has a numeric maximum here. Every external integer has its range here and what happens out of range.
 
-## Interfície
+## Interface
 
-Signatures exactes (Rust per a `core`, missatges per al servidor, pantalles per als clients). Formats en bytes amb offsets. Codis d'`Error` possibles.
+Exact signatures (Rust for `core`, messages for the server, screens for the clients). Formats in bytes with offsets. Possible `Error` codes.
 
 ```rust
-pub fn exemple(input: &[u8]) -> Result<Output, Error>;
+pub fn example(input: &[u8]) -> Result<Output, Error>;
 ```
 
-## Seguretat
+## Security
 
-Quins tipus porten secrets (→ `Zeroize`, `ZeroizeOnDrop`, `Debug` redactat). Què no pot sortir als logs. Entrades externes i com es validen. Comparacions en temps constant on calgui.
+Which types carry secrets (→ `Zeroize`, `ZeroizeOnDrop`, redacted `Debug`). What must not reach the logs. External inputs and how they are validated. Constant-time comparisons where needed.
 
-## Canvis d'API pública
+## Public API changes
 
-Signatures noves o canviades a la frontera del nucli (`docs/spec.md` §9, spec 027). Si n'hi ha, cal actualitzar 040 i 041.
+New or changed signatures at the core boundary (`docs/spec.md` §9, spec 027). If there are any, 040 and 041 must be updated.
 
-## Casos de prova
+## Test cases
 
-Cada test cita el requisit que cobreix i es diu `sNNN_tTT_rRR_<descripció>`.
+Every test cites the requirement it covers and is named `sNNN_tTT_rRR_<description>`.
 
-- T01 (cobreix R1): entrada → sortida esperada
-- T02 (cobreix R2): entrada invàlida → `Error::X` · commits al Store = 0
-- Per a tota spec amb estat: un test amb `FailingStore` que falla al commit *n* i comprova que reobrir dona l'estat anterior a *n*.
-- Per a tot format: la taula de mutació (a «Vectors») és un test.
+- T01 (covers R1): input → expected output
+- T02 (covers R2): invalid input → `Error::X` · commits to the Store = 0
+- For every spec with state: a test with `FailingStore` that fails at commit *n* and checks that reopening yields the state prior to *n*.
+- For every format: the mutation table (in "Vectors") is a test.
 
 ## Vectors
 
-Obligatoris per a specs de `core` amb format o derivació: fitxer `specs/vectors/NNN.json` amb l'esquema de `specs/vectors/README.md` (`{ "name", "inputs": {…hex}, "expected": {…hex} }`), i almenys un vector negatiu per cada requisit de rebuig. Per a formats, una **taula de mutació**: per a cada regió d'offsets, l'`Error` exacte esperat en mutar un byte, i l'assert que el Store no rep cap commit. Per a signatures: vectors negatius amb S no canònica (S + L), `pk` identitat, `pk` i `R` de petit ordre, `pk` no canònica.
+Mandatory for `core` specs with a format or a derivation: file `specs/vectors/NNN.json` with the schema of `specs/vectors/README.md` (`{ "name", "inputs": {…hex}, "expected": {…hex} }`), and at least one negative vector for every rejection requirement. For formats, a **mutation table**: for every offset region, the exact `Error` expected when mutating one byte, and the assert that the Store receives no commit. For signatures: negative vectors with non-canonical S (S + L), identity `pk`, small-order `pk` and `R`, non-canonical `pk`.
 
-## Criteri d'acceptació
+## Acceptance criterion
 
-Comanda exacta que ha de passar (`cargo test -p core sNNN_`), més el criteri no automatitzable si n'hi ha.
+Exact command that must pass (`cargo test -p core sNNN_`), plus the non-automatable criterion if there is one.
 
-## Fora d'abast
+## Out of scope
 
-Què NO fa aquesta feature, per evitar que l'agent ho afegeixi.
+What this feature does NOT do, so that the agent does not add it.
 
-## Preguntes obertes
+## Open questions
 
 - [ ] …
 
-## Historial
+## History
 
-- AAAA-MM-DD esborrany · AAAA-MM-DD acceptada (revisor)
+- YYYY-MM-DD draft · YYYY-MM-DD accepted (reviewer)

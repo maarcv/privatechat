@@ -27,9 +27,9 @@ SPECS_DIR = ROOT / "specs"
 SPECS_INDEX = SPECS_DIR / "README.md"
 AGENTS = ROOT / "AGENTS.md"
 
-ADR_STATES = {"proposada", "acceptada", "obsoleta"}  # plus "substituïda per NNNN"
-ADR_SECTIONS = ["## Context", "## Decisió", "## Alternatives descartades", "## Conseqüències"]
-SPEC_STATES = {"esborrany", "en revisió", "acceptada", "implementada"}
+ADR_STATES = {"proposed", "accepted", "deprecated"}  # plus "superseded by NNNN"
+ADR_SECTIONS = ["## Context", "## Decision", "## Alternatives considered", "## Consequences"]
+SPEC_STATES = {"draft", "in review", "accepted", "implemented"}
 
 failures: list[str] = []
 
@@ -59,7 +59,7 @@ def cells(row: str) -> list[str]:
 
 def spec_body(text: str) -> str:
     """The spec without §13 (audit log), which legitimately cites old names."""
-    cut = text.find("## 13. Registre")
+    cut = text.find("## 13. Audit log")
     return text if cut < 0 else text[:cut]
 
 
@@ -67,8 +67,8 @@ def spec_body(text: str) -> str:
 
 
 def check_s003_t01_r01_threat_table_matches_spec(spec: str, tm: str) -> None:
-    a = table_after(spec, "## 2. Model d'amenaces")
-    b = table_after(tm, "## Adversaris i mitigacions")
+    a = table_after(spec, "## 2. Threat model")
+    b = table_after(tm, "## Adversaries and mitigations")
     if a != b:
         fail("docs/threat-model.md table differs from docs/spec.md §2")
         for x, y in zip(a, b):
@@ -84,11 +84,11 @@ def adr_files() -> dict[str, tuple[str, str, Path]]:
         lines = f.read_text(encoding="utf-8").splitlines()
         m = re.match(r"# ADR (\d{4}) — (.+)", lines[0] if lines else "")
         if not m:
-            fail(f"{f.name}: first line must be '# ADR NNNN — Títol'")
+            fail(f"{f.name}: first line must be '# ADR NNNN — Title'")
             continue
-        state_m = re.search(r"Estat: ([^·]+)", lines[2] if len(lines) > 2 else "")
+        state_m = re.search(r"Status: ([^·]+)", lines[2] if len(lines) > 2 else "")
         if not state_m:
-            fail(f"{f.name}: line 3 must contain 'Estat: …'")
+            fail(f"{f.name}: line 3 must contain 'Status: …'")
             continue
         state = state_m.group(1).strip()
         headings = [l for l in lines if l.startswith("## ")]
@@ -108,18 +108,18 @@ def check_s002_t01_r01_adr_files_follow_template() -> dict[str, tuple[str, str, 
 
 def check_s002_t03_r03_adr_states_are_in_vocabulary(files: dict[str, tuple[str, str, Path]]) -> None:
     for n, (_, state, f) in files.items():
-        if state not in ADR_STATES and not re.fullmatch(r"substituïda per \d{4}", state):
+        if state not in ADR_STATES and not re.fullmatch(r"superseded by \d{4}", state):
             fail(f"{f.name}: invalid state {state!r}")
 
 
 def check_s002_t02_r02_adr_index_matches_files_and_spec(spec: str, files: dict[str, tuple[str, str, Path]]) -> None:
     index: dict[str, tuple[str, str]] = {}
-    for row in table_after(ADR_INDEX.read_text(encoding="utf-8"), "## Índex"):
+    for row in table_after(ADR_INDEX.read_text(encoding="utf-8"), "## Index"):
         c = cells(row)
         if len(c) >= 4 and re.fullmatch(r"\d{4}", c[0]):
             index[c[0]] = (c[1], c[3])
     s3: dict[str, tuple[str, str]] = {}
-    for row in table_after(spec, "## 3. Decisions de disseny"):
+    for row in table_after(spec, "## 3. Design decisions"):
         c = cells(row)
         if len(c) >= 3 and re.fullmatch(r"\d{4}", c[0]):
             s3[c[0]] = (c[1], c[2])
@@ -131,7 +131,7 @@ def check_s002_t02_r02_adr_index_matches_files_and_spec(spec: str, files: dict[s
 
 
 def check_s003_t03_r03_spec_refs_exist_in_plan(spec: str) -> None:
-    plan = " ".join(table_after(spec, "## 10. Pla d'execució"))
+    plan = " ".join(table_after(spec, "## 10. SDD execution plan"))
     listed = set(re.findall(r"\b(\d{3}-[a-z][a-z0-9-]*)", plan))
     sources = [spec_body(spec), AGENTS.read_text(encoding="utf-8")]
     for extra in ("README.md", "CONTRIBUTING.md"):
@@ -159,12 +159,12 @@ def check_s003_t04_r04_agents_has_no_spec_ranges() -> None:
 def check_s003_t05_r05_no_examples_in_requirements() -> None:
     for f in SPECS_DIR.glob("[0-9][0-9][0-9]-*.md"):
         text = f.read_text(encoding="utf-8")
-        start = text.find("## Requisits")
+        start = text.find("## Requirements")
         end = text.find("## ", start + 3) if start >= 0 else -1
         section = text[start:end] if start >= 0 else ""
         for i, line in enumerate(section.splitlines()):
-            if re.search(r"\bper exemple\b|\bp\. ex\.", line, re.IGNORECASE):
-                fail(f"specs/{f.name} Requisits: 'per exemple' is not a fixed value ({line.strip()[:80]})")
+            if re.search(r"\bfor example\b|\be\.g\.|\bsuch as\b", line, re.IGNORECASE):
+                fail(f"specs/{f.name} Requirements: 'for example' is not a fixed value ({line.strip()[:80]})")
 
 
 def check_s003_t06_r06_spec_header_date_changes_with_content() -> None:
@@ -183,12 +183,12 @@ def check_s003_t06_r06_spec_header_date_changes_with_content() -> None:
         ).stdout
     except subprocess.CalledProcessError:
         return  # no base available (first commit): nothing to compare
-    header = re.compile(r"^Versió: .*Actualitzat: (\d{4}-\d{2}-\d{2})", re.MULTILINE)
+    header = re.compile(r"^Version: .*Updated: (\d{4}-\d{2}-\d{2})", re.MULTILINE)
     old_m, new_m = header.search(old), header.search(SPEC.read_text(encoding="utf-8"))
     if not new_m:
-        fail("docs/spec.md header 'Versió: … · Actualitzat: YYYY-MM-DD' missing")
+        fail("docs/spec.md header 'Version: … · Updated: YYYY-MM-DD' missing")
     elif old_m and old_m.group(0) == new_m.group(0):
-        fail("docs/spec.md changed but its 'Versió · Actualitzat' header did not")
+        fail("docs/spec.md changed but its 'Version · Updated' header did not")
 
 
 def check_s003_t07_r07_specs_index_matches_files() -> None:
@@ -196,14 +196,14 @@ def check_s003_t07_r07_specs_index_matches_files() -> None:
         fail("specs/README.md (index) is missing")
         return
     index: dict[str, tuple[str, str]] = {}
-    for row in table_after(SPECS_INDEX.read_text(encoding="utf-8"), "## Índex"):
+    for row in table_after(SPECS_INDEX.read_text(encoding="utf-8"), "## Index"):
         c = cells(row)
         if len(c) >= 4 and re.fullmatch(r"\d{3}", c[0]):
             index[c[0]] = (c[1], c[3])
     files: dict[str, tuple[str, str]] = {}
     for f in SPECS_DIR.glob("[0-9][0-9][0-9]-*.md"):
         text = f.read_text(encoding="utf-8")
-        state_m = re.search(r"^Estat: (.+)$", text, re.MULTILINE)
+        state_m = re.search(r"^Status: (.+)$", text, re.MULTILINE)
         state = state_m.group(1).strip() if state_m else "?"
         if state not in SPEC_STATES:
             fail(f"specs/{f.name}: invalid state {state!r} (must be one of {sorted(SPEC_STATES)})")

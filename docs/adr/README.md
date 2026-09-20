@@ -1,37 +1,37 @@
-# Registre de decisions arquitectòniques
+# Architecture decision log
 
-Una decisió per fitxer, plantilla a `TEMPLATE.md`. El lint documental (spec 003) comprova que aquesta taula, els fitxers i la taula de `docs/spec.md` §3 coincideixen en número, títol i estat.
+One decision per file, template in `TEMPLATE.md`. The documentation lint (spec 003) checks that this table, the files and the table in `docs/spec.md` §3 agree in number, title and status.
 
-## Procediment
+## Procedure
 
-- Una ADR acceptada no s'edita, excepte per canviar-ne l'estat. Per canviar una decisió es crea una ADR nova amb `Substitueix: NNNN` i l'antiga passa a `Estat: substituïda per MMMM`.
-- Els números són seqüencials i no es reutilitzen.
-- Estats: `proposada` · `acceptada` · `obsoleta` · `substituïda per NNNN`.
-- Les ADR 0001–0022 es van escriure abans de crear el repositori i s'han revisat en tres auditories (`docs/spec.md` §13); per això algunes contenen notes de revisió al Context.
+- An accepted ADR is not edited, except to change its status. To change a decision, a new ADR is created with `Supersedes: NNNN` and the old one moves to `Status: superseded by MMMM`.
+- Numbers are sequential and are not reused.
+- States: `proposed` · `accepted` · `deprecated` · `superseded by NNNN`.
+- ADRs 0001–0022 were written before the repository was created and have been reviewed in three audits (`docs/spec.md` §13); that is why some contain review notes in the Context.
 
-## Índex
+## Index
 
-| # | Títol | Data | Estat |
+| # | Title | Date | Status |
 | --- | --- | --- | --- |
-| 0001 | Clau de canal precompartida fora de banda | 2026-09-19 | acceptada |
-| 0002 | Un sol AEAD (XChaCha20-Poly1305) via libsodium | 2026-09-19 | acceptada |
-| 0003 | Ratchet simètric de hash sobre la clau de canal | 2026-09-19 | substituïda per 0013 |
-| 0004 | Sense post-compromise security a la v1 | 2026-09-19 | acceptada |
-| 0005 | Signatures Ed25519 per missatge, amb clau per usuari i per canal | 2026-09-19 | acceptada |
-| 0006 | TOFU: cap llista de membres a la config | 2026-09-19 | acceptada |
-| 0007 | Regeneració de clau lliure i sense enllaç amb l'antiga | 2026-09-19 | acceptada |
-| 0008 | Sense expulsió de membres: es crea un canal nou | 2026-09-19 | acceptada |
-| 0009 | TTL definit a la config, aplicat al servidor i al client | 2026-09-19 | acceptada |
-| 0010 | Autenticació al servidor amb un parell Ed25519 de canal | 2026-09-19 | acceptada |
-| 0011 | Alarma de compromís | 2026-09-19 | obsoleta |
-| 0012 | Nucli criptogràfic i de protocol en Rust, compartit per tots els clients | 2026-09-19 | acceptada |
-| 0013 | Clau de missatge derivada directament del comptador | 2026-09-20 | acceptada |
-| 0014 | TTL lligat al `channel_id` i caducitat per missatge | 2026-09-20 | acceptada |
-| 0015 | Sobre binari de mida fixa; CBOR només al payload xifrat | 2026-09-20 | acceptada |
-| 0016 | Retirada de clau amb missatge `key_retired` | 2026-09-20 | acceptada |
-| 0017 | Sense client web allotjat a la v1; client d'escriptori natiu | 2026-09-20 | acceptada |
-| 0018 | Capçalera de missatge xifrada amb clau de canal | 2026-09-20 | acceptada |
-| 0019 | Una clau, un dispositiu: comptador estrictament creixent | 2026-09-20 | acceptada |
-| 0020 | Store i sessió sans-I/O al nucli Rust | 2026-09-20 | acceptada |
-| 0021 | Client sense base de dades: fitxers xifrats amb commit atòmic | 2026-09-20 | acceptada |
-| 0022 | Servidor d'intercanvi per canal, fixat en crear-lo | 2026-09-20 | acceptada |
+| 0001 | Pre-shared channel key exchanged out of band | 2026-09-19 | accepted |
+| 0002 | A single AEAD (XChaCha20-Poly1305) via libsodium | 2026-09-19 | accepted |
+| 0003 | Symmetric hash ratchet over the channel key | 2026-09-19 | superseded by 0013 |
+| 0004 | No post-compromise security in v1 | 2026-09-19 | accepted |
+| 0005 | Ed25519 signatures per message, with a key per user and per channel | 2026-09-19 | accepted |
+| 0006 | TOFU: no member list in the config | 2026-09-19 | accepted |
+| 0007 | Free key regeneration with no link to the old key | 2026-09-19 | accepted |
+| 0008 | No member removal: a new channel is created | 2026-09-19 | accepted |
+| 0009 | TTL defined in the config, enforced by server and client | 2026-09-19 | accepted |
+| 0010 | Server authentication with a per-channel Ed25519 key pair | 2026-09-19 | accepted |
+| 0011 | Compromise alarm | 2026-09-19 | deprecated |
+| 0012 | Cryptographic and protocol core in Rust, shared by all clients | 2026-09-19 | accepted |
+| 0013 | Message key derived directly from the counter | 2026-09-20 | accepted |
+| 0014 | TTL bound to the `channel_id` and per-message expiry | 2026-09-20 | accepted |
+| 0015 | Fixed-size binary envelope; CBOR only in the encrypted payload | 2026-09-20 | accepted |
+| 0016 | Key retirement with a `key_retired` message | 2026-09-20 | accepted |
+| 0017 | No hosted web client in v1; native desktop client | 2026-09-20 | accepted |
+| 0018 | Message header encrypted with the channel key | 2026-09-20 | accepted |
+| 0019 | One key, one device: strictly increasing counter | 2026-09-20 | accepted |
+| 0020 | Store and sans-I/O session in the Rust core | 2026-09-20 | accepted |
+| 0021 | Client without a database: encrypted files with atomic commit | 2026-09-20 | accepted |
+| 0022 | Exchange server per channel, fixed at creation | 2026-09-20 | accepted |

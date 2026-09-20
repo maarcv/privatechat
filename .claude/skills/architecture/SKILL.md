@@ -84,7 +84,7 @@ nothing left over**. Concretely:
 result type (`Result<T, Error>` in Rust, `Result`/sealed types in Kotlin,
 `throws` in Swift, discriminated unions in TypeScript). There is exactly one
 error type per crate/module, with one variant per *distinct condition the caller
-might act on*. `docs/spec.md` §4 "Verificació en rebre" lists the conditions and
+might act on*. `docs/spec.md` §4 "Verification on receive" lists the conditions and
 their variants: each condition maps to exactly one variant, in order — including
 the three conditions the spec groups under its step 1 (length class, version,
 channel), which the skills label 1a/1b/1c so tests can name them. Never fold two
@@ -108,9 +108,9 @@ TTL tests deterministic and lets the fuzzer drive time.
 
 ## 4. Naming
 
-- Code, identifiers, tests, log messages and code comments: **English**.
-  Specs, ADRs, `docs/`, commits and PRs: **Catalan**. (AGENTS 11.) Mixing them
-  inside one artifact makes grep useless.
+- Language: English for everything — identifiers, comments, error messages,
+  specs, ADRs, docs, commit messages, pull requests and issues. (AGENTS 11.)
+  Mixing languages inside one artifact makes grep useless.
 - Names say what a thing *is* or *does*, in full words: `channel_id`, not
   `chid`; `decrypt_blob`, not `proc`. The only accepted abbreviations are the
   ones the spec itself uses as protocol literals (`pk`, `sk`, `mk`, `ttl`).
@@ -145,7 +145,7 @@ step catches a class of mistake the next one cannot:
    one spec each.
 
 When the implementation reveals the spec was wrong, do not quietly fix the code.
-Add the question to `## Preguntes obertes` in the spec, and if the change touches
+Add the question to `## Open questions` in the spec, and if the change touches
 §3–§6 (wire format, keys, config, protocol), it needs an ADR — the CI `adr-guard`
 will refuse the diff otherwise.
 

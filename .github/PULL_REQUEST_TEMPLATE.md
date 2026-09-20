@@ -1,18 +1,19 @@
 ## Spec
 
-`NNN-nom` · Estat de la spec: en revisió / acceptada / implementada
-Requisits coberts: R1, R2, …
+`NNN-name` · Spec status: in review / accepted / implemented
+Requirements covered: R1, R2, …
 
-## Definició de fet (`docs/spec.md` §10)
+## Definition of done (`docs/spec.md` §10)
 
-- [ ] Cada R\* té un T\* (`scripts/check_requirements.sh` verd)
-- [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `cargo deny check` verds
-- [ ] `scripts/doc_lint.sh` verd
-- [ ] Cap secret als logs; `Debug` redactat a tot tipus secret nou (afegit a `SECRET_TYPES`)
-- [ ] Tot camí de rebuig té un test `entrada → Error::X · commits = 0`; spec amb estat → test amb `FailingStore`
-- [ ] Dependències noves justificades aquí, una frase cada una: …
-- [ ] Canvi de format, config, derivació o tag? → ADR nova: `docs/adr/NNNN`
-- [ ] Cap ADR acceptada modificada fora de la línia d'estat (s002_t04_r04_accepted_adr_only_state_changes)
-- [ ] `docs/spec.md` al dia (capçalera `Actualitzat`) i fila a §13 si canvia una decisió
-- [ ] ≤ 400 línies de diff net; una sola spec
-- [ ] He llegit les skills d'`architecture` i del llenguatge
+- [ ] Every R\* has a T\* (`scripts/check_requirements.sh` green)
+- [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `cargo deny check` green
+- [ ] `scripts/doc_lint.sh` green
+- [ ] No secret in logs; redacted `Debug` on every new secret type (added to `SECRET_TYPES`)
+- [ ] Every rejection path has a test `input → Error::X · commits = 0`; stateful spec → test with `FailingStore`
+- [ ] New dependencies justified here, one sentence each: …
+- [ ] Format, config, derivation or tag change? → new ADR: `docs/adr/NNNN`
+- [ ] No accepted ADR modified outside its status line (s002_t04_r04_accepted_adr_only_state_changes)
+- [ ] `docs/spec.md` up to date (`Updated` header) and a row in §13 if a decision changes
+- [ ] ≤ 400 lines of net diff; a single spec
+- [ ] I have read the `architecture` skill and the language skill
+- [ ] Everything in English (AGENTS 11)

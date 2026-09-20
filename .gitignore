@@ -1,7 +1,7 @@
-# Material de partida i documents privats: no es commiteja mai
+# Source material and private documents: never committed
 /inici/
 
-# Sistema
+# System
 .DS_Store
 Thumbs.db
 
@@ -14,7 +14,7 @@ node_modules/
 dist/
 clients/desktop/src-tauri/target/
 
-# Codi generat (AGENTS 16)
+# Generated code (AGENTS 16)
 bindings/**/generated/
 
 # Android / iOS
@@ -23,6 +23,9 @@ clients/android/local.properties
 clients/ios/DerivedData/
 *.xcuserstate
 
-# Entorn local
+# Local environment
 .env
 *.local
+
+# Personal AI-assistant preferences (see CLAUDE.md and assistant.example.md)
+/assistant.md

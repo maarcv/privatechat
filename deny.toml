@@ -1,4 +1,4 @@
-# cargo-deny: dependències permeses al workspace. AGENTS.md regla 2 i 8.
+# cargo-deny: dependencies allowed in the workspace. AGENTS.md rules 2 and 8.
 
 [graph]
 all-features = true
@@ -26,8 +26,8 @@ confidence-threshold = 0.9
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
-# Cap primitiva criptogràfica ni font d'aleatorietat fora de libsodium (AGENTS 2).
-# `rand` i `rand_core` només poden entrar arrossegats per `proptest` a les dev-dependencies.
+# No cryptographic primitive or randomness source outside libsodium (AGENTS 2).
+# `rand` and `rand_core` may only come in pulled by `proptest` in dev-dependencies.
 deny = [
   { crate = "rand", wrappers = ["proptest", "rand_chacha", "rand_xorshift"] },
   { crate = "rand_core", wrappers = ["proptest", "rand", "rand_chacha", "rand_xorshift"] },
@@ -49,8 +49,8 @@ deny = [
   { crate = "ring" },
   { crate = "openssl" },
   { crate = "openssl-sys" },
-  { crate = "sodiumoxide", reason = "Abandonada; usar libsodium-sys-stable" },
-  # Cap compressió: comprimir abans de xifrar filtra contingut (AGENTS 24).
+  { crate = "sodiumoxide", reason = "Abandoned; use libsodium-sys-stable" },
+  # No compression: compressing before encrypting leaks content (AGENTS 24).
   { crate = "flate2" },
   { crate = "zstd" },
   { crate = "brotli" },

@@ -1,14 +1,14 @@
 # Feature specs
 
-Una spec per feature, escrita amb `TEMPLATE.md` **abans** del codi i acceptada per un humà abans d'implementar (AGENTS «Flux per feature»). La llista canònica de specs per fase és `docs/spec.md` §10; aquest índex només recull les que ja existeixen com a fitxer i el seu estat, i `scripts/doc_lint.sh` comprova que coincideixen.
+One spec per feature, written with `TEMPLATE.md` **before** the code and accepted by a human before implementing (AGENTS "Per-feature flow"). The canonical list of specs per phase is `docs/spec.md` §10; this index only records the ones that already exist as a file and their state, and `scripts/doc_lint.sh` checks that they match.
 
-Estats: `esborrany` · `en revisió` · `acceptada` · `implementada`.
+States: `draft` · `in review` · `accepted` · `implemented`.
 
-## Índex
+## Index
 
-| # | Spec | Fase | Estat |
+| # | Spec | Phase | Status |
 | --- | --- | --- | --- |
-| 000 | 000-repo-layout | 0 | en revisió |
-| 001 | 001-ci | 0 | en revisió |
-| 002 | 002-adr-log | 0 | en revisió |
-| 003 | 003-doc-lint | 0 | en revisió |
+| 000 | 000-repo-layout | 0 | in review |
+| 001 | 001-ci | 0 | in review |
+| 002 | 002-adr-log | 0 | in review |
+| 003 | 003-doc-lint | 0 | in review |

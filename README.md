@@ -1,37 +1,37 @@
-# privatechat — xat de grup privat i simple
+# privatechat — private, simple group chat
 
-Un xat de grup xifrat punt a punt on el servidor és només una bústia: no té comptes, no coneix identitats i no pot llegir res. L'accés a un canal es dona compartint una config fora de banda (QR en persona o fitxer xifrat amb contrasenya). Clients d'escriptori, Android i iOS sobre un mateix nucli criptogràfic en Rust. Codi obert: qualsevol pot desplegar el servidor, i cada canal viu al servidor que va triar qui el va crear.
+An end-to-end encrypted group chat where the server is just a mailbox: it has no accounts, knows no identities and can read nothing. Access to a channel is granted by sharing a config out of band (a QR code in person or a password-encrypted file). Desktop, Android and iOS clients on top of one cryptographic core in Rust. Open source: anyone can deploy the server, and each channel lives on the server chosen by whoever created it.
 
-**Estat:** fase 0 (fundació), branca `mvp`. Encara no hi ha res que es pugui fer servir.
+**Status:** phase 0 (foundation), branch `mvp`. Nothing usable yet.
 
-## El que promet
+## What it promises
 
-- Ni el servidor ni ningú a la xarxa pot desxifrar els missatges.
-- Els missatges caducats s'esborren al servidor i al client segons el TTL del canal.
-- Cada missatge està autenticat: el receptor sap que ve de la mateixa clau que ja havia etiquetat.
-- Cap identitat global: la clau d'un usuari és diferent a cada canal.
-- El servidor no sap qui escriu: veu blobs opacs per canal, no per membre.
+- Neither the server nor anyone on the network can decrypt the messages.
+- Expired messages are deleted on the server and on the client according to the channel TTL.
+- Every message is authenticated: the receiver knows it comes from the same key it had already labelled.
+- No global identity: a user's key is different in every channel.
+- The server does not know who writes: it sees opaque blobs per channel, not per member.
 
-## El que no promet
+## What it does not promise
 
-- No protegeix contra un dispositiu compromès ni contra un membre que reenviï.
-- La confidencialitat de tot el canal depèn de la clau del canal: qui la tingui pot llegir-ho tot, passat i futur, fins que es creï un canal nou. La v1 no té *forward secrecy* ni *post-compromise security*.
-- Els missatges són autenticats però no negables.
-- El servidor pot esborrar o retardar missatges; el client ho detecta parcialment però no ho pot impedir.
-- Qui operi, allotgi o requisi el servidor sap des de quina IP i a quina hora escolta cadascú. Sense Tor, una IP és una persona.
-- Per defecte els canals nous van al servidor configurat a l'app; qui no vulgui que aquest operador vegi les seves metadades el canvia.
+- It does not protect against a compromised device or against a member who forwards.
+- The confidentiality of the whole channel depends on the channel key: whoever has it can read everything, past and future, until a new channel is created. v1 has neither *forward secrecy* nor *post-compromise security*.
+- Messages are authenticated but not deniable.
+- The server can delete or delay messages; the client detects this partially but cannot prevent it.
+- Whoever operates, hosts or seizes the server knows from which IP and at what time each person listens. Without Tor, an IP is a person.
+- By default new channels go to the server configured in the app; whoever does not want that operator to see their metadata changes it.
 
-La llista completa, el model d'amenaces i totes les decisions són a [`docs/spec.md`](docs/spec.md), [`docs/threat-model.md`](docs/threat-model.md) i [`docs/adr/`](docs/adr/README.md).
+The full list, the threat model and every decision are in [`docs/spec.md`](docs/spec.md), [`docs/threat-model.md`](docs/threat-model.md) and [`docs/adr/`](docs/adr/README.md).
 
-## Com està fet
+## How it is built
 
-- `core/` — criptografia (libsodium), format de cable, sessió. Sense I/O ni rellotge.
-- `store/` — emmagatzematge local: fitxers xifrats amb commit atòmic. Sense base de dades.
-- `server/` — bústia amb TTL sobre WebSocket. Un binari, SQLite, cap secret.
-- `clients/` — escriptori (Tauri), Android (Kotlin), iOS (Swift): capes fines sobre el nucli.
+- `core/` — cryptography (libsodium), wire format, session. No I/O, no clock.
+- `store/` — local storage: encrypted files with atomic commit. No database.
+- `server/` — mailbox with TTL over WebSocket. One binary, SQLite, no secrets.
+- `clients/` — desktop (Tauri), Android (Kotlin), iOS (Swift): thin layers over the core.
 
-El desenvolupament segueix specs (`specs/`) escrites abans del codi, amb tests que citen cada requisit. Vegeu [`CONTRIBUTING.md`](CONTRIBUTING.md) i [`AGENTS.md`](AGENTS.md).
+Development follows specs (`specs/`) written before the code, with tests that cite every requirement. See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md).
 
-## Llicència
+## License
 
 [MIT](LICENSE).

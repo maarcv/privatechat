@@ -136,8 +136,8 @@ prefer `?` with `-> Result<(), Error>` test signatures and
 on byte slices is fine in tests; AGENTS 22 (`ct_eq`) is about production
 code.
 
-Order of checks matters and is normative: `docs/spec.md` §4 "Verificació en
-rebre" lists them; implement them in that order, each returning its own
+Order of checks matters and is normative: `docs/spec.md` §4 "Verification on
+receive" lists them; implement them in that order, each returning its own
 variant, so that the mutation table in the spec is a test you can write.
 
 ## Ownership and signatures

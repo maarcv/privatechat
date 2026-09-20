@@ -1,39 +1,39 @@
-# 000 — Estructura del repositori
+# 000 — Repository layout
 
-Estat: en revisió
-Fase: 0
-ADR relacionades: 0012, 0020, 0021, 0022
-Depèn de: —
-Bloqueja: 001, 002, 003, 010
-Revisor humà: Marc Vilardebó · Acceptada el: —
+Status: in review
+Phase: 0
+Related ADRs: 0012, 0020, 0021, 0022
+Depends on: —
+Blocks: 001, 002, 003, 010
+Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
 
-Abans de cap línia de producte cal un monorepo on la spec sigui la font de veritat, els lints facin complir `AGENTS.md` mecànicament i cap secret ni document privat pugui acabar-hi per error. `docs/spec.md` §11 dona l'arbre; §10 la Definició de fet; AGENTS 2, 4, 10, 12 i 25 les regles que aquest layout ha de fer complir. La carpeta `inici/` (material de partida i documents privats de l'empresa) viu al costat del repo i no s'ha de commitejar mai.
+Before any line of product code we need a monorepo where the spec is the source of truth, the lints enforce `AGENTS.md` mechanically and no secret or private document can end up in it by mistake. `docs/spec.md` §11 gives the tree; §10 the Definition of done; AGENTS 2, 4, 10, 12 and 25 the rules this layout has to enforce. The `inici/` directory (starting material and private company documents) lives next to the repo and must never be committed.
 
-## Requisits
+## Requirements
 
-- R1 El workspace Cargo amb els crates `core`, `store` i `server` MUST compilar buit amb `cargo build --workspace --all-targets` sense warnings.
-- R2 `cargo test --workspace` MUST passar, amb els tests d'aquesta spec inclosos.
-- R3 Els lints del workspace MUST denegar a `core`, `store` i `server`: `unwrap_used`, `expect_used`, `panic`, `unreachable`, `indexing_slicing`, `arithmetic_side_effects`, `cast_possible_truncation`, `cast_sign_loss`, `todo`, `unimplemented`, `dbg_macro`, `print_stdout`, `print_stderr`, `undocumented_unsafe_blocks`; `unsafe_code` a `deny` al workspace i `#![forbid(unsafe_code)]` a cada crate fins que existeixi `core/src/crypto/ffi.rs`; `overflow-checks = true` al perfil `release`.
-- R4 L'única URL de servidor al codi MUST ser la constant `privatechat_core::DEFAULT_SERVER_URL`, amb esquema `wss://` i, fins que hi hagi domini, el TLD reservat `.invalid`.
-- R5 `.gitignore` MUST excloure `/inici/`, `.DS_Store`, `/target`, `node_modules/`, `dist/`, `.env` i el codi generat (`bindings/**/generated/`); `git ls-files inici` MUST retornar zero fitxers.
-- R6 L'arrel MUST contenir: `AGENTS.md`, `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `LICENSE` (MIT), `CODEOWNERS`, `Cargo.toml`, `rust-toolchain.toml`, `rustfmt.toml`, `deny.toml`, `.editorconfig`, `.gitignore`, `docs/spec.md`, `docs/threat-model.md`, `docs/adr/README.md`, `docs/adr/TEMPLATE.md`, `specs/TEMPLATE.md`, `specs/README.md`, `specs/vectors/README.md` i les cinc skills a `.claude/skills/`.
-- R7 `rust-toolchain.toml` MUST fixar el canal a una versió estable concreta (`1.98.1`) amb `rustfmt` i `clippy`; `edition = "2024"` i `rust-version` al workspace.
-- R8 `deny.toml` MUST prohibir a tot el workspace els crates de la llista d'AGENTS 2 i els de compressió (AGENTS 24), permetent `rand`/`rand_core` només com a dependència transitiva de `proptest`; llicències permeses: MIT, Apache-2.0, BSD-2/3, ISC, Unicode-3.0, Zlib, MPL-2.0; registre només crates.io.
+- R1 The Cargo workspace with the crates `core`, `store` and `server` MUST compile empty with `cargo build --workspace --all-targets` without warnings.
+- R2 `cargo test --workspace` MUST pass, with the tests of this spec included.
+- R3 The workspace lints MUST deny in `core`, `store` and `server`: `unwrap_used`, `expect_used`, `panic`, `unreachable`, `indexing_slicing`, `arithmetic_side_effects`, `cast_possible_truncation`, `cast_sign_loss`, `todo`, `unimplemented`, `dbg_macro`, `print_stdout`, `print_stderr`, `undocumented_unsafe_blocks`; `unsafe_code` at `deny` in the workspace and `#![forbid(unsafe_code)]` in every crate until `core/src/crypto/ffi.rs` exists; `overflow-checks = true` in the `release` profile.
+- R4 The only server URL in the code MUST be the constant `privatechat_core::DEFAULT_SERVER_URL`, with the `wss://` scheme and, until there is a domain, the reserved TLD `.invalid`.
+- R5 `.gitignore` MUST exclude `/inici/`, `.DS_Store`, `/target`, `node_modules/`, `dist/`, `.env` and generated code (`bindings/**/generated/`); `git ls-files inici` MUST return zero files.
+- R6 The root MUST contain: `AGENTS.md`, `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `LICENSE` (MIT), `CODEOWNERS`, `assistant.example.md`, `Cargo.toml`, `rust-toolchain.toml`, `rustfmt.toml`, `deny.toml`, `.editorconfig`, `.gitignore`, `docs/spec.md`, `docs/threat-model.md`, `docs/adr/README.md`, `docs/adr/TEMPLATE.md`, `specs/TEMPLATE.md`, `specs/README.md`, `specs/vectors/README.md` and the five skills in `.claude/skills/`.
+- R7 `rust-toolchain.toml` MUST pin the channel to a specific stable version (`1.98.1`) with `rustfmt` and `clippy`; `edition = "2024"` and `rust-version` in the workspace.
+- R8 `deny.toml` MUST ban across the whole workspace the crates in the AGENTS 2 list and the compression crates (AGENTS 24), allowing `rand`/`rand_core` only as a transitive dependency of `proptest`; allowed licenses: MIT, Apache-2.0, BSD-2/3, ISC, Unicode-3.0, Zlib, MPL-2.0; registry crates.io only.
 
-## Límits
+## Limits
 
-- Cap. Aquesta spec no processa entrada externa.
+- None. This spec processes no external input.
 
-## Interfície
+## Interface
 
 ```
 /
 ├─ Cargo.toml                (workspace: members core, store, server; [workspace.lints]; [profile.release])
 ├─ core/   (lib privatechat_core)   store/  (lib privatechat_store)   server/ (bin privatechat-server)
 ├─ rust-toolchain.toml · rustfmt.toml · deny.toml · .editorconfig · .gitignore
-├─ AGENTS.md · CLAUDE.md · README.md · CONTRIBUTING.md · SECURITY.md · LICENSE · CODEOWNERS
+├─ AGENTS.md · CLAUDE.md · README.md · CONTRIBUTING.md · SECURITY.md · LICENSE · CODEOWNERS · assistant.example.md
 ├─ .claude/skills/{architecture,rust,kotlin,swift,typescript-svelte}/SKILL.md
 ├─ .github/{workflows/ci.yml, PULL_REQUEST_TEMPLATE.md, dependabot.yml}
 ├─ docs/{spec.md, threat-model.md, adr/}    specs/{TEMPLATE.md, README.md, NNN-*.md, vectors/}
@@ -41,49 +41,49 @@ Abans de cap línia de producte cal un monorepo on la spec sigui la font de veri
 ```
 
 ```rust
-/// Servidor d'intercanvi per defecte de la instal·lació (ADR 0022).
+/// Default exchange server of the installation (ADR 0022).
 pub const DEFAULT_SERVER_URL: &str = "wss://server.invalid";
 ```
 
-## Seguretat
+## Security
 
-- `inici/` fora del repo per `.gitignore` i comprovat a la CI (T05): conté documents privats.
-- `server.invalid` no resol mai (RFC 2606): un build sense configurar no pot connectar enlloc per error.
-- Els lints són el mecanisme que fa complir AGENTS 4 i 12; no s'hi afegeix cap `allow` sense comentari.
+- `inici/` kept out of the repo by `.gitignore` and checked in CI (T05): it contains private documents.
+- `server.invalid` never resolves (RFC 2606): an unconfigured build cannot connect anywhere by mistake.
+- The lints are the mechanism that enforces AGENTS 4 and 12; no `allow` is added without a comment.
 
-## Canvis d'API pública
+## Public API changes
 
-- Nova: `privatechat_core::DEFAULT_SERVER_URL`.
+- New: `privatechat_core::DEFAULT_SERVER_URL`.
 
-## Casos de prova
+## Test cases
 
-- T01 (cobreix R1): `cargo build --workspace --all-targets` → exit 0 (pas de CI `s000_t01_r01_workspace_builds`).
-- T02 (cobreix R2): `cargo test --workspace` → exit 0 (pas de CI `s000_t02_r02_workspace_tests_pass`).
-- T03 (cobreix R3): `s000_t03_r03_workspace_lints_deny_unwrap_and_arithmetic` llegeix `Cargo.toml` i comprova cada lint i `overflow-checks`.
-- T04 (cobreix R4): `s000_t04_r04_default_server_url_is_wss_placeholder`.
-- T05 (cobreix R5): pas de CI `s000_t05_r05_inici_is_ignored` (`git check-ignore inici` i `git ls-files inici` buit).
-- T06 (cobreix R6): pas de CI `s000_t06_r06_root_files_exist`.
-- T07 (cobreix R7): `s000_t07_r07_toolchain_is_pinned` comprova `rust-toolchain.toml`.
-- T08 (cobreix R8): `cargo deny check` verd (pas `s001_t03_r03_cargo_deny`) i `s000_t08_r08_deny_bans_crypto_crates` comprova la llista a `deny.toml`.
+- T01 (covers R1): `cargo build --workspace --all-targets` → exit 0 (CI step `s000_t01_r01_workspace_builds`).
+- T02 (covers R2): `cargo test --workspace` → exit 0 (CI step `s000_t02_r02_workspace_tests_pass`).
+- T03 (covers R3): `s000_t03_r03_workspace_lints_deny_unwrap_and_arithmetic` reads `Cargo.toml` and checks every lint and `overflow-checks`.
+- T04 (covers R4): `s000_t04_r04_default_server_url_is_wss_placeholder`.
+- T05 (covers R5): CI step `s000_t05_r05_inici_is_ignored` (`git check-ignore inici` and `git ls-files inici` empty).
+- T06 (covers R6): CI step `s000_t06_r06_root_files_exist`.
+- T07 (covers R7): `s000_t07_r07_toolchain_is_pinned` checks `rust-toolchain.toml`.
+- T08 (covers R8): `cargo deny check` green (step `s001_t03_r03_cargo_deny`) and `s000_t08_r08_deny_bans_crypto_crates` checks the list in `deny.toml`.
 
 ## Vectors
 
-- Cap: no hi ha format ni derivació.
+- None: there is no format or derivation.
 
-## Criteri d'acceptació
+## Acceptance criterion
 
-`cargo build --workspace --all-targets && cargo test --workspace && cargo clippy --all-targets -- -D warnings && cargo deny check` en verd, i el job `doc-lint` de la CI verd.
+`cargo build --workspace --all-targets && cargo test --workspace && cargo clippy --all-targets -- -D warnings && cargo deny check` green, and the CI `doc-lint` job green.
 
-## Fora d'abast
+## Out of scope
 
-- Cap codi de producte: `core`, `store` i `server` són esquelets amb documentació de mòdul.
-- El valor definitiu de `DEFAULT_SERVER_URL` (decisió oberta de §12).
-- `core/fuzz/` (spec 016) i `bindings/`, `clients/`, `deploy/` (fases 3–5).
+- No product code: `core`, `store` and `server` are skeletons with module documentation.
+- The final value of `DEFAULT_SERVER_URL` (open decision in §12).
+- `core/fuzz/` (spec 016) and `bindings/`, `clients/`, `deploy/` (phases 3–5).
 
-## Preguntes obertes
+## Open questions
 
-- [ ] 000-R4: quan hi hagi domini, la constant canvia amb un commit `chore:`; cal ADR? Proposta: no, és configuració, no protocol.
+- [ ] 000-R4: when there is a domain, the constant changes with a `chore:` commit; is an ADR needed? Proposal: no, it is configuration, not protocol.
 
-## Historial
+## History
 
-- 2026-09-20 esborrany · 2026-09-20 en revisió
+- 2026-09-20 draft · 2026-09-20 in review

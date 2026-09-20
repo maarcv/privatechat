@@ -1,14 +1,14 @@
-# CI de la fase 0 (spec 001). Cada job és un requisit de docs/spec.md §10 «CI per fase».
+# Phase 0 CI (spec 001). Each job is a requirement of docs/spec.md §10 "CI per phase".
 name: ci
 
-# s001_t10_r10_triggers_and_permissions: push a main/mvp, tota PR, només lectura.
+# s001_t10_r10_triggers_and_permissions: push to main/mvp, every PR, read-only.
 on:
   push:
     branches: [main, mvp]
   pull_request:
 
 concurrency:
-  # s001_t05_r05_concurrency_cancels_previous_runs: una execució per branca.
+  # s001_t05_r05_concurrency_cancels_previous_runs: one run per branch.
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
@@ -88,7 +88,7 @@ jobs:
           test "$(git ls-files inici | wc -l)" -eq 0
       - name: s000_t06_r06_root_files_exist
         run: |
-          for f in AGENTS.md CLAUDE.md README.md CONTRIBUTING.md SECURITY.md LICENSE CODEOWNERS \
+          for f in AGENTS.md CLAUDE.md README.md CONTRIBUTING.md SECURITY.md LICENSE CODEOWNERS assistant.example.md \
                    Cargo.toml rust-toolchain.toml rustfmt.toml deny.toml .editorconfig .gitignore \
                    docs/spec.md docs/threat-model.md docs/adr/README.md docs/adr/TEMPLATE.md \
                    specs/TEMPLATE.md specs/README.md specs/vectors/README.md \
@@ -114,7 +114,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: s001_t08_r08_protected_paths_require_adr # també s002_t05_r05_format_changes_need_adr
+      - name: s001_t08_r08_protected_paths_require_adr # also s002_t05_r05_format_changes_need_adr
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}

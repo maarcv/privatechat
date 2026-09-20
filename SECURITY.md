@@ -1,19 +1,19 @@
-# Política de seguretat
+# Security policy
 
-## Abast
+## Scope
 
-Tot el que hi ha en aquest repositori: `core`, `store`, `server`, els clients i el desplegament de referència a `deploy/`. El model d'amenaces, amb el que el sistema promet i el que no, és a [`docs/threat-model.md`](docs/threat-model.md). Una troballa que estigui dins de «Fora del model» o de «Limitacions assumides» és benvinguda com a discussió, però no és una vulnerabilitat.
+Everything in this repository: `core`, `store`, `server`, the clients and the reference deployment in `deploy/`. The threat model, with what the system promises and what it does not, is in [`docs/threat-model.md`](docs/threat-model.md). A finding that falls under "Outside the model" or "Accepted limitations" is welcome as a discussion, but it is not a vulnerability.
 
-## Com informar
+## How to report
 
-**No obris una issue pública.** Fes servir el formulari privat de GitHub: *Security → Report a vulnerability* en aquest repositori. Inclou versió o commit, passos per reproduir-ho i l'impacte que hi veus.
+**Do not open a public issue.** Use GitHub's private form: *Security → Report a vulnerability* in this repository. Include the version or commit, steps to reproduce and the impact you see.
 
-Compromís: resposta inicial en 72 hores; avaluació i pla en 14 dies; publicació coordinada quan hi hagi correcció. Si la troballa afecta el servidor públic del projecte, es corregeix i es redesplega abans de publicar-la.
+Commitment: initial response within 72 hours; assessment and plan within 14 days; coordinated disclosure once there is a fix. If the finding affects the project's public server, it is fixed and redeployed before publication.
 
-## Reconeixement
+## Acknowledgement
 
-Qui informi d'una vulnerabilitat confirmada surt, si ho vol, a la nota de la versió que la corregeix i al registre d'auditoria de `docs/spec.md` §13.
+Whoever reports a confirmed vulnerability appears, if they wish, in the release note of the version that fixes it and in the audit log of `docs/spec.md` §13.
 
-## Revisió externa
+## External review
 
-El nucli criptogràfic està pendent de revisió externa abans de la beta (`docs/spec.md` §13, spec 061). Fins llavors, tracta el projecte com a experimental.
+The cryptographic core is pending external review before the beta (`docs/spec.md` §13, spec 061). Until then, treat the project as experimental.

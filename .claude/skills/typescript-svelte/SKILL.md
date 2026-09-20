@@ -24,7 +24,7 @@ the web view.
 - ESLint (typescript-eslint strict + svelte plugin) and Prettier run in CI and
   must be clean. No `eslint-disable` without a reason comment.
 - No analytics, telemetry, error-reporting or font/CDN dependencies of any
-  kind; everything ships in the bundle (`docs/spec.md` §8 "Telemetria").
+  kind; everything ships in the bundle (`docs/spec.md` §8 "Telemetry").
   Every npm dependency has a one-line justification in the PR; prefer the
   platform (`fetch`, `crypto.getRandomValues`, `Intl`) and 40 lines of your
   own code over a package.
@@ -72,7 +72,7 @@ Keep it ignorant.
   passphrase words are shown from a `Uint8Array` and zeroed on destroy.
 - No `localStorage`, `sessionStorage`, `IndexedDB` or cookies. The web view
   runs with a temporary `data_directory` and no persistent cache
-  (`docs/spec.md` §8 "Finestra i WebView"). Draft text is component state
+  (`docs/spec.md` §8 "Window and WebView"). Draft text is component state
   only.
 - CSP in `tauri.conf.json` is strict: `default-src 'none'; script-src
   'self'; style-src 'self'; img-src 'self' asset:`. No inline scripts, no
@@ -110,7 +110,7 @@ Keep it ignorant.
 - Accessibility: semantic elements, `aria-label` on icon buttons, visible focus,
   keyboard navigation for every action, respects `prefers-reduced-motion` and
   `prefers-color-scheme`. Strings via a tiny `t()` over JSON message files
-  (Catalan default, English); nothing inline.
+  (English default, Catalan); nothing inline.
 
 ## Tauri side (`src-tauri/`)
 

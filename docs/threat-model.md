@@ -1,41 +1,41 @@
-# Model d'amenaces
+# Threat model
 
-Extracte de `docs/spec.md` §1, §2 i §6. La taula és una còpia literal de la de §2; si hi ha discrepància mana `spec.md` i el lint documental (spec 003) ho detecta.
+Extract of `docs/spec.md` §1, §2 and §6. The table is a literal copy of the one in §2; if there is a discrepancy `spec.md` prevails and the doc lint (spec 003) detects it.
 
-## Adversaris i mitigacions
+## Adversaries and mitigations
 
-| Adversari | Què pot veure o fer | Com ho mitiguem |
+| Adversary | What it can see or do | How we mitigate it |
 | --- | --- | --- |
-| Servidor honest-però-curiós | Quins `channel_id` s'escolten, des de quina IP, quan (cada connexió = l'usuari mira l'app), classe de mida (múltiples de 1 KiB) i freqüència dels blobs, política de retenció del canal, plataforma per empremta TLS | AEAD, padding a cubells de 1 KiB, capçalera xifrada (no veu qui escriu ni quant, ADR 0018), autenticació per clau de canal (no d'usuari), sense comptes, cap registre d'IP, `since` arrodonit, sense reanudació TLS, suport de proxy SOCKS5 / Tor / servei .onion |
-| Servidor maliciós | A més: retenir blobs més enllà del TTL, esborrar o retardar blobs selectivament, ocultar oients, omplir el canal | TTL també al client, buits de comptador visibles al client, codi obert + builds reproduïbles, cap client amb codi servit pel servidor (ADR 0017) |
-| Operador requisat o coaccionat (ordre de conservació o intercepció) | Activar el registre IP↔canal↔hora a partir de l'ordre | No mitigable pel protocol: el servidor no guarda IP a disc per disseny però pot ser obligat a fer-ho. Tor o servei .onion; autoallotjament |
-| Proveïdor de hosting o xarxa del servidor | Netflow: IP↔servidor↔hora de tots els clients; mida del grup connectat pel ventall de `push` | Tor o servei .onion. Res més a la v1 |
-| Observador de xarxa de l'usuari (ISP, wifi) | DNS/SNI del servidor, hora de cada connexió, mida i direcció de cada missatge (classe d'1 KiB; escriure vs llegir). No veu quin canal ni quin membre | TLS 1.3, una sola connexió (no revela el nombre de canals), Tor opcional. A la v1 no es rota `channel_id` ni s'afegeix tràfic de cobertura |
-| Membre que opera el servidor autoallotjat | Tot el del servidor + tot el del membre: etiqueta↔IP↔hora de cada company | Es documenta: en autoallotjar, l'operador veu les IP dels membres. Tor si això importa |
-| Atacant sense config | Crear canals i omplir el servidor de blobs | `publish` lligat a una subscripció autenticada a la mateixa connexió; quotes per connexió, per canal i globals; límits per IP només abans d'autenticar |
-| Intrús amb la config filtrada (també un ex-membre, per sempre) | Llegir tot el canal (passat i futur); escriure com a clau nova; crear claus infinites; omplir el canal fins al TTL; reinjectar blobs antics a membres que no els van veure | Es detecta si escriu (apareix com a desconegut); límit de peers desconeguts amb evicció; la quota per canal protegeix el servidor, no el canal: l'única resposta és canal nou (ADR 0008). La lectura passiva no es pot evitar |
-| Intrús amb la clau privada d'un membre | Suplantar-lo dins d'aquell canal; silenciar-lo | Retirada de clau (ADR 0016); alerta a la víctima quan es rep un missatge vàlid de la seva pròpia clau; regeneració de clau; canal nou |
-| Replay d'un missatge capturat | Reinjectar un missatge antic | Comptador estrictament creixent per emissor (ADR 0019): tot comptador ja vist es rebutja; `channel_id` dins l'AAD i la signatura |
-| Observador físic (càmera, espectador, Google Lens) | Capturar el QR d'invitació | QR efímer en pantalla amb captures bloquejades i «escaneja només amb aquesta app»; alternativa fitxer + contrasenya dita en veu; el QR de verificació no és secret |
-| Furt del dispositiu bloquejat | Fitxers locals xifrats | `K_db` embolcallada al Keystore / Secure Enclave amb credencial del dispositiu; fitxers tancats i clau zeroïtzada en bloquejar |
-| Coacció física | Requisa del dispositiu desbloquejat | Només limitació de danys: bloqueig immediat en apagar pantalla, PIN de dispositiu recomanat sobre biometria. Sense codi de coacció a la v1 |
-| Anàlisi forense del dispositiu després d'esborrar | Recuperar versions antigues dels fitxers (snapshots del sistema de fitxers, còpies, flash) | La garantia criptogràfica cobreix tots els fitxers (`K_db` al Keystore/SE); l'esborrat d'un missatge dins del log és físic (compactació) i no resisteix còpies antigues. Es documenta |
-| Membre deshonest | Reenviar, fer captures, demostrar autoria via signatures; conèixer hàbits horaris i estil dels altres | No mitigable. Es documenta |
+| Honest-but-curious server | Which `channel_id`s are being listened to, from which IP, when (each connection = the user looks at the app), size class (multiples of 1 KiB) and frequency of the blobs, the channel's retention policy, platform by TLS fingerprint | AEAD, padding to 1 KiB buckets, encrypted header (it does not see who writes nor how much, ADR 0018), authentication by channel key (not by user), no accounts, no IP logging, rounded `since`, no TLS resumption, SOCKS5 proxy / Tor / .onion service support |
+| Malicious server | In addition: retain blobs beyond the TTL, selectively delete or delay blobs, hide listeners, fill the channel | TTL also on the client, counter gaps visible to the client, open source + reproducible builds, no client with code served by the server (ADR 0017) |
+| Seized or coerced operator (preservation or interception order) | Turn on IP↔channel↔time logging from the order onwards | Not mitigable by the protocol: the server does not store IPs on disk by design but can be compelled to. Tor or .onion service; self-hosting |
+| Server's hosting or network provider | Netflow: IP↔server↔time of all clients; size of the connected group from the `push` fan-out | Tor or .onion service. Nothing else in v1 |
+| User's network observer (ISP, wifi) | Server DNS/SNI, time of each connection, size and direction of each message (1 KiB class; write vs read). Does not see which channel or which member | TLS 1.3, a single connection (does not reveal the number of channels), optional Tor. In v1 `channel_id` is not rotated and no cover traffic is added |
+| Member who operates the self-hosted server | Everything the server sees + everything a member sees: label↔IP↔time of each fellow member | Documented: when self-hosting, the operator sees the members' IPs. Tor if that matters |
+| Attacker without the config | Create channels and fill the server with blobs | `publish` bound to an authenticated subscription on the same connection; per-connection, per-channel and global quotas; per-IP limits only before authenticating |
+| Intruder with the leaked config (also a former member, forever) | Read the whole channel (past and future); write as a new key; create endless keys; fill the channel until the TTL; re-inject old blobs to members who did not see them | Detected if it writes (it appears as unknown); limit on unknown peers with eviction; the per-channel quota protects the server, not the channel: the only answer is a new channel (ADR 0008). Passive reading cannot be prevented |
+| Intruder with a member's private key | Impersonate them within that channel; silence them | Key retirement (ADR 0016); alert to the victim when a valid message from their own key is received; key regeneration; new channel |
+| Replay of a captured message | Re-inject an old message | Strictly increasing counter per sender (ADR 0019): any counter already seen is rejected; `channel_id` inside the AAD and the signature |
+| Physical observer (camera, onlooker, Google Lens) | Capture the invitation QR | Ephemeral on-screen QR with screenshots blocked and "scan only with this app"; alternative file + password spoken aloud; the verification QR is not secret |
+| Theft of the locked device | Encrypted local files | `K_db` wrapped in the Keystore / Secure Enclave with the device credential; files closed and key zeroized on lock |
+| Physical coercion | Seizure of the unlocked device | Damage limitation only: immediate lock when the screen turns off, device PIN recommended over biometrics. No duress code in v1 |
+| Forensic analysis of the device after deletion | Recover old versions of the files (file-system snapshots, copies, flash) | The cryptographic guarantee covers all files (`K_db` in the Keystore/SE); deleting a message inside the log is physical (compaction) and does not resist old copies. Documented |
+| Dishonest member | Forward, take screenshots, prove authorship via signatures; know the others' time habits and style | Not mitigable. Documented |
 
-## Fora del model
+## Outside the model
 
-Malware al dispositiu, dispositiu rootejat o amb jailbreak, serveis d'accessibilitat maliciosos, atacs a la cadena de subministrament de les botigues d'apps, criptoanàlisi de les primitives, disponibilitat garantida del servidor.
+Malware on the device, rooted or jailbroken device, malicious accessibility services, supply-chain attacks on the app stores, cryptanalysis of the primitives, guaranteed server availability.
 
-## Limitacions assumides i documentades públicament
+## Accepted limitations, publicly documented
 
-- No protegeix contra un dispositiu compromès ni contra un membre que reenviï.
-- La confidencialitat de tot el canal depèn de `K_ch`: qui la tingui pot desxifrar qualsevol missatge del canal que hagi capturat, passat o futur, fins que es creï un canal nou. La v1 no té *forward secrecy* ni *post-compromise security* criptogràfiques (ADR 0013, 0004).
-- Els missatges són autenticats però no negables.
-- El servidor pot esborrar o retardar missatges; el client ho detecta parcialment (buits de comptador) però no ho pot impedir.
-- Qui operi, allotgi o requisi el servidor sap des de quina IP i a quina hora escolta cadascú, i quan obres l'app. Sense Tor, una IP és una persona.
-- Per defecte els canals nous van al servidor configurat a l'app, que a la instal·lació és el del projecte; qui no vulgui que aquest operador vegi les seves metadades el canvia a la configuració o en crear el canal.
-- La botiga d'apps i el sistema operatiu saben que tens l'app instal·lada i quan la fas servir; altres apps poden detectar-la.
-- A escriptori, dins la sessió de l'usuari qualsevol procés seu pot llegir els fitxers de dades i el keychain.
-- Sense notificacions push a la v1 per no crear el mapa dispositiu↔canals al servidor.
-- Si la filtració ve del dispositiu d'un membre, el canal nou tornarà a filtrar-se pel mateix camí.
-- La quota per canal protegeix el servidor, no el canal: un intrús amb la config el pot deixar ple fins al TTL; l'única resposta és canal nou.
+- It does not protect against a compromised device or against a member who forwards.
+- The confidentiality of the whole channel depends on `K_ch`: whoever has it can decrypt any message of the channel they have captured, past or future, until a new channel is created. v1 has no cryptographic *forward secrecy* or *post-compromise security* (ADR 0013, 0004).
+- Messages are authenticated but not deniable.
+- The server can delete or delay messages; the client detects this partially (counter gaps) but cannot prevent it.
+- Whoever operates, hosts or seizes the server knows from which IP and at what time each person listens, and when you open the app. Without Tor, an IP is a person.
+- By default new channels go to the server configured in the app, which at installation is the project's; whoever does not want that operator to see their metadata changes it in the settings or when creating the channel.
+- The app store and the operating system know you have the app installed and when you use it; other apps can detect it.
+- On desktop, within the user's session any of their processes can read the data files and the keychain.
+- No push notifications in v1, so as not to create the device↔channels map on the server.
+- If the leak comes from a member's device, the new channel will leak again by the same path.
+- The per-channel quota protects the server, not the channel: an intruder with the config can leave it full until the TTL; the only answer is a new channel.

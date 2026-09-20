@@ -19,7 +19,7 @@ Contents:
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Fixed-size secret. Never `Clone`, `Default`, `Copy` or `PartialEq` by
-/// derive; never printed. `docs/spec.md` §8 "Registre", AGENTS 5.
+/// derive; never printed. `docs/spec.md` §8 "Logging", AGENTS 5.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Secret<const N: usize>([u8; N]);
 
@@ -51,7 +51,7 @@ Conventions this pattern fixes, so you do not have to decide them again:
   at §4. Derived constants (`MIN_BLOB = BLOB_OVERHEAD + PAD_BLOCK`) are
   preferred over literals, and one test pins them to the spec's literals
   (1 185, 64 673) so a wrong derivation cannot hide.
-- **Step 1 of "Verificació en rebre" is three conditions with three variants**,
+- **Step 1 of "Verification on receive" is three conditions with three variants**,
   checked in order: 1a length class → `BadLength`, 1b version →
   `UnsupportedVersion`, 1c channel → `WrongChannel`. The spec writes them as one
   numbered step; the skills label them 1a/1b/1c so tests can name them.
@@ -107,7 +107,7 @@ pub(crate) struct Envelope<'a> {
 }
 
 impl<'a> Envelope<'a> {
-    /// §4 «Verificació en rebre», step 1: length class (1a), version (1b), channel (1c).
+    /// §4 "Verification on receive", step 1: length class (1a), version (1b), channel (1c).
     ///
     /// # Errors
     /// `BadLength`, `UnsupportedVersion`, `WrongChannel`, in that order of precedence.
@@ -232,7 +232,7 @@ pub fn encrypt(&mut self, payload: &Payload, now: u64) -> Result<(ClientRef, Vec
 }
 ```
 
-The order is the requirement (`docs/spec.md` §4 "Comptador d'enviament"): the
+The order is the requirement (`docs/spec.md` §4 "Send counter"): the
 counter and the blob hit disk together, before the caller can send anything.
 
 ## 6. Test vector loader
