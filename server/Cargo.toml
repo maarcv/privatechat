@@ -1,12 +1,12 @@
 [package]
 name = "privatechat-server"
 version = "0.0.0"
-description = "Bústia cega amb TTL: reparteix blobs opacs per canal sobre WebSocket (docs/spec.md §6)."
 edition.workspace = true
 license.workspace = true
+publish = false
 repository.workspace = true
 rust-version.workspace = true
-publish = false
+description = "Blind mailbox with TTL: relays opaque blobs per channel over WebSocket (docs/spec.md §6)."
 
 [[bin]]
 name = "privatechat-server"

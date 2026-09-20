@@ -1,6 +1,6 @@
 ---
 name: rust
-description: Rust coding standard for this repository's `core`, `store` and `server` crates — crate layout, types, error handling, ownership, `unsafe` policy, testing and tooling. Use it whenever you create or edit any `.rs` file, a `Cargo.toml`, a fuzz target, a test vector loader or a clippy/rustfmt config, and when reviewing Rust code. It assumes you have read the `architecture` skill first. `references/patterns.md` has compile-checked shapes; read only the section you need — §1 `Secret<N>`, §2 fixed-offset parser, §3 `Store`/`WriteBatch`, §4 sans-I/O `Session`, §5 encrypt ordering, §6 vector loader.
+description: Rust coding standard for this repository's `core`, `store` and `server` crates — the official Rust Style Guide (formatting via rustfmt, plus its naming, comment, item-ordering and Cargo.toml conventions), crate layout, types, error handling, ownership, `unsafe` policy, testing and tooling. Use it whenever you create or edit any `.rs` file, a `Cargo.toml`, a fuzz target, a test vector loader or a clippy/rustfmt config, and when reviewing Rust code. It assumes you have read the `architecture` skill first. `references/patterns.md` has compile-checked shapes; read only the section you need — §1 `Secret<N>`, §2 fixed-offset parser, §3 `Store`/`WriteBatch`, §4 sans-I/O `Session`, §5 encrypt ordering, §6 vector loader.
 ---
 
 # Rust standard
@@ -10,6 +10,50 @@ persists its state. `server` relays blobs. All three are compiled with the
 workspace lints at `deny`, so most of this skill is about writing code that is
 *clear*, not code that merely compiles. Read `architecture` first; this skill
 assumes its layering, error and naming rules.
+
+## The Rust Style Guide is the baseline
+
+The official [Rust Style Guide](https://doc.rust-lang.org/style-guide/) is
+normative for this repository. Its formatting chapters (indentation, line
+width, trailing commas, blocks, match arms, chains, `use` sorting, …) are
+exactly what `rustfmt` produces with the project's `rustfmt.toml`, so
+`cargo fmt --all` before every commit *is* the guide; never hand-format
+against it or `#[rustfmt::skip]` without a reason comment. The guide's
+non-formatting rules are not mechanical, so they are review items:
+
+- **Casing (RFC 430):** `UpperCamelCase` for types, traits and enum variants;
+  `snake_case` for functions, methods, fields, locals, modules and macros;
+  `SCREAMING_SNAKE_CASE` for `const` and `static`. Generic parameters are
+  single letters (`T`, `E`, `const N: usize`).
+- **Reserved words:** use a raw identifier (`r#type`) or a trailing underscore
+  (`type_`); never misspell (`typ`, `krate`).
+- **Item order in a file:** `extern crate` (rare), then `use` imports, then
+  `mod` declarations, then everything else. Group imports in three blocks
+  separated by one blank line — `std`/`core`, external crates, this crate
+  (`crate::`, `super::`, `self::`) — and let `rustfmt` version-sort inside
+  each block. Avoid `#[path]` on modules; the file tree is the module tree.
+- **Comments are sentences:** start with a capital letter, end with a period,
+  one space after `//`. Prefer a comment on its own line; keep pure-comment
+  lines ≤ 80 columns. Line comments over block comments. Doc comments (`///`)
+  go **before** attributes; `//!` only at crate or module level.
+- **Attributes:** one per line; a single `#[derive(…)]` per item, never two.
+- **Expression-oriented code:** `let x = if c { a } else { b };`, never declare
+  then assign in branches. Prefer `Foo::Bar` qualified enum literals except
+  for the prelude (`Some`, `Ok`, `Err`). Prefer a unit struct `struct Marker;`
+  to an empty `struct Marker {}`.
+- **Operators:** parentheses whenever precedence is not obvious to a reader
+  (`(a * b) + c`); compare by dereferencing (`*t == u`) rather than referencing
+  (`t == &u`).
+- **Hex literals** in lowercase everywhere (the spec's test vectors are
+  lowercase hex too).
+- **`Cargo.toml`:** `[package]` first; inside it `name`, then `version`, then
+  the remaining keys version-sorted, and `description` **last**. Every other
+  section has its keys version-sorted; one blank line between sections and
+  none inside them; bare keys, `key = value` with single spaces; arrays that
+  do not fit on one line are block-indented with a trailing comma.
+
+When the guide and a rule below disagree, the rule below is a project-specific
+tightening (e.g. no `unwrap`), never a relaxation.
 
 ## Crate and module layout
 
@@ -147,8 +191,9 @@ file that calls `libsodium-sys-stable`. There:
   and `# Examples` as a doctest where the item is a parser or an encoder.
   `missing_docs` is a warning in the workspace and a blocker in review.
 - Inline comments explain *why* — cite the spec (`// §4 step 5: signature
-  before decrypt so a garbage header never reaches the AEAD`) or the threat.
-  Never narrate the code.
+  before decrypt so a garbage header never reaches the AEAD.`) or the threat.
+  Never narrate the code. They are complete sentences, in English, ending
+  with a period (style guide).
 
 ## Testing
 
@@ -192,9 +237,11 @@ file that calls `libsodium-sys-stable`. There:
 
 ## Tooling
 
-- `cargo fmt` (workspace `rustfmt.toml`) and `cargo clippy --all-targets --
-  -D warnings` clean before every commit (AGENTS 17). Do not `#[allow]` a lint
-  without a comment saying why; do not allow the ones the workspace denies.
+- `cargo fmt --all` (workspace `rustfmt.toml`, style edition 2024 = the Rust
+  Style Guide) and `cargo clippy --all-targets -- -D warnings` clean before
+  every commit (AGENTS 17). Do not `#[allow]` a lint or `#[rustfmt::skip]` a
+  block without a comment saying why; never allow the lints the workspace
+  denies.
 - `cargo deny check` gates dependencies. Adding a crate needs one sentence in
   the PR. Minimal features (`default-features = false`) unless you need them.
 - `edition = "2024"`, toolchain pinned in `rust-toolchain.toml`. Do not use

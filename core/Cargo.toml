@@ -1,12 +1,12 @@
 [package]
 name = "privatechat-core"
 version = "0.0.0"
-description = "Nucli criptogràfic i de protocol del xat privat E2E: sense I/O, sense rellotge."
 edition.workspace = true
 license.workspace = true
+publish = false
 repository.workspace = true
 rust-version.workspace = true
-publish = false
+description = "Cryptographic and protocol core of the private E2E chat: no I/O, no clock."
 
 [lib]
 name = "privatechat_core"

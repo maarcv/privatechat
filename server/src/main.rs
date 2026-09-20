@@ -1,7 +1,7 @@
-//! Servidor d'intercanvi: bústia cega amb TTL (`docs/spec.md` §6).
+//! Exchange server: blind mailbox with TTL (`docs/spec.md` §6).
 //!
-//! Esquelet creat per la spec 000; el protocol arriba amb les specs 030–035.
-//! Fins llavors el binari surt immediatament amb codi 0 i no obre cap port.
+//! Skeleton created by spec 000; the protocol arrives with specs 030–035.
+//! Until then the binary exits immediately with code 0 and opens no port.
 
 #![forbid(unsafe_code)]
 // Tests may relax these four lints to build fixtures; production code never does (AGENTS 4).

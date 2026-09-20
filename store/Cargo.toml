@@ -1,12 +1,12 @@
 [package]
 name = "privatechat-store"
 version = "0.0.0"
-description = "Emmagatzematge local del client: fitxers xifrats amb commit atòmic (ADR 0021)."
 edition.workspace = true
 license.workspace = true
+publish = false
 repository.workspace = true
 rust-version.workspace = true
-publish = false
+description = "Local client storage: encrypted files with atomic commit (ADR 0021)."
 
 [lib]
 name = "privatechat_store"

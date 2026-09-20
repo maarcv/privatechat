@@ -1,4 +1,7 @@
+# rustfmt applies the Rust Style Guide (https://doc.rust-lang.org/style-guide/).
+# Everything not listed here is the guide's default on purpose.
 edition = "2024"
+style_edition = "2024"
 max_width = 100
 newline_style = "Unix"
 use_field_init_shorthand = true
