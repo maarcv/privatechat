@@ -4,8 +4,18 @@
 //! bytes i esdeveniments (`docs/spec.md` §9). L'esquelet d'aquest fitxer el crea
 //! la spec 000; el contingut arriba amb les specs 010–028.
 
-#![forbid(unsafe_code)] // Es relaxarà a `deny` només quan existeixi `crypto/ffi.rs` (AGENTS 12).
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+#![forbid(unsafe_code)]
+// Es relaxarà a `deny` només quan existeixi `crypto/ffi.rs` (AGENTS 12).
+// Tests may relax these four lints to build fixtures; production code never does (AGENTS 4).
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::arithmetic_side_effects
+    )
+)]
 
 /// Servidor d'intercanvi per defecte de la instal·lació (`docs/spec.md` §8, ADR 0022).
 ///
