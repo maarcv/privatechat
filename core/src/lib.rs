@@ -4,8 +4,8 @@
 //! and returns bytes and events (`docs/spec.md` §9). Spec 000 creates this
 //! skeleton; the contents arrive with specs 010–028.
 
+// Relaxed to `deny` only once `crypto/ffi.rs` exists (AGENTS 12).
 #![forbid(unsafe_code)]
-// Es relaxarà a `deny` només quan existeixi `crypto/ffi.rs` (AGENTS 12).
 // Tests may relax these four lints to build fixtures; production code never does (AGENTS 4).
 #![cfg_attr(
     test,
