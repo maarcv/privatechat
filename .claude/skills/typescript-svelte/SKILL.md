@@ -110,7 +110,8 @@ Keep it ignorant.
 - Accessibility: semantic elements, `aria-label` on icon buttons, visible focus,
   keyboard navigation for every action, respects `prefers-reduced-motion` and
   `prefers-color-scheme`. Strings via a tiny `t()` over JSON message files
-  (English default); nothing inline.
+  (English is the source and default; translations for Spanish, French,
+  Catalan and Italian, `docs/spec.md` §12); nothing inline.
 
 ## Tauri side (`src-tauri/`)
 

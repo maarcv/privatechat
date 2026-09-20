@@ -579,6 +579,7 @@ None of the open decisions blocks phases 0–2. Those that would change the wire
 - Client without a database: encrypted files with atomic commit (ADR 0021). Server with plain SQLite via `rusqlite`, no `sqlx`.
 - The project operates a public server, which is the installation's `DEFAULT_SERVER_URL`; each channel chooses its server at creation and anyone can deploy one (ADR 0022).
 - Licence: MIT for the whole repository.
+- UI languages: English (source and default), Spanish, French, Catalan and Italian, in the three clients. Strings live in the platform resource files, never inline; the core never produces user-facing text.
 
 **Open decisions**
 

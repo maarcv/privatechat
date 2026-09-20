@@ -88,7 +88,8 @@ core (Rust)  via uniffi: Config, Channel, Session, Settings — opaque handles.
   Business state lives in the view model.
 - `#Preview` for every screen with representative states including `.locked`
   and `.failed`. Previews are documentation and catch layout bugs.
-- Strings in `Localizable.xcstrings` (English default); never inline.
+- Strings in `Localizable.xcstrings` (English is the source and default;
+  translations for Spanish, French, Catalan and Italian, `docs/spec.md` §12); never inline.
   Accessibility labels on every icon; Dynamic Type supported; VoiceOver
   checked once per screen.
 - Lists of messages use stable ids (`serverId`); never re-sort in a view.
