@@ -133,10 +133,8 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          bad=0
-          git log --no-merges --format=%s "$BASE"..HEAD | while IFS= read -r subject; do
-            if ! printf '%s' "$subject" | grep -Eq '^([0-9]{3}|docs|ci|chore|adr): '; then
-              echo "bad commit subject: $subject"; bad=1
-            fi
-          done
-          exit $bad
+          # No pipe into `while`: a variable set inside it would be lost in the subshell.
+          bad="$(git log --no-merges --format=%s "$BASE"..HEAD | grep -Ev '^([0-9]{3}|docs|ci|chore|adr): ' || true)"
+          if [ -n "$bad" ]; then
+            echo "bad commit subjects:"; echo "$bad"; exit 1
+          fi
