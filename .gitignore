@@ -1,0 +1,28 @@
+# Material de partida i documents privats: no es commiteja mai
+/inici/
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Rust
+/target
+**/*.rs.bk
+
+# Node / Tauri
+node_modules/
+dist/
+clients/desktop/src-tauri/target/
+
+# Codi generat (AGENTS 16)
+bindings/**/generated/
+
+# Android / iOS
+clients/android/.gradle/
+clients/android/local.properties
+clients/ios/DerivedData/
+*.xcuserstate
+
+# Entorn local
+.env
+*.local
