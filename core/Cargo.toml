@@ -1,0 +1,20 @@
+[package]
+name = "privatechat-core"
+version = "0.0.0"
+description = "Nucli criptogràfic i de protocol del xat privat E2E: sense I/O, sense rellotge."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "privatechat_core"
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]
+
+[lints]
+workspace = true

@@ -1,0 +1,64 @@
+# cargo-deny: dependències permeses al workspace. AGENTS.md regla 2 i 8.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []
+
+[licenses]
+version = 2
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+  "MPL-2.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Cap primitiva criptogràfica ni font d'aleatorietat fora de libsodium (AGENTS 2).
+# `rand` i `rand_core` només poden entrar arrossegats per `proptest` a les dev-dependencies.
+deny = [
+  { crate = "rand", wrappers = ["proptest", "rand_chacha", "rand_xorshift"] },
+  { crate = "rand_core", wrappers = ["proptest", "rand", "rand_chacha", "rand_xorshift"] },
+  { crate = "getrandom", wrappers = ["rand_core"] },
+  { crate = "sha2" },
+  { crate = "sha3" },
+  { crate = "blake2" },
+  { crate = "md-5" },
+  { crate = "aes" },
+  { crate = "aes-gcm" },
+  { crate = "chacha20" },
+  { crate = "chacha20poly1305" },
+  { crate = "ed25519-dalek" },
+  { crate = "x25519-dalek" },
+  { crate = "curve25519-dalek" },
+  { crate = "argon2" },
+  { crate = "hkdf" },
+  { crate = "hmac" },
+  { crate = "ring" },
+  { crate = "openssl" },
+  { crate = "openssl-sys" },
+  { crate = "sodiumoxide", reason = "Abandonada; usar libsodium-sys-stable" },
+  # Cap compressió: comprimir abans de xifrar filtra contingut (AGENTS 24).
+  { crate = "flate2" },
+  { crate = "zstd" },
+  { crate = "brotli" },
+  { crate = "lz4" },
+]
+skip = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

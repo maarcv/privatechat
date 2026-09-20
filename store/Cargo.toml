@@ -1,0 +1,20 @@
+[package]
+name = "privatechat-store"
+version = "0.0.0"
+description = "Emmagatzematge local del client: fitxers xifrats amb commit atòmic (ADR 0021)."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "privatechat_store"
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]
+
+[lints]
+workspace = true
