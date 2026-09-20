@@ -1,15 +1,13 @@
 ---
 name: architecture
-description: Project-wide architecture and code-quality standard for the private E2E chat (privatechat). Read this before writing, reviewing or refactoring ANY code in this repository, in any language, and before writing a feature spec — even for a "small" change, a test, a script or a one-line fix. It defines the layers and dependency direction (core → store → session → UI), the size and naming rules, how errors and state are handled, what "simple" means here, the SDD workflow (spec → review → red tests → code) and the review checklist. The language skills (rust, kotlin, swift, typescript-svelte) assume you have read this one.
+description: Project-wide architecture and code-quality standard for the private E2E chat (privatechat). Read this before writing, reviewing or refactoring ANY code in this repository, in any language, and before writing a feature spec — even for a "small" change, a test, a script or a one-line fix. It defines the layers and dependency direction (UI → Session → Channel → Store → crypto, dependencies pointing down), the size and naming rules, how errors and state are handled, what "simple" means here, the SDD workflow (spec → review → red tests → code) and the review checklist. The language skills (rust, kotlin, swift, typescript-svelte) assume you have read this one.
 ---
 
 # Architecture and code standard
 
 This project is a group chat where the server is a blind mailbox and the client
-is where security actually happens. The owner's mandate is two words long:
-**unbreakable and simple**. Everything below exists to serve those two words.
-When a rule here seems to cost you something, the reason is usually that the
-alternative would add a place for a bug to hide.
+is where security actually happens. The owner's mandate is
+**uncompromising and simple**; everything below exists to serve it.
 
 `AGENTS.md` is the rulebook. The design it enforces comes, in order of
 precedence, from the accepted feature spec `specs/NNN-*.md`, then
@@ -31,24 +29,29 @@ Store (store crate)                two encrypted files per channel, atomic commi
 crypto (core::crypto)              the only module that touches libsodium
 ```
 
+These are call layers. The crate graph is `store → core` and `server → core`;
+`core` defines the `Store` trait and receives a `Box<dyn Store>`.
+
 Dependencies point **down** only. `core` knows nothing about files, sockets,
 clocks or screens: it receives bytes and a `now`, and returns bytes and events.
-The UI knows nothing about the protocol: it opens a TLS socket, shovels frames in
-both directions, and renders what `Session` tells it.
+The UI knows nothing about the protocol: it opens a TLS socket, shovels frames
+in both directions, and renders what `Session` tells it. This keeps the
+security-critical code testable without a device and identical on three
+platforms.
 
-Why this matters: it makes the security-critical code testable without a
-device, fuzzable without a network, and identical on three platforms. Every time
-you are tempted to "just check the time here" or "just parse this in Kotlin",
-you are about to create a second implementation of something that must exist
-exactly once.
-
-Practical rules that follow:
+The core-boundary contract (AGENTS 20; the language skills add only their
+mechanics):
 
 - Boundaries carry **bytes and plain data**, never rich objects. A blob is
-  `&[u8]`; a config is opaque; time is `u64` milliseconds passed in.
-- Secrets never cross a boundary by value. `Config`, `Channel`, `Session` are
-  opaque handles. Only `Received`, `Peer`, `Fingerprint`, `Gap`, `Event` are
-  data records.
+  `&[u8]`; `now` is `u64` milliseconds passed in — nothing in `core` reads a
+  clock.
+- `Config`, `Channel`, `Session` and `Settings` are opaque handles (uniffi
+  `Object`); only `Received`, `Peer`, `Fingerprint`, `Gap` and `Event` are
+  `Record`s. Secrets never cross the boundary by value.
+- Passwords cross the boundary as bytes (`ByteArray`, `[UInt8]`,
+  `Uint8Array`) and are zeroized on the UI side after the call.
+- Outside the core no wiping is promised: what is promised is not retaining
+  (no cache, no log, no `toString`).
 - If a piece of logic could run on all three platforms, it belongs in `core`.
   If it can only run on one, it belongs in that client, and it should be thin.
 
@@ -59,8 +62,7 @@ nothing left over**. Concretely:
 
 - **Delete before you add.** When you find yourself adding a flag, an option,
   a second code path or a "just in case" field, first ask what you could
-  remove instead. Three audits removed eight features from this design; the
-  remaining ones each close a specific hole. A new feature needs the same bar.
+  remove instead. A new feature has to close a specific hole.
 - **No premature abstraction.** Write the concrete thing. Extract a trait,
   generic or helper only when the *third* caller appears and all three are
   genuinely the same. Two similar functions are cheaper than one wrong
@@ -83,19 +85,15 @@ nothing left over**. Concretely:
 **Errors are values.** Every operation that can fail on external input returns a
 result type (`Result<T, Error>` in Rust, `Result`/sealed types in Kotlin,
 `throws` in Swift, discriminated unions in TypeScript). There is exactly one
-error type per crate/module, with one variant per *distinct condition the caller
-might act on*. `docs/spec.md` §4 "Verification on receive" lists the conditions and
-their variants: each condition maps to exactly one variant, in order — including
-the three conditions the spec groups under its step 1 (length class, version,
-channel), which the skills label 1a/1b/1c so tests can name them. Never fold two
-conditions into one variant "for simplicity" — the negative test vectors need to
-tell them apart.
+error type per crate/module, with one variant per condition, in the spec's
+order (rust `patterns.md` §2 for the envelope). Never fold two conditions into
+one variant "for simplicity" — the negative test vectors need to tell them
+apart.
 
 Never panic on external data. In `core`, `store` and `server` the workspace
 lints (single source: `[workspace.lints]` in the root `Cargo.toml`) make
 `unwrap`, `expect`, `panic!`, indexing and unchecked arithmetic compile errors.
-This is not bureaucracy: a panic in the decrypt path is a remote crash, and
-unchecked `max - W` underflowed for every new peer in an earlier draft.
+A panic in the decrypt path is a remote crash.
 
 **State lives in one place and changes in one commit.** Every logical operation
 (receive a message, send a message, retire a key) becomes exactly one
@@ -108,9 +106,6 @@ TTL tests deterministic and lets the fuzzer drive time.
 
 ## 4. Naming
 
-- Language: English for everything — identifiers, comments, error messages,
-  specs, ADRs, docs, commit messages, pull requests and issues. (AGENTS 11.)
-  Mixing languages inside one artifact makes grep useless.
 - Names say what a thing *is* or *does*, in full words: `channel_id`, not
   `chid`; `decrypt_blob`, not `proc`. The only accepted abbreviations are the
   ones the spec itself uses as protocol literals (`pk`, `sk`, `mk`, `ttl`).
@@ -146,8 +141,8 @@ step catches a class of mistake the next one cannot:
 
 When the implementation reveals the spec was wrong, do not quietly fix the code.
 Add the question to `## Open questions` in the spec, and if the change touches
-§3–§6 (wire format, keys, config, protocol), it needs an ADR — the CI `adr-guard`
-will refuse the diff otherwise.
+§3–§6 (wire format, keys, config, protocol), it needs an ADR — the CI
+`adr-guard` will refuse the diff otherwise.
 
 ## 6. Dependencies
 

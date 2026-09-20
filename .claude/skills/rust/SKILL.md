@@ -14,38 +14,21 @@ assumes its layering, error and naming rules.
 ## The Rust Style Guide is the baseline
 
 The official [Rust Style Guide](https://doc.rust-lang.org/style-guide/) is
-normative for this repository. Its formatting chapters (indentation, line
-width, trailing commas, blocks, match arms, chains, `use` sorting, …) are
-exactly what `rustfmt` produces with the project's `rustfmt.toml`, so
-`cargo fmt --all` before every commit *is* the guide; never hand-format
-against it or `#[rustfmt::skip]` without a reason comment. The guide's
-non-formatting rules are not mechanical, so they are review items:
+normative for this repository. Its formatting chapters are exactly what
+`rustfmt` produces with the project's `rustfmt.toml`, so `cargo fmt --all`
+before every commit *is* the guide; never hand-format against it or
+`#[rustfmt::skip]` without a reason comment. The rest of the guide applies as
+written; three non-formatting rules are review items here:
 
-- **Casing (RFC 430):** `UpperCamelCase` for types, traits and enum variants;
-  `snake_case` for functions, methods, fields, locals, modules and macros;
-  `SCREAMING_SNAKE_CASE` for `const` and `static`. Generic parameters are
-  single letters (`T`, `E`, `const N: usize`).
-- **Reserved words:** use a raw identifier (`r#type`) or a trailing underscore
-  (`type_`); never misspell (`typ`, `krate`).
-- **Item order in a file:** `extern crate` (rare), then `use` imports, then
-  `mod` declarations, then everything else. Group imports in three blocks
-  separated by one blank line — `std`/`core`, external crates, this crate
-  (`crate::`, `super::`, `self::`) — and let `rustfmt` version-sort inside
-  each block. Avoid `#[path]` on modules; the file tree is the module tree.
+- **Item order in a file:** `use` imports, then `mod` declarations, then
+  everything else. Group imports in three blocks separated by one blank line —
+  `std`/`core`, external crates, this crate (`crate::`, `super::`, `self::`) —
+  and let `rustfmt` version-sort inside each block. Avoid `#[path]` on
+  modules; the file tree is the module tree.
 - **Comments are sentences:** start with a capital letter, end with a period,
   one space after `//`. Prefer a comment on its own line; keep pure-comment
   lines ≤ 80 columns. Line comments over block comments. Doc comments (`///`)
   go **before** attributes; `//!` only at crate or module level.
-- **Attributes:** one per line; a single `#[derive(…)]` per item, never two.
-- **Expression-oriented code:** `let x = if c { a } else { b };`, never declare
-  then assign in branches. Prefer `Foo::Bar` qualified enum literals except
-  for the prelude (`Some`, `Ok`, `Err`). Prefer a unit struct `struct Marker;`
-  to an empty `struct Marker {}`.
-- **Operators:** parentheses whenever precedence is not obvious to a reader
-  (`(a * b) + c`); compare by dereferencing (`*t == u`) rather than referencing
-  (`t == &u`).
-- **Hex literals** in lowercase everywhere (the spec's test vectors are
-  lowercase hex too).
 - **`Cargo.toml`:** `[package]` first; inside it `name`, then `version`, then
   the remaining keys version-sorted, and `description` **last**. Every other
   section has its keys version-sorted; one blank line between sections and
@@ -88,7 +71,7 @@ tightening (e.g. no `unwrap`), never a relaxation.
   a `[u8; 32]` was meant; a `ChannelId` cannot. Derive only what the type
   needs; a key type must not derive `Clone`, `Default`, `Debug` or
   `PartialEq` (see `Secret<N>` in `references/patterns.md`).
-- **Enums over booleans.** `PeerState::{Unknown, Labeled, Verified, Muted,
+- **Enums over booleans.** `PeerState::{Unknown, Labelled, Verified, Muted,
   Retired}` instead of `verified: bool, muted: bool, retired: bool`, which
   admits eight states of which five are meaningless.
 - **Construct-valid types.** `Payload::validate()` runs inside the constructor
@@ -153,12 +136,15 @@ variant, so that the mutation table in the spec is a test you can write.
 
 ## `unsafe` and libsodium
 
-`#![forbid(unsafe_code)]` everywhere except `crates/core/src/crypto/ffi.rs`, the one
-file that calls `libsodium-sys-stable`. There:
+`unsafe`: `#![forbid(unsafe_code)]` in `store` and `server`; `core` uses
+`#![deny(unsafe_code)]` at the crate root and `#![allow(unsafe_code)]` only in
+`crates/core/src/crypto/ffi.rs`, the single point of contact with
+`libsodium-sys-stable`. There, `#![deny(unsafe_op_in_unsafe_fn)]`, every block
+carries `// SAFETY:` and clippy `undocumented_unsafe_blocks` is at `deny`
+(AGENTS 12). Inside `ffi.rs`:
 
-- `#![deny(unsafe_op_in_unsafe_fn)]`; every `unsafe {}` block has a
-  `// SAFETY:` comment stating the invariant that makes it sound (buffer
-  lengths, non-null, initialised).
+- The `// SAFETY:` comment states the invariant that makes the block sound
+  (buffer lengths, non-null, initialised).
 - Wrap every libsodium call in a safe function with typed arguments
   (`fn aead_encrypt(key: &Secret<32>, nonce: &[u8; 24], ...)`) so the rest of
   `core` never sees a raw pointer or a length parameter.
@@ -189,11 +175,12 @@ file that calls `libsodium-sys-stable`. There:
   implements, what it deliberately does not do.
 - `///` on every `pub` item, with `# Errors` listing the variants and when,
   and `# Examples` as a doctest where the item is a parser or an encoder.
-  `missing_docs` is a warning in the workspace and a blocker in review.
+  `missing_docs` is a workspace warning that CI turns into an error
+  (`RUSTFLAGS=-D warnings`).
 - Inline comments explain *why* — cite the spec (`// §4 step 5: signature
   before decrypt so a garbage header never reaches the AEAD.`) or the threat.
-  Never narrate the code. They are complete sentences, in English, ending
-  with a period (style guide).
+  Never narrate the code. They are complete sentences ending with a period
+  (style guide), in the repository language (AGENTS 11).
 
 ## Testing
 
@@ -201,7 +188,8 @@ file that calls `libsodium-sys-stable`. There:
   requirement may have several tests; every requirement has at least one.
 - Test vectors are loaded from `specs/vectors/NNN.json`, never retyped in
   Rust. A helper `vectors::load("013")` returns typed cases; the loader
-  itself has one test.
+  itself has one test. Hex literals are lowercase everywhere, as in the
+  vectors.
 - **Table-driven** for anything with more than two cases:
 
   ```rust
@@ -216,10 +204,7 @@ file that calls `libsodium-sys-stable`. There:
   ```
 
 - Test modules live at `foo/tests.rs`, declared from `foo.rs` with
-  `#[cfg(test)] mod tests;`. Tests can only be named when the spec exists:
-  if there is no `specs/NNN-*.md` with numbered requirements, stop and write
-  the spec first (AGENTS 1) — never invent `R` numbers.
-
+  `#[cfg(test)] mod tests;`.
 - **Every rejection asserts `commits == 0`**; the test `Store` counts commits.
 - **`proptest` round-trips** for every encoder/decoder pair
   (`encrypt(decrypt(x)) == x` for all `k`, all payload sizes) and **mutation
@@ -237,13 +222,13 @@ file that calls `libsodium-sys-stable`. There:
 
 ## Tooling
 
-- `cargo fmt --all` (workspace `rustfmt.toml`, style edition 2024 = the Rust
-  Style Guide) and `cargo clippy --all-targets -- -D warnings` clean before
-  every commit (AGENTS 17). Do not `#[allow]` a lint or `#[rustfmt::skip]` a
-  block without a comment saying why; never allow the lints the workspace
-  denies.
-- `cargo deny check` gates dependencies. Adding a crate needs one sentence in
-  the PR. Minimal features (`default-features = false`) unless you need them.
+- The local CI commands of `.github/CONTRIBUTING.md` (fmt, clippy, build,
+  test, deny, doc lint, requirements) clean before every commit (AGENTS 17).
+  Do not `#[allow]` a lint or `#[rustfmt::skip]` a block without a comment
+  saying why; never allow the lints the workspace denies.
+- `cargo deny check --all-features` gates dependencies. Adding a crate needs
+  one sentence in the PR. Minimal features (`default-features = false`) unless
+  you need them.
 - `edition = "2024"`, toolchain pinned in `rust-toolchain.toml`. Do not use
   nightly features.
 - Generated code (uniffi) is not committed.
@@ -252,8 +237,7 @@ file that calls `libsodium-sys-stable`. There:
 
 - `?` everywhere; `map_err` to the spec variant at the point where the
   meaning is known, not at the top.
-- `Envelope::parse(blob, &channel_id)` for fixed-offset parsing (the parser
-  needs the expected channel for check 1c, so it is not a `TryFrom`); see
+- `Envelope::parse(blob, &channel_id)` for fixed-offset parsing:
   `references/patterns.md` §2.
 - `#[must_use]` on functions that return a value the caller must not drop
   (`encrypt` returns the reserved counter's blob — dropping it loses a counter).

@@ -18,7 +18,7 @@ Android, it belongs in `core` (architecture §1).
 - SwiftUI, iOS 16+. No UIKit except the thin wrappers the platform forces
   (camera for QR, `UIPasteboard`, screen-capture notifications).
 - SwiftPM for the app and the uniffi package. No CocoaPods, no Carthage.
-- No analytics, crash-reporting or ads SDKs (`docs/spec.md` §8 "Telemetry").
+- No third-party SDK: `docs/spec.md` §8 "Telemetry".
 - Warnings are errors (`SWIFT_TREAT_WARNINGS_AS_ERRORS = YES`).
 
 ## Architecture inside the app
@@ -48,9 +48,9 @@ core (Rust)  via uniffi: Config, Channel, Session, Settings — opaque handles.
 
 ## Talking to the Rust core
 
-- `Config`, `Channel`, `Session`, `Settings` are uniffi **objects**: opaque
-  handles. Do not mirror their contents in Swift structs; call methods on
-  them. Only `Received`, `Peer`, `Fingerprint`, `Gap`, `Event` are records.
+The contract (opaque handles and records, passwords as bytes, `now` passed in,
+non-retention) is architecture §1. The iOS mechanics:
+
 - The storage key comes out of the Secure Enclave unwrap as `[UInt8]`, goes
   into `openStore(path:key:)` once, and is overwritten with zeros in a
   `defer` — same for the `.chatcfg` passphrase. `String` cannot be zeroed;
@@ -58,10 +58,7 @@ core (Rust)  via uniffi: Config, Channel, Session, Settings — opaque handles.
 - The socket actor is a pure host for `Session`: receive a frame →
   `onFrame(frame, now:)` → apply `Event`s → send `outgoing()`. It never looks
   inside a frame.
-- `now` is `Date.now` converted to milliseconds and **passed in**; the core
-  never reads a clock.
-- Nothing from the core is retained beyond current state: no caches, no
-  `description`, no `print`/`os_log` of `Received`.
+- `now` is `Date.now` converted to milliseconds, passed **into** the core.
 
 ## Types and style
 
@@ -88,10 +85,9 @@ core (Rust)  via uniffi: Config, Channel, Session, Settings — opaque handles.
   Business state lives in the view model.
 - `#Preview` for every screen with representative states including `.locked`
   and `.failed`. Previews are documentation and catch layout bugs.
-- Strings in `Localizable.xcstrings` (English is the source and default;
-  translations for Spanish, French, Catalan and Italian, `docs/spec.md` §12); never inline.
-  Accessibility labels on every icon; Dynamic Type supported; VoiceOver
-  checked once per screen.
+- Strings in `Localizable.xcstrings` (English source plus the languages of
+  `docs/spec.md` §12); never inline. Accessibility labels on every icon;
+  Dynamic Type supported; VoiceOver checked once per screen.
 - Lists of messages use stable ids (`serverId`); never re-sort in a view.
 - Secrets never reach a view as `String`. The config QR is drawn from bytes;
   the passphrase words are rendered from `[UInt8]` and cleared `onDisappear`.
@@ -110,9 +106,8 @@ core (Rust)  via uniffi: Config, Channel, Session, Settings — opaque handles.
   on foreground with the core's cursor. No background modes, no push.
 - Files: `isExcludedFromBackup = true` on the data directory. Keychain items
   `ThisDeviceOnly`.
-- Networking: `URLSessionWebSocketTask` with TLS 1.3 minimum, session
-  resumption off, `User-Agent: privatechat/1`, 70 000-byte frame limit, one
-  connection per server host (§6 "Transport").
+- Networking: `URLSessionWebSocketTask`, configured as in `docs/spec.md` §6
+  "Transport".
 - Pasteboard: `UIPasteboard.general.setItems(_, options: [.localOnly: true,
   .expirationDate: …])`. Configs are never copied to the pasteboard.
 

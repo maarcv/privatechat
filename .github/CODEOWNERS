@@ -1,9 +1,2 @@
 # Mandatory human review (AGENTS.md "Per-feature flow")
-*                 @maarcv
-/crates/core/     @maarcv
-/crates/store/    @maarcv
-/crates/server/   @maarcv
-/docs/spec.md     @maarcv
-/docs/adr/        @maarcv
-/specs/           @maarcv
-/.claude/skills/  @maarcv
+* @maarcv

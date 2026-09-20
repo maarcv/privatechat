@@ -39,7 +39,7 @@ The 22 ADRs in `docs/adr/` are the historical context of every decision and the 
 
 ## Test cases
 
-- T01 (covers R1): `check_s002_t01_r01_adr_files_follow_template` validates the first line, the third line, the four sections and the contiguous numbering.
+- T01 (covers R1): `check_s002_t01_r01_adr_files_follow_template` validates the file name `NNNN-<kebab>.md`, line 1, line 3 (`Date · Status [· Supersedes]`), the four sections and the contiguous numbering.
 - T02 (covers R2): `check_s002_t02_r02_adr_index_matches_files_and_spec` compares files ↔ index ↔ §3 (number, title, state).
 - T03 (covers R3): `check_s002_t03_r03_adr_states_are_in_vocabulary`.
 - T04 (covers R4): human review in the PR; item `s002_t04_r04_accepted_adr_only_state_changes` of the PR template. No mechanical check in v1.

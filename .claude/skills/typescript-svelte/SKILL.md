@@ -23,11 +23,11 @@ the web view.
 - Tauri 2. Vite. `pnpm` with a committed lockfile.
 - ESLint (typescript-eslint strict + svelte plugin) and Prettier run in CI and
   must be clean. No `eslint-disable` without a reason comment.
-- No analytics, telemetry, error-reporting or font/CDN dependencies of any
-  kind; everything ships in the bundle (`docs/spec.md` §8 "Telemetry").
-  Every npm dependency has a one-line justification in the PR; prefer the
-  platform (`fetch`, `crypto.getRandomValues`, `Intl`) and 40 lines of your
-  own code over a package.
+- No third-party SDK: `docs/spec.md` §8 "Telemetry". No font or CDN
+  dependency; everything ships in the bundle. Every npm dependency has a
+  one-line justification in the PR; prefer the platform (`fetch`,
+  `crypto.getRandomValues`, `Intl`) and 40 lines of your own code over a
+  package.
 
 ## Architecture inside the app
 
@@ -60,7 +60,9 @@ src-tauri/          Rust: Tauri commands → core::Session / Channel / Store, ke
 ## Secrets in the web view
 
 The web view is the least trusted part of the desktop app: it is a browser.
-Keep it ignorant.
+Keep it ignorant. The contract with the core (opaque handles and records,
+passwords as bytes, `now` passed in, non-retention) is architecture §1; the
+desktop mechanics:
 
 - The storage key, `K_ch`, `sk_u` and message keys **never** enter the web
   view. They live in `src-tauri/` as `Secret<N>`.
@@ -90,9 +92,10 @@ Keep it ignorant.
   `ServerId` cannot be passed where a `PeerId` is expected.
 - Exhaustive `switch` over unions with an `assertNever(x)` default. Adding a
   variant must break compilation everywhere it matters.
-- Full English words; components are nouns in PascalCase (`ChannelScreen.svelte`,
-  `PeerRow.svelte`); state modules `channel.svelte.ts`; intents `XxxIntent`.
-  One component per file; helpers used by a single screen live beside it.
+- Full English words; components are nouns in PascalCase
+  (`ChannelScreen.svelte`, `PeerRow.svelte`); state modules
+  `channel.svelte.ts`; intents `XxxIntent`. One component per file; helpers
+  used by a single screen live beside it.
 - Functions ≤ ~40 lines; a component ≤ ~150 lines including markup and style.
 
 ## Svelte specifics
@@ -110,8 +113,7 @@ Keep it ignorant.
 - Accessibility: semantic elements, `aria-label` on icon buttons, visible focus,
   keyboard navigation for every action, respects `prefers-reduced-motion` and
   `prefers-color-scheme`. Strings via a tiny `t()` over JSON message files
-  (English is the source and default; translations for Spanish, French,
-  Catalan and Italian, `docs/spec.md` §12); nothing inline.
+  (English source plus the languages of `docs/spec.md` §12); nothing inline.
 
 ## Tauri side (`src-tauri/`)
 
@@ -125,8 +127,7 @@ Follows the `rust` skill. Additionally:
   `lock_timeout`.
 - The storage key is read from the OS keychain (`keyring` crate, one type
   `StorageKey`), never written to disk, never sent to the web view.
-- One connection per server host, TLS 1.3, no session resumption,
-  `User-Agent: privatechat/1`, 70 000-byte frame limit (§6 "Transport").
+- The socket is configured as in `docs/spec.md` §6 "Transport".
 
 ## Testing
 

@@ -6,7 +6,7 @@ Date: 2026-09-19 · Status: accepted
 A group of people needs to share an encrypted channel without the server knowing anything about the members.
 
 ## Decision
-Access to a channel is granted with a root key `K_ch` (32 random bytes) that travels inside a config shared out of band: QR in person, password-encrypted file or link with a fragment.
+Access to a channel is granted with a root key `K_ch` (32 random bytes) that travels inside a config shared out of band: QR in person or password-encrypted file.
 
 ## Alternatives considered
 - X3DH with prekeys on the server (Signal): requires the server to store public keys per user and to know the group topology.

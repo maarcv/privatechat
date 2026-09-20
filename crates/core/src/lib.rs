@@ -4,8 +4,8 @@
 //! and returns bytes and events (`docs/spec.md` §9). Spec 000 creates this
 //! skeleton; the contents arrive with specs 010–028.
 
-// Relaxed to `deny` only once `crypto/ffi.rs` exists (AGENTS 12).
-#![forbid(unsafe_code)]
+// `deny`, not `forbid`: `crypto/ffi.rs` alone will `allow` it (AGENTS 12).
+#![deny(unsafe_code)]
 // Tests may relax these four lints to build fixtures; production code never does (AGENTS 4).
 #![cfg_attr(
     test,
@@ -37,21 +37,39 @@ mod tests {
         assert!(DEFAULT_SERVER_URL.ends_with(".invalid"));
     }
 
-    /// Spec 000, R3: the workspace lints deny `unwrap` and friends.
+    /// Spec 000, R3: the workspace lints deny `unwrap` and friends, `unsafe`
+    /// is denied in the workspace and forbidden in `store` and `server`.
     /// Checked by reading the workspace `Cargo.toml`, which is the single source.
     #[test]
     fn s000_t03_r03_workspace_lints_deny_unwrap_and_arithmetic() {
         let manifest = include_str!("../../../Cargo.toml");
         for lint in [
-            "unwrap_used = \"deny\"",
-            "expect_used = \"deny\"",
-            "panic = \"deny\"",
-            "indexing_slicing = \"deny\"",
-            "arithmetic_side_effects = \"deny\"",
+            "arithmetic_side_effects",
+            "cast_possible_truncation",
+            "cast_sign_loss",
+            "dbg_macro",
+            "expect_used",
+            "indexing_slicing",
+            "panic",
+            "print_stderr",
+            "print_stdout",
+            "todo",
+            "undocumented_unsafe_blocks",
+            "unimplemented",
+            "unreachable",
+            "unwrap_used",
         ] {
-            assert!(manifest.contains(lint), "missing workspace lint: {lint}");
+            let line = format!("{lint} = \"deny\"");
+            assert!(manifest.contains(&line), "missing workspace lint: {line}");
         }
+        assert!(manifest.contains("unsafe_code = \"deny\""));
         assert!(manifest.contains("overflow-checks = true"));
+        for crate_root in [
+            include_str!("../../store/src/lib.rs"),
+            include_str!("../../server/src/main.rs"),
+        ] {
+            assert!(crate_root.contains("#![forbid(unsafe_code)]"));
+        }
     }
 
     /// Spec 000, R7: the toolchain is pinned to one concrete stable version.
@@ -62,22 +80,59 @@ mod tests {
         assert!(toolchain.contains("\"rustfmt\"") && toolchain.contains("\"clippy\""));
     }
 
-    /// Spec 000, R8: `deny.toml` bans cryptographic and compression crates.
+    /// Spec 000, R8: `deny.toml` bans every cryptographic and compression
+    /// crate, lets `rand` in only under `proptest`, and allows exactly the
+    /// listed licences.
     #[test]
     fn s000_t08_r08_deny_bans_crypto_crates() {
         let deny = include_str!("../../../deny.toml");
         for crate_name in [
+            "rand",
+            "rand_core",
+            "getrandom",
+            "sha2",
+            "sha3",
+            "blake2",
+            "md-5",
+            "aes",
+            "aes-gcm",
+            "chacha20",
+            "chacha20poly1305",
+            "ed25519-dalek",
+            "x25519-dalek",
+            "curve25519-dalek",
+            "argon2",
+            "hkdf",
+            "hmac",
             "ring",
             "openssl",
-            "ed25519-dalek",
-            "argon2",
+            "openssl-sys",
             "sodiumoxide",
             "flate2",
             "zstd",
+            "brotli",
+            "lz4",
         ] {
             assert!(
-                deny.contains(&format!("crate = \"{crate_name}\"")),
+                deny.contains(&format!("{{ crate = \"{crate_name}\"")),
                 "deny.toml must ban {crate_name}"
+            );
+        }
+        assert!(deny.contains("{ crate = \"rand\", wrappers = [\"proptest\""));
+        for licence in [
+            "MIT",
+            "Apache-2.0",
+            "Apache-2.0 WITH LLVM-exception",
+            "BSD-2-Clause",
+            "BSD-3-Clause",
+            "ISC",
+            "Unicode-3.0",
+            "Zlib",
+            "MPL-2.0",
+        ] {
+            assert!(
+                deny.contains(&format!("  \"{licence}\",\n")),
+                "deny.toml must allow the licence {licence}"
             );
         }
         assert!(

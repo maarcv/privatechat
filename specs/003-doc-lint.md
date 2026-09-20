@@ -15,7 +15,7 @@ The source of truth of this project is a set of documents: `docs/spec.md`, the A
 
 - R1 The adversaries table in `docs/threat-model.md` MUST be byte-for-byte equal to the one in `docs/spec.md` §2.
 - R2 Every ADR MUST match in number, title and state across the file, `docs/adr/README.md` and `docs/spec.md` §3, have exactly the four sections and contiguous numbering (spec 002).
-- R3 Every spec identifier `NNN-name` referenced in `docs/spec.md` (outside §13), `AGENTS.md`, `README.md`, `.github/CONTRIBUTING.md` or in any `specs/NNN-*.md` MUST appear in the table in `docs/spec.md` §10, and every `specs/NNN-*.md` file MUST be listed there.
+- R3 Every spec identifier `NNN-name` referenced in any tracked `*.md` file except those under `docs/adr/` and `docs/audit-log.md` MUST appear in the table in `docs/spec.md` §10, and every `specs/NNN-*.md` file MUST be listed there.
 - R4 `AGENTS.md` MUST NOT contain any spec range `NNN–NNN` (the list lives only in §10).
 - R5 A line in the `## Requirements` section of a spec MUST NOT contain an example-introducing phrase (the phrases matched by `check_s003_t05_r05_no_examples_in_requirements`): requirements carry fixed values.
 - R6 If `docs/spec.md` changes with respect to the base commit of the PR, the header `Version: … · Updated: YYYY-MM-DD` MUST have changed.
@@ -50,7 +50,7 @@ DOC_LINT_BASE=<ref>            # optional; base commit for R6
 - T04 (covers R4): `check_s003_t04_r04_agents_has_no_spec_ranges`.
 - T05 (covers R5): `check_s003_t05_r05_no_examples_in_requirements`; the forbidden phrases are "for example", "e.g." and "such as".
 - T06 (covers R6): `check_s003_t06_r06_spec_header_date_changes_with_content`.
-- T07 (covers R7): `check_s003_t07_r07_specs_index_matches_files`.
+- T07 (covers R7): `check_s003_t07_r07_specs_index_matches_files` compares number, name, phase and state.
 - Negatives (manual, once, recorded in the History): change one cell of the threat-model → R1 fails; change a title in §3 → R2 fails; add `- R9 … for example …` to a spec → R5 fails.
 
 ## Vectors

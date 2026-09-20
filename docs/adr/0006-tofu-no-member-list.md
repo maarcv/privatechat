@@ -14,4 +14,4 @@ The config carries no members. When a new public key arrives, the client shows i
 ## Consequences
 - An intruder who writes becomes visible.
 - Moment zero is the weak point: the UI must clearly show the "unverified" state, must not reuse an existing label for an unverified key, and must make QR pre-verification easy.
-- Unknowns can be collapsed and muted in bulk to defend against floods; there is a limit with eviction (§7).
+- Unknowns can be muted; there is a limit with LRU eviction (§7).

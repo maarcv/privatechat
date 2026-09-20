@@ -4,8 +4,10 @@
 For each `specs/NNN-*.md` with `Status: accepted` or `implemented`, every line
 `- R<k>` in `## Requirements` must be covered by an identifier `sNNN_tTT_rKK_` (two
 digits each), optionally prefixed (`check_s003_…`), somewhere in the tracked
-tree outside `specs/` and `docs/`: a Rust test name, a doc_lint check
-function, a CI step name or comment, a Kotlin/Swift/TS test name.
+tree: a Rust test name, a doc_lint check function, a CI step name or comment,
+a Kotlin/Swift/TS test name. `specs/`, `docs/`, `.claude/` and `AGENTS.md` are
+skipped: they describe tests and quote example test names, and an example must
+not satisfy the check.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ def tracked_text() -> str:
     files = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
     chunks = []
     for rel in files:
-        if rel.startswith("specs/") or rel.startswith("docs/"):
+        if rel.startswith(("specs/", "docs/", ".claude/")) or rel == "AGENTS.md":
             continue
         p = ROOT / rel
         try:

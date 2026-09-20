@@ -29,7 +29,10 @@ AGENTS = ROOT / "AGENTS.md"
 
 ADR_STATES = {"proposed", "accepted", "deprecated"}  # plus "superseded by NNNN"
 ADR_SECTIONS = ["## Context", "## Decision", "## Alternatives considered", "## Consequences"]
+ADR_LINE3 = re.compile(r"Date: \d{4}-\d{2}-\d{2} · Status: ([^·]+?)( · Supersedes: \d{4})?")
 SPEC_STATES = {"draft", "in review", "accepted", "implemented"}
+# A spec id in prose; a thousands-separated number ("70 000-byte") is not one.
+SPEC_ID = re.compile(r"(?<!\d )\b(\d{3}-[a-z][a-z0-9-]*)")
 
 failures: list[str] = []
 
@@ -57,10 +60,10 @@ def cells(row: str) -> list[str]:
     return [c.strip() for c in row.strip().strip("|").split("|")]
 
 
-def spec_body(text: str) -> str:
-    """The spec without §13 (audit log), which legitimately cites old names."""
-    cut = text.find("## 13. Audit log")
-    return text if cut < 0 else text[:cut]
+def tracked_markdown() -> list[str]:
+    """Every tracked `*.md`, as paths relative to the repository root."""
+    out = subprocess.run(["git", "ls-files", "*.md"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    return out.split()
 
 
 # --- checks -----------------------------------------------------------------
@@ -80,17 +83,17 @@ def check_s003_t01_r01_threat_table_matches_spec(spec: str, tm: str) -> None:
 
 def adr_files() -> dict[str, tuple[str, str, Path]]:
     found: dict[str, tuple[str, str, Path]] = {}
-    for f in sorted(ADR_DIR.glob("[0-9][0-9][0-9][0-9]-*.md")):
+    for f in sorted(ADR_DIR.glob("[0-9][0-9][0-9][0-9]-[a-z0-9-]*.md")):
         lines = f.read_text(encoding="utf-8").splitlines()
         m = re.match(r"# ADR (\d{4}) — (.+)", lines[0] if lines else "")
         if not m:
             fail(f"{f.name}: first line must be '# ADR NNNN — Title'")
             continue
-        state_m = re.search(r"Status: ([^·]+)", lines[2] if len(lines) > 2 else "")
-        if not state_m:
-            fail(f"{f.name}: line 3 must contain 'Status: …'")
+        line3 = ADR_LINE3.fullmatch(lines[2] if len(lines) > 2 else "")
+        if not line3:
+            fail(f"{f.name}: line 3 must be 'Date: YYYY-MM-DD · Status: <state>[ · Supersedes: NNNN]'")
             continue
-        state = state_m.group(1).strip()
+        state = line3.group(1).strip()
         headings = [l for l in lines if l.startswith("## ")]
         if headings != ADR_SECTIONS:
             fail(f"{f.name}: sections must be exactly {ADR_SECTIONS}, got {headings}")
@@ -132,17 +135,16 @@ def check_s002_t02_r02_adr_index_matches_files_and_spec(spec: str, files: dict[s
 
 def check_s003_t03_r03_spec_refs_exist_in_plan(spec: str) -> None:
     plan = " ".join(table_after(spec, "## 10. SDD execution plan"))
-    listed = set(re.findall(r"\b(\d{3}-[a-z][a-z0-9-]*)", plan))
-    sources = [spec_body(spec), AGENTS.read_text(encoding="utf-8")]
-    for extra in ("README.md", ".github/CONTRIBUTING.md"):
-        p = ROOT / extra
-        if p.exists():
-            sources.append(p.read_text(encoding="utf-8"))
-    for f in SPECS_DIR.glob("[0-9][0-9][0-9]-*.md"):
-        sources.append(f.read_text(encoding="utf-8"))
+    listed = set(SPEC_ID.findall(plan))
+    # Every tracked Markdown file except the ADRs and the audit log, which cite old names as history.
+    sources = [spec]
+    for rel in tracked_markdown():
+        if rel.startswith("docs/adr/") or rel in {"docs/audit-log.md", "docs/spec.md"}:
+            continue
+        sources.append((ROOT / rel).read_text(encoding="utf-8"))
     referenced = set()
     for text in sources:
-        referenced |= set(re.findall(r"\b(\d{3}-[a-z][a-z0-9-]*)", text))
+        referenced |= set(SPEC_ID.findall(text))
     for ref in sorted(referenced - listed):
         fail(f"spec id {ref!r} is referenced but not listed in docs/spec.md §10")
     for f in SPECS_DIR.glob("[0-9][0-9][0-9]-*.md"):
@@ -195,19 +197,22 @@ def check_s003_t07_r07_specs_index_matches_files() -> None:
     if not SPECS_INDEX.exists():
         fail("specs/README.md (index) is missing")
         return
-    index: dict[str, tuple[str, str]] = {}
+    index: dict[str, tuple[str, str, str]] = {}
     for row in table_after(SPECS_INDEX.read_text(encoding="utf-8"), "## Index"):
         c = cells(row)
         if len(c) >= 4 and re.fullmatch(r"\d{3}", c[0]):
-            index[c[0]] = (c[1], c[3])
-    files: dict[str, tuple[str, str]] = {}
+            index[c[0]] = (c[1], c[2], c[3])
+    files: dict[str, tuple[str, str, str]] = {}
     for f in SPECS_DIR.glob("[0-9][0-9][0-9]-*.md"):
         text = f.read_text(encoding="utf-8")
         state_m = re.search(r"^Status: (.+)$", text, re.MULTILINE)
         state = state_m.group(1).strip() if state_m else "?"
         if state not in SPEC_STATES:
             fail(f"specs/{f.name}: invalid state {state!r} (must be one of {sorted(SPEC_STATES)})")
-        files[f.stem[:3]] = (f.stem, state)
+        phase_m = re.search(r"^Phase: (\d+)$", text, re.MULTILINE)
+        if not phase_m:
+            fail(f"specs/{f.name}: missing 'Phase: N' line")
+        files[f.stem[:3]] = (f.stem, phase_m.group(1) if phase_m else "?", state)
     for n in sorted(set(index) | set(files)):
         if index.get(n) != files.get(n):
             fail(f"specs index vs file for {n}: index={index.get(n)} file={files.get(n)}")

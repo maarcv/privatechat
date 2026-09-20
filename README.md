@@ -19,7 +19,10 @@ An end-to-end encrypted group chat where the server is just a mailbox: it has no
 - Messages are authenticated but not deniable.
 - The server can delete or delay messages; the client detects this partially but cannot prevent it.
 - Whoever operates, hosts or seizes the server knows from which IP and at what time each person listens. Without Tor, an IP is a person.
-- By default new channels go to the server configured in the app; whoever does not want that operator to see their metadata changes it.
+- By default new channels go to the server configured in the app; anyone who does not want that operator to see their metadata can change it.
+- The app store and the operating system know you have the app installed and when you use it; other apps can detect it.
+- On desktop, within the user's session any of their processes can read the data files and the keychain.
+- Reinstalling the app, restoring a backup or a hardware failure erases all local data; recovery is re-importing the config.
 
 The full list, the threat model and every decision are in [`docs/spec.md`](docs/spec.md), [`docs/threat-model.md`](docs/threat-model.md) and [`docs/adr/`](docs/adr/README.md).
 
@@ -32,6 +35,6 @@ The full list, the threat model and every decision are in [`docs/spec.md`](docs/
 
 Development follows specs (`specs/`) written before the code, with tests that cite every requirement. See [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md).
 
-## License
+## Licence
 
 [MIT](LICENSE).

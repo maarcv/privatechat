@@ -12,3 +12,5 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 001 | 001-ci | 0 | in review |
 | 002 | 002-adr-log | 0 | in review |
 | 003 | 003-doc-lint | 0 | in review |
+
+Phase 0 was bootstrapped with implementation and review in parallel; from spec 010 on, acceptance precedes code.

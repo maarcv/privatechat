@@ -26,10 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.98.1
-          components: rustfmt
+      - run: rustup toolchain install # from rust-toolchain.toml (rustup ≥ 1.28 installs the pinned channel and components)
       - name: s001_t01_r01_fmt_check
         run: cargo fmt --all --check
 
@@ -38,10 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.98.1
-          components: clippy
+      - run: rustup toolchain install # from rust-toolchain.toml (rustup ≥ 1.28 installs the pinned channel and components)
       - uses: Swatinem/rust-cache@v2 # s001_t06_r06_cargo_cache
       - name: s001_t02_r02_clippy_denies_warnings
         run: cargo clippy --all-targets --all-features -- -D warnings
@@ -51,9 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.98.1
+      - run: rustup toolchain install # from rust-toolchain.toml (rustup ≥ 1.28 installs the pinned channel and components)
       - uses: Swatinem/rust-cache@v2
       - name: s000_t01_r01_workspace_builds
         run: cargo build --workspace --all-targets
@@ -90,7 +82,7 @@ jobs:
         run: |
           for f in AGENTS.md CLAUDE.md README.md LICENSE .github/CONTRIBUTING.md .github/SECURITY.md .github/CODEOWNERS docs/assistant.example.md \
                    Cargo.toml rust-toolchain.toml rustfmt.toml deny.toml .editorconfig .gitignore \
-                   docs/spec.md docs/threat-model.md docs/adr/README.md docs/adr/TEMPLATE.md \
+                   docs/spec.md docs/threat-model.md docs/audit-log.md docs/adr/README.md docs/adr/TEMPLATE.md \
                    specs/TEMPLATE.md specs/README.md specs/vectors/README.md \
                    .claude/skills/architecture/SKILL.md .claude/skills/rust/SKILL.md \
                    .claude/skills/kotlin/SKILL.md .claude/skills/swift/SKILL.md \

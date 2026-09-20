@@ -1,9 +1,8 @@
 # Rust patterns used in this repository
 
 These are the shapes the spec assumes. Reuse them; do not invent parallel ones.
-Every snippet here compiles under the workspace lints (verified with
-`cargo clippy --all-targets -- -D warnings` on the pinned toolchain); if you
-change one, re-check it the same way before committing the skill.
+These shapes are written to pass the workspace lints; when the implementing
+spec lands, the real code supersedes the snippet and is re-checked against it.
 
 Contents:
 1. `Secret<N>` — key material
@@ -40,8 +39,8 @@ impl<const N: usize> PartialEq for Secret<N> {
 ```
 
 Every secret type is listed in `crypto::SECRET_TYPES` and covered by
-`s010_t02_debug_is_redacted`, which formats each with `{:?}` and asserts the
-exact string.
+the redacted-`Debug` test of spec 010, which formats each with `{:?}` and asserts
+the exact string.
 
 ## 2. Fixed-offset parsing (`docs/spec.md` §4 envelope)
 
@@ -51,10 +50,10 @@ Conventions this pattern fixes, so you do not have to decide them again:
   at §4. Derived constants (`MIN_BLOB = BLOB_OVERHEAD + PAD_BLOCK`) are
   preferred over literals, and one test pins them to the spec's literals
   (1 185, 64 673) so a wrong derivation cannot hide.
-- **Step 1 of "Verification on receive" is three conditions with three variants**,
-  checked in order: 1a length class → `BadLength`, 1b version →
-  `UnsupportedVersion`, 1c channel → `WrongChannel`. The spec writes them as one
-  numbered step; the skills label them 1a/1b/1c so tests can name them.
+- **Step 1 of "Verification on receive" is three conditions with three
+  variants**, checked in order: 1a length class → `BadLength`, 1b version →
+  `UnsupportedVersion`, 1c channel → `WrongChannel`. The spec writes them as
+  one numbered step; the skills label them 1a/1b/1c so tests can name them.
 - **1c lives inside the parser**, which therefore takes the expected
   `ChannelId`. The signature is `Envelope::parse(blob, &channel_id)`, not
   `TryFrom<&[u8]>` (which cannot carry the channel).
@@ -151,11 +150,8 @@ expected field and nowhere else). The spec's **mutation table is a test of
 `signature` the parser accepts and the error (`BadSignature`, `Replay`, …)
 comes from later steps. Say which level a mutation test is at in its name.
 
-Test modules live at `foo/tests.rs`, declared from `foo.rs` with
-`#[cfg(test)] mod tests;`. Tests may build fixtures with indexing and plain
-arithmetic: the crate root relaxes exactly `unwrap_used`, `expect_used`,
-`indexing_slicing` and `arithmetic_side_effects` under `#[cfg(test)]`
-(see `crates/core/src/lib.rs`). Production code never gets that relaxation.
+Fixtures may use indexing and plain arithmetic under the test-only relaxation
+in SKILL.md "Errors and panics"; production code never gets it.
 
 ## 3. `Store` trait and `WriteBatch` — one commit per operation
 
@@ -247,5 +243,7 @@ pub fn load(spec: &str) -> Result<Vec<Vector>, VectorError> {
 }
 ```
 
-Vectors are regenerated only on a `proto_version` change with an ADR (AGENTS
-18); the CI fails a diff that touches vectors without touching `docs/adr/`.
+The vectors in `specs/vectors/*.json` are regenerated only with a
+`proto_version` change and an ADR. CI (`adr-guard`) fails a diff that touches
+`specs/vectors/` without adding a new ADR file, unless a human sets the
+`adr-not-needed` label (AGENTS 18).

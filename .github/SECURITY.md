@@ -12,8 +12,8 @@ Commitment: initial response within 72 hours; assessment and plan within 14 days
 
 ## Acknowledgement
 
-Whoever reports a confirmed vulnerability appears, if they wish, in the release note of the version that fixes it and in the audit log of `docs/spec.md` §13.
+Whoever reports a confirmed vulnerability appears, if they wish, in the release note of the version that fixes it and in `docs/audit-log.md`.
 
 ## External review
 
-The cryptographic core is pending external review before the beta (`docs/spec.md` §13, spec 061). Until then, treat the project as experimental.
+The cryptographic core is pending external review before the beta (`docs/audit-log.md`, spec 061). Until then, treat the project as experimental.

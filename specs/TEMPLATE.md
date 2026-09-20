@@ -53,7 +53,7 @@ Mandatory for `core` specs with a format or a derivation: file `specs/vectors/NN
 
 ## Acceptance criterion
 
-Exact command that must pass (`cargo test -p core sNNN_`), plus the non-automatable criterion if there is one.
+Exact command that must pass (`cargo test -p privatechat-core sNNN_`), plus the non-automatable criterion if there is one.
 
 ## Out of scope
 

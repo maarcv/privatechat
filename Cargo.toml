@@ -12,7 +12,7 @@ rust-version = "1.98"
 # This is the single source of the list (docs/spec.md §10, AGENTS.md rule 4).
 [workspace.lints.rust]
 missing_docs = "warn"
-unsafe_code = "deny" # `forbid` in each crate; `allow` only in crates/core/src/crypto/ffi.rs (AGENTS 12).
+unsafe_code = "deny" # `forbid` in store and server; `deny` in core, `allow` only in crates/core/src/crypto/ffi.rs (AGENTS 12).
 
 [workspace.lints.clippy]
 arithmetic_side_effects = "deny"

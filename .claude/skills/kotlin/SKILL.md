@@ -12,12 +12,13 @@ messages beyond displaying them, stop: it belongs in `core` (architecture §1).
 
 ## Language and platform
 
-- Kotlin 2.x, K2 compiler, `explicitApi()` off (it is an app), `allWarningsAsErrors = true`.
+- Kotlin 2.x, K2 compiler, `explicitApi()` off (it is an app),
+  `allWarningsAsErrors = true`.
 - Jetpack Compose with Material 3; `minSdk 26`. No Views, no Fragments, no
   XML layouts; a single `Activity`.
 - Gradle Kotlin DSL with a version catalog (`gradle/libs.versions.toml`). Every
-  dependency has a one-line justification in the PR. No analytics, crash or
-  ads SDKs of any kind (`docs/spec.md` §8 "Telemetry").
+  dependency has a one-line justification in the PR.
+- No third-party SDK: `docs/spec.md` §8 "Telemetry".
 - Coroutines and `Flow` for everything asynchronous. No RxJava, no callbacks,
   no `LiveData`.
 
@@ -54,10 +55,9 @@ core (Rust)  via uniffi: Config, Channel, Session, Settings — opaque handles.
 
 ## Talking to the Rust core
 
-- `Config`, `Channel`, `Session` and `Settings` are uniffi **objects** — opaque
-  handles. Never copy their contents into Kotlin data classes "for
-  convenience"; call methods on them. Only `Received`, `Peer`, `Fingerprint`,
-  `Gap`, `Event` are records (architecture §1).
+The contract (opaque handles and records, passwords as bytes, `now` passed in,
+non-retention) is architecture §1. The Android mechanics:
+
 - The wrapped storage key is unwrapped by the Keystore into a `ByteArray`,
   passed once to `openStore(path, keyBytes)`, and **filled with zeros
   immediately after**, in a `finally`. Same for the `.chatcfg` passphrase. A
@@ -65,11 +65,7 @@ core (Rust)  via uniffi: Config, Channel, Session, Settings — opaque handles.
 - The socket loop is a pure host for `Session`: read a frame → `onFrame(frame,
   now)` → for each `Event`, update state; write whatever `outgoing()` returns.
   No inspection of frame contents in Kotlin.
-- `now` is always `System.currentTimeMillis()` passed **into** the core; the
-  core never reads it.
-- Do not retain anything the core returns beyond the current UI state: no
-  caches, no `toString()`, no logging of `Received` (architecture: "promise
-  not to retain").
+- `now` is `System.currentTimeMillis()`, passed **into** the core.
 
 ## Types and style
 
@@ -95,10 +91,9 @@ core (Rust)  via uniffi: Config, Channel, Session, Settings — opaque handles.
   position, animation).
 - `@Preview` for every screen-level Composable with representative states,
   including `Locked` and `Error`. Previews are documentation.
-- Strings in `res/values/strings.xml` (English is the source and default;
-  translations for Spanish, French, Catalan and Italian, `docs/spec.md` §12), never
-  hard-coded. Content descriptions on every icon; minimum 48 dp touch targets;
-  test with TalkBack once per screen.
+- Strings in `res/values/strings.xml` (English source plus the languages of
+  `docs/spec.md` §12), never hard-coded. Content descriptions on every icon;
+  minimum 48 dp touch targets; test with TalkBack once per screen.
 - Message lists use `LazyColumn` with stable `key = { it.serverId }`; never
   re-sort in the Composable — the core delivers order.
 - Secrets never reach a Composable. The QR of a config is rendered from bytes
@@ -115,9 +110,8 @@ core (Rust)  via uniffi: Config, Channel, Session, Settings — opaque handles.
   foreground service, no WorkManager, no push (§8 "Background").
 - Manifest: `allowBackup="false"`, `dataExtractionRules` excluding everything,
   no `exported` components, no `usesCleartextTraffic`, no custom URL scheme.
-- Networking: OkHttp WebSocket with TLS 1.3 only, session resumption disabled,
-  no `permessage-deflate`, `User-Agent: privatechat/1`, 70 000-byte frame
-  limit, one connection per server host (§6 "Transport").
+- Networking: OkHttp WebSocket, configured as in `docs/spec.md` §6
+  "Transport".
 
 ## Testing
 

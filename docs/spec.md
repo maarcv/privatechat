@@ -1,12 +1,12 @@
 # Private E2E chat — Specification and plan (SDD)
 
-Version: mvp · Updated: 2026-09-20 · Marc Vilardebó · Post-audit C revision (see §13)
+Version: mvp · Updated: 2026-09-20 · Marc Vilardebó · Post-audit D revision (see `docs/audit-log.md`)
 
-This file is the canonical source of the specification (see §11 "Governance"). Read copy, may lag behind: https://claude.ai/code/artifact/1527bf13-79e8-485a-908d-a515cbd062a4
+This file, on the default branch (`mvp` until the first release), is the canonical source of the specification (see §11 "Governance"). Read copy, may lag behind: https://claude.ai/code/artifact/1527bf13-79e8-485a-908d-a515cbd062a4
 
 ## 1. Vision and goals
 
-An end-to-end encrypted group chat where the server is only a mailbox: it has no accounts, knows no identities and cannot read anything. Access to a channel is granted by sharing a config out of band (QR in person, password-encrypted file). Desktop, Android and iOS clients over a single cryptographic core in Rust. Open source: anyone can deploy the server, and each channel lives on the server chosen by whoever created it (ADR 0022). Three words: chat, private and simple. Every piece that does not bring a demonstrable guarantee is a place to fail, and it is not there.
+An end-to-end encrypted group chat where the server is only a mailbox: it has no accounts, knows no identities and cannot read anything. Access to a channel is granted by sharing a config out of band (QR in person, password-encrypted file). Desktop, Android and iOS clients over a single cryptographic core in Rust. Open source: anyone can deploy the server, and each channel lives on the server chosen by whoever created it (ADR 0022). Uncompromising and simple. Every piece that does not bring a demonstrable guarantee is a place to fail, so it is left out.
 
 **What it promises**
 
@@ -23,9 +23,10 @@ An end-to-end encrypted group chat where the server is only a mailbox: it has no
 - Messages are authenticated but not deniable.
 - The server can delete or delay messages; the client detects this partially (counter gaps) but cannot prevent it.
 - Whoever operates, hosts or seizes the server knows from which IP and at what time each person listens, and when you open the app. Without Tor, an IP is a person.
-- By default new channels go to the server configured in the app, which at installation is the project's; whoever does not want that operator to see their metadata changes it in the settings or when creating the channel.
+- By default new channels go to the server configured in the app, which at installation is the project's; anyone who does not want that operator to see their metadata can change it in the settings or when creating the channel.
 - The app store and the operating system know you have the app installed and when you use it; other apps can detect it.
 - On desktop, within the user's session any of their processes can read the data files and the keychain.
+- Reinstalling the app, restoring a backup or a hardware failure erases all local data; recovery is re-importing the config.
 
 **Out of scope for v1:** calls, attachments, message quoting, presence indicators, 1-to-1 messages with prekeys, member removal, identity export between devices, federated server, push notifications, hosted web client (ADR 0017), duress code.
 
@@ -35,11 +36,11 @@ The main adversary is the server (or whoever compromises, hosts or seizes it) an
 
 | Adversary | What it can see or do | How we mitigate it |
 | --- | --- | --- |
-| Honest-but-curious server | Which `channel_id`s are being listened to, from which IP, when (each connection = the user looks at the app), size class (multiples of 1 KiB) and frequency of the blobs, the channel's retention policy, platform by TLS fingerprint | AEAD, padding to 1 KiB buckets, encrypted header (it does not see who writes nor how much, ADR 0018), authentication by channel key (not by user), no accounts, no IP logging, rounded `since`, no TLS resumption, SOCKS5 proxy / Tor / .onion service support |
+| Honest-but-curious server | Which `channel_id`s are being listened to, from which IP, when (each connection = the user looks at the app), how many connections and which channels share a device (same connection, or same IP and time), size class (multiples of 1 KiB) and frequency of the blobs, the channel's retention policy, platform by TLS fingerprint | AEAD, padding to 1 KiB buckets, encrypted header (it does not see who writes nor how much, ADR 0018), authentication by channel key (not by user), no accounts, no IP logging, rounded `since`, no TLS resumption, SOCKS5 proxy / Tor / .onion service support |
 | Malicious server | In addition: retain blobs beyond the TTL, selectively delete or delay blobs, hide listeners, fill the channel | TTL also on the client, counter gaps visible to the client, open source + reproducible builds, no client with code served by the server (ADR 0017) |
 | Seized or coerced operator (preservation or interception order) | Turn on IP↔channel↔time logging from the order onwards | Not mitigable by the protocol: the server does not store IPs on disk by design but can be compelled to. Tor or .onion service; self-hosting |
 | Server's hosting or network provider | Netflow: IP↔server↔time of all clients; size of the connected group from the `push` fan-out | Tor or .onion service. Nothing else in v1 |
-| User's network observer (ISP, wifi) | Server DNS/SNI, time of each connection, size and direction of each message (1 KiB class; write vs read). Does not see which channel or which member | TLS 1.3, a single connection (does not reveal the number of channels), optional Tor. In v1 `channel_id` is not rotated and no cover traffic is added |
+| User's network observer (ISP, wifi) | Server DNS/SNI, time of each connection, size and direction of each message (1 KiB class; write vs read). Does not see which channel or which member | TLS 1.3, one connection per server (does not reveal the number of channels on it), optional Tor. In v1 `channel_id` is not rotated and no cover traffic is added |
 | Member who operates the self-hosted server | Everything the server sees + everything a member sees: label↔IP↔time of each fellow member | Documented: when self-hosting, the operator sees the members' IPs. Tor if that matters |
 | Attacker without the config | Create channels and fill the server with blobs | `publish` bound to an authenticated subscription on the same connection; per-connection, per-channel and global quotas; per-IP limits only before authenticating |
 | Intruder with the leaked config (also a former member, forever) | Read the whole channel (past and future); write as a new key; create endless keys; fill the channel until the TTL; re-inject old blobs to members who did not see them | Detected if it writes (it appears as unknown); limit on unknown peers with eviction; the per-channel quota protects the server, not the channel: the only answer is a new channel (ADR 0008). Passive reading cannot be prevented |
@@ -55,7 +56,7 @@ The main adversary is the server (or whoever compromises, hosts or seizes it) an
 
 ## 3. Design decisions (ADR)
 
-Each row corresponds to the file `docs/adr/NNNN-*.md`; the title is literal. The full index, with status and supersessions, is in `docs/adr/README.md`.
+Each row corresponds to the file `docs/adr/NNNN-*.md`; titles are copied verbatim from the files. The full index, with status and supersessions, is in `docs/adr/README.md`.
 
 | # | Title | Status | One-line reason |
 | --- | --- | --- | --- |
@@ -84,7 +85,7 @@ Each row corresponds to the file `docs/adr/NNNN-*.md`; the title is literal. The
 
 ## 4. Cryptographic model
 
-Everything comes from libsodium; no primitive of our own is implemented. All parameters are fixed here, versioned with `proto_version` and frozen when spec 013 is accepted. Every multi-byte integer on the wire is big-endian. All times are unix ms in `uint64`; `ttl_ms = u64(ttl_seconds) × 1 000` and no formula mixes units.
+Everything comes from libsodium; no primitive of our own is implemented. All literals of this section — parameters, domain tags, KDF contexts — are versioned with `proto_version` and frozen when spec 013 is accepted; changing any requires a new `proto_version` and an ADR. Every multi-byte integer on the wire is big-endian. All times are unix ms in `uint64`; `ttl_ms = u64(ttl_seconds) × 1000` and no formula mixes units.
 
 **Primitives**
 
@@ -101,7 +102,7 @@ Everything comes from libsodium; no primitive of our own is implemented. All par
 | Fixed-size comparison | `sodium_memcmp` | Every comparison of `[u8; N]` in `core` |
 | Randomness | `randombytes_buf` | — |
 
-**Domain tags.** Every hash or signature carries a fixed ASCII prefix that separates its use. They are protocol literals, not the commercial name, and are frozen with spec 013:
+**Domain tags.** Every hash or signature carries a fixed ASCII prefix that separates its use. They are protocol literals, not the product name:
 
 | Tag | Use |
 | --- | --- |
@@ -110,12 +111,12 @@ Everything comes from libsodium; no primitive of our own is implemented. All par
 | `privatechat/msg/v1` | message envelope signature |
 | `privatechat/fp/v1` | user fingerprint |
 
-**KDF contexts** (exactly 8 bytes, `subkey_id = 0`, frozen): `chauth__`, `msgkey__`, `chhdr___`. Changing one requires a new `proto_version` and an ADR.
+**KDF contexts** (exactly 8 bytes, `subkey_id = 0`): `chauth__`, `msgkey__`, `chhdr___`.
 
 **Keys**
 
 - `K_ch` (32 B, `randombytes_buf`): root key of the channel. Lives only in the config and on the device. Never used directly to encrypt.
-- `(pk_ch, sk_ch) = crypto_sign_seed_keypair(KDF(K_ch, "chauth__"))`: Ed25519 key pair **of the channel**, not of any user. All members have it. It serves to prove to the server that one has the config, with a non-reusable credential (ADR 0010).
+- `(pk_ch, sk_ch) = crypto_sign_seed_keypair(KDF(K_ch, "chauth__"))`: Ed25519 key pair **of the channel**, not of any user. All members have it. It proves to the server that one has the config, with a non-reusable credential (ADR 0010).
 - `channel_id = BLAKE2b("privatechat/chid/v1" ‖ pk_ch ‖ BE32(ttl_seconds))[0..16]`: public identifier of the channel on the server. Self-certifying (the server recomputes it from `pk_ch` and `ttl_seconds`) and binds the TTL to the channel (ADR 0014).
 - `K_msg = KDF(K_ch, "msgkey__")` (32 B): master message key of the channel.
 - `K_hdr = KDF(K_ch, "chhdr___")` (32 B): header key of the channel, shared by all members. Hides from the server who writes and how much (ADR 0018).
@@ -127,13 +128,13 @@ Everything comes from libsodium; no primitive of our own is implemented. All par
 mk = crypto_generichash(outlen = 32, key = K_msg, in = pk_u ‖ BE64(counter))
 ```
 
-The message with `counter = c` from sender *u* is encrypted with `mk` and a random 24 B nonce. A single derivation, O(1), stateless; `mk` is erased (`Zeroize`) after encrypting or decrypting. Per-message key and random nonce are two independent lifelines: if the random generator fails, the counter saves the day; if the counter were to repeat, the nonce does. Whoever has `K_ch` can derive any `mk`: v1 has no forward secrecy (§1, ADR 0004). The payload **is never compressed**, neither in v1 nor in any version: compressing before encrypting leaks content through the size.
+The message with `counter = c` from sender *u* is encrypted with `mk` and a random 24 B nonce. A single derivation, O(1), stateless; `mk` is erased (`Zeroize`) after encrypting or decrypting. Per-message key and random nonce are independent safeguards: a failure of either alone never repeats a (key, nonce) pair. Whoever has `K_ch` can derive any `mk`: v1 has no forward secrecy (§1, ADR 0004). The payload **is never compressed**, neither in v1 nor in any version: compressing before encrypting leaks content through the size.
 
-**Send counter** (ADR 0019). Starts at 0 and is strictly increasing for each `sk_u`. `Channel::encrypt` reserves `counter` and persists `counter + 1` together with the blob in the `outbox` table **in a single commit before** deriving `mk` and returning the blob; if the commit fails, it returns no blob. The UI drains `outbox` in order and notifies each `ack` to the core (`Channel::acked`). `counter = 2^64 − 1` → `Error::CounterExhausted` and the UI forces "Regenerate my key".
+**Send counter** (ADR 0019). Starts at 0 and is strictly increasing for each `sk_u`. `Channel::encrypt` reserves `counter`, derives `mk`, seals, and persists `counter + 1` together with the blob in the `outbox` (blobs sealed and not yet `ack`ed, §6) in a single commit before returning the blob (no blob leaves before the commit); if the commit fails, it returns no blob. The UI drains `outbox` in order and notifies each `ack` to the core (`Channel::acked`). `counter = 2^64 − 1` → `Error::CounterExhausted` and the UI forces "Regenerate my key".
 
 **Anti-replay** (spec 012; mandatory). For each `pk` seen, the receiver keeps `max_counter: Option<u64>`. `c ≤ max_counter` → `Error::Replay`. `c > max_counter` → accept; after successful decryption, `max_counter = c`. There is no window or bitmap: each `sk_u` lives on a single device and the server delivers each channel in total order (§6). A counter lower than or equal to the maximum seen is always a resend. `Channel::gaps()` reports `c.saturating_sub(max_counter + 1)` per sender as a signal of deletion or delay by the server, with the exceptions of §6 "Cursor and gaps"; a jump greater than 2^32 is shown as "anomalous counter jump: this key may be compromised".
 
-**Messages from one's own key.** One's own `pk_u` is just another peer with `max_counter` = send counter − 1: the server's echo of one's own message is `Replay` and is discarded. If `decrypt` accepts a message with `sender_pk` = one's own `pk_u` and `counter ≥` send counter: (1) the send counter becomes `counter + 1` (so the victim is not left mute); (2) the `OwnKeyUsedElsewhere` event is persisted, which the UI shows as a fixed banner "Someone has written with your key in this channel" with the action "Regenerate my key". If the message is a `key_retired` of one's own `pk`, the channel becomes read-only until regeneration.
+Terminology: *envelope* is the structure, *blob* the bytes on the wire and on the server, *message* the decrypted payload.
 
 **Message envelope on the wire** (ADR 0015, 0018; fixed binary format, no CBOR outside the payload)
 
@@ -148,8 +149,7 @@ The message with `counter = c` from sender *u* is encrypted with `mk` and a rand
 
 - `AAD = blob[0..81]` (includes the encrypted `enc_hdr`, as it travels).
 - `signature = crypto_sign_detached(sk_u, "privatechat/msg/v1" ‖ blob[0..81+n])`: *encrypt-then-sign*; the signature covers encrypted header and ciphertext; the receiver verifies it before decrypting. A header decrypted with a wrong `K_hdr` yields a random `pk` and the signature fails.
-- Blob size = 161 + 1 024·k: minimum 1 185 B, maximum 64 673 B. `k = (len − 161) / 1 024`.
-- The server sees `channel_id`, the size class, the time and the IP of the connection. It does not see who writes, nor how many write, nor how much.
+- Blob size = 161 + 1 024·k: minimum 1 185 B, maximum 64 673 B. `k = (len − 161) / 1024`.
 
 **Plaintext payload** (CBOR, map with integer keys, decoded directly into `struct Payload` with `serde` and `recursion_limit = 8`, never into a generic `Value`; then `sodium_pad` to multiples of 1 024 B; maximum size before padding 64 511 B)
 
@@ -168,18 +168,20 @@ The message with `counter = c` from sender *u* is encrypted with `mk` and a rand
 
 - **Verification QR**: `verify:v1:` ‖ base64url(`channel_id` ‖ `pk_u`). Carries no name. The receiver recomputes `fp` itself.
 - **12 words**: `fp[0..16]` encoded as a standard BIP-39 mnemonic (128 bits + 4 of checksum, English list of 2 048 words). Manual verification only marks "verified" if all 12 match.
-- **Short identifier**: the first 4 of the 12 words (44 bits). It serves to tell peers apart in the UI, is always labelled "identifier, not verification" and never enables the verified state. If the short identifier of a new `pk` matches that of an existing peer, the client shows the 12 words of both with the warning "Identifier identical to another member: possible impersonation. Verify by QR".
+- **Short identifier**: the first 4 of the 12 words (44 bits).
 
-**Verification on receive** (in this order; each condition has a single `Error`; any error discards the message without showing it, with no write to the Store except the cursor of §6):
+**Verification on receive** (in this order; each condition has a single `Error`; any error discards the message without showing it, with no write to the Store (§9) except the cursor of §6):
 
-1. `len < 1 185`, `len > 64 673` or `(len − 161) mod 1 024 ≠ 0` → `BadLength`. `blob[0] ≠ 0x01` → `UnsupportedVersion`. `blob[1..17] ≠ channel_id` → `WrongChannel`.
-2. `min(received_at, now).checked_add(ttl_ms) < now` → `Expired`.
+1. `len < 1185`, `len > 64673` or `(len − 161) mod 1024 ≠ 0` → `BadLength`. `blob[0] ≠ 0x01` → `UnsupportedVersion`. `blob[1..17] ≠ channel_id` → `WrongChannel`.
+2. `expires_local < now` (§6) → `Expired`.
 3. Decrypt `enc_hdr` with `K_hdr` and `nonce`: `sender_pk`, `counter`.
 4. `sender_pk` retired → `RetiredKey`. Unknown with no room (§7 "Peer limits") → `PeerLimit`.
 5. `counter ≤ max_counter` → `Replay`.
 6. Signature with `sender_pk` → `BadSignature`.
 7. Derive `mk`, decrypt the AEAD → `BadSignature` if it fails (cannot happen with a valid signature and a correct `K_ch`; treated the same). `sodium_unpad` → `BadPadding`. CBOR and `validate()` → `BadPayload` (`Unreadable` message, but consumed).
 8. Persist the message (or `Unreadable`), `max_counter`, the peer if new and the cursor **in a single commit**; zeroize `mk`.
+
+**Messages from one's own key.** One's own `pk_u` is just another peer with `max_counter` = send counter − 1: the server's echo of one's own message is `Replay` and is discarded. If `decrypt` accepts a message with `sender_pk` = one's own `pk_u` and `counter ≥` send counter: (1) the send counter becomes `counter + 1` (so the victim is not left mute); (2) the `OwnKeyUsedElsewhere` event is persisted (UI in §7 "Key-used-elsewhere alert"). If the message is a `key_retired` of one's own `pk`, the channel becomes read-only until regeneration.
 
 **No-oracle rule.** The core emits no byte to the network depending on the result of `decrypt`; the `Error` codes are local only and no future feature (receipts, "is typing") may expose them to the sender or to the server.
 
@@ -189,7 +191,7 @@ The config is the only secret of the system. It is a small CBOR document that is
 
 | key | field | type | description |
 | --- | --- | --- | --- |
-| 0 | `config_version` | uint8 | 1. Must match the one in the header of the `PCFG` file, otherwise `Error::BadConfig` |
+| 0 | `config_version` | uint8 | 1. Must match the one in the header of the `PCFG` file (format below), otherwise `Error::BadConfig` |
 | 1 | `proto_version` | uint8 | version of the message protocol |
 | 2 | `K_ch` | bytes32 | root key of the channel |
 | 3 | `server_url` | text | `wss://host[:port]`; allows a self-hosted server and `.onion`. Chosen by whoever creates the channel; by default, the `default_server_url` of the app settings. Immutable: changing server = new channel (ADR 0008, 0022) |
@@ -198,12 +200,14 @@ The config is the only secret of the system. It is a small CBOR document that is
 | 6 | `invite_expires_at` | uint64? | unix ms; from then on the client refuses to import it |
 | 7 | `suggested_name` | text | ≤ 64 B; proposed channel name; the receiver can change it locally |
 
+**Create channel.** Form with name, TTL and server. The server is prefilled with the `default_server_url` of the app settings and is editable, with the list of servers already used on this device as suggestions; before creating, the client opens a connection and checks that the `hello` replies with the expected `proto_version`. The channel card shows the server, not editable: no basic channel parameter (`K_ch`, TTL, server) (`K_ch`, TTL, server) can be changed once created. "Create new channel" prefills the same name and the same server.
+
 **Two forms of invitation, both with the same content**
 
 | Via | Mechanism | When |
 | --- | --- | --- |
 | QR in person | CBOR of the config **in the clear**, without a URL scheme: no system camera opens it as a URL. Cameras with cloud recognition (Google Lens) can send the image to third parties: the UI says "scan only with this app". `invite_expires_at` defaults to 10 min, maximum 24 h | Default |
-| `.chatcfg` file | Fixed format: `"PCFG"` (4) ‖ `config_version` u8 ‖ `salt` 16 ‖ `nonce` 24 ‖ `crypto_secretbox(cfg_cbor)`. Key = Argon2id13(password, salt) with `OPSLIMIT_INTERACTIVE` and `MEMLIMIT_INTERACTIVE` fixed by `config_version = 1`; the parameters **do not travel** in the file; unknown version → refusal. Shared via AirDrop, Nearby, email or messaging; the password is spoken over another channel. The `PCFG` prefix identifies the app: the file is considered exposed once sent, which is why it is encrypted | Sharing remotely |
+| `.chatcfg` file | Fixed format: `"PCFG"` (4) ‖ `config_version` u8 ‖ `salt` 16 ‖ `nonce` 24 ‖ `crypto_secretbox(cfg_cbor)`. Key = Argon2id13(password, salt) with the parameters of §4; they **do not travel** in the file; unknown version → refusal. Shared via AirDrop, Nearby, email or messaging; the password is spoken over another channel. The `PCFG` prefix identifies the app: the file is considered exposed once sent, which is why it is encrypted | Sharing remotely |
 
 **File password.** Generated by the app: **7 random words** from the BIP-39 list (77 bits), shown so they can be spoken over another channel. The user cannot choose it. The password length is never reduced to compensate for Argon2id parameters, nor the other way round. The `secretbox` tag is a perfect oracle for an offline attacker and `K_ch` does not rotate: the file must resist for years.
 
@@ -240,23 +244,9 @@ sequenceDiagram
     Note over S: every 60 s: DELETE WHERE expires_at < now LIMIT 1000
 ```
 
-**Authentication** (ADR 0010, spec 031). On connect, the server sends a `server_nonce` (32 B, `randombytes_buf`), per connection, valid 60 s from the `hello`. The client replies with `pk_ch`, `ttl_seconds` and
-
-```
-sig = crypto_sign_detached(sk_ch, "privatechat/auth/v1" ‖ server_nonce(32) ‖ channel_id(16) ‖ BE32(ttl_seconds) ‖ host)
-```
-
-where `host` is `url.host` per WHATWG: lowercase ASCII A-label, no trailing dot, no port, no brackets; IP literals as they appear in `server_url`. The server compares it with the `hostnames` list of its configuration, never with the `Host` header. The server checks the TTL range, recomputes `channel_id` from `(pk_ch, ttl_seconds)`, verifies the signature with `core::crypto` and returns the `channel_id` in `ok`. The credential proves having the config, is not reusable by whoever sees it (server, proxy, logs) and the server stores nothing. After 60 s → `error{nonce_expired}` and a new `hello`. Several `subscribe`s within the window reuse the nonce (each one binds a different `channel_id`).
-
-**Version.** The client refuses to connect if `hello.proto_versions` does not include exactly the `proto_version` of the config; there is no downgrade negotiation. More than 8 elements → local error and disconnection.
-
-**Connections.** One connection per **server**, with up to 16 channels subscribed per connection; a device with channels on N servers has N connections, each with its own `Session` (§9). No background (§8): connections live while the app is unlocked in the foreground; locking = disconnecting. With a SOCKS5 proxy configured (Tor included), one connection and one circuit per channel, isolated by SOCKS credential (user = 4-byte hex prefix of the `channel_id`, empty password). The server can link channels of the same device by IP and time; only Tor prevents it.
-
 **Transport.** TLS 1.3 without session resumption (no ticket, no PSK; every connection is a full handshake). The WebSocket handshake carries only `Host`, `Upgrade`, `Connection`, `Sec-WebSocket-Key`, `Sec-WebSocket-Version` and `User-Agent: privatechat/1`, identical on all platforms; no WS extensions (`permessage-deflate` disabled). Maximum frame 70 000 B on client and server. The TLS fingerprint of each platform's stack still reveals the platform; documented.
 
-**TTL and expiry** (ADR 0014). The TTL is part of the `channel_id` and cannot be changed. Server: `expires_at = received_at + ttl_ms`. Client: `expires_local = min(received_at, now_local) + ttl_ms` according to its own copy of the config, without trusting the server.
-
-**Order and time.** The server assigns `received_at = max(wall_clock_ms, last_received_at + 1)` per process: unique and strictly increasing, so that `ORDER BY received_at` is a total order. The presentation order is `received_at`; the payload's `sent_at` is informative and the client warns if it differs by more than 5 minutes.
+**Connections.** One connection per **server**, with up to 16 channels subscribed per connection; a device with channels on N servers has N connections, each with its own `Session` (§9). Connections live only while the app is unlocked (§8 "Background"). With a SOCKS5 proxy configured (Tor included), one connection and one circuit per channel, isolated by SOCKS credential (user = 4-byte hex prefix of the `channel_id`, empty password). The server can link channels of the same device by IP and time; only Tor prevents it.
 
 **Protocol messages** (CBOR over binary WebSocket; the core serialises and parses them; maps with text keys)
 
@@ -272,34 +262,48 @@ where `host` is `url.host` per WHATWG: lowercase ASCII A-label, no trailing dot,
 
 Error codes: `bad_auth`, `nonce_expired`, `bad_ttl`, `not_subscribed`, `bad_blob`, `rate_limited`, `channel_quota`, `server_full`, `unsupported_version`.
 
+**Authentication** (ADR 0010, spec 031). On connect, the server sends a `server_nonce` (32 B, `randombytes_buf`), per connection, valid 60 s from the `hello`. The client replies with `pk_ch`, `ttl_seconds` and
+
+```
+sig = crypto_sign_detached(sk_ch, "privatechat/auth/v1" ‖ server_nonce(32) ‖ channel_id(16) ‖ BE32(ttl_seconds) ‖ host)
+```
+
+where `host` is `url.host` per WHATWG: lowercase ASCII A-label, no trailing dot, no port, no brackets; IP literals as they appear in `server_url`. The server compares it with the `hostnames` list of its configuration, never with the `Host` header. The server checks the TTL range, recomputes `channel_id` from `(pk_ch, ttl_seconds)`, verifies the signature with `core::crypto` and returns the `channel_id` in `ok`. The credential proves having the config, is not reusable by whoever sees it (server, proxy, logs) and the server stores nothing. After 60 s → `error{nonce_expired}` and a new `hello`. Several `subscribe`s within the window reuse the nonce (each one binds a different `channel_id`).
+
+**Version.** The client refuses to connect if `hello.proto_versions` does not include exactly the `proto_version` of the config; there is no downgrade negotiation. More than 8 elements → local error and disconnection.
+
+**Order and time.** The server assigns `received_at = max(wall_clock_ms, last_received_at + 1)` per process: unique and strictly increasing, so that `ORDER BY received_at` is a total order. Messages are displayed in `received_at` order; the payload's `sent_at` is informative and the client warns if it differs by more than 5 minutes.
+
 **Cursor and gaps.** `server_id` is 16 random bytes (unique, unordered, reveals no volume). The client persists `cursor = received_at` of the last processed `push`, **regardless of the result** (a rejected blob only writes the cursor), in the same commit as any other state of that `push`. On reconnect it sends `since = cursor` **rounded down to the minute**; the resulting duplicates are discarded by `server_id` and by anti-replay. The server returns `ORDER BY received_at` in pages of 500 with `has_more`; `since > now` is treated as `now`; the query filters `expires_at > now`. `oldest_retained_at = now − ttl_ms`; if `since < oldest_retained_at`, the client shows "There may be expired messages before <date>" and `gaps()` does not count the counters before the first message received from each sender in this session.
 
-**Authorisation and envelope validation** (spec 030, 033). The server only accepts `publish` for a `channel_id` authenticated with `subscribe` on the same connection; otherwise `error{not_subscribed}`. Before storing a blob it checks, without touching anything else: `1 185 ≤ len ≤ 64 673`, `(len − 161)` multiple of 1 024, `blob[0] = 0x01` and `blob[1..17] = channel_id`; otherwise `bad_blob`. It verifies no signatures and decrypts nothing.
+**Authorisation and envelope validation** (spec 030, 033). The server only accepts `publish` for a `channel_id` authenticated with `subscribe` on the same connection; otherwise `error{not_subscribed}`. Before storing a blob it checks, without touching anything else: `1185 ≤ len ≤ 64673`, `(len − 161)` multiple of 1 024, `blob[0] = 0x01` and `blob[1..17] = channel_id`; otherwise `bad_blob`. It verifies no signatures and decrypts nothing.
+
+**TTL and expiry** (ADR 0014). The TTL is part of the `channel_id` and cannot be changed. Server: `expires_at = received_at + ttl_ms`. Client: `expires_local = min(received_at, now_local) + ttl_ms` according to its own copy of the config, without trusting the server.
 
 **Limits and quotas** (v1 values, configurable on the server):
 
 | Scope | Limit | Response |
 | --- | --- | --- |
 | Connection | 30 `publish`/min; 16 channels; 1 authentication attempt/s; close on the 3rd failed attempt; no valid `subscribe` within 60 s of the `hello` → close; ping every 30 s, no pong within 30 s → close; send queue ≤ 256 frames or 4 MiB, otherwise close (the client resumes with `since`) | `rate_limited`, close |
-| Channel (all connections) | 120 `publish`/min; 4 MiB/min; maximum retention 64 MiB or 20 000 messages (the new one is rejected, the old one is not deleted). Counters in memory, rebuilt at startup with `GROUP BY channel_id` | `rate_limited`, `channel_quota` |
+| Channel (all connections) | 120 `publish`/min; 4 MiB/min; maximum retention 64 MiB or 20 000 blobs (the new one is rejected, the old one is not deleted). Counters in memory, rebuilt at startup with `GROUP BY channel_id` | `rate_limited`, `channel_quota` |
 | IP, **unauthenticated connections only** (before the first valid `subscribe`) | 20 simultaneous; 60 new/min. Not applied to connections from `127.0.0.1` (.onion service). The IP is kept in the clear in memory during the connection and is neither persisted nor logged | close |
 | Global | disk quota; `SQLITE_FULL` is never a panic | `server_full` |
 
 The per-channel quota protects the server and the other channels, not the channel: an intruder with the config can fill it in minutes and leave it full until the TTL. The client shows `channel_quota` as "Channel full: probably flooded. Create a new one" (ADR 0008). Anti-spam within a channel is client-side: mute unknowns (§7).
 
-**Storage.** A single table `messages(channel_id, server_id, received_at, expires_at, blob)` with indexes `(channel_id, received_at)` and `(expires_at)`. Plain SQLite (unencrypted: the server only stores opaque blobs; the disk is encrypted at rest) via `rusqlite` with `bundled`, no `sqlx`; WAL mode, `synchronous=NORMAL`, `busy_timeout=5 s`, a single writer: a dedicated thread with a bounded channel (1 024 entries) that groups `INSERT`s into transactions of ≤ 10 ms; queue full → `rate_limited`. Purge: `DELETE … WHERE expires_at < now LIMIT 1 000` in a loop every 60 s and at startup, followed by `PRAGMA incremental_vacuum(1000)`; `PRAGMA secure_delete=ON`, `auto_vacuum=INCREMENTAL`. Messages are ephemeral by design: **no backup of `messages`**, no WAL archiving; a crash may lose undelivered messages and this is documented. Disk encrypted at rest. Any volume snapshot must have a retention ≤ 60 s or not be taken. Postgres is reconsidered with metrics (§12).
+**Storage.** A single table `messages(channel_id, server_id, received_at, expires_at, blob)` with indexes `(channel_id, received_at)` and `(expires_at)`. Plain SQLite (unencrypted: the server only stores opaque blobs; the disk is encrypted at rest) via `rusqlite` with `bundled`, no `sqlx`; WAL mode, `synchronous=NORMAL`, `busy_timeout=5 s`, a single writer: a dedicated thread with a bounded channel (1 024 entries) that groups `INSERT`s into transactions of ≤ 10 ms; queue full → `rate_limited`. Purge: `DELETE … WHERE expires_at < now LIMIT 1000` in a loop every 60 s and at startup, followed by `PRAGMA incremental_vacuum(1000)`; `PRAGMA secure_delete=ON`, `auto_vacuum=INCREMENTAL`. Messages are ephemeral by design: **no backup of `messages`**, no WAL archiving; a crash may lose undelivered messages and this is documented. Any volume snapshot must have a retention ≤ 60 s or not be taken. Postgres is reconsidered with metrics (§12).
 
 **Operation** (spec 035). Server configuration: `hostnames`, `trusted_proxies`, quotas, DB path. `X-Forwarded-For` is only accepted from `trusted_proxies`; otherwise the socket IP. Rejects handshakes with an `Origin` header (no browser client in v1). `deploy/` includes reference configurations for Caddy and nginx (`access_log off`, TLS 1.3 only, no session tickets) and a `torrc` with `HiddenServicePort 443` to publish the service as `.onion`. No SQL statement logging in production. In the logs, no `channel_id`, `server_id` or IP: only aggregate counters and error codes. CI test: none of these values appears in the server output under load.
 
 **What the server can do and know (documented, not mitigated in v1):**
 
-- Metadata: which `channel_id`s are being listened to, when (each connection = the user looks at the app), how many connections, size class and frequency of the blobs, source IP, platform by TLS fingerprint, and which channels share a device (same connection, or same IP and time). It only sees the channels that live on it: the same user's channels on other servers are invisible to it.
+- Metadata: as in §2 row 1, including how many connections and which channels share a device (same connection, or same IP and time). It only sees the channels that live on it.
 - Availability: delete, delay or not distribute blobs to some subscribers without cryptographic detection. The client shows `counter` gaps per sender as a signal.
 - v2 may add random delay and optional cover traffic (§12).
 
 ## 7. Identity and trust UX
 
-Identity is local and per channel: each client keeps a table `peers(channel_id, pk, label NULL, verified, muted, retired_at NULL, first_seen, last_seen, max_counter)`. Unknown ⇔ `label IS NULL`. The server takes no part in it.
+Identity is local and per channel: each client keeps `peers` records (`channel_id`, `pk`, `label NULL`, `verified`, `muted`, `retired_at NULL`, `first_seen`, `last_seen`, `max_counter`). Unknown ⇔ `label IS NULL`. The server takes no part in it.
 
 ```mermaid
 stateDiagram-v2
@@ -317,9 +321,10 @@ stateDiagram-v2
 - Unknown: suggested name in grey between quotes, no avatar, with the short identifier (4 words). Messages are shown but with a visible mark. An unknown never shows any other peer's label nor the receiver's name.
 - Labelled: local name in black. If two peers of the channel have labels that collide under the normalisation below, both carry the short identifier next to them.
 - Verified: name + icon. Lost if the `pk` changes.
-- Retired: "Alice (key retired on DD/MM)", in grey. Any message from this `pk` received after the retirement is rejected (`Error::RetiredKey`), whatever its counter. The `(pk, retired_at)` records **are never purged** and count within the limit of 500; their messages do expire.
+- Retired: "Alice (key retired on DD/MM)", in grey. Any message from this `pk` received after the retirement is rejected (`Error::RetiredKey`), whatever its counter. The `(pk, retired_at)` records **are never purged** and count within the limit of 500 (Peer limits, below); their messages do expire.
 - **A label already assigned to a `pk` of the channel cannot be assigned to another unverified `pk`.** To reuse it, the new `pk` must be verified (QR or 12 words) or an explicit dialog confirmed that marks the old one as retired. Label and `display_name` comparison is done over `NFKC → casefold → no spaces or format characters → confusables skeleton (UTS #39)`; on rendering, Cc and Cf characters are removed.
 - If a new `pk` arrives with a `display_name` that collides with a labelled or verified peer: explicit warning in the chat ("Someone claims to be X with a new key. Verify them before trusting them"). `display_name` and writing style link the old and the new key for the members; this is intended.
+- Short identifier (§4): tells peers apart in the UI, is always labelled "identifier, not verification" and never enables the verified state. If the short identifier of a new `pk` matches that of an existing peer, the client shows the 12 words of both with the warning "Identifier identical to another member: possible impersonation. Verify by QR".
 
 **Peer limits** (spec 026). Two counters per channel at the receiver:
 
@@ -329,15 +334,13 @@ stateDiagram-v2
 
 **Verification.** Screen with one's own `verify:` QR and the 12 words. The screen only accepts `verify:v1:` QRs with the `channel_id` of the open channel; any other is rejected with a message. On scanning: if the `pk` exists → `verified = true` keeping the local label; if it does not exist → the peer is created as verified with the label the user types (**pre-verification**: allows verifying a friend's "new phone" before their first message, which is the real remedy to the impersonation vector). Verification is mutual: each scans the other. No verification goes through the server.
 
-**Key regeneration** (ADR 0007, 0016, 0019). In the channel card, "Regenerate my key". Flow: (1) if `sk_u` is still held, `regenerate_identity` writes a `key_retired` signed with the old key to `outbox` **in the same commit** that erases the old `sk_u` and generates the new one; (2) the UI drains `outbox`; (3) the user reappears as unknown to everyone. Prior warning: "you will appear as unknown again". If the old key has been lost (lost phone), the UI says so: "the others will keep seeing your old key as valid; ask them to mark it as retired", and each peer's card has the action "Mark this key as retired". Changing device = re-importing the config and regenerating: a key lives on a single device and is not exported (ADR 0019).
+**Key regeneration** (ADR 0007, 0016, 0019). In the channel card, "Regenerate my key". Flow: (1) if `sk_u` is still held, `regenerate_identity` writes a `key_retired` signed with the old key to `outbox` **in the same commit** that erases the old `sk_u` and generates the new one; (2) the UI drains `outbox`; (3) the user reappears as unknown to everyone. Prior warning: "you will appear as unknown again". If the old key has been lost (lost phone), the UI says so: "the others will keep seeing your old key as valid; ask them to mark it as retired", and each peer's card has the action "Mark this key as retired". Changing device = re-importing the config and regenerating (ADR 0019).
 
-**Key-used-elsewhere alert.** If the client receives a valid message from its own `pk` that it did not send (§4), fixed banner "Someone has written with your key in this channel" with the action "Regenerate my key". It is the only key-compromise detector, and it is free.
-
-**Create channel.** Form with name, TTL and server. The server is prefilled with the `default_server_url` of the app settings and is editable, with the list of servers already used on this device as suggestions; before creating, the client opens a connection and checks that the `hello` replies with the expected `proto_version`. The channel card shows the server, not editable: no basic channel datum (`K_ch`, TTL, server) can be changed once created. "Create new channel" prefills the same name and the same server.
+**Key-used-elsewhere alert.** If the client receives a valid message from its own `pk` that it did not send (§4), fixed banner "Someone has written with your key in this channel" with the action "Regenerate my key". It is the only key-compromise detector, and it costs nothing.
 
 **Config compromise.** There is no message type for this: whoever suspects the config has leaked writes it in text and the group creates a new channel. The channel card always offers "Create new channel" (same name, new `K_ch`) and, as help text, recommends re-inviting only the verified ones and asking where the leak came from (ADR 0008).
 
-**Leave channel.** (1) Closes the subscription. (2) Locally deletes config (`K_ch`), `sk_u`, `peers` table, `outbox`, messages and cursor. Re-importing the same config is a conscious decision by the user and leaves no local trace.
+**Leave channel.** (1) Closes the subscription. (2) Locally deletes config (`K_ch`), `sk_u`, `peers` records, `outbox`, messages and cursor. Re-importing the same config is a conscious decision by the user and leaves no local trace.
 
 ## 8. Device and client security
 
@@ -358,14 +361,14 @@ The device is where the real attacks land; these measures are mandatory in v1 un
 | Push notifications | None in v1 (§12) | None | None |
 | Telemetry | No third-party SDK (crash, analytics, ads). Only the OS crash logs, which the user controls | Same | Same |
 | Keyboard | `.chatcfg` password field with `textPassword`, `IME_FLAG_NO_PERSONALIZED_LEARNING` and `flagNoExtractUi`; one-time warning if a third-party keyboard is active | `secureTextEntry`; `autocorrectionType = .no` in the composer | n/a |
-| FFI boundary | The password is passed as a `ByteArray` and zeroized on the UI side after the call; `Config`, `Channel`, `Session` are opaque handles (uniffi `Object`); outside the core no erasure is promised, **non-retention** is promised (no cache, no log, no `toString`) | Same with `[UInt8]` | Rust to Rust; the Svelte UI strings are copied into a `Uint8Array` and filled with zeros |
+| FFI boundary | The password is passed as a `ByteArray` and zeroized on the UI side after the call; the boundary types are listed in §9; outside the core no erasure is promised, **non-retention** is promised (no cache, no log, no `toString`) | Same with `[UInt8]` | Rust to Rust; the Svelte UI strings are copied into a `Uint8Array` and filled with zeros |
 | Deletion | Purge of expired messages on open and on unlock = compaction of `messages.log` (rewrite without the expired ones, `rename`). Leaving the channel = deleting the channel directory. The cryptographic guarantee covers all files (`K_db` in the Keystore/SE); deleting a record is physical and does not resist old copies (§2) | Same | Same |
 | Clipboard | Copying a message: `ClipDescription.EXTRA_IS_SENSITIVE`; cleared after 60 s. The OS or keyboard clipboard histories are not erased; the config is never copied to the clipboard | `UIPasteboard.setItems(_, options: [.localOnly: true, .expirationDate: +60 s])` (best-effort) | Cleared after 60 s; Win+V may retain it |
 | Window and WebView | n/a | n/a | Fixed window title = app name; WebView without cache or persistent storage (temporary `data_directory`) |
 | Code integrity | Reproducible builds published with hash; F-Droid or direct APK as an alternative to Google Play | Reproducible builds; published hash | Reproducible builds; published hash and signature |
 | Root / jailbreak / accessibility | Not blocked (it would break legitimate users); one-time warning if detected. Production without `debuggable`, without `usesCleartextTraffic`, no `exported` component | One-time warning if jailbreak is detected | Within the session, any process of the user can read keychain and files; documented |
 
-**Logging.** No log with content, names, keys, full `channel_id` or `pk`: only the 4-byte hex prefix when debugging is needed; in production, `warn` level and nothing else. All key material lives in the `Secret<N>` type (no `Clone`, no `Default`, manual `Debug` = `[REDACTED]`, `PartialEq` via `sodium_memcmp`). Test `s010_t02_debug_is_redacted`: `format!("{:?}")` of every type listed in `SECRET_TYPES` is exactly `[REDACTED]`. Test `s010_t01_no_secrets_in_logs`: in-memory `tracing` subscriber at TRACE level, full encrypt/decrypt flow with known keys, assert that neither hex nor base64 of `K_ch`, `sk_u`, `sk_ch`, `K_msg`, `K_hdr`, `mk` nor the full `channel_id` appears in it.
+**Logging.** No log with content, names, keys, full `channel_id` or `pk`: only the 4-byte hex prefix when debugging is needed; in production, `warn` level and nothing else. All key material lives in the `Secret<N>` type (no `Clone`, no `Default`, manual `Debug` = `[REDACTED]`, `PartialEq` via `sodium_memcmp`). Test Redacted-`Debug` test (spec 010): `format!("{:?}")` of every type listed in `SECRET_TYPES` is exactly `[REDACTED]`. Test Log test (spec 010): in-memory `tracing` subscriber at TRACE level, full encrypt/decrypt flow with known keys, assert that neither hex nor base64 of `K_ch`, `sk_u`, `sk_ch`, `K_msg`, `K_hdr`, `mk` nor the full `channel_id` appears in it.
 
 ## 9. Architecture and technical stack
 
@@ -392,7 +395,7 @@ flowchart TD
 | --- | --- | --- |
 | `core` | Stable Rust pinned in `rust-toolchain.toml` (exact version in spec 000), `libsodium-sys-stable`, `ciborium` + `serde`, `zeroize` | One implementation, controlled memory, no GC leaving keys on the heap |
 | `store` | Separate Rust crate: `std::fs` + `core::crypto` (secretbox). Implements the `Store` trait of `core` with two files per channel and atomic commit via `rename` (ADR 0021). No SQLite, no C outside libsodium | Outside `core` because it does I/O (AGENTS 10); a single implementation for the three platforms, fuzzable from Rust |
-| Mobile bindings | `uniffi` (proc macros; no UDL); `Config`, `Channel`, `Session` as `Object`, only `Received`, `Peer`, `Fingerprint`, `Gap`, `Event` as `Record` | Generates Kotlin and Swift; secrets do not cross the boundary by value |
+| Mobile bindings | `uniffi` (proc macros; no UDL). `Config`, `Channel`, `Session` and `Settings` are opaque handles (uniffi `Object`); only `Received`, `Peer`, `Fingerprint`, `Gap` and `Event` are `Record`s. | Generates Kotlin and Swift; secrets do not cross the boundary by value |
 | Desktop | Tauri 2 + Svelte 5 + TypeScript; the core is linked in as a Rust crate, no wasm | Pinned and signed code, OS keychain, one more reproducible build |
 | Android | Kotlin, Jetpack Compose, minSdk 26. No Room or SQLite: storage belongs to the core | Current standard |
 | iOS | Swift 5.10, SwiftUI, iOS 16+. No GRDB or SQLite: storage belongs to the core | Current standard |
@@ -464,7 +467,7 @@ impl Session {                                                                  
 
 ## 10. SDD execution plan
 
-Seven phases; each one closes when its specifications have green tests and a human review. Phases 1 and 2 are the heart and no UI is started until they are closed. Phases 4 and 5 may overlap.
+Seven phases; each one closes when its specifications have green tests and a human review. Phases 1 and 2 are the heart and no UI is started until they are closed.
 
 | Phase | Feature specs (`specs/NNN-*.md`) | Exit criterion |
 | --- | --- | --- |
@@ -480,7 +483,7 @@ Seven phases; each one closes when its specifications have green tests and a hum
 
 **CI per phase**
 
-- Phase 0: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` (workspace lints), `cargo test`, `cargo deny check` (advisories, licenses, bans, sources), `scripts/doc_lint.sh`, `scripts/check_requirements.sh`, `adr-guard` (a diff that touches `crates/core/src/proto/**`, `crates/core/src/crypto/**`, `specs/vectors/**` or specs 011–013 without adding a file to `docs/adr/` fails, unless the `adr-not-needed` label is set by a human), `commit-lint`.
+- Phase 0: `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings` (workspace lints), `cargo test`, `cargo deny --all-features check` (advisories, licenses, bans, sources), `scripts/doc_lint.sh`, `scripts/check_requirements.sh`, `adr-guard` (a diff that touches `crates/core/src/proto/**`, `crates/core/src/crypto/**`, `specs/vectors/**` or specs 011–013 without adding a file to `docs/adr/` fails, unless the `adr-not-needed` label is set by a human), `commit-lint`.
 - Phase 1: nightly fuzz (`cargo fuzz`, 1 h per target: `decrypt`, `payload_parse`, `config_parse`, `encrypt_then_decrypt`), property tests (`proptest`: round-trip for all k, byte-by-byte mutation), log test, redacted `Debug` test.
 - Phase 3: integration test with the server in Docker; Kotlin/Swift vs Rust differential test over vectors from phase 4 onwards.
 - Phase 5: basic UI tests per platform.
@@ -496,15 +499,20 @@ Seven phases; each one closes when its specifications have green tests and a hum
 
 From then on the three clients advance in parallel over a core whose API no longer changes.
 
-**Definition of done, for the whole project**
+**Definition of done, for the whole project** (the PR template renders these items as checkboxes, in this order)
 
-- [ ] Spec written and accepted before the code; each R* has at least one T* named `sNNN_tTT_rRR_*` (`scripts/check_requirements.sh` green)
-- [ ] `cargo fmt`, `cargo clippy -D warnings`, `cargo test`, `cargo deny check` green
-- [ ] Workspace lints at `deny` in `core`, `store` and `server`: `unwrap_used`, `expect_used`, `panic`, `unreachable`, `indexing_slicing`, `arithmetic_side_effects`, `cast_possible_truncation`, `cast_sign_loss`, `todo`, `unimplemented`, `dbg_macro`, `print_stdout`, `print_stderr`, `undocumented_unsafe_blocks`; `[profile.release] overflow-checks = true`
-- [ ] No key or secret in the logs (`s010_t01_no_secrets_in_logs` green); redacted `Debug` (`s010_t02_debug_is_redacted` green)
-- [ ] Every rejection path has a test `input → Error::X · commits to the Store = 0`; every spec with state has a test with `FailingStore`
-- [ ] New ADR if the implementation has changed a decision; row in §13 if §3–§6 change
-- [ ] ≤ 400 lines of net diff per PR (excluding vectors and generated code)
+- [ ] Every R\* has a T\* (`scripts/check_requirements.sh` green)
+- [ ] The local CI commands of `.github/CONTRIBUTING.md` green (fmt, clippy, build, test, deny, doc lint, requirements)
+- [ ] Workspace lints (`[workspace.lints]` in `Cargo.toml`) at `deny` in `core`, `store` and `server`; `overflow-checks = true` in release
+- [ ] No secret in logs; redacted `Debug` on every new secret type (added to `SECRET_TYPES`)
+- [ ] Every rejection path has a test `input → Error::X · commits = 0`; stateful spec → test with `FailingStore`
+- [ ] New dependencies justified in the PR, one sentence each
+- [ ] Format, config, derivation or tag change → new ADR in `docs/adr/`
+- [ ] No accepted ADR modified outside its status line
+- [ ] `docs/spec.md` up to date (`Updated` header) and a row in `docs/audit-log.md` if a decision changes
+- [ ] ≤ 400 lines of net diff; a single spec; PR title `NNN: …`
+- [ ] The `architecture` skill and the language skill followed
+- [ ] Everything in English (AGENTS 11)
 
 ## 11. Repository and working with agents
 
@@ -526,11 +534,12 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 ├─ docs/
 │  ├─ spec.md                ← this document (canonical)
 │  ├─ threat-model.md
+│  ├─ audit-log.md           ← findings and changes of every audit (§13 points here)
 │  ├─ assistant.example.md   ← template for personal AI-assistant preferences (copied to git-ignored assistant.md)
-│  └─ adr/README.md · TEMPLATE.md · 0001-…md … 0020-…md
+│  └─ adr/README.md · TEMPLATE.md · 0001-…md … 0022-…md
 ├─ specs/                    ← one spec per feature (TEMPLATE.md, README.md index)
 │  └─ vectors/               ← JSON test vectors, generated by the core (README.md with the schema)
-├─ scripts/doc_lint.sh · check_requirements.sh
+├─ scripts/{doc_lint,check_requirements}.{sh,py}
 ├─ crates/
 │  ├─ core/                  ← Rust crate: crypto, proto, session (no I/O); fuzz/ in phase 1
 │  ├─ store/                 ← Rust crate: Store trait over encrypted files (phase 2)
@@ -540,7 +549,7 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 └─ deploy/                   ← reference docker-compose.yml, Caddyfile, nginx.conf, torrc (phase 3)
 ```
 
-**Governance of the specification.** Since the creation of the repository, `docs/spec.md` on `main` is the only canonical version. Claude's living document is a read copy that may lag behind; nothing is edited there. Every change to `docs/spec.md` is made by PR with human review; if it changes a decision of §3–§6, the PR includes a new ADR and a row in §13. The `Version · Updated` header is brought up to date on every change and the doc lint checks it.
+**Governance of the specification.** Since the creation of the repository, `docs/spec.md` on the default branch (`mvp` until the first release) is the only canonical version. Claude's living document is a read copy that may lag behind; nothing is edited there. Every change to `docs/spec.md` is made by PR with human review; if it changes a decision of §3–§6, the PR includes a new ADR and a row in `docs/audit-log.md`. The `Version · Updated` header is brought up to date on every change and the doc lint checks it.
 
 **Source precedence** (also in `AGENTS.md`): 1) the accepted spec `specs/NNN-*.md` for its feature; 2) `docs/spec.md`; 3) the ADRs (historical context). If a spec contradicts `docs/spec.md`, the agent stops and opens an open question; it does not decide.
 
@@ -562,26 +571,20 @@ Human review at B and F is mandatory in `core`, `store` and `server`; in the cli
 
 None of the open decisions blocks phases 0–2. Those that would change the wire format were closed in revision C; any reopening is `proto_version = 2`.
 
-**Decisions closed in revisions B and C** — they can be reopened with an ADR:
+**Decisions closed in revisions B and C** — they can be reopened with an ADR. Decisions with an ADR are in §3; the following were closed without one:
 
-- Random 24 B nonce (not derived from the counter): defence in depth against `mk` reuse (ADR 0002, note).
 - Fingerprint word list: English BIP-39 (compatibility with libraries and checksum).
-- KDF contexts and domain tags: protocol literals, independent of the commercial name.
-- Hosted web client: out of v1; Tauri desktop in its place (ADR 0017).
+- KDF contexts and domain tags: protocol literals, independent of the product name.
 - Duress code: out of v1.
 - Server: SQLite only in v1 (plain, via `rusqlite`).
-- Encrypted message header (ADR 0018); the server cannot verify envelope signatures, and it need not.
-- One key, one device; strictly increasing counter; no identity export (ADR 0019).
 - No `presence`, `compromise_alert`, `reply_to` or `join` link in v1; no connection-sharing option; no app-specific PIN.
 - 7-word file password with Argon2id INTERACTIVE.
-- Client without a database: encrypted files with atomic commit (ADR 0021). Server with plain SQLite via `rusqlite`, no `sqlx`.
-- The project operates a public server, which is the installation's `DEFAULT_SERVER_URL`; each channel chooses its server at creation and anyone can deploy one (ADR 0022).
 - Licence: MIT for the whole repository.
 - UI languages: English (source and default), Spanish, French, Catalan and Italian, in the three clients. Strings live in the platform resource files, never inline; the core never produces user-facing text.
 
 **Open decisions**
 
-- [ ] Commercial name of the product. Affects only the repo name, the stores and the documentation; affects no protocol literal.
+- [ ] Product name. Affects only the repo name, the stores and the documentation; affects no protocol literal.
 - [ ] List of known community servers: in the documentation, not inside the app.
 - [ ] v1.x without a `proto_version` change (new CBOR key in the payload; old receivers ignore it): message quoting (`reply_to` = hash of the quoted blob), presence indicator.
 - [ ] Web client (v2): browser extension with pinned code, or web hosted on an origin and by an operator different from the message server's.
@@ -607,85 +610,4 @@ None of the open decisions blocks phases 0–2. Those that would change the wire
 
 ## 13. Audit log
 
-**2026-09-20 — Audit C, technical review in three independent passes (adversarial cryptography; privacy and traffic analysis; implementation and operations red team).** 33 attacks tried against §4 with none that breaks confidentiality or authenticity; findings and changes applied:
-
-| # | Finding | Severity | Change |
-| --- | --- | --- | --- |
-| C1 | `sender_pk` in the clear + `publish` bound to the connection gave the server the `IP ↔ pseudonym ↔ channel ↔ time` record of every message | High | Header encrypted with `K_hdr` (ADR 0018): 40 B XOR, identical size, zero server changes |
-| C2 | The anti-replay promise only held for stateful receivers: an intruder could re-inject old blobs to new members or to ones who had not seen them | Medium | Strictly increasing counter, no window; total order on the server; one key one device (ADR 0019) |
-| C3 | 55-bit file password for a secret that does not rotate, with a perfect oracle; and the risk of lowering Argon2id | Medium | 7 words (77 bits) + Argon2id INTERACTIVE: stronger and works on every device (§5) |
-| C4 | Wrapping key invalidation on biometric enrolment = loss of all data for nothing in return | High | `setInvalidatedByBiometricEnrollment(false)`, `.userPresence`; key loss documented (§8) |
-| C5 | No rule for valid messages from one's own key: a thief could leave the victim mute forever without warning | High | Send counter bump + banner "Someone has written with your key"; it is the only compromise detector (§4, §7) |
-| C6 | `Store` outside the core (Room, GRDB): three transactions, DB key in a JVM/Swift `String` | High | A single `Store` in Rust with a single `commit(Batch)`; Kotlin and Swift never touch the storage (ADR 0020; format in ADR 0021) |
-| C7 | Send counter persisted "after" the blob: crash → `counter` reuse and silent rejection by everyone | Medium | `encrypt` reserves the counter and writes `outbox` in a single commit before encrypting (§4) |
-| C8 | Three formulas mixed ms and seconds: TTL 1 000× shorter if implemented literally | Medium | `ttl_ms` defined; no formula mixes units (§4, §6) |
-| C9 | Unprotected arithmetic (`max − W` underflows for every new peer) and no lint | Medium | `arithmetic_side_effects` at `deny`, `overflow-checks` in release, `saturating_sub` (§4, §10, AGENTS) |
-| C10 | The API of §9 could not implement §6: the WS state machine would have been written three times | Medium | Sans-I/O `Session` in the core; `acked`, `outbox`, `cursor` (§9, ADR 0020) |
-| C11 | Reconnection cursor as an oracle (it revealed which blobs the client rejects) and `since` in exact ms as a cookie | Medium | Cursor = last processed `push` whatever the result; `since` rounded to the minute; random `client_ref` (§6) |
-| C12 | Payload rules insufficient for a fuzzer and three platforms; "unknown type consumes" but "malformed CBOR does not" | Medium | Authenticated = consumed; `Unreadable`; `serde` into a struct; numeric limits; single `validate()` (§4) |
-| C13 | Step 1 of §4 with a single error for three conditions: negative vectors without a unique result | Medium | One `Error` per condition; mandatory mutation table in TEMPLATE (§4) |
-| C14 | Ten unspecified server behaviours (non-unique `received_at` → infinite pagination, 64 MiB frames, slowloris, purge, single writer, `Host` vs `public_host`) | Medium | All fixed in §6 |
-| C15 | Per-IP quotas incompatible with Tor and NAT; `K_rot` theatre; "50 new channels/hour" required the IP→channels map the spec denies | Medium | Per-IP limits only before authenticating; no `K_rot`; `127.0.0.1` exemption (§6) |
-| C16 | "One connection per channel by default" was theatre without Tor and leaked the number of channels to the ISP; TLS resumption and `User-Agent` linked connections and revealed the platform | Medium | One connection per device; circuit per channel only with SOCKS5; no TLS resumption; fixed UA; no `permessage-deflate` (§6) |
-| C17 | Missing adversaries: seized operator, hosting provider, member-operator, post-deletion forensics, badly described network observer | Medium | Six new or rewritten rows in §2; §1 says "without Tor, an IP is a person" |
-| C18 | App "PIN or biometrics" without defining what it protected: decorative PIN or offline brute force | Medium | No app PIN; the lock is the system prompt (§8) |
-| C19 | In-memory blob queue while locked: OOM and state outside the `Store` | Medium | Locked ⇔ disconnected (§8) |
-| C20 | `sent_at` in ms = clock fingerprint that links regenerated keys and identifies devices | Medium | Rounded to the minute (§4) |
-| C21 | The spec depended on libsodium's strict Ed25519 verification without writing it down; the server could use another verifier | Medium | Written in §4; the server verifies via `core::crypto`; negative vectors for small order and non-canonical S (§4, AGENTS) |
-| C22 | Retired peers purged after the TTL: the dead key resurrected as unknown | Low | The `(pk, retired_at)` records are never purged (§7) |
-| C23 | 44-bit short identifier collidable in ~200 GPU-days nullified label disambiguation | Low | Collision rule: show the 12 words of both with a warning (§4) |
-| C24 | Encoding ambiguities (`[0..16]`, LE of `subkey_id`, `id=1` vs `id=0`, unnormalised `host`, double `config_version`); no-compression not written down | Low | All fixed in §4, §5, §6 |
-| C25 | Simplification: identity export, `compromise_alert`, `presence`, `reply_to`, `join` link, connection-sharing option, tombstones, collapsing of unknowns, negotiable `limit`/`max_blob_bytes`, double derivation `K_send`/`mk` | — | All removed from v1 without losing any guarantee of §1; a single message-key derivation; two forms of invitation; two payload types. ADR 0011 deprecated |
-| C26 | Device leaks not written down: third-party telemetry, window title, WebView, clipboard histories, Lens, desktop keychain | Low | New rows in §8; §1 and §5 corrected |
-
-**Later decision (2026-09-20, same day):** the client carries no database; storage is encrypted files with atomic commit in pure Rust (ADR 0021). Removes SQLCipher, OpenSSL and the exception to the "libsodium only" rule. The server moves from `sqlx` to plain `rusqlite`.
-
-**Pending external review before the beta (spec 061):** derivations of §4 (contexts, tags, field order, encrypted header), `store` format (record, compaction, recovery), `ciborium` limits for untrusted payload, and the design of the epoch jump for v2.
-
-**2026-09-20 — Audit B, three independent passes (cryptography and protocol; device, server and trust UX; coherence of the SDD process).** 88 findings; changes applied:
-
-| # | Finding | Severity | Change |
-| --- | --- | --- | --- |
-| B1 | The symmetric ratchet gave no forward secrecy: `k_0` is recomputed from `K_ch`, present on every device | High | Direct message-key derivation; §1 promise corrected; ADR 0013 supersedes 0003; ADR 0004 clarifies that FS and PCS arrive together in v2 |
-| B2 | It was not defined which bytes were signed; "canonical CBOR" is not guaranteed by `ciborium` | High | Fixed-size binary envelope with offsets; CBOR only in the payload; domain tags (§4, ADR 0015) |
-| B3 | 66-bit fingerprint and a UI that showed 22 of them (2 words) as identifier | High | 12 BIP-39 words with checksum or QR with `pk_u`; 4-word short identifier marked as non-verification (§4, §7) |
-| B4 | "Maximum jump 10 000" desynchronised a sender forever; 64-key window ambiguous | High | Sliding window (revised in C2: strictly increasing counter) |
-| B5 | "Lowest TTL wins" let anyone with the config destroy everyone's retention | High | TTL inside the `channel_id`; per-message expiry; no channel table (§4, §6, ADR 0014) |
-| B6 | `publish` without authorisation; no quotas; per-connection rate limit not sybil-resistant; `channels` table of unbounded growth | High | `publish` bound to the connection's subscription; envelope validation; quotas (§6) |
-| B7 | After regenerating or stealing a key, the old one remained "Alice ✓" indefinitely | High | `key_retired` message, Retired state, manual action (§4, §7, ADR 0016) |
-| B8 | The defence against "I changed phone" depended on `display_name` and on a short fingerprint collidable in seconds | High | Labels not reusable without verifying; confusables normalisation; `verify:` QR defined; pre-verification (§7) |
-| B9 | A member on the hosted web client made the confidentiality of the whole channel depend on the web operator | High | No hosted web in v1; Tauri desktop (ADR 0017) |
-| B10 | ADR 0003 with a formula different from §4; §9 API without `Result`; anti-replay spread across three specs; AGENTS with outdated spec ranges | High | ADR 0003 superseded; API with `Result` and `Config::create`; spec 012 owns anti-replay, 026 the peer limits; AGENTS references §10 |
-| B11 | Rule "no other cryptographic library in the project" impossible to meet (SQLCipher, TLS) | High | Rule scoped to `core` with a list of forbidden crates (AGENTS 2, ADR 0002) |
-| B12 | Authentication signature without domain prefix or encoding; nonce without semantics | Medium | `privatechat/auth/v1` tag, `BE32(ttl)`, `host` inside the signature, per-connection 60 s nonce (§6) |
-| B13 | Encrypted config with Argon2id parameters in the header (DoS via `memlimit`); user-chosen password | Medium | Fixed `PCFG` format, parameters bound to `config_version`, app-generated password (§5) |
-| B14 | `reply_to` undefined; phantom types in the enum; no rule for unknown types | Medium | Closed v1 enum; unknown type = consumed (§4) |
-| B15 | Periodic `presence` = free traffic analysis | Medium | Only on explicit actions (removed altogether in C25) |
-| B16 | Config QR as a URL; clipboard synced to iCloud; 24 h QR expiry | Medium | QR without URL scheme, 10 min by default; `localOnly`; `EXTRA_IS_SENSITIVE` (§5, §8) |
-| B17 | Multiplexed connection gives the device↔channels map that A6 deemed unacceptable | Medium | One connection per channel by default (revised in C16) |
-| B18 | "Do not log IPs" unenforceable with proxies and default logs; backups nullify the TTL | Medium | `trusted_proxies`, reference configs, no backups of `messages`, `secure_delete` (§6) |
-| B19 | DB key on the device badly specified | Medium | Random wrapped key; life cycle defined; no background (§8) |
-| B20 | Duress code mandatory in §8 but "physical coercion" outside the model in §2; legal risks | Medium | Out of v1; coercion inside the model only as damage limitation (§2, §8) |
-| B21 | 500-peer limit exhaustible by an intruder, leaving legitimate members invisible | Medium | 500 labelled (hard) + 50 unknown with LRU eviction; never silently (§7) |
-| B22 | Alarms spammable by unknowns; repeatable social blocking; "Leave channel" undefined | Medium | Grouping and limits (type removed in C25); "Leave" defined (§7) |
-| B23 | `since`/`server_id` without semantics; `gaps()` with false positives after being offline | Medium | Random `server_id`, cursor by `received_at`, `oldest_retained_at` (§6) |
-| B24 | Homonymous `spec/vectors` and `specs/` directories; `sodium_memzero` vs `zeroize`; "or" in places of decision; "for example" in limits | Medium | `specs/vectors/`; one mechanism per platform; fixed values (§6, §8, §9) |
-| B25 | External review required in phase 1 and at the same time "before the beta"; weekly plan contradicted the phase order | Medium | Internal in phase 1, external in phase 6; MVP after phase 4 (§10) |
-| B26 | Spec TEMPLATE without dependencies, acceptance criterion, security, vectors or history; ADRs without template, index or state vocabulary | Medium | `specs/TEMPLATE.md` extended; `docs/adr/TEMPLATE.md` and `README.md`; fixed states |
-| B27 | AGENTS without rules on language, `unsafe`, TODO, I/O in the core, PR size, ignored tests, generated code, vectors | Medium | Rules 11–20 (AGENTS.md); workspace lints in the Definition of done |
-| B28 | Cosmetics: pre-A1 file name of ADR 0010, "12 sections", non-literal §3 titles, incomplete threat-model, "padding to fixed size" | Low | Corrected everywhere |
-
-**2026-09-19 — Audit A, internal in three passes (cryptography and protocol, device and operations, SDD process).** Changes applied:
-
-| # | Finding | Severity | Change |
-| --- | --- | --- | --- |
-| A1 | HMAC authentication required the server to know `K_auth` and it was not said how it obtained it | High | Channel Ed25519 key pair derived from `K_ch`; the client signs the nonce; the server only has `pk_ch`. Self-certifying `channel_id` (§4, §6, ADR 0010) |
-| A2 | `K_send` was derived with an ad hoc XOR | Medium | Keyed BLAKE2b hash (§4; merged into a single derivation in C25) |
-| A3 | No replay rule or counter jump limit | High | Monotonic counter per `pk`, rejection of duplicates (§4; revised in B4 and C2) |
-| A4 | Exporting `sk_u` without the counter allows reusing `mk_i` | High | The counter travels with the exported key (feature removed in C25: one key, one device) |
-| A5 | No peer limit per channel: storage DoS with the config | Medium | `pk` limit per channel; spec 026 (§4, §10; revised in B21) |
-| A6 | Push with a per-channel token recreates the device↔channels map on the server | High | No push in v1; open decision for v2 (§8, §12) |
-| A7 | The server can delete or delay messages without detection | Low | Documented in the threat model; the client shows `counter` gaps (§2, §6) |
-| A8 | `sent_at` not verifiable | Low | Order by `received_at`; warning if they differ by more than 5 min (§6) |
-| A9 | Clipboard clearing not guaranteeable on iOS | Low | Marked as best-effort (§8) |
-| A10 | `docs/threat-model.md` referenced but nonexistent | Low | Created as an extract of §1, §2 and §6 |
+Audits A (2026-09-19), B, C and D (2026-09-20): findings and applied changes are in `docs/audit-log.md`. Every PR that changes §3–§6 adds a row there.
