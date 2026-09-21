@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Every requirement R* of an accepted or implemented spec has a test T* (spec 001, AGENTS 6).
+"""Every requirement R* of an implemented spec has a test T* (spec 001, AGENTS 6).
 
-For each `specs/NNN-*.md` with `Status: accepted` or `implemented`, every line
+An `accepted` spec is not gated: its tests are written after acceptance, so the
+gate would fail for the whole of the spec-to-code step of the flow.
+
+For each `specs/NNN-*.md` with `Status: implemented`, every line
 `- R<k>` in `## Requirements` must be covered by an identifier `sNNN_tTT_rKK_` (two
 digits each), optionally prefixed (`check_s003_…`), somewhere in the tracked
 tree: a Rust test name, a doc_lint check function, a CI step name or comment,
@@ -40,7 +43,7 @@ def main() -> int:
     for spec in sorted((ROOT / "specs").glob("[0-9][0-9][0-9]-*.md")):
         text = spec.read_text(encoding="utf-8")
         state = re.search(r"^Status: (.+)$", text, re.MULTILINE)
-        if not state or state.group(1).strip() not in {"accepted", "implemented"}:
+        if not state or state.group(1).strip() != "implemented":
             continue
         nnn = spec.stem[:3]
         start = text.find("## Requirements")
