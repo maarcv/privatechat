@@ -19,7 +19,7 @@ Flow, review, PR size, commit prefixes and ADR rules: `AGENTS.md`. Nothing here 
 ## Running the CI locally
 
 ```sh
-export RUSTFLAGS=-D warnings
+export RUSTFLAGS="-D warnings"
 cargo fmt --all --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo build --workspace --all-targets
