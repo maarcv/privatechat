@@ -16,6 +16,10 @@ English for everything that goes into the repository (AGENTS 11).
 
 Flow, review, PR size, commit prefixes and ADR rules: `AGENTS.md`. Nothing here overrides it.
 
+## Dependencies
+
+New dependencies are justified in the pull request and must pass `cargo deny` (AGENTS 8). Bumping `libsodium-sys-stable`, which dependabot proposes on its own, follows the section "Bumping libsodium" of [`specs/010-primitives-wrapper.md`](../specs/010-primitives-wrapper.md): the CI failures are the checklist, and a red test vector rejects the bump.
+
 ## Running the CI locally
 
 ```sh
