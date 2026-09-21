@@ -17,6 +17,11 @@
     )
 )]
 
+// The callers of `crypto` arrive with specs 011-014; until then every item of
+// the module is reachable only from its own tests.
+#[allow(dead_code, unused_imports)]
+mod crypto;
+
 /// Default exchange server of a fresh installation (`docs/spec.md` §8, ADR 0022).
 ///
 /// This is the only server URL in the code. Each fork sets its own; the

@@ -1,0 +1,13 @@
+# `core` does no I/O and never reads the clock: time comes in as a parameter
+# (AGENTS 10, spec 010 R17). The `store` and `server` crates do their I/O at a
+# single audited place, which allows the lint there with a reason.
+disallowed-methods = [
+  { path = "std::time::SystemTime::now", reason = "time is a parameter (AGENTS 10)" },
+  { path = "std::time::Instant::now", reason = "time is a parameter (AGENTS 10)" },
+  { path = "std::thread::sleep", reason = "no clock in core (AGENTS 10)" },
+  { path = "std::fs::read", reason = "core does no I/O (AGENTS 10)" },
+  { path = "std::fs::write", reason = "core does no I/O (AGENTS 10)" },
+  { path = "std::fs::File::open", reason = "core does no I/O (AGENTS 10)" },
+  { path = "std::fs::File::create", reason = "core does no I/O (AGENTS 10)" },
+  { path = "std::net::TcpStream::connect", reason = "core does no I/O (AGENTS 10)" },
+]
