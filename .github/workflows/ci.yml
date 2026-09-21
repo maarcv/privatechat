@@ -62,6 +62,8 @@ jobs:
         with:
           command: check
           arguments: --all-features
+          # Without this, a changed build script is only a warning (spec 010 R16).
+          command-arguments: -D checksum-mismatch
 
   doc-lint:
     name: doc-lint

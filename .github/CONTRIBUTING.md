@@ -24,7 +24,7 @@ cargo fmt --all --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo build --workspace --all-targets
 cargo test --workspace
-cargo deny --all-features check
+cargo deny --all-features check -D checksum-mismatch
 scripts/doc_lint.sh
 scripts/check_requirements.sh
 ```
