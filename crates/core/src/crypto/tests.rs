@@ -1,13 +1,15 @@
-//! Tests of spec 010 that need no cryptographic operation: the invariants of
-//! the module itself (confinement of `unsafe`, initialisation, secrets,
-//! randomness, redacted output) and the pins of its build.
+//! Tests of spec 010: the invariants of the module itself (confinement of
+//! `unsafe`, initialisation, secrets, randomness, redacted output), the pins
+//! of its build, and every primitive against the vectors of `010.json`.
 
+use proptest::collection::vec as bytes_of;
 use proptest::prelude::{any, proptest};
 use zeroize::Zeroize;
 
 use super::{
-    CryptoError, KdfContext, Nonce, PublicKey, SECRET_TYPES, Salt, Secret, Signature, ct_eq, init,
-    init_calls, random_bytes, vectors, version,
+    CryptoError, KdfContext, Nonce, PublicKey, SECRET_TYPES, Salt, Secret, Signature, aead_decrypt,
+    aead_encrypt, checked_output_len, ct_eq, init, init_calls, random_bytes, secretbox_open,
+    secretbox_seal, stream_xor, vectors, version,
 };
 
 /// Every `.rs` file of the crate. `core` does no I/O (AGENTS 10), so the test
@@ -279,4 +281,160 @@ fn vector_loader_reads_every_vector() {
     let rejected = vectors::load("unpad_all_zero");
     assert_eq!(rejected.kind, "negative");
     assert_eq!(rejected.expected_text("error"), "BadPadding");
+}
+
+/// Spec 010, R6: the AEAD reproduces the published vector, in both
+/// directions.
+#[test]
+fn s010_t07_r06_aead_known_answer() -> Result<(), CryptoError> {
+    let vector = vectors::load("aead_xchacha20poly1305_ietf");
+    let key = Secret::<32>::from_bytes(vector.array("key"));
+    let nonce = Nonce(vector.array("nonce"));
+    let aad = vector.bytes("aad");
+    let plaintext = vector.bytes("plaintext");
+    let ciphertext = vector.expected_bytes("ciphertext");
+    assert_eq!(aead_encrypt(&key, &nonce, &aad, &plaintext)?, ciphertext);
+    assert_eq!(aead_decrypt(&key, &nonce, &aad, &ciphertext)?, plaintext);
+    Ok(())
+}
+
+proptest! {
+    /// Spec 010, R6: what the AEAD seals it opens, and the tag costs exactly
+    /// sixteen bytes.
+    #[test]
+    fn s010_t08_r06_aead_roundtrip(
+        plaintext in bytes_of(any::<u8>(), 0..=4096),
+        aad in bytes_of(any::<u8>(), 0..=128),
+    ) {
+        let key = Secret::<32>::from_bytes([3u8; 32]);
+        let nonce = Nonce([4u8; 24]);
+        let sealed = aead_encrypt(&key, &nonce, &aad, &plaintext).unwrap();
+        assert_eq!(sealed.len(), plaintext.len() + 16);
+        assert_eq!(aead_decrypt(&key, &nonce, &aad, &sealed).unwrap(), plaintext);
+    }
+}
+
+/// Spec 010, R6: one byte changed anywhere — ciphertext, tag, associated
+/// data or nonce — and the AEAD reports a forgery.
+#[test]
+fn s010_t09_r06_aead_mutation() -> Result<(), CryptoError> {
+    let key = Secret::<32>::from_bytes([5u8; 32]);
+    let nonce = Nonce([6u8; 24]);
+    let aad = [7u8; 12];
+    let plaintext = [8u8; 64];
+    let sealed = aead_encrypt(&key, &nonce, &aad, &plaintext)?;
+
+    // The body of the ciphertext and its tag, one flipped byte at a time.
+    for at in [0, 63, 64, sealed.len() - 1] {
+        let mut broken = sealed.clone();
+        broken[at] ^= 1;
+        assert_eq!(
+            aead_decrypt(&key, &nonce, &aad, &broken),
+            Err(CryptoError::Forged),
+            "ciphertext byte {at}"
+        );
+    }
+
+    let mut other_aad = aad;
+    other_aad[0] ^= 1;
+    assert_eq!(
+        aead_decrypt(&key, &nonce, &other_aad, &sealed),
+        Err(CryptoError::Forged)
+    );
+
+    let mut other_nonce = nonce;
+    other_nonce.0[0] ^= 1;
+    assert_eq!(
+        aead_decrypt(&key, &other_nonce, &aad, &sealed),
+        Err(CryptoError::Forged)
+    );
+    Ok(())
+}
+
+proptest! {
+    /// Spec 010, R7: the stream cipher is its own inverse.
+    #[test]
+    fn s010_t10_r07_stream_xor_is_involution(plaintext in bytes_of(any::<u8>(), 0..=4096)) {
+        let key = Secret::<32>::from_bytes([9u8; 32]);
+        let nonce = Nonce([10u8; 24]);
+        let mut buffer = plaintext.clone();
+        stream_xor(&key, &nonce, &mut buffer).unwrap();
+        stream_xor(&key, &nonce, &mut buffer).unwrap();
+        assert_eq!(buffer, plaintext);
+    }
+}
+
+/// Spec 010, R7: over a zero buffer the stream cipher writes the published
+/// keystream.
+#[test]
+fn s010_t11_r07_stream_known_answer() -> Result<(), CryptoError> {
+    let vector = vectors::load("stream_xchacha20");
+    let key = Secret::<32>::from_bytes(vector.array("key"));
+    let nonce = Nonce(vector.array("nonce"));
+    let mut buffer = vector.bytes("buf");
+    stream_xor(&key, &nonce, &mut buffer)?;
+    assert_eq!(buffer, vector.expected_bytes("buf"));
+    Ok(())
+}
+
+/// Spec 010, R12: the secret box reproduces the published vector.
+#[test]
+fn s010_t18_r12_secretbox_known_answer() -> Result<(), CryptoError> {
+    let vector = vectors::load("secretbox_easy");
+    let key = Secret::<32>::from_bytes(vector.array("key"));
+    let nonce = Nonce(vector.array("nonce"));
+    let plaintext = vector.bytes("plaintext");
+    let sealed = vector.expected_bytes("sealed");
+    assert_eq!(secretbox_seal(&key, &nonce, &plaintext)?, sealed);
+    assert_eq!(secretbox_open(&key, &nonce, &sealed)?, plaintext);
+    Ok(())
+}
+
+/// Spec 010, R12: what it seals it opens, a flipped byte is a forgery, and a
+/// ciphertext too short to hold a tag is one too.
+#[test]
+fn s010_t19_r12_secretbox_roundtrip_and_mutation() -> Result<(), CryptoError> {
+    let key = Secret::<32>::from_bytes([11u8; 32]);
+    let nonce = Nonce([12u8; 24]);
+    let plaintext = [13u8; 100];
+    let sealed = secretbox_seal(&key, &nonce, &plaintext)?;
+    assert_eq!(sealed.len(), plaintext.len() + 16);
+    assert_eq!(secretbox_open(&key, &nonce, &sealed)?, plaintext);
+
+    for at in [0, 15, 16, sealed.len() - 1] {
+        let mut broken = sealed.clone();
+        broken[at] ^= 1;
+        assert_eq!(
+            secretbox_open(&key, &nonce, &broken),
+            Err(CryptoError::Forged),
+            "byte {at}"
+        );
+    }
+    assert_eq!(
+        secretbox_open(&key, &nonce, &[0u8; 15]),
+        Err(CryptoError::Forged)
+    );
+    Ok(())
+}
+
+/// Spec 010, R14: the wrapper bounds only what libsodium requires. A
+/// megabyte is far above every protocol bound and goes through untouched;
+/// what it does reject is the arithmetic that would not fit.
+#[test]
+fn s010_t22_r14_wrapper_bounds_are_the_primitives() -> Result<(), CryptoError> {
+    let key = Secret::<32>::from_bytes([14u8; 32]);
+    let nonce = Nonce([15u8; 24]);
+    let plaintext = vec![16u8; 1024 * 1024];
+    let sealed = aead_encrypt(&key, &nonce, &[], &plaintext)?;
+    assert_eq!(aead_decrypt(&key, &nonce, &[], &sealed)?, plaintext);
+    let boxed = secretbox_seal(&key, &nonce, &plaintext)?;
+    assert_eq!(secretbox_open(&key, &nonce, &boxed)?, plaintext);
+
+    assert_eq!(checked_output_len(100, 16), Ok(116));
+    assert_eq!(
+        checked_output_len(usize::MAX - 15, 16),
+        Err(CryptoError::TooLong)
+    );
+    assert_eq!(checked_output_len(usize::MAX, 1), Err(CryptoError::TooLong));
+    Ok(())
 }

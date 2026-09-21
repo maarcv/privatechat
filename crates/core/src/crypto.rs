@@ -22,6 +22,10 @@ mod vectors;
 
 pub(crate) use secret::Secret;
 
+/// Bytes the authenticated primitives add to a message: the Poly1305 tag of
+/// the AEAD and the mac of the secret box (`docs/spec.md` §4).
+pub(crate) const TAG_LEN: usize = 16;
+
 /// The types that hold key material, as the PR checklist of AGENTS 5 names
 /// them. A new secret type is added here and to the redacted-`Debug` test.
 pub(crate) const SECRET_TYPES: [&str; 2] = ["Secret<32>", "Secret<64>"];
@@ -200,4 +204,132 @@ fn write_hex(f: &mut fmt::Formatter<'_>, bytes: &[u8]) -> fmt::Result {
         write!(f, "{byte:02x}")?;
     }
     Ok(())
+}
+
+/// `len + extra`, or `TooLong` when the sum would not fit (spec 010, R14).
+///
+/// This is the whole of the wrapper's size policy: it holds no protocol
+/// number, and libsodium aborts rather than returns when a length exceeds
+/// what it can express, so the check happens here, before the call.
+///
+/// # Errors
+///
+/// `CryptoError::TooLong` when `len + extra` overflows `usize`.
+pub(crate) fn checked_output_len(len: usize, extra: usize) -> Result<usize, CryptoError> {
+    len.checked_add(extra).ok_or(CryptoError::TooLong)
+}
+
+/// Seals `plaintext` with XChaCha20-Poly1305 IETF: ciphertext followed by its
+/// 16-byte tag, with `aad` authenticated but not encrypted (spec 010, R6).
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise, and
+/// `CryptoError::TooLong` when the sealed length cannot be expressed.
+pub(crate) fn aead_encrypt(
+    key: &Secret<32>,
+    nonce: &Nonce,
+    aad: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    init()?;
+    let mut sealed = vec![0u8; checked_output_len(plaintext.len(), TAG_LEN)?];
+    if ffi::aead_encrypt(key.expose(), &nonce.0, aad, plaintext, &mut sealed) {
+        Ok(sealed)
+    } else {
+        Err(CryptoError::TooLong)
+    }
+}
+
+/// Opens what `aead_encrypt` sealed, under the same key, nonce and `aad`
+/// (spec 010, R6).
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise;
+/// `CryptoError::Forged` when the tag does not verify, which includes a
+/// ciphertext too short to hold one.
+pub(crate) fn aead_decrypt(
+    key: &Secret<32>,
+    nonce: &Nonce,
+    aad: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    init()?;
+    let len = ciphertext
+        .len()
+        .checked_sub(TAG_LEN)
+        .ok_or(CryptoError::Forged)?;
+    let mut plaintext = vec![0u8; len];
+    if ffi::aead_decrypt(key.expose(), &nonce.0, aad, ciphertext, &mut plaintext) {
+        Ok(plaintext)
+    } else {
+        Err(CryptoError::Forged)
+    }
+}
+
+/// Applies the XChaCha20 keystream to `buf` in place; applying it twice with
+/// the same key and nonce restores the buffer (spec 010, R7).
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise, and
+/// `CryptoError::TooLong` when the length cannot be expressed.
+pub(crate) fn stream_xor(
+    key: &Secret<32>,
+    nonce: &Nonce,
+    buf: &mut [u8],
+) -> Result<(), CryptoError> {
+    init()?;
+    if ffi::stream_xor(key.expose(), &nonce.0, buf) {
+        Ok(())
+    } else {
+        Err(CryptoError::TooLong)
+    }
+}
+
+/// Seals `plaintext` with `crypto_secretbox_easy`: the 16-byte mac followed
+/// by the ciphertext (spec 010, R12).
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise, and
+/// `CryptoError::TooLong` when the sealed length cannot be expressed.
+pub(crate) fn secretbox_seal(
+    key: &Secret<32>,
+    nonce: &Nonce,
+    plaintext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    init()?;
+    let mut sealed = vec![0u8; checked_output_len(plaintext.len(), TAG_LEN)?];
+    if ffi::secretbox_seal(key.expose(), &nonce.0, plaintext, &mut sealed) {
+        Ok(sealed)
+    } else {
+        Err(CryptoError::TooLong)
+    }
+}
+
+/// Opens what `secretbox_seal` sealed (spec 010, R12).
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise;
+/// `CryptoError::Forged` when the mac does not verify, which includes a
+/// ciphertext too short to hold one.
+pub(crate) fn secretbox_open(
+    key: &Secret<32>,
+    nonce: &Nonce,
+    sealed: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    init()?;
+    let len = sealed
+        .len()
+        .checked_sub(TAG_LEN)
+        .ok_or(CryptoError::Forged)?;
+    let mut plaintext = vec![0u8; len];
+    if ffi::secretbox_open(key.expose(), &nonce.0, sealed, &mut plaintext) {
+        Ok(plaintext)
+    } else {
+        Err(CryptoError::Forged)
+    }
 }
