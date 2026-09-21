@@ -13,8 +13,18 @@ name = "privatechat_core"
 path = "src/lib.rs"
 
 [dependencies]
+# The only cryptographic dependency of the workspace (AGENTS 2, spec 010 R16).
+# Default features: libsodium is built from the sources vendored in the crate
+# and linked statically. `use-pkg-config` must stay off, or the build would link
+# whatever libsodium the host happens to have.
+libsodium-sys-stable = { version = "1.24.0", default-features = true }
+# `Zeroize` and `ZeroizeOnDrop` for `Secret<N>` (AGENTS 5, spec 010 R3).
+zeroize = { version = "1.8.2", features = ["zeroize_derive"] }
 
 [dev-dependencies]
+# Property tests. The only dev dependency, and the only reason `rand` may appear
+# in the graph at all (AGENTS 2, spec 010 R16).
+proptest = "1.8.0"
 
 [lints]
 workspace = true

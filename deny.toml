@@ -27,11 +27,13 @@ confidence-threshold = 0.9
 multiple-versions = "warn"
 wildcards = "deny"
 # No cryptographic primitive or randomness source outside libsodium (AGENTS 2).
-# `rand` and `rand_core` may only come in pulled by `proptest` in dev-dependencies.
+# `rand` and `rand_core` may only come in pulled by `proptest` in dev-dependencies,
+# and `getrandom` only under those or under `tempfile`, which `proptest` uses to
+# name the files of a failed-case persistence run. None of them reaches `core`.
 deny = [
   { crate = "rand", wrappers = ["proptest", "rand_chacha", "rand_xorshift"] },
   { crate = "rand_core", wrappers = ["proptest", "rand", "rand_chacha", "rand_xorshift"] },
-  { crate = "getrandom", wrappers = ["rand_core"] },
+  { crate = "getrandom", wrappers = ["rand_core", "tempfile"] },
   { crate = "sha2" },
   { crate = "sha3" },
   { crate = "blake2" },
@@ -51,12 +53,25 @@ deny = [
   { crate = "openssl-sys" },
   { crate = "sodiumoxide", reason = "Abandoned; use libsodium-sys-stable" },
   # No compression: compressing before encrypting leaks content (AGENTS 24).
-  { crate = "flate2" },
+  # `libsodium-sys-stable` ships libsodium's sources as an archive and unpacks
+  # them in its build script, so `zip` and `flate2` reach the graph through it
+  # and through nothing else. Every other path stays banned.
+  { crate = "flate2", wrappers = ["zip"] },
+  { crate = "zip", wrappers = ["libsodium-sys-stable"] },
   { crate = "zstd" },
   { crate = "brotli" },
   { crate = "lz4" },
 ]
 skip = []
+
+# That build script prefers the archive vendored in the crate, but falls back to
+# fetching libsodium over plain HTTP if it cannot read it. Pinning its SHA-256
+# means such a change cannot arrive unread: `cargo deny -D checksum-mismatch`
+# fails until a human has looked at the new script (spec 010 R16).
+[bans.build]
+[[bans.build.bypass]]
+crate = "libsodium-sys-stable"
+build-script = "fd5350cadce8c49fa1683aa0d723dd721cad94e0988c582621ae50953297d815"
 
 [sources]
 unknown-registry = "deny"
