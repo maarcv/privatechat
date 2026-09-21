@@ -8,9 +8,10 @@ use zeroize::Zeroize;
 
 use super::{
     CryptoError, KdfContext, Nonce, PublicKey, SECRET_TYPES, Salt, Secret, Signature, aead_decrypt,
-    aead_encrypt, checked_output_len, ct_eq, hash, init, init_calls, kdf_derive, keyed_hash,
-    random_bytes, secretbox_open, secretbox_seal, sign_detached, sign_keypair,
-    sign_keypair_from_seed, stream_xor, vectors, verify_detached, version,
+    aead_encrypt, check_password_len, checked_output_len, ct_eq, ffi, hash, init, init_calls,
+    kdf_derive, keyed_hash, pad, password_key, random_bytes, secretbox_open, secretbox_seal,
+    sign_detached, sign_keypair, sign_keypair_from_seed, stream_xor, unpad, vectors,
+    verify_detached, version,
 };
 
 /// Every `.rs` file of the crate. `core` does no I/O (AGENTS 10), so the test
@@ -437,6 +438,19 @@ fn s010_t22_r14_wrapper_bounds_are_the_primitives() -> Result<(), CryptoError> {
         Err(CryptoError::TooLong)
     );
     assert_eq!(checked_output_len(usize::MAX, 1), Err(CryptoError::TooLong));
+
+    assert_eq!(check_password_len(0), Err(CryptoError::BadLength));
+    assert_eq!(check_password_len(2048), Ok(()));
+    let beyond_libsodium = usize::try_from(ffi::password_max())
+        .ok()
+        .and_then(|max| max.checked_add(1));
+    if let Some(len) = beyond_libsodium {
+        assert_eq!(check_password_len(len), Err(CryptoError::TooLong));
+    }
+
+    let mut buffer = vec![0u8; 8];
+    assert_eq!(pad(&mut buffer, 0), Err(CryptoError::BadLength));
+    assert_eq!(unpad(&buffer, 0), Err(CryptoError::BadLength));
     Ok(())
 }
 
@@ -538,4 +552,61 @@ proptest! {
             Err(CryptoError::Forged)
         );
     }
+}
+
+/// Spec 010, R11: Argon2id13 at the parameters the specification fixes, and
+/// a different salt gives a different key.
+#[test]
+fn s010_t17_r11_password_key_known_answer() -> Result<(), CryptoError> {
+    let vector = vectors::load("argon2id13_interactive");
+    assert_eq!(vector.number("opslimit"), 2);
+    assert_eq!(vector.number("memlimit"), 67_108_864);
+    let password = vector.bytes("password");
+    let salt = Salt(vector.array("salt"));
+    let expected = Secret::<32>::from_bytes(vector.expected_bytes("key").try_into().unwrap());
+    assert!(password_key(&password, &salt)? == expected);
+
+    let mut other = salt;
+    other.0[0] ^= 1;
+    assert!(password_key(&password, &other)? != expected);
+    Ok(())
+}
+
+proptest! {
+    /// Spec 010, R13: padding grows the buffer to the next multiple of the
+    /// block, always strictly, and unpadding gives the length back.
+    #[test]
+    fn s010_t20_r13_pad_unpad_roundtrip(
+        plaintext in bytes_of(any::<u8>(), 0..=4096),
+        block in proptest::sample::select(vec![16usize, 1024]),
+    ) {
+        let mut buffer = plaintext.clone();
+        pad(&mut buffer, block).unwrap();
+        assert!(buffer.len() > plaintext.len());
+        assert_eq!(buffer.len() % block, 0);
+        assert_eq!(unpad(&buffer, block).unwrap(), plaintext.len());
+        assert_eq!(&buffer[..plaintext.len()], &plaintext[..]);
+    }
+}
+
+/// Spec 010, R13: the padding vector, and the two buffers that carry no
+/// valid padding at all.
+#[test]
+fn s010_t21_r13_unpad_rejects_bad_padding() -> Result<(), CryptoError> {
+    let vector = vectors::load("pad_1024");
+    let block = vector.number("block");
+    let mut buffer = vector.bytes("buf");
+    let unpadded_len = buffer.len();
+    pad(&mut buffer, block)?;
+    assert_eq!(buffer, vector.expected_bytes("padded"));
+    assert_eq!(unpad(&buffer, block)?, unpadded_len);
+
+    let zeros = vectors::load("unpad_all_zero");
+    assert_eq!(zeros.expected_text("error"), "BadPadding");
+    assert_eq!(
+        unpad(&zeros.bytes("buf"), zeros.number("block")),
+        Err(CryptoError::BadPadding)
+    );
+    assert_eq!(unpad(&[0u8; 30], 16), Err(CryptoError::BadPadding));
+    Ok(())
 }

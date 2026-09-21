@@ -312,3 +312,71 @@ pub(super) fn memzero(buf: &mut [u8]) {
     // passed is that same slice's length, so libsodium writes inside it.
     unsafe { libsodium_sys::sodium_memzero(buf.as_mut_ptr().cast::<c_void>(), buf.len()) }
 }
+
+/// The longest password `crypto_pwhash` accepts; beyond it, it refuses the
+/// call with `EFBIG` (spec 010, R14).
+pub(super) fn password_max() -> u64 {
+    u64::from(libsodium_sys::crypto_pwhash_PASSWD_MAX)
+}
+
+/// Argon2id13 at the interactive parameters of `docs/spec.md` §4: two
+/// passes over 64 MiB (spec 010, R11).
+///
+/// `false` is an allocation failure: the lengths are checked before the call.
+pub(super) fn password_key(password: &[u8], salt: &[u8; 16], out: &mut [u8; 32]) -> bool {
+    let Ok(password_len) = u64::try_from(password.len()) else {
+        return false;
+    };
+    let Ok(out_len) = u64::try_from(out.len()) else {
+        return false;
+    };
+    // SAFETY: `out` is 32 bytes, the output length passed beside it; the
+    // password pointer comes from a borrow whose length is passed too and is
+    // read as bytes, not as a C string; the salt is the fixed 16 bytes this
+    // primitive reads.
+    let derived = unsafe {
+        libsodium_sys::crypto_pwhash(
+            out.as_mut_ptr(),
+            out_len,
+            password.as_ptr().cast::<c_char>(),
+            password_len,
+            salt.as_ptr(),
+            u64::from(libsodium_sys::crypto_pwhash_OPSLIMIT_INTERACTIVE),
+            usize::try_from(libsodium_sys::crypto_pwhash_MEMLIMIT_INTERACTIVE)
+                .unwrap_or(usize::MAX),
+            i32::try_from(libsodium_sys::crypto_pwhash_ALG_ARGON2ID13).unwrap_or(0),
+        )
+    };
+    derived == 0
+}
+
+/// Pads `buf` in place to `padded_len`, which the caller sized as the next
+/// multiple of `block` (spec 010, R13).
+pub(super) fn pad(buf: &mut [u8], unpadded_len: usize, block: usize) -> bool {
+    let mut written = 0usize;
+    // SAFETY: `buf` is at least `unpadded_len + block` long, which is what
+    // this primitive may write; the maximum it is allowed to use is passed as
+    // the length of the very same slice.
+    let padded = unsafe {
+        libsodium_sys::sodium_pad(
+            &raw mut written,
+            buf.as_mut_ptr(),
+            unpadded_len,
+            block,
+            buf.len(),
+        )
+    };
+    padded == 0 && written == buf.len()
+}
+
+/// The unpadded length of `buf`, or `None` when it carries no valid padding
+/// (spec 010, R13).
+pub(super) fn unpad(buf: &[u8], block: usize) -> Option<usize> {
+    let mut unpadded = 0usize;
+    // SAFETY: the pointer comes from a borrow of `buf` and the length passed
+    // is that same slice's length, so this primitive reads inside it; it
+    // writes only the one length, through a pointer to a local.
+    let unpadded_ok =
+        unsafe { libsodium_sys::sodium_unpad(&raw mut unpadded, buf.as_ptr(), buf.len(), block) };
+    (unpadded_ok == 0).then_some(unpadded)
+}

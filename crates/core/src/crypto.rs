@@ -480,3 +480,84 @@ pub(crate) fn verify_detached(
         Err(CryptoError::Forged)
     }
 }
+
+/// Rejects a password libsodium would refuse, and the empty one (R14).
+///
+/// The empty password is the one guard this module keeps that libsodium does
+/// not ask for: no key is ever derived from nothing. The product's own
+/// maximum belongs to spec 011-config-format.
+///
+/// # Errors
+///
+/// `CryptoError::BadLength` when the password is empty, and
+/// `CryptoError::TooLong` above `crypto_pwhash_PASSWD_MAX`.
+pub(crate) fn check_password_len(len: usize) -> Result<(), CryptoError> {
+    if len == 0 {
+        return Err(CryptoError::BadLength);
+    }
+    let len = u64::try_from(len).map_err(|_| CryptoError::TooLong)?;
+    if len > ffi::password_max() {
+        return Err(CryptoError::TooLong);
+    }
+    Ok(())
+}
+
+/// Derives a 32-byte key from a password with Argon2id13 at the interactive
+/// parameters (spec 010, R11).
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise;
+/// `CryptoError::BadLength` for an empty password and `CryptoError::TooLong`
+/// for one libsodium refuses; `CryptoError::OutOfMemory` when the 64 MiB the
+/// derivation needs cannot be allocated.
+pub(crate) fn password_key(password: &[u8], salt: &Salt) -> Result<Secret<32>, CryptoError> {
+    init()?;
+    check_password_len(password.len())?;
+    let mut key = [0u8; HASH_LEN];
+    if !ffi::password_key(password, &salt.0, &mut key) {
+        return Err(CryptoError::OutOfMemory);
+    }
+    let derived = Secret::from_bytes(key);
+    // The array is `Copy`, so wrapping it left this copy behind (R18).
+    ffi::memzero(&mut key);
+    Ok(derived)
+}
+
+/// Pads `buf` to the smallest multiple of `block` strictly greater than its
+/// length, as ISO/IEC 7816-4 (spec 010, R13).
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise;
+/// `CryptoError::BadLength` when `block` is zero; `CryptoError::TooLong` when
+/// the padded length would not fit.
+pub(crate) fn pad(buf: &mut Vec<u8>, block: usize) -> Result<(), CryptoError> {
+    init()?;
+    let unpadded_len = buf.len();
+    let remainder = unpadded_len
+        .checked_rem(block)
+        .ok_or(CryptoError::BadLength)?;
+    let padding = block.checked_sub(remainder).ok_or(CryptoError::BadLength)?;
+    buf.resize(checked_output_len(unpadded_len, padding)?, 0);
+    if ffi::pad(buf, unpadded_len, block) {
+        Ok(())
+    } else {
+        Err(CryptoError::TooLong)
+    }
+}
+
+/// The length `buf` had before it was padded (spec 010, R13).
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise;
+/// `CryptoError::BadLength` when `block` is zero; `CryptoError::BadPadding`
+/// when the buffer carries no valid padding.
+pub(crate) fn unpad(buf: &[u8], block: usize) -> Result<usize, CryptoError> {
+    init()?;
+    if block == 0 {
+        return Err(CryptoError::BadLength);
+    }
+    ffi::unpad(buf, block).ok_or(CryptoError::BadPadding)
+}
