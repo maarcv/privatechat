@@ -52,7 +52,8 @@ Protocol and storage bounds: 64 511 B payload and 64 673 B blob (specs 011-confi
 crates/core/src/crypto.rs              pub(crate) module root: types, re-exports, `init()`, `SECRET_TYPES`
 crates/core/src/crypto/ffi.rs          the only `unsafe`: thin typed calls into libsodium-sys-stable
 crates/core/src/crypto/secret.rs       Secret<N>
-crates/core/src/crypto/tests.rs        s010_* tests and the vector loader for 010.json
+crates/core/src/crypto/tests.rs        s010_* tests
+crates/core/src/crypto/vectors.rs      loader of 010.json, `cfg(test)`: no dependency, no I/O
 clippy.toml                            disallowed-methods (R17)
 ```
 
@@ -196,4 +197,4 @@ A bump of `libsodium-sys-stable` moves three pinned values at once (the version 
 
 ## History
 
-- 2026-09-20 draft · 2026-09-20 in review · 2026-09-21 accepted (Marc Vilardebó) · 2026-09-21 "Vectors" amended: three primitives have no published vector at the parameters §4 fixes, so they are `pinned` and each vector declares its `source` (Marc Vilardebó) · 2026-09-21 open question 010-R15 closed: the log test is parked in spec 100-log-test (Marc Vilardebó) · 2026-09-21 R14 amended: the wrapper bounds only what libsodium requires; the protocol number 65 535 leaves this spec (Marc Vilardebó) · 2026-09-21 R14 amended again: the 1 024 B password bound was policy too and leaves for spec 011-config-format; the empty-password guard is declared as such; `docs/spec.md` §4, §5 and §7 record the bounds owed by specs 011, 020 and 026 (Marc Vilardebó) · 2026-09-21 R14 completed: `crypto_pwhash` rejects a password above `crypto_pwhash_PASSWD_MAX`, so the wrapper rejects it too instead of surfacing it as `OutOfMemory` (Marc Vilardebó) · 2026-09-21 open question 010-R16 closed: the bump procedure is written out as its own section, with the CI as the checklist (Marc Vilardebó)
+- 2026-09-20 draft · 2026-09-20 in review · 2026-09-21 accepted (Marc Vilardebó) · 2026-09-21 "Vectors" amended: three primitives have no published vector at the parameters §4 fixes, so they are `pinned` and each vector declares its `source` (Marc Vilardebó) · 2026-09-21 open question 010-R15 closed: the log test is parked in spec 100-log-test (Marc Vilardebó) · 2026-09-21 R14 amended: the wrapper bounds only what libsodium requires; the protocol number 65 535 leaves this spec (Marc Vilardebó) · 2026-09-21 R14 amended again: the 1 024 B password bound was policy too and leaves for spec 011-config-format; the empty-password guard is declared as such; `docs/spec.md` §4, §5 and §7 record the bounds owed by specs 011, 020 and 026 (Marc Vilardebó) · 2026-09-21 R14 completed: `crypto_pwhash` rejects a password above `crypto_pwhash_PASSWD_MAX`, so the wrapper rejects it too instead of surfacing it as `OutOfMemory` (Marc Vilardebó) · 2026-09-21 open question 010-R16 closed: the bump procedure is written out as its own section, with the CI as the checklist (Marc Vilardebó) · 2026-09-21 Interface amended: the vector loader is its own `cfg(test)` file, so the test module stays within the size the code standard asks for (Marc Vilardebó)

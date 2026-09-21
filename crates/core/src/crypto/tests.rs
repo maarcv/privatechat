@@ -7,17 +7,18 @@ use zeroize::Zeroize;
 
 use super::{
     CryptoError, KdfContext, Nonce, PublicKey, SECRET_TYPES, Salt, Secret, Signature, ct_eq, init,
-    init_calls, random_bytes, version,
+    init_calls, random_bytes, vectors, version,
 };
 
 /// Every `.rs` file of the crate. `core` does no I/O (AGENTS 10), so the test
 /// cannot walk the directory: a new file is added to this list by hand.
-const SOURCES: [(&str, &str); 5] = [
+const SOURCES: [(&str, &str); 6] = [
     ("lib.rs", include_str!("../lib.rs")),
     ("crypto.rs", include_str!("../crypto.rs")),
     ("crypto/ffi.rs", include_str!("ffi.rs")),
     ("crypto/secret.rs", include_str!("secret.rs")),
     ("crypto/tests.rs", include_str!("tests.rs")),
+    ("crypto/vectors.rs", include_str!("vectors.rs")),
 ];
 
 /// Spec 010, R1: `crypto/ffi.rs` is the only file that uses the keyword, and
@@ -260,4 +261,22 @@ fn s010_t28_r16_deny_pins_the_build_script() {
 fn s010_t29_r16_libsodium_version_is_pinned() -> Result<(), CryptoError> {
     assert_eq!(version()?, "1.0.22");
     Ok(())
+}
+
+/// The vector loader reads the whole file and hands back the bytes the
+/// vectors declare. It covers no requirement of the spec: it is the harness
+/// every vector test below depends on, so it is checked on its own.
+#[test]
+fn vector_loader_reads_every_vector() {
+    assert_eq!(vectors::count(), 19);
+    let aead = vectors::load("aead_xchacha20poly1305_ietf");
+    assert_eq!(aead.kind, "positive");
+    assert_eq!(aead.array::<32>("key").len(), 32);
+    assert_eq!(aead.bytes("plaintext").len(), 114);
+    assert_eq!(aead.expected_bytes("ciphertext").len(), 130);
+    let padding = vectors::load("pad_1024");
+    assert_eq!(padding.number("block"), 1024);
+    let rejected = vectors::load("unpad_all_zero");
+    assert_eq!(rejected.kind, "negative");
+    assert_eq!(rejected.expected_text("error"), "BadPadding");
 }
