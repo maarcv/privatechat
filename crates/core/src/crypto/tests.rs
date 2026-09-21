@@ -610,3 +610,42 @@ fn s010_t21_r13_unpad_rejects_bad_padding() -> Result<(), CryptoError> {
     assert_eq!(unpad(&[0u8; 30], 16), Err(CryptoError::BadPadding));
     Ok(())
 }
+
+/// The wrappers of `ffi.rs` check the buffer sizes their SAFETY comments
+/// rest on, so a caller that sized one wrong is refused instead of writing
+/// outside it. It covers no requirement of the spec: it guards the one file
+/// where `unsafe` lives.
+#[test]
+fn ffi_rejects_a_buffer_of_the_wrong_size() {
+    let key = [1u8; 32];
+    let nonce = [2u8; 24];
+    let mut too_small = [0u8; 8];
+    assert!(!ffi::aead_encrypt(
+        &key,
+        &nonce,
+        &[],
+        &[3u8; 16],
+        &mut too_small
+    ));
+    assert!(!ffi::aead_decrypt(
+        &key,
+        &nonce,
+        &[],
+        &[4u8; 32],
+        &mut too_small
+    ));
+    assert!(!ffi::secretbox_seal(
+        &key,
+        &nonce,
+        &[5u8; 16],
+        &mut too_small
+    ));
+    assert!(!ffi::secretbox_open(
+        &key,
+        &nonce,
+        &[6u8; 32],
+        &mut too_small
+    ));
+    let mut buffer = [0u8; 16];
+    assert!(!ffi::pad(&mut buffer, 17, 16));
+}

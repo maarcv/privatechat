@@ -35,16 +35,12 @@ pub(super) fn random_bytes(buf: &mut [u8]) {
     unsafe { libsodium_sys::randombytes_buf(buf.as_mut_ptr().cast::<c_void>(), buf.len()) }
 }
 
-/// Constant-time equality of two slices of the same length (spec 010, R4).
-///
-/// The caller passes arrays of one fixed size `N`, so the lengths are equal
-/// by construction.
-pub(super) fn memcmp(a: &[u8], b: &[u8]) -> bool {
-    // SAFETY: both pointers come from borrows of slices of length `a.len()`,
-    // which the caller guarantees equals `b.len()`; libsodium reads that many
-    // bytes from each.
-    let equal =
-        unsafe { libsodium_sys::sodium_memcmp(a.as_ptr().cast(), b.as_ptr().cast(), a.len()) };
+/// Constant-time equality of two arrays of the same size (spec 010, R4).
+pub(super) fn memcmp<const N: usize>(a: &[u8; N], b: &[u8; N]) -> bool {
+    // SAFETY: both pointers come from borrows of arrays of `N` bytes, the
+    // length passed beside them: the type, not the caller, makes the two
+    // lengths equal.
+    let equal = unsafe { libsodium_sys::sodium_memcmp(a.as_ptr().cast(), b.as_ptr().cast(), N) };
     equal == 0
 }
 
@@ -60,15 +56,18 @@ pub(super) fn aead_encrypt(
     plaintext: &[u8],
     out: &mut [u8],
 ) -> bool {
+    if plaintext.len().checked_add(super::TAG_LEN) != Some(out.len()) {
+        return false;
+    }
     let (Ok(plaintext_len), Ok(aad_len)) =
         (u64::try_from(plaintext.len()), u64::try_from(aad.len()))
     else {
         return false;
     };
-    // SAFETY: `out` holds `plaintext.len() + 16` bytes, which is what this
-    // primitive writes; the other pointers come from borrows whose length is
-    // passed beside them; the secret nonce is unused and must be null; the
-    // written length is not needed, so no pointer is given for it.
+    // SAFETY: the check above makes `out` exactly the `plaintext.len() + 16`
+    // bytes this primitive writes; the other pointers come from borrows whose
+    // length is passed beside them; the secret nonce is unused and must be
+    // null; the written length is not needed, so no pointer is given for it.
     let written = unsafe {
         libsodium_sys::crypto_aead_xchacha20poly1305_ietf_encrypt(
             out.as_mut_ptr(),
@@ -94,14 +93,18 @@ pub(super) fn aead_decrypt(
     ciphertext: &[u8],
     out: &mut [u8],
 ) -> bool {
+    if ciphertext.len().checked_sub(super::TAG_LEN) != Some(out.len()) {
+        return false;
+    }
     let (Ok(ciphertext_len), Ok(aad_len)) =
         (u64::try_from(ciphertext.len()), u64::try_from(aad.len()))
     else {
         return false;
     };
-    // SAFETY: `out` holds `ciphertext.len() - 16` bytes, the plaintext length
-    // this primitive writes; the other pointers come from borrows whose length
-    // is passed beside them; the secret nonce is unused and must be null.
+    // SAFETY: the check above makes `out` exactly the `ciphertext.len() - 16`
+    // bytes this primitive writes; the other pointers come from borrows whose
+    // length is passed beside them; the secret nonce is unused and must be
+    // null.
     let opened = unsafe {
         libsodium_sys::crypto_aead_xchacha20poly1305_ietf_decrypt(
             out.as_mut_ptr(),
@@ -123,13 +126,17 @@ pub(super) fn stream_xor(key: &[u8; 32], nonce: &[u8; 24], buf: &mut [u8]) -> bo
     let Ok(len) = u64::try_from(buf.len()) else {
         return false;
     };
+    // Both arguments are the same pointer: taking a second, shared borrow of
+    // `buf` for the input would invalidate the mutable one under Rust's
+    // aliasing rules, and libsodium would then write through a dead pointer.
+    let pointer = buf.as_mut_ptr();
     // SAFETY: libsodium supports the output and the input being the same
-    // buffer, and both pointers here come from the same mutable borrow, whose
-    // length is the one passed.
+    // buffer; the pointer comes from a mutable borrow of `buf` and the length
+    // passed is that same slice's length.
     let applied = unsafe {
         libsodium_sys::crypto_stream_xchacha20_xor(
-            buf.as_mut_ptr(),
-            buf.as_ptr(),
+            pointer,
+            pointer.cast_const(),
             len,
             nonce.as_ptr(),
             key.as_ptr(),
@@ -146,12 +153,15 @@ pub(super) fn secretbox_seal(
     plaintext: &[u8],
     out: &mut [u8],
 ) -> bool {
+    if plaintext.len().checked_add(super::TAG_LEN) != Some(out.len()) {
+        return false;
+    }
     let Ok(len) = u64::try_from(plaintext.len()) else {
         return false;
     };
-    // SAFETY: `out` holds `plaintext.len() + 16` bytes, the mac and the
-    // ciphertext this primitive writes; the other pointers come from borrows
-    // whose length is passed beside them.
+    // SAFETY: the check above makes `out` exactly the `plaintext.len() + 16`
+    // bytes of mac and ciphertext this primitive writes; the other pointers
+    // come from borrows whose length is passed beside them.
     let sealed = unsafe {
         libsodium_sys::crypto_secretbox_easy(
             out.as_mut_ptr(),
@@ -172,12 +182,15 @@ pub(super) fn secretbox_open(
     sealed: &[u8],
     out: &mut [u8],
 ) -> bool {
+    if sealed.len().checked_sub(super::TAG_LEN) != Some(out.len()) {
+        return false;
+    }
     let Ok(len) = u64::try_from(sealed.len()) else {
         return false;
     };
-    // SAFETY: `out` holds `sealed.len() - 16` bytes, the plaintext length this
-    // primitive writes; the other pointers come from borrows whose length is
-    // passed beside them.
+    // SAFETY: the check above makes `out` exactly the `sealed.len() - 16`
+    // bytes of plaintext this primitive writes; the other pointers come from
+    // borrows whose length is passed beside them.
     let opened = unsafe {
         libsodium_sys::crypto_secretbox_open_easy(
             out.as_mut_ptr(),
@@ -330,6 +343,14 @@ pub(super) fn password_key(password: &[u8], salt: &[u8; 16], out: &mut [u8; 32])
     let Ok(out_len) = u64::try_from(out.len()) else {
         return false;
     };
+    // Neither conversion can fail at these constants, and a guessed value
+    // would be a memory request or an algorithm that is not the one §4 fixes.
+    let Ok(memlimit) = usize::try_from(libsodium_sys::crypto_pwhash_MEMLIMIT_INTERACTIVE) else {
+        return false;
+    };
+    let Ok(algorithm) = i32::try_from(libsodium_sys::crypto_pwhash_ALG_ARGON2ID13) else {
+        return false;
+    };
     // SAFETY: `out` is 32 bytes, the output length passed beside it; the
     // password pointer comes from a borrow whose length is passed too and is
     // read as bytes, not as a C string; the salt is the fixed 16 bytes this
@@ -342,9 +363,8 @@ pub(super) fn password_key(password: &[u8], salt: &[u8; 16], out: &mut [u8; 32])
             password_len,
             salt.as_ptr(),
             u64::from(libsodium_sys::crypto_pwhash_OPSLIMIT_INTERACTIVE),
-            usize::try_from(libsodium_sys::crypto_pwhash_MEMLIMIT_INTERACTIVE)
-                .unwrap_or(usize::MAX),
-            i32::try_from(libsodium_sys::crypto_pwhash_ALG_ARGON2ID13).unwrap_or(0),
+            memlimit,
+            algorithm,
         )
     };
     derived == 0
@@ -353,10 +373,13 @@ pub(super) fn password_key(password: &[u8], salt: &[u8; 16], out: &mut [u8; 32])
 /// Pads `buf` in place to `padded_len`, which the caller sized as the next
 /// multiple of `block` (spec 010, R13).
 pub(super) fn pad(buf: &mut [u8], unpadded_len: usize, block: usize) -> bool {
+    if unpadded_len > buf.len() {
+        return false;
+    }
     let mut written = 0usize;
-    // SAFETY: `buf` is at least `unpadded_len + block` long, which is what
-    // this primitive may write; the maximum it is allowed to use is passed as
-    // the length of the very same slice.
+    // SAFETY: the check above puts the unpadded content inside `buf`, and
+    // libsodium refuses the call unless the padded length fits as well,
+    // because the maximum it may use is the length of that same slice.
     let padded = unsafe {
         libsodium_sys::sodium_pad(
             &raw mut written,
