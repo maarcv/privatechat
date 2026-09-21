@@ -37,7 +37,7 @@ The read copy linked from the header of `docs/spec.md` may lag behind; nothing i
 21. Every `parse`, `decrypt` and `open_*` of `core` has a target in `crates/core/fuzz` and a round-trip property test (`proptest`); spec 016 adds a CI check that the number of targets is ≥ the number of public functions that take `&[u8]`.
 22. No `==` on `[u8; N]` in `core`: every fixed-size comparison goes through `crypto::ct_eq` (`sodium_memcmp`). No exceptions, so nobody has to decide where constant time is needed.
 23. Every write to the state goes through `Store::commit(WriteBatch)`, a single commit per logical operation. A rejection path commits nothing but the cursor. Every stateful spec has a test with `FailingStore` that fails at commit *n* and checks the state on reopening.
-24. The payload is never compressed. No compression crate in the workspace.
+24. The payload is never compressed, in any version: compressing before encrypting leaks content through the size. No crate of the workspace may compress protocol data. A decompressor reached only by a build script (libsodium ships its sources as an archive) is not protocol data: it is allowed only as an entry of `[bans]` in `deny.toml` naming its exact wrapper, so every path that brings one in has been read by a human.
 25. Before writing code in a language, read `.claude/skills/architecture/SKILL.md` and then `.claude/skills/<language>/SKILL.md` (`rust`, `kotlin`, `swift`, `typescript-svelte`). They are the project's coding standard: layers, sizes, names, errors, tests and tooling. Non-Claude agents read them as ordinary documents.
 
 ## Per-feature flow
