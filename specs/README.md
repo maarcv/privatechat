@@ -12,7 +12,7 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 001 | 001-ci | 0 | implemented |
 | 002 | 002-adr-log | 0 | implemented |
 | 003 | 003-doc-lint | 0 | implemented |
-| 010 | 010-primitives-wrapper | 1 | accepted |
+| 010 | 010-primitives-wrapper | 1 | implemented |
 | 100 | 100-log-test | 6 | draft |
 
 Phase 0 was bootstrapped with implementation and review in parallel; from spec 010 on, acceptance precedes code.
