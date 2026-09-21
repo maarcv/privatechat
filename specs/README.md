@@ -14,6 +14,7 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 003 | 003-doc-lint | 0 | implemented |
 | 010 | 010-primitives-wrapper | 1 | implemented |
 | 011 | 011-config-format | 1 | in review |
+| 012 | 012-message-keys | 1 | in review |
 | 100 | 100-log-test | 6 | draft |
 
 Phase 0 was bootstrapped with implementation and review in parallel; from spec 010 on, acceptance precedes code.
