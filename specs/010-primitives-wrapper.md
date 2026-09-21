@@ -1,11 +1,11 @@
 # 010 — Primitives wrapper
 
-Status: in review
+Status: accepted
 Phase: 1
 Related ADRs: 0002, 0005, 0012
 Depends on: 000, 001
 Blocks: 011, 012, 013, 014, 015, 016
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-21
 
 ## Context
 
@@ -166,4 +166,4 @@ Mutation table (AEAD and secretbox): any single byte of `ciphertext`, `tag`/`mac
 
 ## History
 
-- 2026-09-20 draft · 2026-09-20 in review
+- 2026-09-20 draft · 2026-09-20 in review · 2026-09-21 accepted (Marc Vilardebó)
