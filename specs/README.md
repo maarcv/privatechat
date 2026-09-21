@@ -18,6 +18,7 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 013 | 013-wire-message | 1 | in review |
 | 014 | 014-fingerprint | 1 | in review |
 | 015 | 015-test-vectors | 1 | in review |
+| 016 | 016-fuzz-harness | 1 | in review |
 | 100 | 100-log-test | 6 | draft |
 
 Phase 0 was bootstrapped with implementation and review in parallel; from spec 010 on, acceptance precedes code.
