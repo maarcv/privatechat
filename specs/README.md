@@ -13,5 +13,8 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 002 | 002-adr-log | 0 | implemented |
 | 003 | 003-doc-lint | 0 | implemented |
 | 010 | 010-primitives-wrapper | 1 | accepted |
+| 100 | 100-log-test | 6 | draft |
 
 Phase 0 was bootstrapped with implementation and review in parallel; from spec 010 on, acceptance precedes code.
+
+Spec 100 is numbered outside the phases on purpose: it holds an obligation of `docs/spec.md` §8 that no spec could carry yet, and it stays `draft` until a spec that emits logs adopts it or it is implemented on its own before phase 6 closes.

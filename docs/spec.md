@@ -368,7 +368,7 @@ The device is where the real attacks land; these measures are mandatory in v1 un
 | Code integrity | Reproducible builds published with hash; F-Droid or direct APK as an alternative to Google Play | Reproducible builds; published hash | Reproducible builds; published hash and signature |
 | Root / jailbreak / accessibility | Not blocked (it would break legitimate users); one-time warning if detected. Production without `debuggable`, without `usesCleartextTraffic`, no `exported` component | One-time warning if jailbreak is detected | Within the session, any process of the user can read keychain and files; documented |
 
-**Logging.** No log with content, names, keys, full `channel_id` or `pk`: only the 4-byte hex prefix when debugging is needed; in production, `warn` level and nothing else. All key material lives in the `Secret<N>` type (no `Clone`, no `Default`, manual `Debug` = `[REDACTED]`, `PartialEq` via `sodium_memcmp`). Test Redacted-`Debug` test (spec 010): `format!("{:?}")` of every type listed in `SECRET_TYPES` is exactly `[REDACTED]`. Test Log test (spec 010): in-memory `tracing` subscriber at TRACE level, full encrypt/decrypt flow with known keys, assert that neither hex nor base64 of `K_ch`, `sk_u`, `sk_ch`, `K_msg`, `K_hdr`, `mk` nor the full `channel_id` appears in it.
+**Logging.** No log with content, names, keys, full `channel_id` or `pk`: only the 4-byte hex prefix when debugging is needed; in production, `warn` level and nothing else. All key material lives in the `Secret<N>` type (no `Clone`, no `Default`, manual `Debug` = `[REDACTED]`, `PartialEq` via `sodium_memcmp`). Test Redacted-`Debug` test (spec 010): `format!("{:?}")` of every type listed in `SECRET_TYPES` is exactly `[REDACTED]`. Test Log test (spec 100, parked until a crate emits): in-memory `tracing` subscriber at TRACE level, full encrypt/decrypt flow with known keys, assert that neither hex nor base64 of `K_ch`, `sk_u`, `sk_ch`, `K_msg`, `K_hdr`, `mk` nor the full `channel_id` appears in it.
 
 ## 9. Architecture and technical stack
 
@@ -477,7 +477,7 @@ Seven phases; each one closes when its specifications have green tests and a hum
 | 3. Server | 030-ws-protocol, 031-auth-channel-signature, 032-storage-ttl, 033-rate-limit-quotas, 034-docker, 035-server-ops | Core↔server integration test via `Session`; working `docker compose up`; `deploy/README.md` "Deploy your own server"; log test without identifiers |
 | 4. Bindings | 040-uniffi, 041-desktop-bridge | Kotlin and Swift pass the same vectors as Rust; the empty Tauri app opens a channel |
 | 5. Clients | 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 053-device-security, 054-qr-invite, 055-verify-ui | One user on each platform chats in the same channel; all measures of §8 applied; store publication process started |
-| 6. Hardening | 060-reproducible-builds, 061-threat-review, 062-security-docs, 063-beta | Published hashes; external review of the cryptographic and threat model; public documentation of what it promises and does not promise |
+| 6. Hardening | 060-reproducible-builds, 061-threat-review, 062-security-docs, 063-beta, 100-log-test | Published hashes; external review of the cryptographic and threat model; public documentation of what it promises and does not promise; no spec left in `draft` |
 
 **Template for each spec**: `specs/TEMPLATE.md`. **Index**: `specs/README.md`, checked by the doc lint.
 
