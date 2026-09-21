@@ -9,7 +9,7 @@
 #![allow(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-use core::ffi::{CStr, c_void};
+use core::ffi::{CStr, c_char, c_void};
 use core::ptr;
 
 /// Initialises the library. Negative on failure, `0` on the first call and
@@ -188,4 +188,127 @@ pub(super) fn secretbox_open(
         )
     };
     opened == 0
+}
+
+/// Derives a 32-byte subkey with `subkey_id = 0` from `key` and an 8-byte
+/// context (spec 010, R8).
+pub(super) fn kdf_derive(key: &[u8; 32], context: &[u8; 8], out: &mut [u8; 32]) -> bool {
+    // SAFETY: the three buffers are fixed-size arrays of exactly the lengths
+    // this primitive reads and writes; the context is eight bytes, which is
+    // `crypto_kdf_CONTEXTBYTES`, and is read as characters, not as a C string.
+    let derived = unsafe {
+        libsodium_sys::crypto_kdf_derive_from_key(
+            out.as_mut_ptr(),
+            out.len(),
+            0,
+            context.as_ptr().cast::<c_char>(),
+            key.as_ptr(),
+        )
+    };
+    derived == 0
+}
+
+/// BLAKE2b at 32 bytes, keyed when `key` is given (spec 010, R9).
+pub(super) fn generichash(key: Option<&[u8; 32]>, input: &[u8], out: &mut [u8; 32]) -> bool {
+    let Ok(input_len) = u64::try_from(input.len()) else {
+        return false;
+    };
+    let (key_pointer, key_len) = match key {
+        Some(key) => (key.as_ptr(), key.len()),
+        None => (ptr::null(), 0),
+    };
+    // SAFETY: `out` is 32 bytes, the output length passed beside it; the input
+    // pointer comes from a borrow whose length is passed too; a null key with
+    // length zero is how libsodium is asked for the unkeyed hash.
+    let hashed = unsafe {
+        libsodium_sys::crypto_generichash(
+            out.as_mut_ptr(),
+            out.len(),
+            input.as_ptr(),
+            input_len,
+            key_pointer,
+            key_len,
+        )
+    };
+    hashed == 0
+}
+
+/// The Ed25519 key pair of a seed (spec 010, R10).
+pub(super) fn sign_keypair_from_seed(
+    seed: &[u8; 32],
+    public_key: &mut [u8; 32],
+    secret_key: &mut [u8; 64],
+) -> bool {
+    // SAFETY: the three buffers are fixed-size arrays of exactly the lengths
+    // this primitive reads and writes.
+    let generated = unsafe {
+        libsodium_sys::crypto_sign_seed_keypair(
+            public_key.as_mut_ptr(),
+            secret_key.as_mut_ptr(),
+            seed.as_ptr(),
+        )
+    };
+    generated == 0
+}
+
+/// A fresh Ed25519 key pair (spec 010, R10).
+pub(super) fn sign_keypair(public_key: &mut [u8; 32], secret_key: &mut [u8; 64]) -> bool {
+    // SAFETY: both buffers are fixed-size arrays of exactly the lengths this
+    // primitive writes.
+    let generated = unsafe {
+        libsodium_sys::crypto_sign_keypair(public_key.as_mut_ptr(), secret_key.as_mut_ptr())
+    };
+    generated == 0
+}
+
+/// Signs `message` detached (spec 010, R10).
+pub(super) fn sign_detached(secret_key: &[u8; 64], message: &[u8], out: &mut [u8; 64]) -> bool {
+    let Ok(message_len) = u64::try_from(message.len()) else {
+        return false;
+    };
+    // SAFETY: `out` is the 64 bytes of a detached signature; the message
+    // pointer comes from a borrow whose length is passed beside it; the
+    // written length is always 64, so no pointer is given for it.
+    let signed = unsafe {
+        libsodium_sys::crypto_sign_detached(
+            out.as_mut_ptr(),
+            ptr::null_mut(),
+            message.as_ptr(),
+            message_len,
+            secret_key.as_ptr(),
+        )
+    };
+    signed == 0
+}
+
+/// Verifies a detached signature. `false` is a forgery, and libsodium is
+/// strict about non-canonical and small-order values (spec 010, R10).
+pub(super) fn sign_verify_detached(
+    public_key: &[u8; 32],
+    message: &[u8],
+    signature: &[u8; 64],
+) -> bool {
+    let Ok(message_len) = u64::try_from(message.len()) else {
+        return false;
+    };
+    // SAFETY: the signature and the key are fixed-size arrays of the lengths
+    // this primitive reads; the message pointer comes from a borrow whose
+    // length is passed beside it.
+    let verified = unsafe {
+        libsodium_sys::crypto_sign_verify_detached(
+            signature.as_ptr(),
+            message.as_ptr(),
+            message_len,
+            public_key.as_ptr(),
+        )
+    };
+    verified == 0
+}
+
+/// Wipes a buffer that held key material, in a way the compiler may not
+/// remove (spec 010, R18).
+pub(super) fn memzero(buf: &mut [u8]) {
+    // SAFETY: the pointer comes from a mutable borrow of `buf` and the length
+    // passed is that same slice's length, so libsodium writes inside it.
+    unsafe { libsodium_sys::sodium_memzero(buf.as_mut_ptr().cast::<c_void>(), buf.len()) }
 }

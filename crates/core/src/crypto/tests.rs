@@ -8,8 +8,9 @@ use zeroize::Zeroize;
 
 use super::{
     CryptoError, KdfContext, Nonce, PublicKey, SECRET_TYPES, Salt, Secret, Signature, aead_decrypt,
-    aead_encrypt, checked_output_len, ct_eq, init, init_calls, random_bytes, secretbox_open,
-    secretbox_seal, stream_xor, vectors, version,
+    aead_encrypt, checked_output_len, ct_eq, hash, init, init_calls, kdf_derive, keyed_hash,
+    random_bytes, secretbox_open, secretbox_seal, sign_detached, sign_keypair,
+    sign_keypair_from_seed, stream_xor, vectors, verify_detached, version,
 };
 
 /// Every `.rs` file of the crate. `core` does no I/O (AGENTS 10), so the test
@@ -437,4 +438,104 @@ fn s010_t22_r14_wrapper_bounds_are_the_primitives() -> Result<(), CryptoError> {
     );
     assert_eq!(checked_output_len(usize::MAX, 1), Err(CryptoError::TooLong));
     Ok(())
+}
+
+/// Spec 010, R8: the derivation reproduces its vector, and a different
+/// context gives a different subkey.
+#[test]
+fn s010_t12_r08_kdf_known_answer() -> Result<(), CryptoError> {
+    let vector = vectors::load("kdf_subkey_0");
+    let key = Secret::<32>::from_bytes(vector.array("key"));
+    let context = KdfContext::new(vector.array("context"));
+    let expected = Secret::<32>::from_bytes(vector.expected_bytes("subkey").try_into().unwrap());
+    assert!(kdf_derive(&key, &context)? == expected);
+
+    let other = KdfContext::new(*b"pcother1");
+    assert!(kdf_derive(&key, &other)? != expected);
+    Ok(())
+}
+
+/// Spec 010, R9: BLAKE2b at 32 bytes, keyed and unkeyed, on their vectors.
+#[test]
+fn s010_t13_r09_hash_known_answer() -> Result<(), CryptoError> {
+    let unkeyed = vectors::load("blake2b_256_unkeyed");
+    assert_eq!(
+        hash(&unkeyed.bytes("input"))?.to_vec(),
+        unkeyed.expected_bytes("hash")
+    );
+
+    let keyed = vectors::load("blake2b_256_keyed");
+    let key = Secret::<32>::from_bytes(keyed.array("key"));
+    let expected = Secret::<32>::from_bytes(keyed.expected_bytes("hash").try_into().unwrap());
+    assert!(keyed_hash(&key, &keyed.bytes("input"))? == expected);
+    Ok(())
+}
+
+/// Spec 010, R10: the three RFC 8032 vectors, seed to public key and message
+/// to signature.
+#[test]
+fn s010_t14_r10_sign_known_answer() -> Result<(), CryptoError> {
+    for name in [
+        "ed25519_rfc8032_test1",
+        "ed25519_rfc8032_test2",
+        "ed25519_rfc8032_test3",
+    ] {
+        let vector = vectors::load(name);
+        let seed = Secret::<32>::from_bytes(vector.array("seed"));
+        let message = vector.bytes("message");
+        let (public_key, secret_key) = sign_keypair_from_seed(&seed)?;
+        assert!(
+            public_key == PublicKey(vector.expected_bytes("pk").try_into().unwrap()),
+            "{name}"
+        );
+        let signature = sign_detached(&secret_key, &message)?;
+        assert!(
+            signature == Signature(vector.expected_bytes("signature").try_into().unwrap()),
+            "{name}"
+        );
+        verify_detached(&public_key, &message, &signature)?;
+    }
+    Ok(())
+}
+
+/// Spec 010, R10: verification is strict. Every malformed signature or key
+/// of the negative vectors is a forgery, never an accepted message.
+#[test]
+fn s010_t15_r10_verify_rejects_malformed() {
+    for name in [
+        "signature_s_plus_l",
+        "pk_identity",
+        "pk_small_order",
+        "pk_non_canonical",
+        "r_small_order",
+        "wrong_message",
+        "wrong_pk",
+    ] {
+        let vector = vectors::load(name);
+        assert_eq!(vector.kind, "negative");
+        assert_eq!(vector.expected_text("error"), "Forged", "{name}");
+        let public_key = PublicKey(vector.array("pk"));
+        let signature = Signature(vector.array("signature"));
+        assert_eq!(
+            verify_detached(&public_key, &vector.bytes("message"), &signature),
+            Err(CryptoError::Forged),
+            "{name}"
+        );
+    }
+}
+
+proptest! {
+    /// Spec 010, R10: a fresh key signs its own messages and nobody else's.
+    #[test]
+    fn s010_t16_r10_sign_roundtrip(message in bytes_of(any::<u8>(), 0..=4096)) {
+        let (public_key, secret_key) = sign_keypair().unwrap();
+        let signature = sign_detached(&secret_key, &message).unwrap();
+        assert_eq!(verify_detached(&public_key, &message, &signature), Ok(()));
+
+        let (other_key, _) = sign_keypair().unwrap();
+        assert_eq!(
+            verify_detached(&other_key, &message, &signature),
+            Err(CryptoError::Forged)
+        );
+    }
 }

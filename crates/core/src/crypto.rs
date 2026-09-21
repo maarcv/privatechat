@@ -26,6 +26,10 @@ pub(crate) use secret::Secret;
 /// the AEAD and the mac of the secret box (`docs/spec.md` §4).
 pub(crate) const TAG_LEN: usize = 16;
 
+/// Length of every hash and every derived key of the protocol
+/// (`docs/spec.md` §4).
+pub(crate) const HASH_LEN: usize = 32;
+
 /// The types that hold key material, as the PR checklist of AGENTS 5 names
 /// them. A new secret type is added here and to the redacted-`Debug` test.
 pub(crate) const SECRET_TYPES: [&str; 2] = ["Secret<32>", "Secret<64>"];
@@ -329,6 +333,149 @@ pub(crate) fn secretbox_open(
     let mut plaintext = vec![0u8; len];
     if ffi::secretbox_open(key.expose(), &nonce.0, sealed, &mut plaintext) {
         Ok(plaintext)
+    } else {
+        Err(CryptoError::Forged)
+    }
+}
+
+/// Derives a 32-byte subkey from `key` and an 8-byte context, with
+/// `subkey_id = 0` (spec 010, R8).
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise;
+/// `CryptoError::BadLength` if libsodium refuses the fixed lengths this
+/// wrapper passes, which its own constants make unreachable.
+pub(crate) fn kdf_derive(
+    key: &Secret<32>,
+    context: &KdfContext,
+) -> Result<Secret<32>, CryptoError> {
+    init()?;
+    let mut subkey = [0u8; HASH_LEN];
+    if !ffi::kdf_derive(key.expose(), &context.0, &mut subkey) {
+        return Err(CryptoError::BadLength);
+    }
+    let derived = Secret::from_bytes(subkey);
+    // The array is `Copy`, so wrapping it left this copy behind (R18).
+    ffi::memzero(&mut subkey);
+    Ok(derived)
+}
+
+/// BLAKE2b of `input` at 32 bytes, unkeyed (spec 010, R9).
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise, and
+/// `CryptoError::TooLong` when the input length cannot be expressed.
+pub(crate) fn hash(input: &[u8]) -> Result<[u8; HASH_LEN], CryptoError> {
+    init()?;
+    let mut digest = [0u8; HASH_LEN];
+    if ffi::generichash(None, input, &mut digest) {
+        Ok(digest)
+    } else {
+        Err(CryptoError::TooLong)
+    }
+}
+
+/// BLAKE2b of `input` at 32 bytes under a 32-byte key. The result is key
+/// material, so it comes back as a secret (spec 010, R9).
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise, and
+/// `CryptoError::TooLong` when the input length cannot be expressed.
+pub(crate) fn keyed_hash(key: &Secret<32>, input: &[u8]) -> Result<Secret<32>, CryptoError> {
+    init()?;
+    let mut digest = [0u8; HASH_LEN];
+    if !ffi::generichash(Some(key.expose()), input, &mut digest) {
+        return Err(CryptoError::TooLong);
+    }
+    let hashed = Secret::from_bytes(digest);
+    // The array is `Copy`, so wrapping it left this copy behind (R18).
+    ffi::memzero(&mut digest);
+    Ok(hashed)
+}
+
+/// The Ed25519 key pair of `seed`, which is what makes an identity
+/// reproducible from stored key material (spec 010, R10).
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise;
+/// `CryptoError::BadLength` if libsodium refuses the fixed lengths this
+/// wrapper passes, which its own constants make unreachable.
+pub(crate) fn sign_keypair_from_seed(
+    seed: &Secret<32>,
+) -> Result<(PublicKey, Secret<64>), CryptoError> {
+    init()?;
+    let mut public_key = [0u8; 32];
+    let mut secret_key = [0u8; 64];
+    if !ffi::sign_keypair_from_seed(seed.expose(), &mut public_key, &mut secret_key) {
+        return Err(CryptoError::BadLength);
+    }
+    let pair = (PublicKey(public_key), Secret::from_bytes(secret_key));
+    // The array is `Copy`, so wrapping it left this copy behind (R18).
+    ffi::memzero(&mut secret_key);
+    Ok(pair)
+}
+
+/// A fresh Ed25519 key pair from libsodium's random source (spec 010, R10).
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise;
+/// `CryptoError::BadLength` if libsodium refuses the fixed lengths this
+/// wrapper passes, which its own constants make unreachable.
+pub(crate) fn sign_keypair() -> Result<(PublicKey, Secret<64>), CryptoError> {
+    init()?;
+    let mut public_key = [0u8; 32];
+    let mut secret_key = [0u8; 64];
+    if !ffi::sign_keypair(&mut public_key, &mut secret_key) {
+        return Err(CryptoError::BadLength);
+    }
+    let pair = (PublicKey(public_key), Secret::from_bytes(secret_key));
+    // The array is `Copy`, so wrapping it left this copy behind (R18).
+    ffi::memzero(&mut secret_key);
+    Ok(pair)
+}
+
+/// Signs `message` detached with an Ed25519 secret key (spec 010, R10).
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise, and
+/// `CryptoError::TooLong` when the message length cannot be expressed.
+pub(crate) fn sign_detached(
+    secret_key: &Secret<64>,
+    message: &[u8],
+) -> Result<Signature, CryptoError> {
+    init()?;
+    let mut signature = [0u8; 64];
+    if ffi::sign_detached(secret_key.expose(), message, &mut signature) {
+        Ok(Signature(signature))
+    } else {
+        Err(CryptoError::TooLong)
+    }
+}
+
+/// Verifies a detached signature (spec 010, R10).
+///
+/// Strictness is libsodium's: a non-canonical `S`, an identity or small-order
+/// public key, a small-order `R` and a non-canonical public key are all
+/// refused, and the negative vectors of the spec prove it at test time.
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise;
+/// `CryptoError::Forged` when the signature does not verify.
+pub(crate) fn verify_detached(
+    public_key: &PublicKey,
+    message: &[u8],
+    signature: &Signature,
+) -> Result<(), CryptoError> {
+    init()?;
+    if ffi::sign_verify_detached(&public_key.0, message, &signature.0) {
+        Ok(())
     } else {
         Err(CryptoError::Forged)
     }
