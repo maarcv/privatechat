@@ -25,7 +25,7 @@ jobs:
     name: fmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup toolchain install # from rust-toolchain.toml (rustup ≥ 1.28 installs the pinned channel and components)
       - name: s001_t01_r01_fmt_check
         run: cargo fmt --all --check
@@ -34,7 +34,7 @@ jobs:
     name: clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup toolchain install # from rust-toolchain.toml (rustup ≥ 1.28 installs the pinned channel and components)
       - uses: Swatinem/rust-cache@v2 # s001_t06_r06_cargo_cache
       - name: s001_t02_r02_clippy_denies_warnings
@@ -44,7 +44,7 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup toolchain install # from rust-toolchain.toml (rustup ≥ 1.28 installs the pinned channel and components)
       - uses: Swatinem/rust-cache@v2
       - name: s000_t01_r01_workspace_builds
@@ -56,7 +56,7 @@ jobs:
     name: deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: s001_t03_r03_cargo_deny
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
@@ -69,7 +69,7 @@ jobs:
     name: doc-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: s001_t04_r04_doc_lint
@@ -96,7 +96,7 @@ jobs:
     name: check-requirements
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: s001_t07_r07_every_requirement_has_a_test
         run: scripts/check_requirements.sh
 
@@ -105,7 +105,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: s001_t08_r08_protected_paths_require_adr # also s002_t05_r05_format_changes_need_adr
@@ -128,7 +128,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: s001_t09_r09_commit_subjects_have_prefix
