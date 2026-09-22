@@ -1,0 +1,40 @@
+# Checks for the static site in `landing/` (see `landing/README.md`). The site is outside
+# the Cargo workspace and has no Rust in it, so it has its own workflow and runs only when
+# it changes. The whole repository is checked out because the site reads `docs/` and
+# `README.md` at build time (`landing/src/lib/docs.ts`).
+name: landing
+
+on:
+  push:
+    branches: [main, mvp]
+    paths: ['landing/**', '.github/workflows/landing.yml']
+  pull_request:
+    paths: ['landing/**', '.github/workflows/landing.yml']
+
+concurrency:
+  group: landing-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: landing
+
+jobs:
+  landing:
+    name: landing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: landing/package-lock.json
+      - run: npm ci
+      - name: types
+        run: npm run check
+      - name: build
+        run: npm run build
