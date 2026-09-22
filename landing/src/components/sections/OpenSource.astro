@@ -1,0 +1,42 @@
+---
+import { getHome } from '../../lib/content';
+import type { Locale } from '../../lib/i18n';
+import { hrefOf } from '../../lib/links';
+import { anchorOf } from '../../lib/sections';
+import Button from '../ui/Button.astro';
+import Inline from '../ui/Inline.astro';
+import Section from '../ui/Section.astro';
+import SectionHeading from '../ui/SectionHeading.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const { openSource } = await getHome(locale);
+---
+
+<Section id={anchorOf('openSource')} tone="sunken">
+  <SectionHeading title={openSource.title} lead={openSource.lead} />
+
+  <ul class="mt-12 grid gap-x-10 gap-y-8 sm:grid-cols-3">
+    {
+      openSource.points.map((point) => (
+        <li>
+          <h3 class="font-semibold">{point.title}</h3>
+          <Inline text={point.body} class="mt-1.5 leading-relaxed text-ink-muted" />
+        </li>
+      ))
+    }
+  </ul>
+
+  <div class="mt-10 flex flex-wrap gap-3">
+    {
+      openSource.actions.map((item, index) => (
+        <Button href={hrefOf(item, locale)} variant={index === 0 ? 'primary' : 'secondary'}>
+          {item.label}
+        </Button>
+      ))
+    }
+  </div>
+</Section>

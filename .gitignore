@@ -12,6 +12,7 @@ Thumbs.db
 # Node / Tauri
 node_modules/
 dist/
+landing/.astro/
 clients/desktop/src-tauri/target/
 
 # Generated code (AGENTS 16)

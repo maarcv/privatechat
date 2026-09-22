@@ -1,0 +1,23 @@
+---
+import Container from './Container.astro';
+
+interface Props {
+  id: string;
+  tone?: 'hero' | 'plain' | 'sunken';
+  class?: string;
+}
+
+const tones = {
+  hero: 'bg-paper',
+  plain: 'bg-paper border-t border-line',
+  sunken: 'bg-paper-sunken border-t border-line',
+} as const;
+
+const { id, tone = 'plain', class: className } = Astro.props;
+---
+
+<section id={id} class:list={['scroll-mt-20 py-16 sm:py-24', tones[tone]]}>
+  <Container class={className}>
+    <slot />
+  </Container>
+</section>

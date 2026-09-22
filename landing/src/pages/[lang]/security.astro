@@ -1,0 +1,106 @@
+---
+import AdversaryTable from '../../components/security/AdversaryTable.astro';
+import QuotedList from '../../components/security/QuotedList.astro';
+import Container from '../../components/ui/Container.astro';
+import Inline from '../../components/ui/Inline.astro';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { availableLocales, getSecurity } from '../../lib/content';
+import { adversaries, outsideTheModel, promises, specHeader } from '../../lib/docs';
+import { isLocale, localePath } from '../../lib/i18n';
+import { hrefOf } from '../../lib/links';
+import { groupedLimitations } from '../../lib/security';
+
+export async function getStaticPaths() {
+  return (await availableLocales()).map((lang) => ({ params: { lang } }));
+}
+
+const { lang } = Astro.params;
+if (!isLocale(lang)) throw new Error(`landing: unknown language "${lang}"`);
+const content = await getSecurity(lang);
+
+const titles = new Map(content.limits.groups.map((group) => [group.id, group.title]));
+const groups = groupedLimitations().map((group) => {
+  const title = titles.get(group.id);
+  if (title === undefined) {
+    throw new Error(`landing: src/content/security/${lang}.json has no title for "${group.id}"`);
+  }
+  return { ...group, title };
+});
+---
+
+<BaseLayout
+  locale={lang}
+  page="security"
+  title={content.meta.title}
+  description={content.meta.description}
+>
+  <Container class="py-16 sm:py-24">
+    <header class="max-w-3xl">
+      <h1 class="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
+        {content.title}
+      </h1>
+      <Inline text={content.lead} class="mt-6 text-lg leading-relaxed text-ink-muted" />
+    </header>
+
+    <section class="mt-16" aria-labelledby="promises">
+      <h2 id="promises" class="text-2xl font-semibold tracking-tight">{content.promises.title}</h2>
+      <Inline text={content.promises.lead} class="mt-3 max-w-3xl text-ink-muted" />
+      <QuotedList items={promises} tone="promise" class="mt-6 max-w-3xl" />
+    </section>
+
+    <section class="mt-16" aria-labelledby="limits">
+      <h2 id="limits" class="text-2xl font-semibold tracking-tight">{content.limits.title}</h2>
+      <Inline text={content.limits.lead} class="mt-3 max-w-3xl text-ink-muted" />
+      <div class="mt-8 grid gap-10">
+        {
+          groups.map((group) => (
+            <div>
+              <h3 class="text-sm font-semibold tracking-wide uppercase">{group.title}</h3>
+              <QuotedList items={group.items} tone="limit" class="mt-4 max-w-3xl" />
+            </div>
+          ))
+        }
+      </div>
+    </section>
+
+    <section class="mt-16" aria-labelledby="adversaries">
+      <h2 id="adversaries" class="text-2xl font-semibold tracking-tight">
+        {content.adversaries.title}
+      </h2>
+      <Inline text={content.adversaries.lead} class="mt-3 max-w-3xl text-ink-muted" />
+      <AdversaryTable table={adversaries} />
+    </section>
+
+    <section class="mt-16" aria-labelledby="outside">
+      <h2 id="outside" class="text-2xl font-semibold tracking-tight">{content.outside.title}</h2>
+      <Inline text={outsideTheModel} class="mt-3 max-w-3xl leading-relaxed text-ink-muted" />
+    </section>
+
+    <section class="mt-16 border-t border-line pt-8" aria-labelledby="provenance">
+      <h2 id="provenance" class="text-sm font-semibold tracking-wide uppercase">
+        {content.provenance.title}
+      </h2>
+      <Inline text={content.provenance.lead} class="mt-3 max-w-3xl text-sm text-ink-muted" />
+      <ul class="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm">
+        {
+          content.provenance.links.map((item) => (
+            <li>
+              <a href={hrefOf(item, lang)} class="text-accent underline underline-offset-4">
+                {item.label}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+      <p class="mt-4 font-mono text-xs text-ink-muted">
+        {content.provenance.versionLabel}: {specHeader.version} · {specHeader.updated}
+      </p>
+      <a
+        href={localePath(lang)}
+        class="mt-8 inline-block text-sm text-accent underline underline-offset-4"
+      >
+        {content.backToHome}
+      </a>
+    </section>
+  </Container>
+</BaseLayout>

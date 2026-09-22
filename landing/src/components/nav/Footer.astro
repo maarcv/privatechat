@@ -1,0 +1,36 @@
+---
+import { getSite } from '../../lib/content';
+import { localePath, type Locale } from '../../lib/i18n';
+import { hrefOf } from '../../lib/links';
+import Container from '../ui/Container.astro';
+import Inline from '../ui/Inline.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const site = await getSite(locale);
+---
+
+<footer class="border-t border-line bg-paper-sunken">
+  <Container class="flex flex-col gap-4 py-10 text-sm text-ink-muted sm:flex-row sm:items-start sm:justify-between">
+    <Inline text={site.footer.note} class="max-w-md" />
+    <ul class="flex flex-wrap gap-x-5 gap-y-2">
+      <li>
+        <a href={localePath(locale, 'security')} class="underline underline-offset-2 hover:text-ink">
+          {site.nav.security}
+        </a>
+      </li>
+      {
+        site.footer.links.map((item) => (
+          <li>
+            <a href={hrefOf(item, locale)} class="underline underline-offset-2 hover:text-ink">
+              {item.label}
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </Container>
+</footer>

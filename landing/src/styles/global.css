@@ -1,0 +1,88 @@
+@import 'tailwindcss';
+
+/*
+  Minimal, high contrast, no photographs, light and dark (landing/CONTENT.md).
+
+  Nothing is fetched from a third party: the type is whatever the reader already has,
+  the only images are the inline SVG illustrations, and the site ships no script. That
+  is the same position as the clients (docs/spec.md §8 "Telemetry": no third-party SDK).
+*/
+
+:root {
+  color-scheme: light dark;
+
+  --paper: #fbfbf9;
+  --paper-raised: #ffffff;
+  --paper-sunken: #f1f1ec;
+  --ink: #16171b;
+  --ink-muted: #54575e;
+  --line: #dcdcd5;
+  --accent: #0a6a56;
+  --accent-contrast: #ffffff;
+  --flag: #8a2e1e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0d0e11;
+    --paper-raised: #16181d;
+    --paper-sunken: #101217;
+    --ink: #ecedf1;
+    --ink-muted: #a2a7b1;
+    --line: #2a2d35;
+    --accent: #4ed3ac;
+    --accent-contrast: #05231b;
+    --flag: #ff9d85;
+  }
+}
+
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-raised: var(--paper-raised);
+  --color-paper-sunken: var(--paper-sunken);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-flag: var(--flag);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
+  body {
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    text-wrap: pretty;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    overflow-wrap: anywhere;
+  }
+}

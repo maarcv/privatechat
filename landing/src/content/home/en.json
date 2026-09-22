@@ -1,0 +1,189 @@
+{
+  "meta": {
+    "title": "privatechat — a private group chat",
+    "description": "An end-to-end encrypted group chat where the server is only a mailbox: no accounts, no identities, nothing it can read."
+  },
+  "idea": {
+    "navLabel": "Idea",
+    "title": "A free and private internet, for everyone",
+    "lead": "Talking with the people you choose, without anyone in between able to read it, should be as ordinary as talking in a room. privatechat is a group chat built on that one idea, and on very little else.",
+    "points": [
+      {
+        "title": "Privacy is a default, not a feature for experts",
+        "body": "Keeping a conversation to the people in it should not require knowing how any of this works. The difficult part belongs in the software, not in the person using it."
+      },
+      {
+        "title": "Open and verifiable, not trusted",
+        "body": "The tools for this have to be simple, open and checkable by anyone — not believed on the word of whoever runs them."
+      },
+      {
+        "title": "Less is safer",
+        "body": "Every piece that does not bring a demonstrable guarantee is a place to fail, so it is left out."
+      }
+    ],
+    "actions": [
+      { "label": "See what it is", "section": "whatItIs" },
+      { "label": "Read the source", "link": "repository" }
+    ]
+  },
+  "whatItIs": {
+    "navLabel": "What it is",
+    "title": "A private group chat",
+    "lead": "End-to-end encrypted group chat where the server is only a mailbox: it has no accounts, knows no identities and cannot read anything it stores.",
+    "points": [
+      {
+        "title": "The server is a mailbox",
+        "body": "It keeps opaque blobs and hands them out. It has no accounts, it knows no identities, and it cannot read a single message."
+      },
+      {
+        "title": "There is no sign-up",
+        "body": "You join a channel by receiving its config: a QR code scanned in person, or a file protected by a password spoken over another channel."
+      },
+      {
+        "title": "Three clients, one core",
+        "body": "Desktop, Android and iOS over a single cryptographic core written in Rust, so there is one implementation to audit instead of three."
+      },
+      {
+        "title": "Anyone can run the server",
+        "body": "The project is open source, and every channel lives on the server chosen by whoever created it."
+      },
+      {
+        "title": "Messages expire",
+        "body": "Each channel has a retention time, applied on the server and again on your device, because the server is not trusted to delete."
+      },
+      {
+        "title": "Private, not anonymous",
+        "body": "The server cannot read what you write, but without Tor it sees an IP address, and an IP address is a person. That distinction is kept everywhere on this site."
+      }
+    ],
+    "limits": {
+      "title": "What it is not",
+      "items": [
+        "No calls and no attachments.",
+        "No one-to-one messages with prekeys.",
+        "No web version: the client never runs code that a server sent.",
+        "No push notifications.",
+        "No removing a member — the group creates a new channel instead.",
+        "No identity that follows you between channels or devices."
+      ]
+    }
+  },
+  "howItWorks": {
+    "navLabel": "How it works",
+    "title": "How it works",
+    "lead": "Four steps, in plain words. The exact construction is written down in the specification; this is the shape of it, not a summary you are asked to take on faith.",
+    "steps": [
+      {
+        "title": "A channel is a key",
+        "body": "Whoever creates the channel gets a random root key. Everything else — the channel's identifier on the server, the message keys, the header key — is derived from it. Whoever has the key is in the channel."
+      },
+      {
+        "title": "The invitation travels outside the system",
+        "body": "A QR code shown on screen and scanned in person, or a `.chatcfg` file protected by seven random words spoken over another channel. The server never sees the invitation."
+      },
+      {
+        "title": "Every message is sealed and signed",
+        "body": "Each message is encrypted with a key of its own and then signed with the sender's key for that channel. The server stores an opaque blob padded to a fixed size class, and does not know who wrote it."
+      },
+      {
+        "title": "You verify people, not accounts",
+        "body": "A member is a key that has written. To know it is your friend, you compare a QR code or twelve words with them in person. Nothing about it goes through the server."
+      }
+    ],
+    "also": {
+      "title": "Two things worth saying here",
+      "items": [
+        "One key per device. Changing device means importing the config again and generating a new key, and the others see you as someone new until they verify you again.",
+        "No forward secrecy in v1. Whoever obtains a channel key can decrypt any message of that channel they have captured, past or future, until the group creates a new channel. It is on the list of limits, not in a footnote."
+      ]
+    }
+  },
+  "runItYourself": {
+    "navLabel": "Run it yourself",
+    "title": "Run it yourself",
+    "lead": "By default a new channel goes to the project's server. That is a convenience, not a requirement, and it is the part of the system you are most entitled to distrust.",
+    "points": [
+      {
+        "title": "One binary, one table",
+        "body": "The server is a single binary with one SQLite table. It holds no secrets and no user accounts. Anyone can run one."
+      },
+      {
+        "title": "Each channel picks its server",
+        "body": "The server is fixed when the channel is created. The app ships with the project's server as the default; it can be changed in the settings or for a single channel."
+      },
+      {
+        "title": "What running a server lets you see",
+        "body": "Which channels are being listened to, from which IP address and when. Not the content and not who writes. If you host the server for your group, you see your group's IP addresses: that is said here rather than left to be discovered."
+      },
+      {
+        "title": "Tor and .onion",
+        "body": "Supported, for the people for whom the IP address is the thing that matters."
+      }
+    ],
+    "actions": [
+      {
+        "label": "Reference deployment",
+        "link": "deploy",
+        "note": "In progress: it arrives with the server, in phase 3."
+      }
+    ]
+  },
+  "checkItYourself": {
+    "navLabel": "Check it yourself",
+    "title": "Check it yourself",
+    "lead": "This site does not ask to be trusted. It says where to look.",
+    "plannedLabel": "Planned",
+    "checks": [
+      {
+        "title": "Read the specification",
+        "body": "Everything the software does is written before it is coded: the full specification, a record for every decision, and one spec per feature with numbered requirements and a test that cites each one.",
+        "action": { "label": "Read the specification", "link": "spec" }
+      },
+      {
+        "title": "Read the threat model",
+        "body": "Who can see what, and what we do about it, in one table. The same table is on the promises and limits page of this site.",
+        "action": { "label": "Read the threat model", "link": "threatModel" }
+      },
+      {
+        "title": "Run the test vectors",
+        "body": "The protocol produces fixed bytes for fixed inputs. The vectors are published, so an independent implementation can check itself against them instead of against our word.",
+        "action": { "label": "See the test vectors", "link": "vectors" }
+      },
+      {
+        "title": "Rebuild the app and compare the hash",
+        "body": "Reproducible builds with published hashes, so the app you install can be shown to be the source you read.",
+        "planned": true,
+        "action": { "label": "See the plan", "link": "spec" }
+      },
+      {
+        "title": "No code from the server",
+        "body": "The client never runs code the server sends, and there is no web client. All the cryptography is libsodium: the project implements no primitive of its own.",
+        "action": { "label": "Read the decisions", "link": "adrIndex" }
+      }
+    ]
+  },
+  "openSource": {
+    "navLabel": "Open source",
+    "title": "Open source, MIT",
+    "lead": "Use it, fork it, ship it under your own name, with or without our server.",
+    "points": [
+      {
+        "title": "How the project works",
+        "body": "Spec first, human review, tests that cite the requirement they cover, small pull requests. The rules are in the repository and they apply to people and to agents alike."
+      },
+      {
+        "title": "Where help is welcome",
+        "body": "Independent review of the cryptographic model, translations of the clients and of this site, reports from people running their own server, and client work once the core and the storage are closed."
+      },
+      {
+        "title": "Reporting a vulnerability",
+        "body": "Not in a public issue. The security policy has the private form, what to include and the response times the project commits to."
+      }
+    ],
+    "actions": [
+      { "label": "Read the repository", "link": "repository" },
+      { "label": "How to contribute", "link": "contributing" },
+      { "label": "Security policy", "link": "securityPolicy" }
+    ]
+  }
+}

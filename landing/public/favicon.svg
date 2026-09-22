@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="privatechat">
+  <style>
+    .paper { fill: #fbfbf9; }
+    .ink { fill: none; stroke: #16171b; stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
+    .accent { fill: none; stroke: #0a6a56; stroke-width: 2.2; stroke-linecap: round; }
+    @media (prefers-color-scheme: dark) {
+      .paper { fill: #0d0e11; }
+      .ink { stroke: #ecedf1; }
+      .accent { stroke: #4ed3ac; }
+    }
+  </style>
+  <rect class="paper" width="32" height="32" rx="7" />
+  <path class="ink" d="M6 11.5h20v13H10.5L6 28.5z" />
+  <path class="accent" d="M12 17h8" />
+  <path class="accent" d="M12 21h5" />
+  <path class="ink" d="M13 11.5V8a3 3 0 0 1 6 0v3.5" />
+</svg>

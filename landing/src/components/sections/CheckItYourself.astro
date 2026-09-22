@@ -1,0 +1,45 @@
+---
+import { getHome } from '../../lib/content';
+import type { Locale } from '../../lib/i18n';
+import { hrefOf } from '../../lib/links';
+import { anchorOf } from '../../lib/sections';
+import Inline from '../ui/Inline.astro';
+import Section from '../ui/Section.astro';
+import SectionHeading from '../ui/SectionHeading.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const { checkItYourself } = await getHome(locale);
+---
+
+<Section id={anchorOf('checkItYourself')}>
+  <SectionHeading title={checkItYourself.title} lead={checkItYourself.lead} />
+
+  <ol class="mt-12 grid gap-px overflow-hidden rounded-lg border border-line bg-line">
+    {
+      checkItYourself.checks.map((check, index) => (
+        <li class="bg-paper p-6">
+          <h3 class="flex flex-wrap items-baseline gap-2 font-semibold">
+            <span class="font-mono text-sm text-accent">{index + 1}</span>
+            {check.title}
+            {check.planned && (
+              <span class="rounded-full border border-line px-2 py-0.5 text-xs font-normal tracking-wide text-ink-muted uppercase">
+                {checkItYourself.plannedLabel}
+              </span>
+            )}
+          </h3>
+          <Inline text={check.body} class="mt-1.5 max-w-3xl leading-relaxed text-ink-muted" />
+          <a
+            href={hrefOf(check.action, locale)}
+            class="mt-3 inline-block text-sm text-accent underline underline-offset-4"
+          >
+            {check.action.label}
+          </a>
+        </li>
+      ))
+    }
+  </ol>
+</Section>

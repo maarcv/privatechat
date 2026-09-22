@@ -1,0 +1,40 @@
+{
+  "meta": {
+    "title": "Promises and limits — privatechat",
+    "description": "What privatechat promises, what it does not promise, and who can see what. Copied from the project's specification and threat model."
+  },
+  "title": "Promises and limits",
+  "lead": "Every sentence on this page is taken from the specification and the threat model in the repository, and the page is built from those files, so it cannot drift from them. Nothing here is softened for a website.",
+  "promises": {
+    "title": "What it promises",
+    "lead": "The five guarantees of the specification, §1."
+  },
+  "limits": {
+    "title": "What it does not promise",
+    "lead": "The nine items of the specification §1 and the three the threat model adds. Every sentence is kept; the grouping only makes them readable.",
+    "groups": [
+      { "id": "device", "title": "Your device and the people in the channel" },
+      { "id": "channel-key", "title": "The channel key" },
+      { "id": "server", "title": "The server and the network" },
+      { "id": "platform", "title": "The operating system and the store" }
+    ]
+  },
+  "adversaries": {
+    "title": "Who can see what",
+    "lead": "The adversary table of the specification §2, in the three columns of the source: who the adversary is, what they can see or do, and what we do about it."
+  },
+  "outside": {
+    "title": "Outside the model"
+  },
+  "provenance": {
+    "title": "Where this comes from",
+    "lead": "The lists and the table above are read from these files when the site is built.",
+    "versionLabel": "Specification",
+    "links": [
+      { "label": "Specification §1–§2", "link": "spec" },
+      { "label": "Threat model", "link": "threatModel" },
+      { "label": "Audit log", "link": "auditLog" }
+    ]
+  },
+  "backToHome": "Back to the home page"
+}

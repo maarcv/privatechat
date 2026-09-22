@@ -1,0 +1,37 @@
+---
+import { getHome } from '../../lib/content';
+import type { Locale } from '../../lib/i18n';
+import { anchorOf } from '../../lib/sections';
+import Inline from '../ui/Inline.astro';
+import Section from '../ui/Section.astro';
+import SectionHeading from '../ui/SectionHeading.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const { whatItIs } = await getHome(locale);
+---
+
+<Section id={anchorOf('whatItIs')} tone="sunken">
+  <SectionHeading title={whatItIs.title} lead={whatItIs.lead} />
+
+  <ul class="mt-12 grid gap-x-10 gap-y-8 sm:grid-cols-2">
+    {
+      whatItIs.points.map((point) => (
+        <li class="border-l-2 border-accent pl-4">
+          <h3 class="font-semibold">{point.title}</h3>
+          <Inline text={point.body} class="mt-1.5 leading-relaxed text-ink-muted" />
+        </li>
+      ))
+    }
+  </ul>
+
+  <div class="mt-12 rounded-lg border border-line bg-paper-raised p-6">
+    <h3 class="text-sm font-semibold tracking-wide uppercase">{whatItIs.limits.title}</h3>
+    <ul class="mt-4 grid gap-2 text-ink-muted sm:grid-cols-2">
+      {whatItIs.limits.items.map((item) => <Inline as="li" text={item} class="leading-relaxed" />)}
+    </ul>
+  </div>
+</Section>

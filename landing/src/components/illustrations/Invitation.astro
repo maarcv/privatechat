@@ -1,0 +1,38 @@
+---
+/** The invitation travels out of band: the server never sees it. */
+interface Props {
+  class?: string;
+}
+
+const { class: className } = Astro.props;
+---
+
+<svg
+  viewBox="0 0 200 120"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  aria-hidden="true"
+  focusable="false"
+  class={className}
+>
+  <g class="text-ink" stroke="currentColor">
+    <rect x="14" y="14" width="46" height="80" rx="7"></rect>
+    <rect x="140" y="14" width="46" height="80" rx="7"></rect>
+  </g>
+  <g class="text-accent" stroke="currentColor">
+    <rect x="25" y="28" width="10" height="10" rx="1"></rect>
+    <rect x="39" y="28" width="10" height="10" rx="1"></rect>
+    <rect x="25" y="42" width="10" height="10" rx="1"></rect>
+    <path d="M39 44h4M45 44h4M39 50h10M39 56h4M25 58h10"></path>
+    <path d="M66 42h62"></path>
+    <path d="M122 36l7 6-7 6"></path>
+  </g>
+  <g class="text-ink-muted" stroke="currentColor">
+    <rect x="74" y="84" width="52" height="24" rx="4" stroke-dasharray="5 4"></rect>
+    <path d="M100 84V58" stroke-dasharray="5 4"></path>
+    <path d="M93 64l14 14M107 64l-14 14" class="text-flag" stroke="currentColor"></path>
+  </g>
+</svg>
