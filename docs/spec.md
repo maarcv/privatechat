@@ -1,6 +1,6 @@
 # Private E2E chat — Specification and plan (SDD)
 
-Version: mvp · Updated: 2026-09-21 · Marc Vilardebó · Post-audit D revision (see `docs/audit-log.md`)
+Version: mvp · Updated: 2026-09-22 · Marc Vilardebó · Post-audit D revision (see `docs/audit-log.md`)
 
 This file, on the default branch (`mvp` until the first release), is the canonical source of the specification (see §11 "Governance"). Read copy, may lag behind: https://claude.ai/code/artifact/1527bf13-79e8-485a-908d-a515cbd062a4
 
@@ -546,7 +546,8 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 │  └─ server/                ← Rust axum crate (phase 3)
 ├─ bindings/uniffi/          (phase 4)
 ├─ clients/desktop · android · ios   (phase 5)
-└─ deploy/                   ← reference docker-compose.yml, Caddyfile, nginx.conf, torrc (phase 3)
+├─ deploy/                   ← reference docker-compose.yml, Caddyfile, nginx.conf, torrc (phase 3)
+└─ landing/                  ← static multilingual site (Astro); outside the Cargo workspace, no protocol code
 ```
 
 **Governance of the specification.** Since the creation of the repository, `docs/spec.md` on the default branch (`mvp` until the first release) is the only canonical version. Claude's living document is a read copy that may lag behind; nothing is edited there. Every change to `docs/spec.md` is made by PR with human review; if it changes a decision of §3–§6, the PR includes a new ADR and a row in `docs/audit-log.md`. The `Version · Updated` header is brought up to date on every change and the doc lint checks it.
