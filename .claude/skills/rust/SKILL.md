@@ -48,8 +48,8 @@ tightening (e.g. no `unwrap`), never a relaxation.
 - Default visibility is private. Reach for `pub(crate)` before `pub`. The
   public API of `core` is the list in `docs/spec.md` §9; anything else that is
   `pub` needs a reason.
-- One `Error` enum per crate at the crate root (`core::Error`), derived with
-  `thiserror`. Variants mirror the spec's conditions one-to-one. No `anyhow`,
+- One `Error` enum per crate at the crate root (`core::Error`), written by
+  hand (`core` carries no dependency beyond libsodium and `zeroize`). Variants mirror the spec's conditions one-to-one. No `anyhow`,
   no `Box<dyn Error>` in library crates; `server`'s `main` may use `anyhow`
   for startup only.
 - Every number that appears in the spec is a named `const` next to the code

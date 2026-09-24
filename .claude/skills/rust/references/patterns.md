@@ -234,16 +234,24 @@ counter and the blob hit disk together, before the caller can send anything.
 ## 6. Test vector loader
 
 ```rust
-#[derive(serde::Deserialize)]
-struct Vector { name: String, kind: String, inputs: BTreeMap<String, HexBytes>, expected: BTreeMap<String, HexBytes> }
+// cfg(test) only. No serde: `core` carries no dependency beyond libsodium and
+// zeroize, so the loader is a small JSON reader over `include_str!` (spec 015).
+pub(crate) fn all(spec: &str) -> Vec<Vector>;          // every vector of specs/vectors/<spec>.json
+pub(crate) fn load(spec: &str, name: &str) -> Vector;  // one by name; a missing name fails the test
 
-pub fn load(spec: &str) -> Result<Vec<Vector>, VectorError> {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../specs/vectors/");
-    // read, parse, return; one test asserts the loader rejects malformed JSON
+#[test]
+fn s013_t21_r01_every_vector_is_checked() {
+    for v in vectors::all("013") {
+        match v.name.as_str() {
+            "text_k1" => check_text_k1(&v),
+            // one arm per vector; an unknown name fails, so no vector is dead
+            other => unreachable_vector(other),
+        }
+    }
 }
 ```
 
-The vectors in `specs/vectors/*.json` are regenerated only with a
-`proto_version` change and an ADR. CI (`adr-guard`) fails a diff that touches
-`specs/vectors/` without adding a new ADR file, unless a human sets the
-`adr-not-needed` label (AGENTS 18).
+The vectors in `specs/vectors/*.json` freeze when phase 1 closes; from then
+on they are regenerated only with a `proto_version` change and an ADR. CI
+(`adr-guard`) fails a diff that touches `specs/vectors/` without adding a new
+ADR file, unless a human sets the `adr-not-needed` label (AGENTS 18).
