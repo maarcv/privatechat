@@ -213,12 +213,12 @@ Docker with a fake clock.
 ## 5. Encrypt: reserve before you emit
 
 ```rust
-pub fn encrypt(&mut self, payload: &Payload, now: u64) -> Result<(ClientRef, Vec<u8>), Error> {
-    payload.validate()?;
+pub fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> Result<(ClientRef, Vec<u8>), Error> {
+    let payload = Payload::text(body, display_name, now)?; // the core builds and validates it
     let counter = self.send_counter;
     let next = counter.checked_add(1).ok_or(Error::CounterExhausted)?;
     let client_ref = ClientRef::random();
-    let blob = self.seal(payload, counter, now)?;           // derives mk, encrypts, signs
+    let blob = self.seal(&payload, counter, now)?;          // draws the nonce, derives mk, encrypts, signs
     let mut batch = WriteBatch::default();
     batch.send_counter = Some(next);
     batch.outbox_add.push((client_ref, blob.clone()));
@@ -239,8 +239,8 @@ counter and the blob hit disk together, before the caller can send anything.
 pub(crate) fn all(spec: &str) -> Vec<Vector>;          // every vector of specs/vectors/<spec>.json
 pub(crate) fn load(spec: &str, name: &str) -> Vector;  // one by name; a missing name fails the test
 
-#[test]
-fn s013_t21_r01_every_vector_is_checked() {
+#[test] // named sNNN_tTT_rRR_every_vector_is_checked in the spec that owns the file
+fn every_vector_is_checked() {
     for v in vectors::all("013") {
         match v.name.as_str() {
             "text_k1" => check_text_k1(&v),

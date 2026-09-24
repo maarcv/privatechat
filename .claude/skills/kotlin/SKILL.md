@@ -60,8 +60,8 @@ non-retention) is architecture §1. The Android mechanics:
 
 - The wrapped storage key is unwrapped by the Keystore into a `ByteArray`,
   passed once to `openStore(path, keyBytes)`, and **filled with zeros
-  immediately after**, in a `finally`. Same for the `.chatcfg` passphrase. A
-  `String` cannot be zeroed; passphrase fields use `ByteArray`-backed input.
+  immediately after**, in a `finally`. Same for the `.chatcfg` password. A
+  `String` cannot be zeroed; password fields use `ByteArray`-backed input.
 - The socket loop is a pure host for `Session`: read a frame → `onFrame(frame,
   now)` → for each `Event`, update state; write whatever `outgoing()` returns.
   No inspection of frame contents in Kotlin.
@@ -97,7 +97,7 @@ non-retention) is architecture §1. The Android mechanics:
 - Message lists use `LazyColumn` with stable `key = { it.serverId }`; never
   re-sort in the Composable — the core delivers order.
 - Secrets never reach a Composable. The QR of a config is rendered from bytes
-  the core returns and the screen sets `FLAG_SECURE`; the passphrase words are
+  the core returns and the screen sets `FLAG_SECURE`; the password words are
   shown from a `ByteArray` and cleared on dispose.
 
 ## Platform layer

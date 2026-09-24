@@ -53,8 +53,8 @@ non-retention) is architecture §1. The iOS mechanics:
 
 - The storage key comes out of the Secure Enclave unwrap as `[UInt8]`, goes
   into `openStore(path:key:)` once, and is overwritten with zeros in a
-  `defer` — same for the `.chatcfg` passphrase. `String` cannot be zeroed;
-  passphrase entry produces `[UInt8]`.
+  `defer` — same for the `.chatcfg` password. `String` cannot be zeroed;
+  password entry produces `[UInt8]`.
 - The socket actor is a pure host for `Session`: receive a frame →
   `onFrame(frame, now:)` → apply `Event`s → send `outgoing()`. It never looks
   inside a frame.
@@ -90,8 +90,8 @@ non-retention) is architecture §1. The iOS mechanics:
   Dynamic Type supported; VoiceOver checked once per screen.
 - Lists of messages use stable ids (`serverId`); never re-sort in a view.
 - Secrets never reach a view as `String`. The config QR is drawn from bytes;
-  the passphrase words are rendered from `[UInt8]` and cleared `onDisappear`.
-  Screens that show a QR or passphrase blur on `willResignActive` and observe
+  the password words are rendered from `[UInt8]` and cleared `onDisappear`.
+  Screens that show a QR or password blur on `willResignActive` and observe
   `capturedDidChange`.
 
 ## Platform layer

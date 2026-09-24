@@ -2,6 +2,30 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit F
+
+**2026-09-24 — Audit F, second review of the phase 1 specs 011–017 after audit E, in the same three independent passes (A: completeness and SDD; B: adversarial cryptography; C: goal, simplicity, implementability).** One blocker, a regression introduced by audit E; nothing breaks confidentiality, the key hierarchy or encrypt-then-sign. Substantive changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| F1 | A stale message still advanced `max_counter` and raised no own-key alert: a thief could mint one with `counter = 2^64 − 2`, `sent_at = 0` and silence the victim everywhere, with no alert (F-B1, regression of C5) | Blocker | A stale message changes nothing but the cursor; from one's own key it still persists `OwnKeyUsedElsewhere` (ADR 0027, supersedes 0024; §4) |
+| F2 | The stale rule ran after `validate`: a stale message with an unknown `type` became `Unreadable`, was persisted and could create and evict peers (F-B2) | Medium | Stale checked as soon as `sent_at` can be read, before the `type` check and `validate` (ADR 0027, §4) |
+| F3 | A receiver clock ahead of the server by more than the TTL lost every live blob for good at step 2 (F-B4) | Medium | Step 2 carries the same 360 000 ms margin (ADR 0027, §4) |
+| F4 | The mutation table could not prove what the signature covers: every mutation also broke the AEAD (F-B3) | Medium | Mutations must fail in `verify` itself; a narrower signed range is tested; a byte-by-byte mutation property (spec 013) |
+| F5 | `export_encrypted` accepted any password, so the 77 bits rested on each UI (F-B8) | Medium | The export draws the password and returns it with the file (ADR 0028, supersedes 0026; §5, §9) |
+| F6 | `export_qr` put `K_ch` in a `String`, against AGENTS 5 (F-A3) | Medium | The QR crosses the boundary as ASCII bytes the UI zeroizes (ADR 0028, §5, §9) |
+| F7 | Only four whitespace characters were collapsed: a mobile keyboard's U+00A0 made the right password wrong (F-A20) | Low | Every run of Unicode `White_Space` collapses (ADR 0028, §5) |
+| F8 | §4 literals froze on accepting 013 while the vectors froze at the phase 1 exit (F-A8) | Low | Both freeze at the phase 1 exit, after the reference script (§4) |
+| F9 | The reference script could not check Ed25519, so nothing independent pinned the signed range or `pk_ch` (F-B6) | Medium | The script carries the RFC 8032 §6 reference Ed25519, standard library only (spec 015) |
+| F10 | A key added in v1.x could make one signed blob read as two different messages across versions (F-B7) | Low | A new payload key never changes what keys 0–3 mean to v1.0 (§4) |
+| F11 | Process rules written as requirements whose tests only grep files, and two fuzz targets that add nothing (F-C3, F-C4) | Medium | About 15 requirements removed or moved to acceptance; seven targets; AGENTS 21 becomes a set check with a named exclusion list |
+| F12 | Nine one-hour targets in one job exceed the 6-hour runner limit (F-C5) | Medium | One parallel nightly job per target (§10) |
+| F13 | `store` and `server` had no stated way to reach the crate-internal codec and crypto (F-A18, F-C13) | Low | Only through `pub` functions of `core` defined by 020 and 030, each with a fuzz target (§9) |
+| F14 | `BadPadding` had no producer; `passphrase` and `password` mixed (F-A11, F-C14, F-C naming) | Low | `BadPadding` removed; `password` and `BadPassword` everywhere (§9, skills) |
+| F15 | `server_url` could grow a path later only with a `config_version` bump (F-C) | Low | No path, now or later; self-hosters use their own host or subdomain (§5) |
+
+The spec-level defects (the unreachable `Trailing` error and field-check order of 017, the unreachable version-mismatch rule of 011, the leftover fuzz dependency in the acceptance of 011 and 017, base64url and vector-generation ownership, PR slices, test paths and header inconsistencies) were fixed inside the specs and are not listed.
+
 ## Audit E
 
 **2026-09-24 — Audit E, review of the phase 1 specs 011–016 before acceptance, in three independent passes (A: completeness and SDD conformance; B: adversarial cryptography and protocol; C: fit with the goal, simplicity and implementability).** 84 findings (A1–A37, B1–B17, C1–C30). None breaks the key hierarchy, domain separation, encrypt-then-sign or the strict Ed25519 verification. The substantive ones, grouped, and the changes applied:

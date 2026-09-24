@@ -1,6 +1,6 @@
 # Test vectors
 
-JSON files validated by Rust, Kotlin and Swift: they guarantee that the three platforms produce exactly the same bytes (`docs/spec.md` §9, ADR 0012, 0015). One file per spec: `NNN.json`.
+JSON files validated by Rust, Kotlin and Swift: they guarantee that the three platforms produce exactly the same bytes (`docs/spec.md` §9, ADR 0012, 0023). One file per spec: `NNN.json`.
 
 They freeze when phase 1 closes, after `scripts/reference/` has recomputed every `derived` value independently (spec 015-test-vectors). From then on they are regenerated **only** with a `proto_version` change accompanied by an ADR (AGENTS 18); the CI (`adr-guard`) refuses a diff that touches this directory without a new ADR, unless a human sets `adr-not-needed`.
 

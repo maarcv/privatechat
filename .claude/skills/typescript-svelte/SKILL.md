@@ -66,12 +66,12 @@ desktop mechanics:
 
 - The storage key, `K_ch`, `sk_u` and message keys **never** enter the web
   view. They live in `src-tauri/` as `Secret<N>`.
-- The `.chatcfg` passphrase is typed in a component, kept as `Uint8Array`
+- The `.chatcfg` password is typed in a component, kept as `Uint8Array`
   (`TextEncoder`), passed once through `invoke`, then `.fill(0)`. A `string`
-  cannot be zeroed; do not hold the passphrase as one longer than the input
+  cannot be zeroed; do not hold the password as one longer than the input
   element forces.
 - The config QR is rendered from an image the Rust side produces; the
-  passphrase words are shown from a `Uint8Array` and zeroed on destroy.
+  password words are shown from a `Uint8Array` and zeroed on destroy.
 - No `localStorage`, `sessionStorage`, `IndexedDB` or cookies. The web view
   runs with a temporary `data_directory` and no persistent cache
   (`docs/spec.md` §8 "Window and WebView"). Draft text is component state
@@ -136,7 +136,7 @@ Follows the `rust` skill. Additionally:
 - `@testing-library/svelte` for the two flows that matter: import a config,
   verify a peer. Not every button.
 - Test names carry the spec id where they cover a requirement:
-  `test('s050_t02_r03 lock closes session and zeroes passphrase buffer', …)`.
+  `test('s050_t02_r03 lock closes session and zeroes password buffer', …)`.
 - No test touches Tauri IPC, the network or the keychain.
 
 ## Tooling

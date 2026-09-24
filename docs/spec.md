@@ -83,13 +83,15 @@ Each row corresponds to the file `docs/adr/NNNN-*.md`; titles are copied verbati
 | 0021 | Client without a database: encrypted files with atomic commit | accepted | Zero C outside libsodium; atomicity comes from `rename`; everything fuzzable from Rust |
 | 0022 | Exchange server per channel, fixed at creation | accepted | Open source = multiple servers; the group chooses its operator; changing it is a new channel |
 | 0023 | Fixed binary envelope and an own record encoding; no CBOR | accepted | One canonical encoding per value, no third-party parser on the hostile path, no dependency |
-| 0024 | Verify the signature before any state check, and expire by the signed send time | accepted | Nothing unauthenticated decides anything; a server cannot revive an expired message |
+| 0024 | Verify the signature before any state check, and expire by the signed send time | superseded by 0027 | Nothing unauthenticated decides anything; a server cannot revive an expired message |
 | 0025 | Fingerprint words from 132 bits of the fingerprint, with no BIP-39 checksum | accepted | Nobody types the words; no SHA-256 for a checksum; not a seed phrase |
-| 0026 | Invitation with a fixed expiry, a text QR and a canonical password | accepted | One password encoding on every platform; no expiry setting; scanners read text |
+| 0026 | Invitation with a fixed expiry, a text QR and a canonical password | superseded by 0028 | One password encoding on every platform; no expiry setting; scanners read text |
+| 0027 | Verify the signature before any state; a stale message changes nothing but the cursor | accepted | Nothing unauthenticated decides anything; a stale message can neither silence a member nor revive itself |
+| 0028 | The export draws the file password; the invitation crosses the boundary as bytes | accepted | 77 bits guaranteed by the core; no key in a `String` |
 
 ## 4. Cryptographic model
 
-Everything comes from libsodium; no primitive of our own is implemented. All literals of this section — parameters, domain tags, KDF contexts — are versioned with `proto_version` and frozen when spec 013 is accepted; changing any requires a new `proto_version` and an ADR. Every multi-byte integer on the wire is big-endian. All times are unix ms in `uint64`; `ttl_ms = u64(ttl_seconds) × 1000` and no formula mixes units.
+Everything comes from libsodium; no primitive of our own is implemented. All literals of this section — parameters, domain tags, KDF contexts — are versioned with `proto_version` and frozen when phase 1 closes, after the reference script of spec 015-test-vectors has cross-checked them (the same moment as the vectors, AGENTS 18); changing any requires a new `proto_version` and an ADR. Every multi-byte integer on the wire is big-endian. All times are unix ms in `uint64`; `ttl_ms = u64(ttl_seconds) × 1000` and no formula mixes units.
 
 **Primitives**
 
@@ -136,7 +138,7 @@ The message with `counter = c` from sender *u* is encrypted with `mk` and a rand
 
 **Send counter** (ADR 0019). Starts at 0 and is strictly increasing for each `sk_u`. `Channel::encrypt` reserves `counter`, derives `mk`, seals, and persists `counter + 1` together with the blob in the `outbox` (blobs sealed and not yet `ack`ed, §6) in a single commit before returning the blob (no blob leaves before the commit); if the commit fails, it returns no blob. The UI drains `outbox` in order and notifies each `ack` to the core (`Channel::acked`). `counter = 2^64 − 1` → `Error::CounterExhausted` and the UI forces "Regenerate my key". The maximum number of blobs held in `outbox`, and with it its share of `state.bin`, is fixed by spec 020-store-files.
 
-**Anti-replay** (spec 012; mandatory). For each `pk` seen, the receiver keeps `max_counter: Option<u64>`. `c ≤ max_counter` → `Error::Replay`. `c > max_counter` → accept; after successful decryption, `max_counter = c`. There is no window or bitmap: each `sk_u` lives on a single device and the server delivers each channel in total order (§6). A counter lower than or equal to the maximum seen is always a resend. `Channel::gaps()` reports `c.saturating_sub(max_counter + 1)` per sender as a signal of deletion or delay by the server, with the exceptions of §6 "Cursor and gaps"; a jump greater than 2^32 is shown as "anomalous counter jump: this key may be compromised". Gaps, the anomalous-jump flag and every other effect of a message are computed only once it is consumed ("Verification on receive", step 7), never from an unauthenticated header.
+**Anti-replay** (spec 012; mandatory). For each `pk` seen, the receiver keeps `max_counter: Option<u64>`. `c ≤ max_counter` → `Error::Replay`. `c > max_counter` → accept; after successful decryption, `max_counter = c`. There is no window or bitmap: each `sk_u` lives on a single device and the server delivers each channel in total order (§6). A counter lower than or equal to the maximum seen is always a resend. `Channel::gaps()` reports `c.saturating_sub(max_counter + 1)` per sender as a signal of deletion or delay by the server, with the exceptions of §6 "Cursor and gaps"; a jump greater than 2^32 is shown as "anomalous counter jump: this key may be compromised". Gaps, the anomalous-jump flag and every other effect of a message are computed only once it is consumed and not stale ("Verification on receive", step 7), never from an unauthenticated header.
 
 Terminology: *envelope* is the structure, *blob* the bytes on the wire and on the server, *message* the decrypted payload.
 
@@ -152,7 +154,7 @@ Terminology: *envelope* is the structure, *blob* the bytes on the wire and on th
 | 81+n | 64 | `signature` | yes |
 
 - `AAD = blob[0..81]` (includes the encrypted `enc_hdr`, as it travels).
-- `signature = crypto_sign_detached(sk_u, "privatechat/msg/v1" ‖ blob[0..81+n])`: *encrypt-then-sign*; the signature covers encrypted header and ciphertext; the receiver verifies it right after opening the header, before any state check and before the AEAD (ADR 0024). A header decrypted with a wrong `K_hdr` yields a random `pk` and the signature fails.
+- `signature = crypto_sign_detached(sk_u, "privatechat/msg/v1" ‖ blob[0..81+n])`: *encrypt-then-sign*; the signature covers encrypted header and ciphertext; the receiver verifies it right after opening the header, before any state check and before the AEAD (ADR 0027). A header decrypted with a wrong `K_hdr` yields a random `pk` and the signature fails.
 - Blob size = 161 + 1 024·k: minimum 1 185 B, maximum 64 673 B. `k = (len − 161) / 1024`.
 
 **Record encoding** (ADR 0023, spec 017-record-encoding). Every structure other than the envelope — payload, config, client-server messages and the local files — is a *record*:
@@ -178,7 +180,7 @@ record = field*            field = key (u8) ‖ len (u32 BE) ‖ value (len byte
 | 3 | `body` | bytes | Mandatory. In `text`: valid UTF-8; in `key_retired`: present and empty |
 
 - `Payload::validate()` is the only validation function and both `encrypt` and `decrypt` call it. A key out of order or repeated, a value of the wrong type or width, a missing mandatory field or an exceeded limit → `Error::BadPayload`. The UI never builds a payload: `Channel::encrypt` takes the body and the name and the core builds it (§9); only `regenerate_identity` builds a `key_retired`.
-- After a successful AEAD the anti-replay state **always** advances (authenticated = consumed). An unknown `type` or a padding, decoding or validation error persists the message as `Unreadable` without a body and the UI shows "unsupported or corrupt message". Unknown payload keys are ignored; this way fields can be added in v1.x without changing `proto_version`.
+- After a successful AEAD the anti-replay state **always** advances (authenticated = consumed), unless the message is stale (step 7), which changes nothing but the cursor. An unknown `type` or a padding, decoding or validation error persists the message as `Unreadable` without a body and the UI shows "unsupported or corrupt message". Unknown payload keys are ignored; this way fields can be added in v1.x without changing `proto_version`. A key added in v1.x MUST NOT change what keys 0–3 mean to a v1.0 client: anything that changes how `body` is read needs a new `type` (shown as `Unreadable` by older clients) or a new `proto_version`, so that one signed blob never reads as two different messages.
 - `key_retired` (ADR 0016): signed with the key being retired. From an unknown `pk` it is consumed and discarded without creating a peer.
 
 **User fingerprint**: `fp = BLAKE2b("privatechat/fp/v1" ‖ channel_id ‖ pk_u)` (32 B). It is presented in three ways:
@@ -187,18 +189,18 @@ record = field*            field = key (u8) ‖ len (u32 BE) ‖ value (len byte
 - **12 words** (ADR 0025): `words[i] = list[bits(fp, 11·i, 11)]` for `i` in 0..12, reading `fp` most significant bit first: the first 132 bits of `fp` as indices into the English BIP-39 list of 2 048 words. No checksum; the words are not a BIP-39 mnemonic. Manual verification only marks "verified" if all 12 match.
 - **Short identifier**: the first 4 of the 12 words (44 bits).
 
-**Verification on receive** (ADR 0024; in this order; each condition has a single `Error`; any error discards the message without showing it, with no write to the Store (§9) except the cursor of §6). No step before 4 reads state or has any effect: nothing written in an unauthenticated field decides anything.
+**Verification on receive** (ADR 0027; in this order; each condition has a single `Error`; any error discards the message without showing it, with no write to the Store (§9) except the cursor of §6). No step before 4 reads state or has any effect: nothing written in an unauthenticated field decides anything.
 
 1. `len < 1185`, `len > 64673` or `(len − 161) mod 1024 ≠ 0` → `BadLength`. `blob[0] ≠ 0x01` → `UnsupportedVersion`. `blob[1..17] ≠ channel_id` → `WrongChannel`.
-2. `expires_local < now` (§6) → `Expired`.
+2. `min(received_at, now) + ttl_ms + 360 000 < now` → `Expired` (the margin covers five minutes of clock skew and the rounding of `sent_at`; the display purge of §6 uses `expires_local` without it).
 3. Decrypt `enc_hdr` with `K_hdr` and `nonce`: `sender_pk`, `counter`.
 4. Signature with `sender_pk` → `BadSignature`.
 5. `sender_pk` retired → `RetiredKey`. Unknown with no room (§7 "Peer limits") → `PeerLimit`.
 6. `counter ≤ max_counter` → `Replay`.
-7. Derive `mk`, decrypt the AEAD → `BadSignature` if it fails (cannot happen with a valid signature and a correct `K_ch`; treated the same). From here the message is **consumed**. `sodium_unpad`, decoding or `validate()` failing → the message is `Unreadable`. `sent_at + ttl_ms + 360 000 < min(received_at, now)` → the message is stale (kept by the server past its TTL) and is discarded as `Expired`. Evictions, the count of ignored keys, gaps, the anomalous-jump flag and `OwnKeyUsedElsewhere` are computed here and only for a consumed message.
-8. Persist the message (or `Unreadable`), `max_counter`, the peer if new and the cursor **in a single commit**; for a stale message, only the cursor and, for a known sender, `max_counter`. Zeroize `mk`.
+7. Derive `mk`, decrypt the AEAD → `BadSignature` if it fails (cannot happen with a valid signature and a correct `K_ch`; treated the same). From here the message is **consumed**. As soon as the payload frames and `sent_at` can be read, and before the `type` check and `validate()`: `sent_at + ttl_ms + 360 000 < min(received_at, now)` → the message is **stale** (kept past its TTL by the server, or minted old by its signer) and is discarded as `Expired`. Otherwise `sodium_unpad`, decoding or `validate()` failing → the message is `Unreadable`. Evictions, the count of ignored keys, gaps, the anomalous-jump flag and `OwnKeyUsedElsewhere` are computed here, only for a consumed message that is not stale.
+8. Persist the message (or `Unreadable`), `max_counter`, the peer if new and the cursor **in a single commit**; for a stale message, only the cursor: no `max_counter`, no peer, no eviction, no send counter, except that a stale message from one's own key with `counter ≥` send counter also persists `OwnKeyUsedElsewhere`. Zeroize `mk`.
 
-**Messages from one's own key.** One's own `pk_u` is just another peer with `max_counter` = send counter − 1: the server's echo of one's own message is `Replay` and is discarded. If `decrypt` accepts a message with `sender_pk` = one's own `pk_u` and `counter ≥` send counter: (1) the send counter becomes `counter + 1` (so the victim is not left mute), or is exhausted (`CounterExhausted` on the next send) if `counter = 2^64 − 1`; (2) the `OwnKeyUsedElsewhere` event is persisted (UI in §7 "Key-used-elsewhere alert"). If the message is a `key_retired` of one's own `pk`, the channel becomes read-only until regeneration.
+**Messages from one's own key.** One's own `pk_u` is just another peer with `max_counter` = send counter − 1: the server's echo of one's own message is `Replay` and is discarded. If `decrypt` accepts a message with `sender_pk` = one's own `pk_u` and `counter ≥` send counter: (1) the send counter becomes `counter + 1` (so the victim is not left mute), or is exhausted (`CounterExhausted` on the next send) if `counter = 2^64 − 1`; (2) the `OwnKeyUsedElsewhere` event is persisted (UI in §7 "Key-used-elsewhere alert"). If the message is a `key_retired` of one's own `pk`, the channel becomes read-only until regeneration. A stale message from one's own key raises `OwnKeyUsedElsewhere` and changes no counter (step 8).
 
 **No-oracle rule.** The core emits no byte to the network depending on the result of `decrypt`; the `Error` codes are local only and no future feature (receipts, "is typing") may expose them to the sender or to the server. A verdict never surfaces as an error of `Session::on_frame`, never changes the connection state and never changes the timing of the next outgoing frame.
 
@@ -211,22 +213,22 @@ The config is the only secret of the system. It is a small record (§4 "Record e
 | 0 | `config_version` | u8 | 1. Must match the one in the header of the `PCFG` file (format below), otherwise `Error::BadConfig` |
 | 1 | `proto_version` | u8 | version of the message protocol |
 | 2 | `K_ch` | bytes32 | root key of the channel |
-| 3 | `server_url` | text | `wss://host[:port]`; allows a self-hosted server and `.onion`. Chosen by whoever creates the channel; by default, the `default_server_url` of the app settings. Immutable: changing server = new channel (ADR 0008, 0022) |
+| 3 | `server_url` | text | `wss://host[:port]`, with no path, now or in any later `config_version` (a self-hosted server uses its own host or subdomain); allows a self-hosted server and `.onion`. Chosen by whoever creates the channel; by default, the `default_server_url` of the app settings. Immutable: changing server = new channel (ADR 0008, 0022) |
 | 4 | `ttl_seconds` | u32 | message expiry (min. 60; max. 2 592 000 = 30 days). Part of the `channel_id` |
 | 5 | `created_at` | u64 | unix ms |
-| 6 | `invite_expires_at` | u64, optional | unix ms; from then on the client refuses to import it. Set by the export, fixed per form (ADR 0026); never stored after import |
+| 6 | `invite_expires_at` | u64, optional | unix ms; from then on the client refuses to import it. Set by the export, fixed per form (ADR 0028); never stored after import |
 | 7 | `suggested_name` | text | ≤ 64 B UTF-8 with no Cc character; proposed channel name; the receiver can change it locally |
 
-**Create channel.** Form with name, TTL and server. The server is prefilled with the `default_server_url` of the app settings and is editable, with the list of servers already used on this device as suggestions; before creating, the client opens a connection and checks that the `hello` replies with the expected `proto_version`. The channel card shows the server, not editable: no basic channel parameter (`K_ch`, TTL, server) (`K_ch`, TTL, server) can be changed once created. "Create new channel" prefills the same name and the same server.
+**Create channel.** Form with name, TTL and server. The server is prefilled with the `default_server_url` of the app settings and is editable, with the list of servers already used on this device as suggestions; before creating, the client opens a connection and checks that the `hello` replies with the expected `proto_version`. The channel card shows the server, not editable: no basic channel parameter (`K_ch`, TTL, server) can be changed once created. "Create new channel" prefills the same name and the same server.
 
 **Two forms of invitation, both with the same content**
 
 | Via | Mechanism | When |
 | --- | --- | --- |
-| QR in person | base64url text, without padding, of the config record **in the clear**, with no prefix and no URL scheme: no system camera opens it as a URL. Cameras with cloud recognition (Google Lens) can send the image to third parties: the UI says "scan only with this app". `invite_expires_at` = export time + 10 min, fixed (ADR 0026) | Default |
-| `.chatcfg` file | Fixed format: `"PCFG"` (4) ‖ `config_version` u8 ‖ `salt` 16 ‖ `nonce` 24 ‖ `crypto_secretbox(config record)`; `invite_expires_at` = export time + 24 h, fixed (ADR 0026). Key = Argon2id13(password, salt) with the parameters of §4; they **do not travel** in the file; unknown version → refusal. Shared via AirDrop, Nearby, email or messaging; the password is spoken over another channel. The `PCFG` prefix identifies the app: the file is considered exposed once sent, which is why it is encrypted | Sharing remotely |
+| QR in person | base64url text, without padding, of the config record **in the clear**, with no prefix and no URL scheme: no system camera opens it as a URL. Cameras with cloud recognition (Google Lens) can send the image to third parties: the UI says "scan only with this app". `invite_expires_at` = export time + 10 min, fixed (ADR 0028). The QR text crosses the core boundary as ASCII bytes, never as a `String`, and the UI zeroizes them after rendering | Default |
+| `.chatcfg` file | Fixed format: `"PCFG"` (4) ‖ `config_version` u8 ‖ `salt` 16 ‖ `nonce` 24 ‖ `crypto_secretbox(config record)`; `invite_expires_at` = export time + 24 h, fixed (ADR 0028). Key = Argon2id13(password, salt) with the parameters of §4; they **do not travel** in the file; unknown version → refusal. Shared via AirDrop, Nearby, email or messaging; the password is spoken over another channel. The `PCFG` prefix identifies the app: the file is considered exposed once sent, which is why it is encrypted | Sharing remotely |
 
-**File password.** Generated by the core: **7 random words** from the English BIP-39 list, 11 bits from `randombytes_buf` each (77 bits), shown so they can be spoken over another channel. The user cannot choose it. Its canonical bytes are the lowercase ASCII words joined by one U+0020; when a file is opened, the typed password is canonicalised first (ASCII lowercased, runs of whitespace → one U+0020, leading and trailing whitespace removed), so a keyboard's capital letter or double space is not a wrong password (ADR 0026). The password length is never reduced to compensate for Argon2id parameters, nor the other way round. The `secretbox` tag is a perfect oracle for an offline attacker and `K_ch` does not rotate: the file must resist for years. `core::crypto` bounds no password length (spec 010-primitives-wrapper, R14): the maximum length accepted when opening a `.chatcfg` file is fixed by spec 011-config-format.
+**File password.** Drawn by the core inside the export (ADR 0028): **7 random words** from the English BIP-39 list, 11 bits from `randombytes_buf` each (77 bits), returned with the file so they can be spoken over another channel. No caller chooses it. Its canonical bytes are the lowercase ASCII words joined by one U+0020; when a file is opened, the typed password is canonicalised first (ASCII lowercased, every run of Unicode `White_Space` characters → one U+0020, leading and trailing whitespace removed), so a keyboard's capital letter, double space or non-breaking space is not a wrong password. The password length is never reduced to compensate for Argon2id parameters, nor the other way round. The `secretbox` tag is a perfect oracle for an offline attacker and `K_ch` does not rotate: the file must resist for years. `core::crypto` bounds no password length (spec 010-primitives-wrapper, R14): the maximum length accepted when opening a `.chatcfg` file is fixed by spec 011-config-format.
 
 **`invite_expires_at` is not a security control.** `K_ch` does not expire. The expiry protects against carelessness (forgotten configs), not against attackers: a modified client ignores it. Whoever suspects a QR has been captured must create a new channel (ADR 0008).
 
@@ -242,7 +244,7 @@ The config is the only secret of the system. It is a small record (§4 "Record e
 
 - Exporting always asks for confirmation and shows a warning: whoever has this config can read the whole channel, past and future.
 - The config QR is shown only after an explicit tap, with screenshots blocked (§8), hides itself after 60 s, and the screen offers neither "save image" nor sharing the image.
-- `invite_expires_at` is fixed by the form (10 min for the QR, 24 h for the file) and is not configurable (ADR 0026).
+- `invite_expires_at` is fixed by the form (10 min for the QR, 24 h for the file) and is not configurable (ADR 0028).
 
 ## 6. Client-server protocol
 
@@ -296,7 +298,7 @@ where `host` is `url.host` per WHATWG: lowercase ASCII A-label, no trailing dot,
 
 **Authorisation and envelope validation** (spec 030, 033). The server only accepts `publish` for a `channel_id` authenticated with `subscribe` on the same connection; otherwise `error{not_subscribed}`. Before storing a blob it checks, without touching anything else: `1185 ≤ len ≤ 64673`, `(len − 161)` multiple of 1 024, `blob[0] = 0x01` and `blob[1..17] = channel_id`; otherwise `bad_blob`. It verifies no signatures and decrypts nothing.
 
-**TTL and expiry** (ADR 0014). The TTL is part of the `channel_id` and cannot be changed. Server: `expires_at = received_at + ttl_ms`. Client: `expires_local = min(received_at, now_local) + ttl_ms` according to its own copy of the config, without trusting the server; and, because the server supplies `received_at`, a consumed message whose signed `sent_at` is older than the TTL plus six minutes is discarded (§4 step 7, ADR 0024).
+**TTL and expiry** (ADR 0014). The TTL is part of the `channel_id` and cannot be changed. Server: `expires_at = received_at + ttl_ms`. Client: `expires_local = min(received_at, now_local) + ttl_ms` according to its own copy of the config, without trusting the server; and, because the server supplies `received_at`, a consumed message whose signed `sent_at` is older than the TTL plus six minutes is discarded (§4 step 7, ADR 0027).
 
 **Limits and quotas** (v1 values, configurable on the server):
 
@@ -426,8 +428,8 @@ flowchart TD
 ```rust
 pub enum Error {
     BadLength, UnsupportedVersion, WrongChannel, Expired, RetiredKey, PeerLimit,
-    Replay, BadSignature, BadPadding, BadPayload, CounterExhausted,
-    BadConfig, BadPassphrase, InviteExpired, ConfigMismatch,
+    Replay, BadSignature, BadPayload, CounterExhausted,
+    BadConfig, BadPassword, InviteExpired, ConfigMismatch,
     Internal,          // libsodium failed to initialise or to allocate (Argon2id needs 64 MiB)
     Store(StoreError), // arrives with spec 020-store-files
 }
@@ -441,11 +443,10 @@ pub trait Store {
 impl Config {
     pub fn create(server_url: &str, ttl_seconds: u32, suggested_name: &str, now: u64) -> Result<Config, Error>;
     pub fn parse(bytes: &[u8], now: u64) -> Result<Config, Error>;              // the record itself
-    pub fn parse_qr(text: &str, now: u64) -> Result<Config, Error>;            // base64url of the record
-    pub fn open_encrypted(bytes: &[u8], passphrase: &[u8], now: u64) -> Result<Config, Error>;
-    pub fn generate_password() -> Result<Vec<u8>, Error>;                       // 7 words, canonical bytes
-    pub fn export_qr(&self, now: u64) -> Result<String, Error>;                 // expiry now + 10 min
-    pub fn export_encrypted(&self, passphrase: &[u8], now: u64) -> Result<Vec<u8>, Error>; // now + 24 h
+    pub fn parse_qr(text: &[u8], now: u64) -> Result<Config, Error>;           // ASCII base64url of the record
+    pub fn open_encrypted(bytes: &[u8], password: &[u8], now: u64) -> Result<Config, Error>;
+    pub fn export_qr(&self, now: u64) -> Result<Vec<u8>, Error>;                // ASCII base64url; expiry now + 10 min
+    pub fn export_encrypted(&self, now: u64) -> Result<(Vec<u8>, Vec<u8>), Error>; // (file, password); now + 24 h
     pub fn channel_id(&self) -> [u8; 16];
     pub fn server_url(&self) -> &str;
     pub fn suggested_name(&self) -> &str;
@@ -478,7 +479,7 @@ impl Settings {                                                                 
 }
 
 impl Session {                                                                  // sans-I/O, ADR 0020; one per server
-    pub fn new(host: &str, channels: Vec<Channel>) -> Session;                   // all channels of one server (host and port)
+    pub fn new(server_url: &str, channels: Vec<Channel>) -> Session;             // all channels of one server (host and port)
     pub fn on_connect(&mut self, now: u64);
     pub fn on_frame(&mut self, frame: &[u8], now: u64) -> Result<Vec<Event>, Error>; // hello/ok/push/ack/error
     pub fn outgoing(&mut self) -> Vec<Vec<u8>>;                                 // subscribe, publish
@@ -487,6 +488,7 @@ impl Session {                                                                  
 
 - The UI never touches a key. The core never touches the network or the UI: it receives bytes and returns bytes. The UI groups the `Channel`s by the host and port of `server_url`, opens one TLS socket per group, passes frames in both directions and reconnects with backoff when it receives `Event::Reconnect`.
 - No server URL in the code outside the `DEFAULT_SERVER_URL` constant (spec 000).
+- The record encoding and `core::crypto` are crate-internal. `store` and `server` reach them only through `pub` functions of `core` that their own specs define (020-store-files, 030-ws-protocol); each such function that takes external bytes has a fuzz target (AGENTS 21).
 - The core does no I/O and does not read the clock: no `std::net`, `std::fs`, `tokio`, `SystemTime::now`. Time enters as a parameter (`now`). Checked with `cargo deny` (bans) and clippy `disallowed_methods`.
 - One data directory per device with a `LOCK` file (advisory), one process: no widget or share extension in v1.
 - `Channel` has no state that has not gone through `commit`: in memory there is the copy loaded at `open`, and every change is written before returning the result.
@@ -510,7 +512,7 @@ Seven phases; each one closes when its specifications have green tests and a hum
 **CI per phase**
 
 - Phase 0: `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings` (workspace lints), `cargo test`, `cargo deny --all-features check` (advisories, licenses, bans, sources), `scripts/doc_lint.sh`, `scripts/check_requirements.sh`, `adr-guard` (a diff that touches `crates/core/src/proto/**`, `crates/core/src/crypto/**`, `specs/vectors/**` or specs 011–014 and 017 without adding a file to `docs/adr/` fails, unless the `adr-not-needed` label is set by a human), `commit-lint`.
-- Phase 1: nightly fuzz (`cargo fuzz`, 1 h per target of spec 016-fuzz-harness), property tests (`proptest`: round-trip for all k, byte-by-byte mutation), the vector checks of spec 015-test-vectors, redacted `Debug` test. The log test waits for spec 100-log-test.
+- Phase 1: nightly fuzz (`cargo fuzz`, 1 h per target of spec 016-fuzz-harness, one parallel job per target), property tests (`proptest`: round-trip for all k, byte-by-byte mutation), the vector checks of spec 015-test-vectors, redacted `Debug` test. The log test waits for spec 100-log-test.
 - Phase 3: integration test with the server in Docker; Kotlin/Swift vs Rust differential test over vectors from phase 4 onwards.
 - Phase 5: basic UI tests per platform.
 - Phase 6: reproducible build and hash comparison.
