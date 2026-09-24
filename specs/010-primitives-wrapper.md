@@ -4,7 +4,7 @@ Status: implemented
 Phase: 1
 Related ADRs: 0002, 0005, 0012
 Depends on: 000, 001
-Blocks: 011, 012, 013, 014, 015, 016
+Blocks: 011, 012, 013, 014, 015, 016, 017
 Human reviewer: Marc Vilardebó · Accepted on: 2026-09-21
 
 ## Context
