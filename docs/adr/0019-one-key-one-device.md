@@ -15,5 +15,5 @@ A key `sk_u` lives on a single device and is not exported. Changing device = re-
 ## Consequences
 - Replay is also closed for receivers with no prior state for a sender (except the first message they see from them, which sets `max_counter`).
 - Gone: the bitmap, `Error::TooOld`, the `PKEY` format, the "+1 024" rule, `export_identity`/`import_identity` from the API, the second password and the double installation as a failure mode.
-- If the client receives a valid message from its own `pk` with a counter ≥ its own, the key is somewhere else: it advances the counter and alerts the user (`docs/spec.md` §4).
-- Affected specs: 012-message-keys, 021-channel-session, 025-identity-regen, 032-storage-ttl.
+- If the client receives a valid message from its own `pk` with a counter ≥ its own, the key is somewhere else: it advances the counter and alerts the user (`docs/spec.md` §4; refined by ADR 0029, which decides the echo by signature).
+- Affected specs: 013-wire-message, 021-channel-session, 025-identity-regen, 032-storage-ttl.

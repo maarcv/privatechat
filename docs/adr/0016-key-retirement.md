@@ -15,7 +15,7 @@ New payload type `key_retired`, with an empty body, signed with the key being re
 
 ## Consequences
 - A thief who holds `sk_u` can also emit the victim's `key_retired`: the effect is to close the key, which is what the victim would want. They cannot revert it. If the client receives a `key_retired` for its own key, the channel becomes read-only until regeneration.
-- `regenerate_identity` writes the `key_retired` to `outbox` in the same commit that erases the old key; this way it is not lost if the UI is offline.
+- `regenerate_identity` writes the `key_retired` to `outbox` in the same commit that erases the old key; this way it is not lost if the UI is offline (refined by ADR 0033, its counter, and ADR 0034, which keeps the old key until the retirement is acknowledged).
 - New state in the peer diagram and `retired_at` column (`docs/spec.md` §7).
 - The type is added to the v1 enum before freezing the format (spec 013).
 - Affected specs: 022-peers-tofu, 024-key-retired, 025-identity-regen, 055-verify-ui.

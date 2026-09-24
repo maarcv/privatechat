@@ -41,3 +41,9 @@ One decision per file, template in `TEMPLATE.md`. The documentation lint (spec 0
 | 0026 | Invitation with a fixed expiry, a text QR and a canonical password | 2026-09-24 | superseded by 0028 |
 | 0027 | Verify the signature before any state; a stale message changes nothing but the cursor | 2026-09-24 | accepted |
 | 0028 | The export draws the file password; the invitation crosses the boundary as bytes | 2026-09-24 | accepted |
+| 0029 | Treat a message from one's own key as an echo only if this device sealed it | 2026-09-24 | accepted |
+| 0030 | Treat a message dated more than one TTL in the future as stale | 2026-09-24 | accepted |
+| 0031 | Pad the config record so every `.chatcfg` file has the same size | 2026-09-24 | accepted |
+| 0032 | Mask the envelope signature with the header keystream | 2026-09-24 | accepted |
+| 0033 | Seal every `key_retired` with the last counter | 2026-09-24 | accepted |
+| 0034 | Publish no stale `outbox` entry, and re-seal a pending `key_retired` | 2026-09-24 | accepted |

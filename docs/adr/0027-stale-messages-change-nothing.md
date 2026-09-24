@@ -16,7 +16,7 @@ Both expiry checks carry the same margin of 360 000 ms, which covers the roundin
 - Step 2 rejects when `min(received_at, now) + ttl_ms + 360 000 < now`.
 - After the AEAD, as soon as the payload frames and `sent_at` can be read, and before the `type` check and `validate`, a message with `sent_at + ttl_ms + 360 000 < min(received_at, now)` is **stale**.
 
-A stale message is discarded as `Expired` and changes nothing but the cursor: no `max_counter`, no peer, no eviction, no send counter. The one exception is a message from one's own key with `counter ≥` send counter, which also persists `OwnKeyUsedElsewhere`, so a stolen key is still reported.
+A stale message is discarded as `Expired` and changes nothing but the cursor: no `max_counter`, no peer, no eviction, no send counter. The one exception is a message from one's own key with `counter ≥` send counter, which also persists `OwnKeyUsedElsewhere`, so a stolen key is still reported (widened by ADR 0029 to every message from one's own key this device did not seal).
 
 ## Alternatives considered
 - ADR 0024 as written: a thief can silence a member with one message.
@@ -27,5 +27,5 @@ A stale message is discarded as `Expired` and changes nothing but the cursor: no
 - Nothing an attacker writes into an unauthenticated field decides anything. Every mutated byte of a well-formed blob yields `BadSignature` in `verify`, whatever the receiver's state.
 - Replaying a stale blob is harmless: it stays stale, because `now` only grows.
 - A message that is authentic, readable and fresh is the only kind that moves `max_counter`, besides an `Unreadable` message that is not stale.
-- A sender or receiver clock off by more than five minutes loses messages in channels whose TTL is shorter than the offset. The warning of §6 for a `sent_at` more than five minutes off makes the skew visible.
-- Affected specs: 012-message-keys, 013-wire-message, 021-channel-session, 022-peers-tofu, 023-ttl-purge, 026-peer-limits.
+- A sender or receiver clock off by more than five minutes loses messages in channels whose TTL is shorter than the offset (a message left in the `outbox` past its TTL is handled by ADR 0034). The warning of §6 for a `sent_at` more than five minutes off makes the skew visible.
+- Affected specs: 013-wire-message, 021-channel-session, 022-peers-tofu, 023-ttl-purge, 026-peer-limits.
