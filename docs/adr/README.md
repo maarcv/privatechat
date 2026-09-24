@@ -36,6 +36,8 @@ One decision per file, template in `TEMPLATE.md`. The documentation lint (spec 0
 | 0021 | Client without a database: encrypted files with atomic commit | 2026-09-20 | accepted |
 | 0022 | Exchange server per channel, fixed at creation | 2026-09-20 | accepted |
 | 0023 | Fixed binary envelope and an own record encoding; no CBOR | 2026-09-24 | accepted |
-| 0024 | Verify the signature before any state check, and expire by the signed send time | 2026-09-24 | accepted |
+| 0024 | Verify the signature before any state check, and expire by the signed send time | 2026-09-24 | superseded by 0027 |
 | 0025 | Fingerprint words from 132 bits of the fingerprint, with no BIP-39 checksum | 2026-09-24 | accepted |
-| 0026 | Invitation with a fixed expiry, a text QR and a canonical password | 2026-09-24 | accepted |
+| 0026 | Invitation with a fixed expiry, a text QR and a canonical password | 2026-09-24 | superseded by 0028 |
+| 0027 | Verify the signature before any state; a stale message changes nothing but the cursor | 2026-09-24 | accepted |
+| 0028 | The export draws the file password; the invitation crosses the boundary as bytes | 2026-09-24 | accepted |

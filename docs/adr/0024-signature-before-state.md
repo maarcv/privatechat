@@ -1,6 +1,6 @@
 # ADR 0024 — Verify the signature before any state check, and expire by the signed send time
 
-Date: 2026-09-24 · Status: accepted
+Date: 2026-09-24 · Status: superseded by 0027
 
 ## Context
 The verification order of `docs/spec.md` §4 opened the encrypted header and then checked `RetiredKey`, `PeerLimit` and `Replay` before the signature. The header is a plain XChaCha20 XOR, so anyone on the path can flip chosen bits of `sender_pk` or `counter` without any key. Those checks then ran on unauthenticated values. This made the result of a mutated blob depend on the receiver's state, so the mutation table was not deterministic (audit E, findings A7, B9, C6). It also left room for side effects driven by forged values, such as evictions, the "new keys ignored" counter or a false "key may be compromised" alarm (B2).

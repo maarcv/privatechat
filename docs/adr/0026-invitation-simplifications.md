@@ -1,6 +1,6 @@
 # ADR 0026 — Invitation with a fixed expiry, a text QR and a canonical password
 
-Date: 2026-09-24 · Status: accepted
+Date: 2026-09-24 · Status: superseded by 0028
 
 ## Context
 Audit E found three places where the invitation of `docs/spec.md` §5 left interoperability or simplicity open:
