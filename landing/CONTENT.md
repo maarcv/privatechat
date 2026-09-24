@@ -148,12 +148,11 @@ the doc lint keeps the threat table single-sourced and the site must not drift f
 Structure of the page:
 
 1. **What it promises** — the five items of §1, verbatim.
-2. **What it does not promise** — the nine items of §1 plus the three extra items of
-   `docs/threat-model.md` "Accepted limitations", verbatim. Group them for reading, keeping
-   every sentence:
+2. **What it does not promise** — the single list of §1 (since audit G the threat model
+   only points at it), verbatim. Group them for reading, keeping every sentence:
    - Your device and the people in the channel: compromised device, member who forwards,
      not deniable, local data lost on reinstall or backup restore, desktop processes can
-     read the files.
+     read the files, two devices of one person are two members.
    - The channel key: whoever has it reads everything, past and future, until a new channel;
      no forward secrecy or post-compromise security in v1; a leak from a device leaks the new
      channel too; a full channel is only fixed by a new channel.

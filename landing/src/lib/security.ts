@@ -15,7 +15,7 @@ export interface LimitGroup {
 /**
  * The accepted limitations, in the order of the groups, with every sentence kept and
  * used exactly once. A mismatch is a build error: the grouping in `src/lib/limits.ts`
- * has fallen behind `docs/threat-model.md`.
+ * has fallen behind `docs/spec.md` §1.
  */
 export function groupedLimitations(): readonly LimitGroup[] {
   const used = new Map<string, string>();
@@ -27,7 +27,7 @@ export function groupedLimitations(): readonly LimitGroup[] {
       if (item === undefined || found.length > 1) {
         throw new Error(
           `landing: the accepted limitation matching ${JSON.stringify(key)} was found ` +
-            `${found.length} times in docs/threat-model.md; update src/lib/limits.ts.`,
+            `${found.length} times in docs/spec.md §1; update src/lib/limits.ts.`,
         );
       }
       const owner = used.get(item);
@@ -45,7 +45,7 @@ export function groupedLimitations(): readonly LimitGroup[] {
   const missing = acceptedLimitations.filter((item) => !used.has(item));
   if (missing.length > 0) {
     throw new Error(
-      `landing: ${missing.length} accepted limitation(s) of docs/threat-model.md are in ` +
+      `landing: ${missing.length} accepted limitation(s) of docs/spec.md §1 are in ` +
         `no group of src/lib/limits.ts, and the page must keep every sentence: ` +
         missing.map((item) => JSON.stringify(item.slice(0, 60))).join(', '),
     );

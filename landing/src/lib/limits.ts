@@ -1,8 +1,8 @@
 /**
  * How the accepted limitations are grouped on the security page.
  *
- * `landing/CONTENT.md` requires every sentence of `docs/threat-model.md` "Accepted
- * limitations" to appear verbatim, grouped for reading. The sentences themselves come
+ * `landing/CONTENT.md` requires every sentence of `docs/spec.md` §1 "What it does not
+ * promise" to appear verbatim, grouped for reading. The sentences themselves come
  * from the document (`src/lib/docs.ts`); which group each one belongs to is structure,
  * so it lives here and not in the translated content. Each key is a substring that
  * must match exactly one sentence, and `src/lib/security.ts` fails the build if a key
@@ -16,6 +16,7 @@ export const LIMIT_GROUPS = [
       'not deniable',
       'any of their processes can read the data files',
       'Reinstalling the app',
+      'Two devices of one person are two members',
     ],
   },
   {

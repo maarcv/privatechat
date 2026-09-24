@@ -2,8 +2,8 @@
  * The parts of the site that quote the repository are read from the repository, at
  * build time, and never copied into this project by hand.
  *
- * `landing/CONTENT.md` requires the security page to reproduce `docs/spec.md` §1 and
- * `docs/threat-model.md` literally, and the site must not drift from them. Parsing the
+ * `landing/CONTENT.md` requires the security page to reproduce the two lists of
+ * `docs/spec.md` §1 and the table of `docs/threat-model.md` literally, and the site must not drift from them. Parsing the
  * documents is what makes that mechanical: if a list, a table or a heading moves, the
  * build fails here instead of the site quietly going stale.
  */
@@ -96,24 +96,13 @@ export const promises: readonly string[] = (() => {
 })();
 
 /**
- * `docs/threat-model.md` "Accepted limitations", verbatim: the nine items of
- * `docs/spec.md` §1 "What it does not promise" followed by the three the threat model
- * adds. The site shows the longer list, so it checks here that it really does start
- * with the shorter one.
+ * `docs/spec.md` §1 "What it does not promise", verbatim. Since audit G it is the single
+ * list: `docs/threat-model.md` "Accepted limitations" only points at it.
  */
 export const acceptedLimitations: readonly string[] = (() => {
-  const accepted = bulletsAfter(threatModelSource, '## Accepted limitations, publicly documented');
-  const promised = bulletsAfter(specSource, '**What it does not promise');
-  if (accepted.length === 0) need(undefined, 'the list "Accepted limitations" of docs/threat-model.md');
-  const divergent = promised.findIndex((item, index) => accepted[index] !== item);
-  if (promised.length === 0 || divergent !== -1) {
-    throw new Error(
-      'landing: docs/threat-model.md "Accepted limitations" no longer starts with ' +
-        `docs/spec.md §1 "What it does not promise" (item ${divergent + 1} differs). ` +
-        'The security page quotes both; resolve the divergence in the documents first.',
-    );
-  }
-  return accepted;
+  const items = bulletsAfter(specSource, '**What it does not promise');
+  if (items.length === 0) need(undefined, 'the list "What it does not promise" of docs/spec.md §1');
+  return items;
 })();
 
 /** The adversaries table, three columns, as `docs/spec.md` §2 defines it. */

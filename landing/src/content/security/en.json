@@ -11,7 +11,7 @@
   },
   "limits": {
     "title": "What it does not promise",
-    "lead": "The nine items of the specification §1 and the three the threat model adds. Every sentence is kept; the grouping only makes them readable.",
+    "lead": "The single list of the specification §1, which the threat model points at. Every sentence is kept; the grouping only makes them readable.",
     "groups": [
       { "id": "device", "title": "Your device and the people in the channel" },
       { "id": "channel-key", "title": "The channel key" },
