@@ -27,11 +27,18 @@ confidence-threshold = 0.9
 multiple-versions = "warn"
 wildcards = "deny"
 # No cryptographic primitive or randomness source outside libsodium (AGENTS 2).
-# `rand` and `rand_core` may only come in pulled by `proptest` in dev-dependencies,
-# and `getrandom` only under those or under `tempfile`, which `proptest` uses to
-# name the files of a failed-case persistence run. None of them reaches `core`.
+# `rand`, `rand_core`, `rand_chacha` and `rand_xorshift` may only come in pulled
+# by `proptest` in dev-dependencies, and `getrandom` and `fastrand` only under
+# those or under `tempfile`, which `proptest` uses to name the files of a
+# failed-case persistence run. None of them reaches `core`. `minisign-verify`
+# (Ed25519 and BLAKE2b in Rust) comes only through the build script of
+# `libsodium-sys-stable`, which checks the signature of the archive it unpacks.
 deny = [
   { crate = "rand", wrappers = ["proptest", "rand_chacha", "rand_xorshift"] },
+  { crate = "rand_chacha", wrappers = ["proptest", "rand"] },
+  { crate = "rand_xorshift", wrappers = ["proptest"] },
+  { crate = "fastrand", wrappers = ["tempfile"] },
+  { crate = "minisign-verify", wrappers = ["libsodium-sys-stable"] },
   { crate = "rand_core", wrappers = ["proptest", "rand", "rand_chacha", "rand_xorshift"] },
   { crate = "getrandom", wrappers = ["rand_core", "tempfile"] },
   { crate = "sha2" },
@@ -52,12 +59,54 @@ deny = [
   { crate = "openssl" },
   { crate = "openssl-sys" },
   { crate = "sodiumoxide", reason = "Abandoned; use libsodium-sys-stable" },
+  { crate = "libsodium-sys" },
+  { crate = "dryoc" },
+  { crate = "ed25519-compact" },
+  { crate = "ed25519-zebra" },
+  { crate = "poly1305" },
+  { crate = "salsa20" },
+  { crate = "xsalsa20poly1305" },
+  { crate = "crypto_secretbox" },
+  { crate = "crypto_box" },
+  { crate = "blake3" },
+  { crate = "sha1" },
+  { crate = "md5" },
+  { crate = "pbkdf2" },
+  { crate = "scrypt" },
+  { crate = "rustls" },
+  { crate = "aws-lc-rs" },
+  { crate = "aws-lc-sys" },
   # No compression: compressing before encrypting leaks content (AGENTS 24).
   # `libsodium-sys-stable` ships libsodium's sources as an archive and unpacks
-  # them in its build script, so `zip` and `flate2` reach the graph through it
-  # and through nothing else. Every other path stays banned.
+  # them in its build script, so `zip`, `flate2` with its `zlib-rs` backend,
+  # `zopfli`, `libflate` and `libflate_lz77` reach the graph through it and
+  # through nothing else. Every other path stays banned.
   { crate = "flate2", wrappers = ["zip"] },
+  { crate = "zlib-rs", wrappers = ["flate2"] },
   { crate = "zip", wrappers = ["libsodium-sys-stable"] },
+  { crate = "zopfli", wrappers = ["zip"] },
+  { crate = "libflate", wrappers = ["libsodium-sys-stable"] },
+  { crate = "libflate_lz77", wrappers = ["libflate"] },
+  { crate = "miniz_oxide" },
+  { crate = "lzma-rs" },
+  { crate = "xz2" },
+  { crate = "bzip2" },
+  { crate = "snap" },
+  { crate = "lz4_flex" },
+  { crate = "lz4-sys" },
+  { crate = "ruzstd" },
+  { crate = "zstd-safe" },
+  { crate = "zstd-sys" },
+  { crate = "lzma-sys" },
+  { crate = "liblzma" },
+  { crate = "bzip2-sys" },
+  { crate = "libz-sys" },
+  { crate = "libz-ng-sys" },
+  { crate = "brotli-decompressor" },
+  { crate = "deflate" },
+  { crate = "inflate" },
+  { crate = "yazi" },
+  { crate = "zune-inflate" },
   { crate = "zstd" },
   { crate = "brotli" },
   { crate = "lz4" },
