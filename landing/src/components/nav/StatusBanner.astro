@@ -1,0 +1,26 @@
+---
+import { projectStatus } from '../../lib/docs';
+import { LINKS } from '../../lib/links';
+import Container from '../ui/Container.astro';
+import Inline from '../ui/Inline.astro';
+
+/**
+ * Which phase the project is in (`landing/CONTENT.md`: no download, no store badge and
+ * no server address until they exist). The sentence is the one in the repository
+ * README, read at build time, so the site cannot claim a phase the project has left.
+ */
+interface Props {
+  label: string;
+  repositoryLabel: string;
+}
+
+const { label, repositoryLabel } = Astro.props;
+---
+
+<div class="border-b border-line bg-paper-sunken">
+  <Container class="flex flex-wrap items-baseline gap-x-2 gap-y-1 py-2 text-sm text-ink-muted">
+    <span class="font-medium text-ink">{label}</span>
+    <Inline as="span" text={projectStatus} />
+    <a href={LINKS.repository} class="text-accent underline underline-offset-2">{repositoryLabel}</a>
+  </Container>
+</div>

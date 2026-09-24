@@ -1,0 +1,37 @@
+---
+/** A channel is a key: everything else in the channel is derived from it. */
+interface Props {
+  class?: string;
+}
+
+const { class: className } = Astro.props;
+---
+
+<svg
+  viewBox="0 0 200 120"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  aria-hidden="true"
+  focusable="false"
+  class={className}
+>
+  <g class="text-accent" stroke="currentColor">
+    <circle cx="32" cy="60" r="14"></circle>
+    <path d="M46 60h40"></path>
+    <path d="M70 60v9M80 60v9"></path>
+  </g>
+  <g class="text-ink-muted" stroke="currentColor">
+    <path d="M86 60c16 0 16-29 32-29"></path>
+    <path d="M86 60h32"></path>
+    <path d="M86 60c16 0 16 29 32 29"></path>
+  </g>
+  <g class="text-ink" stroke="currentColor">
+    <rect x="118" y="20" width="60" height="22" rx="4"></rect>
+    <rect x="118" y="49" width="60" height="22" rx="4"></rect>
+    <rect x="118" y="78" width="60" height="22" rx="4"></rect>
+    <path d="M128 31h22M128 60h30M128 89h18" class="text-ink-muted" stroke="currentColor"></path>
+  </g>
+</svg>

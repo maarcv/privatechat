@@ -1,0 +1,45 @@
+---
+import { getHome } from '../../lib/content';
+import type { Locale } from '../../lib/i18n';
+import { hrefOf } from '../../lib/links';
+import { anchorOf } from '../../lib/sections';
+import Button from '../ui/Button.astro';
+import Inline from '../ui/Inline.astro';
+import Section from '../ui/Section.astro';
+import SectionHeading from '../ui/SectionHeading.astro';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const { runItYourself } = await getHome(locale);
+---
+
+<Section id={anchorOf('runItYourself')} tone="sunken">
+  <SectionHeading title={runItYourself.title} lead={runItYourself.lead} />
+
+  <ul class="mt-12 grid gap-x-10 gap-y-8 sm:grid-cols-2">
+    {
+      runItYourself.points.map((point) => (
+        <li class="border-l-2 border-accent pl-4">
+          <h3 class="font-semibold">{point.title}</h3>
+          <Inline text={point.body} class="mt-1.5 leading-relaxed text-ink-muted" />
+        </li>
+      ))
+    }
+  </ul>
+
+  <div class="mt-10 flex flex-wrap items-center gap-x-4 gap-y-2">
+    {
+      runItYourself.actions.map((item) => (
+        <>
+          <Button href={hrefOf(item, locale)} variant="secondary">
+            {item.label}
+          </Button>
+          {item.note !== undefined && <span class="text-sm text-ink-muted">{item.note}</span>}
+        </>
+      ))
+    }
+  </div>
+</Section>

@@ -1,0 +1,32 @@
+---
+import Inline from '../ui/Inline.astro';
+
+/**
+ * A list of sentences reproduced verbatim from the repository documents. Nothing here
+ * is rewritten: `landing/CONTENT.md` requires the page to keep every sentence.
+ */
+interface Props {
+  items: readonly string[];
+  tone?: 'promise' | 'limit';
+  class?: string;
+}
+
+const tones = {
+  promise: 'border-accent',
+  limit: 'border-flag',
+} as const;
+
+const { items, tone = 'promise', class: className } = Astro.props;
+---
+
+<ul class:list={['grid gap-3', className]}>
+  {
+    items.map((item) => (
+      <Inline
+        as="li"
+        text={item}
+        class:list={['border-l-2 pl-4 leading-relaxed text-ink-muted', tones[tone]]}
+      />
+    ))
+  }
+</ul>

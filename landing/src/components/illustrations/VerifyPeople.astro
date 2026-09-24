@@ -1,0 +1,40 @@
+---
+/** You verify people, not accounts: a QR or twelve words, in person. */
+interface Props {
+  class?: string;
+}
+
+const { class: className } = Astro.props;
+---
+
+<svg
+  viewBox="0 0 200 120"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="2"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  aria-hidden="true"
+  focusable="false"
+  class={className}
+>
+  <g class="text-ink" stroke="currentColor">
+    <circle cx="28" cy="34" r="12"></circle>
+    <path d="M10 66a18 18 0 0 1 36 0"></path>
+    <circle cx="172" cy="34" r="12"></circle>
+    <path d="M154 66a18 18 0 0 1 36 0"></path>
+  </g>
+  <g class="text-accent" stroke="currentColor">
+    <rect x="76" y="18" width="48" height="48" rx="4"></rect>
+    <rect x="85" y="27" width="11" height="11" rx="1"></rect>
+    <rect x="104" y="27" width="11" height="11" rx="1"></rect>
+    <rect x="85" y="46" width="11" height="11" rx="1"></rect>
+    <path d="M104 46h5M113 46h2M104 53h11"></path>
+    <path d="M52 42h18M148 42h-18"></path>
+  </g>
+  <!-- The twelve words that are compared out loud. -->
+  <g class="text-ink-muted" stroke="currentColor" stroke-width="4">
+    <path d="M30 98h8M42 98h8M54 98h8M66 98h8M78 98h8M90 98h8"></path>
+    <path d="M102 98h8M114 98h8M126 98h8M138 98h8M150 98h8M162 98h8"></path>
+  </g>
+</svg>

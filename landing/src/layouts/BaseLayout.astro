@@ -1,0 +1,61 @@
+---
+import '../styles/global.css';
+
+import Footer from '../components/nav/Footer.astro';
+import Header from '../components/nav/Header.astro';
+import StatusBanner from '../components/nav/StatusBanner.astro';
+import { availableLocales, getSite } from '../lib/content';
+import { DEFAULT_LOCALE, localePath, type Locale } from '../lib/i18n';
+
+interface Props {
+  locale: Locale;
+  page: '' | 'security';
+  title: string;
+  description: string;
+}
+
+const { locale, page, title, description } = Astro.props;
+const site = await getSite(locale);
+const locales = await availableLocales();
+const url = (candidate: Locale): string => new URL(localePath(candidate, page), Astro.site).href;
+const canonical = url(locale);
+---
+
+<!doctype html>
+<html lang={locale}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- The site sends no referrer and loads nothing from anywhere else: no script, no
+         font, no analytics (docs/spec.md §8 "Telemetry"). -->
+    <meta name="referrer" content="no-referrer" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    {locales.map((candidate) => <link rel="alternate" hreflang={candidate} href={url(candidate)} />)}
+    <link rel="alternate" hreflang="x-default" href={url(DEFAULT_LOCALE)} />
+    <link rel="sitemap" href="/sitemap-index.xml" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={site.name} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta name="twitter:card" content="summary" />
+    <meta name="generator" content={Astro.generator} />
+  </head>
+  <body class="flex min-h-screen flex-col">
+    <a
+      href="#main"
+      class="sr-only focus:not-sr-only focus:absolute focus:z-30 focus:m-2 focus:rounded focus:bg-accent focus:px-3 focus:py-2 focus:text-accent-contrast"
+    >
+      {site.skipToContent}
+    </a>
+    <Header locale={locale} page={page} />
+    <StatusBanner label={site.status.label} repositoryLabel={site.nav.repository} />
+    <main id="main" class="flex-1">
+      <slot />
+    </main>
+    <Footer locale={locale} />
+  </body>
+</html>

@@ -1,0 +1,72 @@
+---
+import { getHome, getSite } from '../../lib/content';
+import { localePath, type Locale } from '../../lib/i18n';
+import { LINKS } from '../../lib/links';
+import { SECTIONS } from '../../lib/sections';
+import Container from '../ui/Container.astro';
+import LanguagePicker from './LanguagePicker.astro';
+import NavLinks, { type NavItem } from './NavLinks.astro';
+
+interface Props {
+  locale: Locale;
+  page: '' | 'security';
+}
+
+const { locale, page } = Astro.props;
+const site = await getSite(locale);
+const home = await getHome(locale);
+const homePath = localePath(locale);
+
+const items: NavItem[] = [
+  ...SECTIONS.map(({ key, anchor }) => ({
+    href: `${homePath}#${anchor}`,
+    label: home[key].navLabel,
+  })),
+  {
+    href: localePath(locale, 'security'),
+    label: site.nav.security,
+    current: page === 'security',
+  },
+  { href: LINKS.repository, label: site.nav.repository },
+];
+---
+
+<header class="sticky top-0 z-20 border-b border-line bg-paper/95 backdrop-blur">
+  <Container class="flex items-center justify-between gap-4 py-3">
+    <a href={homePath} class="text-base font-semibold tracking-tight">{site.name}</a>
+
+    <div class="hidden items-center gap-2 lg:flex">
+      <NavLinks items={items} label={site.nav.label} class="flex items-center gap-0.5 text-sm" />
+      <span class="h-4 w-px bg-line" aria-hidden="true"></span>
+      <LanguagePicker locale={locale} page={page} label={site.languages.label} />
+    </div>
+
+    <details class="group relative lg:hidden">
+      <summary
+        class="flex cursor-pointer list-none items-center gap-2 rounded border border-line px-3 py-1.5 text-sm [&::-webkit-details-marker]:hidden"
+      >
+        {site.nav.menuLabel}
+        <svg
+          viewBox="0 0 12 8"
+          width="12"
+          height="8"
+          aria-hidden="true"
+          class="transition-transform group-open:rotate-180"
+        >
+          <path d="M1 1.5 6 6.5l5-5" fill="none" stroke="currentColor" stroke-width="1.5"></path>
+        </svg>
+      </summary>
+      <div
+        class="absolute right-0 z-30 mt-2 w-64 rounded-md border border-line bg-paper-raised p-2 shadow-lg"
+      >
+        <NavLinks items={items} label={site.nav.label} class="flex flex-col text-sm" />
+        <LanguagePicker
+          locale={locale}
+          page={page}
+          label={site.languages.label}
+          class="mt-2 flex-wrap border-t border-line pt-2"
+        />
+      </div>
+    </details>
+  </Container>
+</header>

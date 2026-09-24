@@ -1,0 +1,17 @@
+---
+import { inlineMarkdown } from '../../lib/inline';
+
+/**
+ * One line of copy, with the code spans and emphasis of the source documents kept.
+ * The text is escaped before it is marked up (`src/lib/inline.ts`).
+ */
+interface Props {
+  text: string;
+  as?: 'p' | 'li' | 'span' | 'div' | 'dd' | 'td' | 'th';
+  class?: string;
+}
+
+const { text, as: Tag = 'p', class: className } = Astro.props;
+---
+
+<Tag class={className} set:html={inlineMarkdown(text)} />

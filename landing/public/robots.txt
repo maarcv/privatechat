@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://privatechat.invalid/sitemap-index.xml

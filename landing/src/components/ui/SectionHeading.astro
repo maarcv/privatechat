@@ -1,0 +1,15 @@
+---
+import Inline from './Inline.astro';
+
+interface Props {
+  title: string;
+  lead: string;
+}
+
+const { title, lead } = Astro.props;
+---
+
+<header class="max-w-3xl">
+  <h2 class="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">{title}</h2>
+  <Inline text={lead} class="mt-4 text-lg leading-relaxed text-ink-muted" />
+</header>

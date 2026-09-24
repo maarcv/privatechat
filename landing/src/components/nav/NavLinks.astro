@@ -1,0 +1,37 @@
+---
+export interface NavItem {
+  href: string;
+  label: string;
+  current?: boolean;
+}
+
+interface Props {
+  items: readonly NavItem[];
+  label: string;
+  class?: string;
+  itemClass?: string;
+}
+
+const { items, label, class: className, itemClass } = Astro.props;
+---
+
+<nav aria-label={label} class={className}>
+  <ul class="contents">
+    {
+      items.map((item) => (
+        <li>
+          <a
+            href={item.href}
+            aria-current={item.current ? 'page' : undefined}
+            class:list={[
+              'block rounded px-2 py-1 text-ink-muted transition hover:text-ink aria-[current]:text-ink aria-[current]:font-medium',
+              itemClass,
+            ]}
+          >
+            {item.label}
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+</nav>

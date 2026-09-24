@@ -1,0 +1,28 @@
+---
+import CheckItYourself from '../../components/sections/CheckItYourself.astro';
+import HowItWorks from '../../components/sections/HowItWorks.astro';
+import Idea from '../../components/sections/Idea.astro';
+import OpenSource from '../../components/sections/OpenSource.astro';
+import RunItYourself from '../../components/sections/RunItYourself.astro';
+import WhatItIs from '../../components/sections/WhatItIs.astro';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { availableLocales, getHome } from '../../lib/content';
+import { isLocale } from '../../lib/i18n';
+
+export async function getStaticPaths() {
+  return (await availableLocales()).map((lang) => ({ params: { lang } }));
+}
+
+const { lang } = Astro.params;
+if (!isLocale(lang)) throw new Error(`landing: unknown language "${lang}"`);
+const { meta } = await getHome(lang);
+---
+
+<BaseLayout locale={lang} page="" title={meta.title} description={meta.description}>
+  <Idea locale={lang} />
+  <WhatItIs locale={lang} />
+  <HowItWorks locale={lang} />
+  <RunItYourself locale={lang} />
+  <CheckItYourself locale={lang} />
+  <OpenSource locale={lang} />
+</BaseLayout>

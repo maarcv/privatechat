@@ -1,0 +1,46 @@
+---
+import type { DocsTable } from '../../lib/docs';
+import { inlineMarkdown } from '../../lib/inline';
+
+/**
+ * The adversaries table of `docs/spec.md` §2, three columns, as it stands in
+ * `docs/threat-model.md`. Below the `md` breakpoint each row becomes a card and every
+ * cell carries its column name, so the table never has to be scrolled sideways.
+ */
+interface Props {
+  table: DocsTable;
+}
+
+const { table } = Astro.props;
+const cellClass =
+  'block px-0 pt-3 text-ink-muted before:mb-1 before:block before:text-xs before:font-semibold before:tracking-wide before:text-ink before:uppercase before:content-[attr(data-column)] md:table-cell md:border-t md:border-line md:px-4 md:py-3 md:align-top md:before:hidden';
+---
+
+<table class="mt-8 w-full border-collapse text-left text-sm">
+  <thead class="sr-only md:not-sr-only md:table-header-group">
+    <tr>
+      {
+        table.columns.map((column) => (
+          <th scope="col" class="px-4 pb-2 text-xs font-semibold tracking-wide uppercase">
+            {column}
+          </th>
+        ))
+      }
+    </tr>
+  </thead>
+  <tbody class="block md:table-row-group">
+    {
+      table.rows.map((row) => (
+        <tr class="mb-4 block rounded-lg border border-line p-4 last:mb-0 md:mb-0 md:table-row md:rounded-none md:border-0 md:p-0">
+          {row.map((cell, index) => (
+            <td
+              data-column={table.columns[index]}
+              class:list={[cellClass, index === 0 && 'md:w-52 md:font-medium md:text-ink']}
+              set:html={inlineMarkdown(cell)}
+            />
+          ))}
+        </tr>
+      ))
+    }
+  </tbody>
+</table>

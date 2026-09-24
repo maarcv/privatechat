@@ -1,0 +1,37 @@
+---
+import { availableLocales } from '../../lib/content';
+import { LOCALE_NAMES, localePath, type Locale } from '../../lib/i18n';
+
+/**
+ * Only the languages that already have their copy are offered; with a single one
+ * there is nothing to choose, so nothing is rendered.
+ */
+interface Props {
+  locale: Locale;
+  page: string;
+  label: string;
+  class?: string;
+}
+
+const { locale, page, label, class: className } = Astro.props;
+const locales = await availableLocales();
+---
+
+{
+  locales.length > 1 && (
+    <nav aria-label={label} class:list={['flex items-center gap-1 text-sm', className]}>
+      <span class="sr-only">{label}</span>
+      {locales.map((candidate) => (
+        <a
+          href={localePath(candidate, page)}
+          hreflang={candidate}
+          lang={candidate}
+          aria-current={candidate === locale ? 'true' : undefined}
+          class="rounded px-1.5 py-1 text-ink-muted transition hover:text-ink aria-[current]:font-medium aria-[current]:text-ink"
+        >
+          {LOCALE_NAMES[candidate]}
+        </a>
+      ))}
+    </nav>
+  )
+}

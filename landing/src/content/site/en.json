@@ -1,0 +1,26 @@
+{
+  "name": "privatechat",
+  "description": "An end-to-end encrypted group chat where the server is only a mailbox: no accounts, no identities, nothing it can read.",
+  "nav": {
+    "label": "Site",
+    "menuLabel": "Menu",
+    "security": "Promises and limits",
+    "repository": "Repository"
+  },
+  "languages": {
+    "label": "Language"
+  },
+  "status": {
+    "label": "Project status"
+  },
+  "footer": {
+    "note": "Free software under the MIT licence. It promises what it can prove, and says the rest out loud.",
+    "links": [
+      { "label": "MIT licence", "link": "licence" },
+      { "label": "Repository", "link": "repository" },
+      { "label": "Specification", "link": "spec" },
+      { "label": "Report a vulnerability", "link": "securityPolicy" }
+    ]
+  },
+  "skipToContent": "Skip to content"
+}
