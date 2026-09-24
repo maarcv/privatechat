@@ -6,7 +6,7 @@ Date: 2026-09-19 · Status: accepted
 There are three clients (desktop, Android, iOS) and one server. All the cryptography and the protocol must be identical in all of them.
 
 ## Decision
-A Rust crate `core` contains crypto (libsodium via `libsodium-sys-stable`), the binary message envelope (ADR 0015), CBOR payload (`ciborium`), key derivation, signatures, peer management and the sans-I/O protocol session (ADR 0020). Storage is a separate Rust crate, `store`, also shared (ADR 0020, 0021). It is exposed to Kotlin and Swift with `uniffi` (proc macros) and to the Tauri desktop client as a directly linked Rust crate (ADR 0017). The UI never touches a key; the core never touches the network or the clock.
+A Rust crate `core` contains crypto (libsodium via `libsodium-sys-stable`), the binary message envelope and the record encoding (ADR 0023), key derivation, signatures, peer management and the sans-I/O protocol session (ADR 0020). Storage is a separate Rust crate, `store`, also shared (ADR 0020, 0021). It is exposed to Kotlin and Swift with `uniffi` (proc macros) and to the Tauri desktop client as a directly linked Rust crate (ADR 0017). The UI never touches a key; the core never touches the network or the clock.
 
 ## Alternatives considered
 - Reimplementing the protocol in Kotlin, Swift and TypeScript: three implementations to audit and to keep in sync; divergences almost certain.

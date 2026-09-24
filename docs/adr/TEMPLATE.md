@@ -3,7 +3,7 @@
 Date: YYYY-MM-DD · Status: proposed | accepted | deprecated | superseded by NNNN · Supersedes: NNNN (optional)
 
 ## Context
-Problem and constraints. Link to `docs/spec.md` §N and, where applicable, to the audit finding (audit log Ak / Bk / Ck / Dk in `docs/audit-log.md`).
+Problem and constraints. Link to `docs/spec.md` §N and, where applicable, to the audit finding (a row of `docs/audit-log.md`, such as B5 or F1).
 
 ## Decision
 One sentence in the present tense. Formulas only when the decision is the formula; otherwise reference `docs/spec.md` §4.

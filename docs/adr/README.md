@@ -4,10 +4,10 @@ One decision per file, template in `TEMPLATE.md`. The documentation lint (spec 0
 
 ## Procedure
 
-- An accepted ADR is not edited, except to change its status. To change a decision, a new ADR is created with `Supersedes: NNNN` and the old one moves to `Status: superseded by MMMM`.
+- An accepted ADR is not edited, except to change its status or to correct a stale reference without touching the decision; each such correction is a row in `docs/audit-log.md`. To change a decision, a new ADR is created with `Supersedes: NNNN` and the old one moves to `Status: superseded by MMMM`.
 - Numbers are sequential and are not reused.
 - States: `proposed` · `accepted` · `deprecated` · `superseded by NNNN`.
-- ADRs 0001–0022 were written before the repository was created and have been reviewed in four audits (`docs/audit-log.md`); that is why some contain review notes in their Context, Decision or Consequences.
+- ADRs 0001–0022 were written before the repository was created and were reviewed in audits A–D (`docs/audit-log.md`); that is why some contain review notes in their Context, Decision or Consequences.
 
 ## Index
 

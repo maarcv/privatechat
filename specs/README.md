@@ -24,4 +24,4 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 
 Phase 0 was bootstrapped with implementation and review in parallel; from spec 010 on, acceptance precedes code.
 
-Spec 100 is numbered outside the phases on purpose: it holds an obligation of `docs/spec.md` §8 that no spec could carry yet, and it stays `draft` until a spec that emits logs adopts it or it is implemented on its own before phase 6 closes.
+Spec 100 carries a number outside the phase ranges on purpose: it holds an obligation of `docs/spec.md` §8 that no spec could carry yet. It sits in phase 6 and stays `draft` until a spec that emits logs adopts it or it is implemented on its own before phase 6 closes.

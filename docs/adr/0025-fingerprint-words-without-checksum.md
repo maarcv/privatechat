@@ -3,7 +3,7 @@
 Date: 2026-09-24 · Status: accepted
 
 ## Context
-`docs/spec.md` §4 encoded `fp[0..16]` as a standard BIP-39 mnemonic. Its 4-bit checksum is SHA-256 of the entropy, and SHA-256 is not among the primitives of §4 (spec 010-primitives-wrapper put SHA-2 out of scope). Adding it would reopen an implemented spec for one use. Audit E (findings A12, B13, C recommendation 1) also noted two further points. The checksum exists to catch typing errors when words are entered into a wallet, but here nobody types the words: two people compare them by eye or by voice. And words that form a valid seed phrase train users to read "their 12 words" aloud, which is the shape of a known phishing pattern.
+`docs/spec.md` §4 encoded `fp[0..16]` as a standard BIP-39 mnemonic. Its 4-bit checksum is SHA-256 of the entropy, and SHA-256 is not among the primitives of §4 (spec 010-primitives-wrapper put SHA-2 out of scope). Adding it would reopen an implemented spec for one use. Audit E (findings E-A12, E-B13, E-C recommendation 1) also noted two further points. The checksum exists to catch typing errors when words are entered into a wallet, but here nobody types the words: two people compare them by eye or by voice. And words that form a valid seed phrase train users to read "their 12 words" aloud, which is the shape of a known phishing pattern.
 
 ## Decision
 The 12 words are `words[i] = list[bits(fp, 11·i, 11)]` for `i` in 0..12, reading `fp` most significant bit first: the first 132 bits of the 256-bit fingerprint as indices into the English BIP-39 list of 2 048 words. They are not a BIP-39 mnemonic. The short identifier stays the first 4 words (44 bits).
