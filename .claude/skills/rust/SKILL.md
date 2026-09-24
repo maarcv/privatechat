@@ -140,8 +140,9 @@ AGENTS 12 fixes where `unsafe` may appear. Inside that one file:
 
 - Names: AGENTS 6. One requirement may have several tests; every requirement
   has at least one.
-- Test vectors are loaded from `specs/vectors/NNN.json`, never retyped in
-  Rust (`references/patterns.md` §6). Hex literals are lowercase everywhere.
+- Test vectors are loaded from `specs/vectors/NNN.json`, which the reference
+  script of spec 015 writes, never retyped in Rust (`references/patterns.md`
+  §6). Hex literals are lowercase everywhere.
 - **Table-driven** for anything with more than two cases:
 
   ```rust
@@ -177,14 +178,15 @@ AGENTS 12 fixes where `unsafe` may appear. Inside that one file:
 - Minimal features on every dependency (`default-features = false`) unless
   you need them (AGENTS 8).
 - `edition = "2024"`, toolchain pinned in `rust-toolchain.toml`. No nightly
-  features.
+  features. The one nightly toolchain in the repository is the dated one the
+  fuzz workflow uses for `cargo fuzz` (spec 016-fuzz-harness, R9).
 
 ## Project idioms
 
 - `?` everywhere; `map_err` to the spec variant at the point where the
   meaning is known, not at the top.
-- `Envelope::parse(blob, &channel_id)` for fixed-offset parsing
-  (`references/patterns.md` §2).
+- `Envelope::parse(blob, &channel_id)` for fixed-offset parsing, the first
+  half of `verify` (`references/patterns.md` §2).
 - `#[must_use]` on functions that return a value the caller must not drop
   (`encrypt` returns the reserved counter's blob — dropping it loses a counter).
 - No `impl Trait` in return position on public `core` API (uniffi cannot see

@@ -52,6 +52,11 @@ Two conventions this shape fixes, so nobody decides them again:
 - The parser exposes `aad` (`blob[0..81]`) and `signed_bytes`
   (`blob[0..len-64]`) so the offsets exist exactly once; the caller never
   re-slices.
+- The parser is the first half of `verify(blob, ctx, received_at, now)`
+  (spec 013 R11): after step 1 come the expiry check, then the header is
+  opened and the signature unmasked with bytes 40..104 of the `K_hdr`
+  keystream (ADR 0032), then the signature check. The signature travels
+  masked; the parser only locates it.
 
 ```rust
 /// Wire protocol version 1 (§4).
@@ -82,10 +87,11 @@ pub(crate) struct Envelope<'a> {
     pub enc_hdr: &'a [u8; 40],
     pub nonce: &'a [u8; 24],
     pub ciphertext: &'a [u8],
+    /// The masked signature as it travels; `verify` unmasks it with keystream bytes 40..104 (ADR 0032).
     pub signature: &'a [u8; 64],
     /// `blob[0..81]`: the AEAD associated data, exactly as it travelled.
     pub aad: &'a [u8],
-    /// `blob[0..len-64]`: the bytes the signature covers.
+    /// `blob[0..len-64]`: the bytes the unmasked signature covers, after the tag (spec 013 R4).
     pub signed_bytes: &'a [u8],
 }
 
@@ -107,7 +113,11 @@ impl<'a> Envelope<'a> {
             return Err(Error::UnsupportedVersion);
         }
         // 1c. Channel. Constant-time: the id is public, but one rule beats a judgement call.
-        let channel_id = blob.get(CHANNEL_ID_RANGE).ok_or(Error::BadLength)?;
+        // `ct_eq` takes `&[u8; N]`, so the slice becomes an array first.
+        let channel_id: &[u8; 16] = blob
+            .get(CHANNEL_ID_RANGE)
+            .and_then(|bytes| bytes.try_into().ok())
+            .ok_or(Error::BadLength)?;
         if !crate::crypto::ct_eq(channel_id, channel.as_bytes()) {
             return Err(Error::WrongChannel);
         }
@@ -130,7 +140,7 @@ Tests for this function: the length boundaries (1 184, 1 185, 64 673, 64 674,
 1 200 → `BadLength`), version and channel mutations, the constant-pinning
 test, and a field-placement test (mutate one byte, assert it lands in the
 expected field and nowhere else). The full mutation table belongs to
-`decrypt`, not to the parser (rust skill, "Testing").
+`verify` (spec 013 R17), not to the parser (rust skill, "Testing").
 
 ## 3. `Store` trait and `WriteBatch` — one commit per operation (AGENTS 23)
 
@@ -145,7 +155,7 @@ pub trait Store {
 pub struct WriteBatch {
     pub messages: Vec<StoredMessage>,
     pub peers: Vec<PeerUpdate>,
-    pub outbox_add: Vec<(ClientRef, Vec<u8>)>,
+    pub outbox_add: Vec<(ClientRef, Vec<u8>, [u8; 64])>, // blob and its unmasked signature (ADR 0029)
     pub outbox_remove: Vec<ClientRef>,
     pub send_counter: Option<u64>,
     pub cursor: Option<u64>,
@@ -193,13 +203,13 @@ pub fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> R
     let counter = self.send_counter;
     let next = counter.checked_add(1).ok_or(Error::CounterExhausted)?;
     let client_ref = ClientRef::random();
-    let blob = self.seal(&payload, counter, now)?;          // draws the nonce, derives mk, encrypts, signs
+    let sealed = self.seal(&payload, counter, now)?;        // draws the nonce, derives mk, encrypts, signs and masks the signature (013 R16)
     let mut batch = WriteBatch::default();
     batch.send_counter = Some(next);
-    batch.outbox_add.push((client_ref, blob.clone()));
+    batch.outbox_add.push((client_ref, sealed.blob.clone(), sealed.signature));
     self.store.commit(batch)?;                               // if this fails, no blob leaves
     self.send_counter = next;
-    Ok((client_ref, blob))
+    Ok((client_ref, sealed.blob))
 }
 ```
 
@@ -207,18 +217,17 @@ pub fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> R
 
 ```rust
 // cfg(test) only. No serde: `core` carries no dependency beyond libsodium and
-// zeroize, so the loader is a small JSON reader over `include_str!`.
-pub(crate) fn all(spec: &str) -> Vec<Vector>;          // every vector of specs/vectors/<spec>.json
-pub(crate) fn load(spec: &str, name: &str) -> Vector;  // one by name; a missing name fails the test
+// zeroize, so the loader is a small JSON reader over `include_str!`. The files
+// are written by `scripts/reference/vectors.py`; Rust only reads and checks.
+pub(crate) fn load(spec: &str, name: &str) -> Vector;  // spec 010's tests only
+pub(crate) type Checker = fn(&Vector);                // an alias keeps clippy::type_complexity quiet
+pub(crate) fn check_all(spec: &str, entries: &[(&str, Checker)]);  // fails on a vector with no entry or an entry with no vector
 
-#[test] // named sNNN_tTT_rRR_every_vector_is_checked in the spec that owns the file
-fn every_vector_is_checked() {
-    for v in vectors::all("013") {
-        match v.name.as_str() {
-            "text_k1" => check_text_k1(&v),
-            // one arm per vector; an unknown name fails, so no vector is dead
-            other => unreachable_vector(other),
-        }
-    }
+#[test] // the only code that loads 013.json (spec 015 R3)
+fn s013_vectors_dispatch() {
+    vectors::check_all("013", &[
+        ("text_k1", check_text_k1),
+        // one entry per vector: check_all fails on an unmatched name either way
+    ]);
 }
 ```

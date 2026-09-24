@@ -49,7 +49,7 @@ Every test cites the requirement it covers and is named `sNNN_tTT_rRR_<descripti
 
 ## Vectors
 
-Mandatory for `core` specs with a format or a derivation: file `specs/vectors/NNN.json` with the schema of `specs/vectors/README.md` (`name`, `kind`, `source`, `origin`, `inputs`, `expected`), and at least one negative vector for every rejection requirement. For formats, a **mutation table**: for every offset region, the exact `Error` expected when mutating one byte, and the assert that the Store receives no commit. For signatures: negative vectors with non-canonical S (S + L), identity `pk`, small-order `pk` and `R`, non-canonical `pk`.
+Mandatory for `core` specs with a format or a derivation: file `specs/vectors/NNN.json` with the schema of `specs/vectors/README.md` (`name`, `kind`, `source`, `origin`, `inputs`, `expected`), and a negative vector for every requirement that rejects external input, except a rejection the primitive wrapper (spec 010) already proves, which is not repeated one layer up; a rejection of a crate-internal function no platform reaches is a unit test, not a vector. For formats, a **mutation table**: for every offset region, the exact `Error` expected when mutating one byte, and the assert that the Store receives no commit. The strict Ed25519 negatives (non-canonical S, identity `pk`, small-order `pk` and `R`, non-canonical `pk`) live once, in spec 010-primitives-wrapper.
 
 ## Acceptance criterion
 
