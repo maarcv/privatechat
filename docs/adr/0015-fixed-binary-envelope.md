@@ -1,6 +1,6 @@
 # ADR 0015 — Fixed-size binary envelope; CBOR only in the encrypted payload
 
-Date: 2026-09-20 · Status: accepted
+Date: 2026-09-20 · Status: superseded by 0023
 
 ## Context
 The first version defined the message envelope as "canonical CBOR" and the signature "over all the preceding fields". `ciborium` does not implement the deterministic profile of RFC 8949 §4.2, and "all the preceding fields" admits several serialisations: the signed bytes were not defined and the test vectors would not be reproducible by a third party (finding B2). An envelope with seven fields, six of them fixed-size, does not need CBOR.

@@ -27,7 +27,7 @@ One decision per file, template in `TEMPLATE.md`. The documentation lint (spec 0
 | 0012 | Cryptographic and protocol core in Rust, shared by all clients | 2026-09-19 | accepted |
 | 0013 | Message key derived directly from the counter | 2026-09-20 | accepted |
 | 0014 | TTL bound to the `channel_id` and per-message expiry | 2026-09-20 | accepted |
-| 0015 | Fixed-size binary envelope; CBOR only in the encrypted payload | 2026-09-20 | accepted |
+| 0015 | Fixed-size binary envelope; CBOR only in the encrypted payload | 2026-09-20 | superseded by 0023 |
 | 0016 | Key retirement with a `key_retired` message | 2026-09-20 | accepted |
 | 0017 | No hosted web client in v1; native desktop client | 2026-09-20 | accepted |
 | 0018 | Message header encrypted with the channel key | 2026-09-20 | accepted |
@@ -35,3 +35,7 @@ One decision per file, template in `TEMPLATE.md`. The documentation lint (spec 0
 | 0020 | Store and sans-I/O session in the Rust core | 2026-09-20 | accepted |
 | 0021 | Client without a database: encrypted files with atomic commit | 2026-09-20 | accepted |
 | 0022 | Exchange server per channel, fixed at creation | 2026-09-20 | accepted |
+| 0023 | Fixed binary envelope and an own record encoding; no CBOR | 2026-09-24 | accepted |
+| 0024 | Verify the signature before any state check, and expire by the signed send time | 2026-09-24 | accepted |
+| 0025 | Fingerprint words from 132 bits of the fingerprint, with no BIP-39 checksum | 2026-09-24 | accepted |
+| 0026 | Invitation with a fixed expiry, a text QR and a canonical password | 2026-09-24 | accepted |
