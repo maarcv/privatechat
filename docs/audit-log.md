@@ -2,6 +2,26 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit G
+
+**2026-09-24 — Audit G, coherence review of the whole documentation after audit F (spec, threat model, ADRs, audit log, `AGENTS.md`, skills, feature specs, templates), looking for duplication, contradictions and stale metadata.** No decision changes; the ADR edits are stale-reference corrections under the rule added to `docs/adr/README.md`. Substantive changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| G1 | Spec 001 R8 named specs 011–013 as the paths `adr-guard` protects, while the CI and §10 protect 011–014 and 017 since E21 | Medium | R8 brought in line with the CI (spec 001) |
+| G2 | "A rejection commits nothing but the cursor" (AGENTS 23, §10) and "asserts `commits == 0`" (skills, PR template) read as a contradiction; only `specs/vectors/README.md` said the cursor is not counted | Medium | Defined once: `commits` counts the commits other than the cursor's (AGENTS 23, §10 DoD, PR template, `specs/TEMPLATE.md`, skills) |
+| G3 | Spec 010 still placed the vector loader in `crypto/`, sent the `CryptoError` mapping to spec 027 (spec 011 R20 owns it) and named a `decrypt` fuzz target that does not exist | Low | Corrected (spec 010) |
+| G4 | Spec 016 R11 demanded eight round-trips that the owning specs already carry and its own Out of scope excluded; `Config::open_encrypted` matched R7 but was neither targeted nor excluded; the record fuzz schema was `cfg(test)` in 017 and "fuzz-only" in 016 | Medium | R11 dropped and R12–R13 renumbered; `open_encrypted` in the exclusion list; one test schema under `cfg(any(test, fuzzing))` (specs 016, 017) |
+| G5 | `patterns.md` gave `Session::new(host)` while §9 takes `server_url` | Low | Aligned with §9 |
+| G6 | Audit E numbered its internal passes A1…, B1…, C1…, colliding with the top-level ids of audits A–C; ADRs 0023–0026 cited them as if they were | Medium | `E-` prefix on every internal id, in the log and in the four ADRs |
+| G7 | Stale metadata: spec header "post-audit E", §13 without F, §11 tree ending at ADR 0026, ADR README "four audits", ADR 0012 naming `ciborium` and ADR 0015 as current, a pending-review item about `ciborium`, §12 citing ADR 0025 as "closed without an ADR", `DEFAULT_SERVER_URL` open decision cited by spec 000 but absent from §12 | Low | All brought up to date (§1 pointer, §11, §12, §13, ADR README and 0012, audit log) |
+| G8 | Three copies of "what it does not promise": §1, the threat model (with three bullets §1 lacked) and the README | Low | §1 is the single list, with the three bullets; `docs/threat-model.md` keeps the lint-checked table and points to §1; README labels its copy as plain words |
+| G9 | The three client skills shared about 60% of their text with platform nouns swapped; the rust skill and `patterns.md` copied AGENTS 4, 5, 12, 18, 22, 23 and the style guide | Medium | `architecture` §7 "Client shape" owns the shared part; client skills keep platform mechanics; rust skill and patterns cite AGENTS by number |
+| G10 | The architecture skill said `store` must not read a clock; AGENTS 10 binds `core` only and `clippy.toml` allows the I/O crates one audited place | Low | Skill aligned with AGENTS 10 |
+| G11 | `specs/TEMPLATE.md` showed a vector schema without `kind`, `source`, `origin`, and required dependencies to be `implemented` while every phase 1 spec depends on `accepted` ones | Low | Template corrected |
+
+Not changed on purpose: the §2 table copy in `docs/threat-model.md` and the two ADR tables (`docs/adr/README.md`, §3), because the doc lint keeps them equal and collapsing them would touch specs 002 and 003 and the lint itself; the closed "Open questions" of specs 011–017, which record the reason of each decision.
+
 ## Audit F
 
 **2026-09-24 — Audit F, second review of the phase 1 specs 011–017 after audit E, in the same three independent passes (A: completeness and SDD; B: adversarial cryptography; C: goal, simplicity, implementability).** One blocker, a regression introduced by audit E; nothing breaks confidentiality, the key hierarchy or encrypt-then-sign. Substantive changes applied:
