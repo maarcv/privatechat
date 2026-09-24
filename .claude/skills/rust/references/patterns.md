@@ -196,7 +196,7 @@ pub enum Event {
 }
 
 impl Session {
-    pub fn new(host: &str, channels: Vec<Channel>) -> Session;
+    pub fn new(server_url: &str, channels: Vec<Channel>) -> Session; // all channels of one server (host and port)
     pub fn on_connect(&mut self, now: u64);
     pub fn on_frame(&mut self, frame: &[u8], now: u64) -> Result<Vec<Event>, Error>;
     pub fn outgoing(&mut self) -> Vec<Vec<u8>>;

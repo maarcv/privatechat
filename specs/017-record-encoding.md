@@ -50,7 +50,7 @@ This spec fixes the codec. Which keys each record has, and which error a failure
 
 The 4-byte length is wide enough for the largest value any record carries: a sealed blob of 64 673 bytes inside the `outbox` of `state.bin`. The real bound is always the smaller of the buffer and the caller's maximum.
 
-**Test schema.** The tests, the vectors and the fuzz target `record_decode` of spec 016-fuzz-harness decode by one fixed schema that uses every type, so that no path of the codec depends on a later spec to be exercised: 0 `u8` mandatory; 1 `u32`; 2 `u64`; 3 `bool`; 4 `bytes` (max 64); 5 `bytes32`; 6 `text` (max 64); 7 nested record with 0 `u8` mandatory and 1 `text` (max 16); 8 `list<bytes>` (max 3 items of max 16 bytes). Every key but 0 is optional, and the whole record is at most 512 bytes.
+**Test schema.** The tests, the vectors and the fuzz target `record_decode` of spec 016-fuzz-harness decode by one fixed schema that uses every type, compiled under `cfg(any(test, fuzzing))` so that both reach it, and so that no path of the codec depends on a later spec to be exercised: 0 `u8` mandatory; 1 `u32`; 2 `u64`; 3 `bool`; 4 `bytes` (max 64); 5 `bytes32`; 6 `text` (max 64); 7 nested record with 0 `u8` mandatory and 1 `text` (max 16); 8 `list<bytes>` (max 3 items of max 16 bytes). Every key but 0 is optional, and the whole record is at most 512 bytes.
 
 ## Interface
 

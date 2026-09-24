@@ -53,7 +53,7 @@ crates/core/src/crypto.rs              pub(crate) module root: types, re-exports
 crates/core/src/crypto/ffi.rs          the only `unsafe`: thin typed calls into libsodium-sys-stable
 crates/core/src/crypto/secret.rs       Secret<N>
 crates/core/src/crypto/tests.rs        s010_* tests
-crates/core/src/crypto/vectors.rs      loader of 010.json, `cfg(test)`: no dependency, no I/O
+crates/core/src/vectors.rs             loader of every `specs/vectors/*.json`, `cfg(test)`: no dependency, no I/O (owned by spec 015-test-vectors)
 clippy.toml                            disallowed-methods (R17)
 ```
 
@@ -108,7 +108,7 @@ Every function returns `Result` because each one may be the first libsodium call
 
 ## Public API changes
 
-- None at the core boundary: the whole module is `pub(crate)`. Spec 027 decides how `CryptoError` maps into the public `Error` of `docs/spec.md` §9.
+- None at the core boundary: the whole module is `pub(crate)`. Spec 011-config-format R20 maps `CryptoError` into the public `Error` of `docs/spec.md` §9.
 
 ## Test cases
 
@@ -182,19 +182,24 @@ A bump of `libsodium-sys-stable` moves three pinned values at once (the version 
 ## Out of scope
 
 - Domain tags, KDF contexts, `channel_id`, `K_msg`, `K_hdr`, `mk`, the envelope, the payload and the fingerprint (specs 011–014).
-- The public `Error` of `docs/spec.md` §9 and its mapping from `CryptoError` (spec 027).
-- Fuzz targets: this module parses nothing; the fuzz harness (spec 016) targets `decrypt`, the payload and the config parsers.
+- The public `Error` of `docs/spec.md` §9 and its mapping from `CryptoError` (spec 011-config-format R20).
+- Fuzz targets: this module parses nothing; the fuzz harness (spec 016) targets the receive path, the payload and the config parsers.
 - The `tracing`-based "no secrets in logs" test of `docs/spec.md` §8 "Logging": there is no log emitter yet, so it is parked in spec 100-log-test.
 - Any primitive not in the §4 table (no X25519, no `crypto_box`, no SHA-2).
 
 ## Open questions
 
-- [x] 010-R15 — closed on 2026-09-21: the log test leaves this spec. It is parked in spec 100-log-test (`draft`, phase 6), which holds it until a spec that emits `tracing` events adopts it; `AGENTS.md` rule 19 and `docs/spec.md` §8 now point there. The redacted `Debug` test stays here (R3).
-- [x] 010-R16 — closed on 2026-09-21: the procedure is the section "Bumping libsodium" above, with the CI as its checklist and the minisign public key written out, so nothing has to be remembered. A vector that moves rejects the bump; it is never a value to update on sight.
-- [x] 010-R14 — closed on 2026-09-21: `MAX_INPUT = 65 535` was a protocol number in a layer that knows no protocol, and ADR 0021 (`state.bin` sealed in one `secretbox` call, ≤ 550 peers plus `outbox`) already exceeds it. R14 now bounds only what libsodium would abort on or what would overflow; the protocol and storage bounds live in specs 011-config-format, 013-wire-message and 020-store-files and in `docs/spec.md` §6. The bounds this leaves owed to other specs are recorded in `docs/spec.md` where each field is defined: the password length (§5, spec 011-config-format), the `outbox` size (§4, spec 020-store-files) and the `label` size (§7, spec 026-peer-limits).
-
+- [x] 010-R15, 010-R16, 010-R14 — closed on 2026-09-21; the resolutions are in the History and in the text they changed (spec 100-log-test, "Bumping libsodium", R14).
 - [ ] 010-T04: "Test cases" asks for a `compile_fail` doctest per forbidden trait, but a doctest is compiled as a separate crate and cannot name a `pub(crate)` type, so none of them can reach `Secret`. Implemented instead as `s010_t04_r03_secret_has_no_forbidden_traits`, which reads `secret.rs` and asserts the exact derive list and the exact set of `impl` blocks, so any added trait fails the test. Confirm this, or make the type reachable from a doctest some other way.
 
 ## History
 
-- 2026-09-20 draft · 2026-09-20 in review · 2026-09-21 accepted (Marc Vilardebó) · 2026-09-21 "Vectors" amended: three primitives have no published vector at the parameters §4 fixes, so they are `pinned` and each vector declares its `source` (Marc Vilardebó) · 2026-09-21 open question 010-R15 closed: the log test is parked in spec 100-log-test (Marc Vilardebó) · 2026-09-21 R14 amended: the wrapper bounds only what libsodium requires; the protocol number 65 535 leaves this spec (Marc Vilardebó) · 2026-09-21 R14 amended again: the 1 024 B password bound was policy too and leaves for spec 011-config-format; the empty-password guard is declared as such; `docs/spec.md` §4, §5 and §7 record the bounds owed by specs 011, 020 and 026 (Marc Vilardebó) · 2026-09-21 R14 completed: `crypto_pwhash` rejects a password above `crypto_pwhash_PASSWD_MAX`, so the wrapper rejects it too instead of surfacing it as `OutOfMemory` (Marc Vilardebó) · 2026-09-21 open question 010-R16 closed: the bump procedure is written out as its own section, with the CI as the checklist (Marc Vilardebó) · 2026-09-21 Interface amended: the vector loader is its own `cfg(test)` file, so the test module stays within the size the code standard asks for (Marc Vilardebó) · 2026-09-21 implemented: the wrapper is written and green, and the human review of `ffi.rs` that the acceptance criterion asks for is done (Marc Vilardebó) · 2026-09-24 Interface note: spec 015-test-vectors moves the vector loader to `crates/core/src/vectors.rs`, shared by every spec, with the same functions; no requirement of this spec changes
+- 2026-09-20 draft · 2026-09-20 in review · 2026-09-21 accepted (Marc Vilardebó)
+- 2026-09-21 "Vectors" amended: three primitives have no published vector at the parameters §4 fixes, so they are `pinned` and each vector declares its `source` (Marc Vilardebó)
+- 2026-09-21 open question 010-R15 closed: the log test is parked in spec 100-log-test (Marc Vilardebó)
+- 2026-09-21 R14 amended three times: the wrapper bounds only what libsodium requires; the protocol number 65 535 and the 1 024 B password bound leave for specs 013 and 011; the empty-password guard is declared as policy; a password above `crypto_pwhash_PASSWD_MAX` is `TooLong`, not `OutOfMemory` (Marc Vilardebó)
+- 2026-09-21 open question 010-R16 closed: the bump procedure is the section "Bumping libsodium" (Marc Vilardebó)
+- 2026-09-21 Interface amended: the vector loader is its own `cfg(test)` file (Marc Vilardebó)
+- 2026-09-21 implemented: the wrapper is green and the human review of `ffi.rs` is done (Marc Vilardebó)
+- 2026-09-24 Interface: spec 015-test-vectors moves the vector loader to `crates/core/src/vectors.rs`, shared by every spec; no requirement of this spec changes
+- 2026-09-24 documentation review: the error mapping is owned by spec 011 R20, not spec 027; closed open questions condensed

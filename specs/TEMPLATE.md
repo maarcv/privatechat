@@ -3,7 +3,7 @@
 Status: draft | in review | accepted | implemented
 Phase: N
 Related ADRs: 000X, 000Y
-Depends on: NNN, NNN (specs that must be `implemented`)
+Depends on: NNN-name, NNN-name (specs that must be `accepted` or `implemented`)
 Blocks: NNN
 Human reviewer: (name) · Accepted on: YYYY-MM-DD
 
@@ -43,13 +43,13 @@ New or changed signatures at the core boundary (`docs/spec.md` §9, spec 027). I
 Every test cites the requirement it covers and is named `sNNN_tTT_rRR_<description>`.
 
 - T01 (covers R1): input → expected output
-- T02 (covers R2): invalid input → `Error::X` · commits to the Store = 0
+- T02 (covers R2): invalid input → `Error::X` · commits = 0 (commits other than the cursor)
 - For every spec with state: a test with `FailingStore` that fails at commit *n* and checks that reopening yields the state prior to *n*.
 - For every format: the mutation table (in "Vectors") is a test.
 
 ## Vectors
 
-Mandatory for `core` specs with a format or a derivation: file `specs/vectors/NNN.json` with the schema of `specs/vectors/README.md` (`{ "name", "inputs": {…hex}, "expected": {…hex} }`), and at least one negative vector for every rejection requirement. For formats, a **mutation table**: for every offset region, the exact `Error` expected when mutating one byte, and the assert that the Store receives no commit. For signatures: negative vectors with non-canonical S (S + L), identity `pk`, small-order `pk` and `R`, non-canonical `pk`.
+Mandatory for `core` specs with a format or a derivation: file `specs/vectors/NNN.json` with the schema of `specs/vectors/README.md` (`name`, `kind`, `source`, `origin`, `inputs`, `expected`), and at least one negative vector for every rejection requirement. For formats, a **mutation table**: for every offset region, the exact `Error` expected when mutating one byte, and the assert that the Store receives no commit. For signatures: negative vectors with non-canonical S (S + L), identity `pk`, small-order `pk` and `R`, non-canonical `pk`.
 
 ## Acceptance criterion
 

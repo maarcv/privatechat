@@ -1,6 +1,6 @@
 # Private E2E chat — Specification and plan (SDD)
 
-Version: mvp · Updated: 2026-09-24 · Marc Vilardebó · Post-audit E revision (see `docs/audit-log.md`)
+Version: mvp · Post-audit G revision · Updated: 2026-09-24 · Marc Vilardebó (audits in `docs/audit-log.md`)
 
 This file, on the default branch (`mvp` until the first release), is the canonical source of the specification (see §11 "Governance"). Read copy, may lag behind: https://claude.ai/code/artifact/1527bf13-79e8-485a-908d-a515cbd062a4
 
@@ -56,7 +56,7 @@ The main adversary is the server (or whoever compromises, hosts or seizes it) an
 
 ## 3. Design decisions (ADR)
 
-Each row corresponds to the file `docs/adr/NNNN-*.md`; titles are copied verbatim from the files. The full index, with status and supersessions, is in `docs/adr/README.md`.
+Each row corresponds to the file `docs/adr/NNNN-*.md`; titles are copied verbatim from the files. The full index, with dates, is in `docs/adr/README.md`.
 
 | # | Title | Status | One-line reason |
 | --- | --- | --- | --- |
@@ -388,7 +388,7 @@ The device is where the real attacks land; these measures are mandatory in v1 un
 | Code integrity | Reproducible builds published with hash; F-Droid or direct APK as an alternative to Google Play | Reproducible builds; published hash | Reproducible builds; published hash and signature |
 | Root / jailbreak / accessibility | Not blocked (it would break legitimate users); one-time warning if detected. Production without `debuggable`, without `usesCleartextTraffic`, no `exported` component | One-time warning if jailbreak is detected | Within the session, any process of the user can read keychain and files; documented |
 
-**Logging.** No log with content, names, keys, full `channel_id` or `pk`: only the 4-byte hex prefix when debugging is needed; in production, `warn` level and nothing else. All key material lives in the `Secret<N>` type (no `Clone`, no `Default`, manual `Debug` = `[REDACTED]`, `PartialEq` via `sodium_memcmp`). Test Redacted-`Debug` test (spec 010): `format!("{:?}")` of every type listed in `SECRET_TYPES` is exactly `[REDACTED]`. Test Log test (spec 100, parked until a crate emits): in-memory `tracing` subscriber at TRACE level, full encrypt/decrypt flow with known keys, assert that neither hex nor base64 of `K_ch`, `sk_u`, `sk_ch`, `K_msg`, `K_hdr`, `mk` nor the full `channel_id` appears in it.
+**Logging.** No log with content, names, keys, full `channel_id` or `pk`: only the 4-byte hex prefix when debugging is needed; in production, `warn` level and nothing else. All key material lives in the `Secret<N>` type (no `Clone`, no `Default`, manual `Debug` = `[REDACTED]`, `PartialEq` via `sodium_memcmp`). Redacted-`Debug` test (spec 010): `format!("{:?}")` of every type listed in `SECRET_TYPES` is exactly `[REDACTED]`. Log test (spec 100, parked until a crate emits): in-memory `tracing` subscriber at TRACE level, full encrypt/decrypt flow with known keys, assert that neither hex nor base64 of `K_ch`, `sk_u`, `sk_ch`, `K_msg`, `K_hdr`, `mk` nor the full `channel_id` appears in it.
 
 ## 9. Architecture and technical stack
 
@@ -533,10 +533,10 @@ From then on the three clients advance in parallel over a core whose API no long
 - [ ] The local CI commands of `.github/CONTRIBUTING.md` green (fmt, clippy, build, test, deny, doc lint, requirements)
 - [ ] Workspace lints (`[workspace.lints]` in `Cargo.toml`) at `deny` in `core`, `store` and `server`; `overflow-checks = true` in release
 - [ ] No secret in logs; redacted `Debug` on every new secret type (added to `SECRET_TYPES`)
-- [ ] Every rejection path has a test `input → Error::X`; in a stateful spec it also asserts that nothing but the cursor is committed, and there is a test with `FailingStore`
+- [ ] Every rejection path has a test `input → Error::X · commits = 0` (commits other than the cursor); stateful spec → test with `FailingStore`
 - [ ] New dependencies justified in the PR, one sentence each
 - [ ] Format, config, derivation or tag change → new ADR in `docs/adr/`
-- [ ] No accepted ADR modified outside its status line
+- [ ] No accepted ADR modified outside its status line, except a stale-reference correction logged in `docs/audit-log.md`
 - [ ] `docs/spec.md` up to date (`Updated` header) and a row in `docs/audit-log.md` if a decision changes
 - [ ] ≤ 400 lines of net diff; a single spec; PR title `NNN: …`
 - [ ] The `architecture` skill and the language skill followed
@@ -564,7 +564,7 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 │  ├─ threat-model.md
 │  ├─ audit-log.md           ← findings and changes of every audit (§13 points here)
 │  ├─ assistant.example.md   ← template for personal AI-assistant preferences (copied to git-ignored assistant.md)
-│  └─ adr/README.md · TEMPLATE.md · 0001-…md … 0026-…md
+│  └─ adr/README.md (index) · TEMPLATE.md · NNNN-*.md, one per decision
 ├─ specs/                    ← one spec per feature (TEMPLATE.md, README.md index)
 │  └─ vectors/               ← JSON test vectors, generated by the core (README.md with the schema)
 ├─ scripts/{doc_lint,check_requirements,check_fuzz_targets}.{sh,py}
@@ -602,7 +602,7 @@ None of the open decisions blocks phases 0–2. Those that would change the wire
 
 **Decisions closed in revisions B and C** — they can be reopened with an ADR. Decisions with an ADR are in §3; the following were closed without one:
 
-- Fingerprint word list: the English BIP-39 list (widely reviewed, unique 4-letter prefixes); the words are not a BIP-39 mnemonic and carry no checksum (ADR 0025).
+- Fingerprint word list: the English BIP-39 list (widely reviewed, unique 4-letter prefixes). How the words are derived from `fp`, with no checksum, is ADR 0025.
 - KDF contexts and domain tags: protocol literals, independent of the product name.
 - Duress code: out of v1.
 - Server: SQLite only in v1 (plain, via `rusqlite`).
@@ -614,6 +614,7 @@ None of the open decisions blocks phases 0–2. Those that would change the wire
 **Open decisions**
 
 - [ ] Product name. Affects only the repo name, the stores and the documentation; affects no protocol literal.
+- [ ] Final value of `DEFAULT_SERVER_URL` (the project's public server; spec 000-repo-layout defines the constant).
 - [ ] List of known community servers: in the documentation, not inside the app.
 - [ ] v1.x without a `proto_version` change (new key in the payload record; old receivers ignore it): message quoting (`reply_to` = hash of the quoted blob), presence indicator.
 - [ ] Web client (v2): browser extension with pinned code, or web hosted on an origin and by an operator different from the message server's.
@@ -639,4 +640,4 @@ None of the open decisions blocks phases 0–2. Those that would change the wire
 
 ## 13. Audit log
 
-Audits A (2026-09-19), B, C and D (2026-09-20) and E (2026-09-24): findings and applied changes are in `docs/audit-log.md`. Every PR that changes §3–§6 adds a row there.
+Audits A (2026-09-19), B, C and D (2026-09-20), E, F and G (2026-09-24): findings and applied changes are in `docs/audit-log.md`. Every PR that changes §3–§6 adds a row there.
