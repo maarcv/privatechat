@@ -1,6 +1,6 @@
 # Threat model
 
-Extract of `docs/spec.md` §1, §2 and §6. The table is a literal copy of the one in §2; if there is a discrepancy `spec.md` prevails and the doc lint (spec 003) detects it.
+The table is a literal copy of the one in `docs/spec.md` §2; if there is a discrepancy `spec.md` prevails and the doc lint (spec 003) detects it. What the system promises and does not promise is the list in `docs/spec.md` §1, not repeated here.
 
 ## Adversaries and mitigations
 
@@ -26,17 +26,6 @@ Extract of `docs/spec.md` §1, §2 and §6. The table is a literal copy of the o
 
 Malware on the device, rooted or jailbroken device, malicious accessibility services, supply-chain attacks on the app stores, cryptanalysis of the primitives, guaranteed server availability.
 
-## Accepted limitations, publicly documented
+## Accepted limitations
 
-- It does not protect against a compromised device or against a member who forwards.
-- The confidentiality of the whole channel depends on `K_ch`: whoever has it can decrypt any message of the channel they have captured, past or future, until a new channel is created. v1 has no cryptographic *forward secrecy* or *post-compromise security* (ADR 0013, 0004).
-- Messages are authenticated but not deniable.
-- The server can delete or delay messages; the client detects this partially (counter gaps) but cannot prevent it.
-- Whoever operates, hosts or seizes the server knows from which IP and at what time each person listens, and when you open the app. Without Tor, an IP is a person.
-- By default new channels go to the server configured in the app, which at installation is the project's; anyone who does not want that operator to see their metadata can change it in the settings or when creating the channel.
-- The app store and the operating system know you have the app installed and when you use it; other apps can detect it.
-- On desktop, within the user's session any of their processes can read the data files and the keychain.
-- Reinstalling the app, restoring a backup or a hardware failure erases all local data; recovery is re-importing the config.
-- No push notifications in v1, so as not to create the device↔channels map on the server.
-- If the leak comes from a member's device, the new channel will leak again by the same path.
-- The per-channel quota protects the server, not the channel: an intruder with the config can leave it full until the TTL; the only answer is a new channel.
+`docs/spec.md` §1 "What it does not promise" is the single list; every item there is public documentation, and the root `README.md` restates it in plain words.

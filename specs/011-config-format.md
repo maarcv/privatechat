@@ -175,7 +175,7 @@ The exports take `now` because they write the fixed expiry of R18, and `core` ne
 
 ## Vectors
 
-`specs/vectors/011.json`, schema of `specs/vectors/README.md`, `proto_version = 1`, with `created_at` and `invite_expires_at` as big-endian 8-byte hex. The configs are built with `from_parts` and the file with `seal_file`, from fixed inputs. The `derived` values are recomputed by the reference script of spec 015-test-vectors before they freeze (AGENTS 18).
+`specs/vectors/011.json`, schema of `specs/vectors/README.md`, `proto_version = 1`. The configs are built with `from_parts` and the file with `seal_file`, from fixed inputs. The `derived` values are recomputed by the reference script of spec 015-test-vectors.
 
 | name | kind | source | origin |
 | --- | --- | --- | --- |

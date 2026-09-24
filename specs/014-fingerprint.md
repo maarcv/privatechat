@@ -91,7 +91,7 @@ The functions are `pub(crate)`. `Fingerprint` is the `Record` of the core bounda
 
 ## Public API changes
 
-`Fingerprint` and `Channel::fingerprint` are already in `docs/spec.md` §9. This spec adds the `short` field to the record, which §9 already shows. Spec 027-core-api exposes `parse_verify_qr` behind the verification screen's call, taking the scanned bytes.
+`Fingerprint` and `Channel::fingerprint` are already in `docs/spec.md` §9, `short` field included. Spec 027-core-api exposes `parse_verify_qr` behind the verification screen's call, taking the scanned bytes.
 
 ## Test cases
 

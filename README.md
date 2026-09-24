@@ -14,6 +14,8 @@ An end-to-end encrypted group chat where the server is just a mailbox: it has no
 
 ## What it does not promise
 
+In plain words; the normative list is `docs/spec.md` §1.
+
 - It does not protect against a compromised device or against a member who forwards.
 - The confidentiality of the whole channel depends on the channel key: whoever has it can read everything, past and future, until a new channel is created. v1 has neither *forward secrecy* nor *post-compromise security*.
 - Messages are authenticated but not deniable.
@@ -24,7 +26,7 @@ An end-to-end encrypted group chat where the server is just a mailbox: it has no
 - On desktop, within the user's session any of their processes can read the data files and the keychain.
 - Reinstalling the app, restoring a backup or a hardware failure erases all local data; recovery is re-importing the config.
 
-The full list, the threat model and every decision are in [`docs/spec.md`](docs/spec.md), [`docs/threat-model.md`](docs/threat-model.md) and [`docs/adr/`](docs/adr/README.md).
+The threat model and every decision are in [`docs/spec.md`](docs/spec.md), [`docs/threat-model.md`](docs/threat-model.md) and [`docs/adr/`](docs/adr/README.md).
 
 ## How it is built
 

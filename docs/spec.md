@@ -27,6 +27,11 @@ An end-to-end encrypted group chat where the server is only a mailbox: it has no
 - The app store and the operating system know you have the app installed and when you use it; other apps can detect it.
 - On desktop, within the user's session any of their processes can read the data files and the keychain.
 - Reinstalling the app, restoring a backup or a hardware failure erases all local data; recovery is re-importing the config.
+- No push notifications in v1, so as not to create the device↔channels map on the server.
+- If the leak comes from a member's device, the new channel will leak again by the same path.
+- The per-channel quota protects the server, not the channel: an intruder with the config can leave it full until the TTL; the only answer is a new channel.
+
+This list is the single source: `docs/threat-model.md` and the root `README.md` point here.
 
 **Out of scope for v1:** calls, attachments, message quoting, presence indicators, 1-to-1 messages with prekeys, member removal, identity export between devices, federated server, push notifications, hosted web client (ADR 0017), duress code.
 

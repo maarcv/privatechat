@@ -136,7 +136,7 @@ None at the core boundary. `Error::Replay`, `Error::CounterExhausted` and the `O
 
 ## Vectors
 
-`specs/vectors/012.json`, schema of `specs/vectors/README.md`, `proto_version = 1`. Every 64-bit value (counters) is a 16-character big-endian hex string. Produced by the generator of spec 015-test-vectors, cross-checked by its reference script (R14), and frozen when phase 1 closes (AGENTS 18).
+`specs/vectors/012.json`, schema of `specs/vectors/README.md`, `proto_version = 1`. Produced by the generator of spec 015-test-vectors and cross-checked by its reference script (R14).
 
 | name | kind | source | origin |
 | --- | --- | --- | --- |

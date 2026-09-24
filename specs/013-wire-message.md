@@ -168,7 +168,7 @@ None directly: every item here is `pub(crate)`. `docs/spec.md` §9 gives `Channe
 
 ## Vectors
 
-`specs/vectors/013.json`, schema of `specs/vectors/README.md`, `proto_version = 1`. Every 64-bit value (counters, times) is a 16-character big-endian hex string. Receive vectors carry `channel_id`, `K_ch`, `received_at`, `now` and `ttl_seconds`; none needs receiver state. Every vector with a valid signature also carries the sender's Ed25519 seed and `pk_u`, so that the reference script can re-derive the key and verify the signature over the signed range on its own. Produced by the generator of spec 015-test-vectors, cross-checked by its reference script (R18), and frozen when phase 1 closes (AGENTS 18).
+`specs/vectors/013.json`, schema of `specs/vectors/README.md`, `proto_version = 1`. Receive vectors carry `channel_id`, `K_ch`, `received_at`, `now` and `ttl_seconds`; none needs receiver state. Every vector with a valid signature also carries the sender's Ed25519 seed and `pk_u`, so that the reference script can re-derive the key and verify the signature over the signed range on its own. Produced by the generator of spec 015-test-vectors and cross-checked by its reference script (R18).
 
 | name | kind | source | origin |
 | --- | --- | --- | --- |
