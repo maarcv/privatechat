@@ -114,7 +114,7 @@ jobs:
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
           changed="$(git diff --name-only "$BASE"...HEAD)"
-          protected="$(printf '%s\n' "$changed" | grep -E '^(crates/core/src/proto/|crates/core/src/crypto/|specs/vectors/|specs/01[123]-)' || true)"
+          protected="$(printf '%s\n' "$changed" | grep -E '^(crates/core/src/proto/|crates/core/src/crypto/|specs/vectors/|specs/01[12347]-)' || true)"
           if [ -z "$protected" ]; then echo "no protected paths touched"; exit 0; fi
           case ",$LABELS," in *,adr-not-needed,*) echo "label adr-not-needed present"; exit 0;; esac
           added_adr="$(git diff --name-only --diff-filter=A "$BASE"...HEAD | grep -E '^docs/adr/[0-9]{4}-.*\.md$' || true)"
