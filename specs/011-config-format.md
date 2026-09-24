@@ -2,149 +2,188 @@
 
 Status: in review
 Phase: 1
-Related ADRs: 0001, 0008, 0009, 0010, 0014, 0022
-Depends on: 010-primitives-wrapper
+Related ADRs: 0001, 0008, 0009, 0010, 0014, 0022, 0023, 0026
+Depends on: 010-primitives-wrapper, 015-test-vectors, 017-record-encoding
 Blocks: 012-message-keys, 013-wire-message, 014-fingerprint, 031-auth-channel-signature
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
 
-The config is the only secret of the system (`docs/spec.md` §5): whoever holds it reads the whole channel, past and future, and there is no way to take it back (ADR 0008). This spec fixes three things: the document a config is, the two forms in which it travels — a QR in the clear and an encrypted file — and the channel identity it derives, which is the Ed25519 key pair of the channel (ADR 0010) and the `channel_id` the server sees (ADR 0014).
+The config is the only secret of the system (`docs/spec.md` §5): whoever holds it reads the whole channel, past and future, and there is no way to take it back (ADR 0008). This spec fixes four things:
 
-Everything is built from `core::crypto` (spec 010-primitives-wrapper) and nothing else. Message keys, envelope and payload belong to specs 012-message-keys and 013-wire-message: a config knows how to identify a channel, not how to write in it. The channel identity lives here, and not in 012, because `pk_ch` and `channel_id` are properties of the config itself: they are what a config *is* to the server, and they are fixed the moment it is created.
+- the record a config is;
+- the two forms in which it travels, a QR in the clear and a password-encrypted file;
+- the 7-word password of that file;
+- the channel identity the config derives, which is the Ed25519 key pair of the channel (ADR 0010) and the `channel_id` the server sees (ADR 0014).
 
-This spec also pays the debt spec 010 left it: `core::crypto` bounds no password length, so the maximum a `.chatcfg` file accepts is fixed here (`docs/spec.md` §5, spec 010 R14).
+Everything is built from `core::crypto` (spec 010-primitives-wrapper) and from the record codec of spec 017-record-encoding. Message keys, the envelope and the payload belong to specs 012-message-keys and 013-wire-message: a config knows how to identify a channel, not how to write in it. The channel identity lives here, and not in 012, because `pk_ch` and `channel_id` are what a config *is* to the server, and they are fixed the moment it is created.
+
+This spec also creates `core::Error`, the one error type of the core boundary (`docs/spec.md` §9), because the config is the first code that returns it. It also owns the English BIP-39 word list, which the password uses first and spec 014-fingerprint reuses.
+
+It pays the debt spec 010 left it: `core::crypto` bounds no password length, so the maximum a `.chatcfg` file accepts is fixed here (`docs/spec.md` §5, spec 010 R14).
+
+In plain words: a config is a short list of numbered fields: the channel key, the server address, how long messages live, a name and two version numbers. It travels either as text inside a QR code that is shown in person, or as a small file locked with a 7-word password that is spoken over another channel.
 
 ## Requirements
 
-- R1 A config MUST be a CBOR map carrying the integer keys of `docs/spec.md` §5 and no others: 0 `config_version` uint, 1 `proto_version` uint, 2 `K_ch` 32 bytes, 3 `server_url` text, 4 `ttl_seconds` uint, 5 `created_at` uint, 6 `invite_expires_at` uint or absent, 7 `suggested_name` text.
-- R2 Decoding MUST go through `ciborium` into a `struct` with `serde` and `recursion_limit = 8`, MUST NOT build a generic CBOR value, and MUST return `Error::BadConfig` for a duplicate key, an unknown key, a missing key other than 6, a value of the wrong CBOR major type, a value that does not fit its type, or any trailing byte after the map.
-- R3 `config_version` and `proto_version` MUST both be 1; any other value MUST return `Error::UnsupportedVersion` before any other check of the document.
-- R4 `ttl_seconds` MUST be within 60..=2_592_000 and `suggested_name` at most 64 bytes of UTF-8 with no character of the Unicode categories Cc and Cf; outside those ranges MUST return `Error::BadConfig`.
-- R5 `server_url` MUST be at most 256 bytes and MUST match `wss://` ‖ host ‖ optional `:port`, with nothing after it: a host of lowercase ASCII letters, digits, `-` and `.` in labels of 1..=63 bytes totalling at most 253 bytes with no trailing dot, or an IPv4 literal, or an IPv6 literal between brackets; a port of 1..=65535 with no leading zero. Any other text MUST return `Error::BadConfig`.
-- R6 `Config::host()` MUST return the host of `server_url` without brackets and without the port, which is the string the subscription signature covers (`docs/spec.md` §6).
-- R7 The serialised config MUST be at most 512 bytes, and a document above that MUST return `Error::BadConfig` before it is decoded.
-- R8 `sk_ch` and `pk_ch` MUST be `sign_keypair_from_seed(kdf_derive(K_ch, "chauth__"))`, and `channel_id` MUST be the first 16 bytes of `hash("privatechat/chid/v1" ‖ pk_ch ‖ BE32(ttl_seconds))` (`docs/spec.md` §4).
-- R9 `Config::create` MUST generate `K_ch` with `random_bytes`, set `config_version` and `proto_version` to 1, `created_at` to the `now` it receives and no `invite_expires_at`, and MUST validate `server_url`, `ttl_seconds` and `suggested_name` by the rules of R4 and R5.
-- R10 `Config::parse` MUST reject a config whose `invite_expires_at` is present and lower than the `now` it receives, with `Error::InviteExpired`, after the checks of R2 to R7 and before deriving anything.
-- R11 The QR form MUST be the CBOR of the config with no prefix and no URL scheme, so that no system camera opens it as a link (`docs/spec.md` §5).
-- R12 The file form MUST be `"PCFG"` ‖ `config_version` uint8 ‖ `salt` 16 bytes ‖ `nonce` 24 bytes ‖ `secretbox_seal(password_key(password, salt), nonce, config_cbor)`, with `salt` and `nonce` from `random_bytes`; a file whose first 4 bytes are not `PCFG` MUST return `Error::BadConfig`, and one whose `config_version` is not 1 MUST return `Error::UnsupportedVersion`.
-- R13 Opening a file MUST return `Error::BadPassphrase` when the secret box does not open, and MUST NOT distinguish a wrong password from a corrupted file.
-- R14 The password of a file MUST be within 1..=256 bytes; outside that range MUST return `Error::BadPassphrase`, and the empty password MUST never reach `password_key`.
-- R15 `Config::export_encrypted` MUST refuse an `invite_expires_at` more than 86_400_000 milliseconds after the `now` it receives, and the QR export MUST refuse one more than 86_400_000 milliseconds after it, both with `Error::BadConfig`.
-- R16 `K_ch`, `sk_ch` and the key derived from the password MUST live in `Secret<32>` and `Secret<64>`, MUST be added to `SECRET_TYPES`, and `Config` MUST NOT implement `Clone`, `Debug`, `Display` or any `serde` trait that would print or copy it.
-- R17 `core` MUST gain exactly two dependencies, `ciborium` and `serde` with the feature `derive`, both with `default-features = false`; the manifest test of spec 010-primitives-wrapper MUST be updated in the same pull request and `cargo deny --all-features check` MUST pass.
-- R18 A config that fails any check of this spec MUST leave no trace: no `Store` commit, no partially built `Config`, and no error carrying a byte of `K_ch` or of the password.
+- R1 A config MUST be a record of spec 017-record-encoding with exactly the keys of `docs/spec.md` §5: 0 `config_version` u8, 1 `proto_version` u8, 2 `K_ch` bytes32, 3 `server_url` text, 4 `ttl_seconds` u32, 5 `created_at` u64, 6 `invite_expires_at` u64, 7 `suggested_name` text. Key 6 MUST be optional and every other key mandatory.
+- R2 The config MUST be decoded with a `Reader` under `UnknownKeys::Reject`, and every `RecordError` MUST become `Error::BadConfig`: a key out of order or repeated, an unknown key, a missing mandatory key, a value of the wrong width, text that is not UTF-8, or a trailing byte.
+- R3 Decoding MUST run in this order: the size of R7; then keys 0 and 1 alone, read with a reader under `UnknownKeys::Ignore`, where a `config_version` or `proto_version` other than 1 MUST return `Error::UnsupportedVersion`; then the strict decode of R2; then the ranges of R4 and R5; then the expiry of R10; and only then any derivation.
+- R4 `ttl_seconds` MUST be within 60..=2_592_000, and `suggested_name` MUST be at most 64 bytes of UTF-8 with no Cc character (U+0000..=U+001F, U+007F..=U+009F); outside those ranges the result MUST be `Error::BadConfig`.
+- R5 `server_url` MUST be at most 256 bytes and MUST be `wss://` ‖ host ‖ optional `:port`, with nothing after it. The host MUST be either a name of lowercase ASCII letters, digits, `-` and `.`, in labels of 1..=63 bytes totalling at most 253 bytes, with no trailing dot and a last label that is not all digits; or an IPv4 literal of four decimal numbers within 0..=255 with no leading zero. The port MUST be within 1..=65535, with no leading zero, and MUST NOT be 443. Any other text MUST return `Error::BadConfig`.
+- R6 `Config` MUST expose `server_url()`, `suggested_name()`, `ttl_seconds()` and `channel_id()` as read-only accessors, and `host()` MUST return the host of `server_url` without the port. The host is the string the subscription signature covers (`docs/spec.md` §6), not the key that groups channels on one connection, which is the host and the port together.
+- R7 The encoded record MUST be at most 512 bytes, and a longer one MUST return `Error::BadConfig` before any byte of it is decoded.
+- R8 `sk_ch` and `pk_ch` MUST be `sign_keypair_from_seed(kdf_derive(K_ch, "chauth__"))`, and `channel_id` MUST be the first 16 bytes of `hash("privatechat/chid/v1" ‖ pk_ch ‖ BE32(ttl_seconds))`, held in the type `ChannelId` and compared only with `ct_eq` (`docs/spec.md` §4).
+- R9 `Config::create` MUST generate `K_ch` with `random_bytes`, MUST set both versions to 1, `created_at` to the `now` it receives and no `invite_expires_at`, and MUST validate `server_url`, `ttl_seconds` and `suggested_name` by R4 and R5.
+- R10 `parse`, `parse_qr` and `open_encrypted` MUST return `Error::InviteExpired` for an `invite_expires_at` lower than the `now` they receive. A `Config` they return MUST NOT hold `invite_expires_at`, so that a config stored after import never expires as an invitation (ADR 0026).
+- R11 The QR form MUST be the base64url text, with no padding, of the config record, with no prefix and no URL scheme. `parse_qr` MUST return `Error::BadConfig` for text longer than 683 characters, for a character outside the base64url alphabet, for padding, and for final bits that are not zero, so that each config has exactly one QR text.
+- R12 The file form MUST be `"PCFG"` ‖ `config_version` u8 ‖ `salt` 16 bytes ‖ `nonce` 24 bytes ‖ `secretbox_seal(password_key(password, salt), nonce, config record)`, with `salt` and `nonce` drawn with `random_bytes` for every export. Opening MUST check, in this order: the magic (`Error::BadConfig`), the version byte (`Error::UnsupportedVersion` if not 1), the length within 61..=573 bytes (`Error::BadConfig`), then derive the key, open the box, and decode the record by R3. A record whose `config_version` differs from the header byte MUST return `Error::BadConfig`.
+- R13 Opening a file MUST return `Error::BadPassphrase` whenever the secret box does not open, and MUST NOT distinguish a wrong password from a corrupted file.
+- R14 Before any key is derived, a password MUST be canonicalised: ASCII letters lowercased, every run of U+0020, U+0009, U+000A and U+000D replaced by one U+0020, and leading and trailing spaces removed. The canonical password MUST be within 1..=256 bytes, otherwise the result is `Error::BadPassphrase`, and the empty password MUST never reach `password_key`. Both `open_encrypted` and `export_encrypted` apply this rule.
+- R15 `Config::generate_password` MUST return 7 words of the list of R16, each chosen by 11 bits drawn with `random_bytes`, as lowercase ASCII joined by one U+0020: 77 bits, at most 62 bytes, and already canonical by R14.
+- R16 The word list MUST be the English BIP-39 list, embedded in `core` as 2 048 lines ending in LF, and a test MUST pin its BLAKE2b-256 digest (`crypto::hash`) to `6fefd6b6e47ee66e6bbf8ee322305deebeefb1bd9b24e8618bf126d870175bb7`. Its SHA-256, which a human can check with common tools, is `2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda`.
+- R17 `export_qr` MUST write `invite_expires_at = now + 600_000` and `export_encrypted` `invite_expires_at = now + 86_400_000`, both with `checked_add`, and they MUST NOT take an expiry as a parameter (ADR 0026).
+- R18 `K_ch` MUST be copied from the record straight into a `Secret<32>`, `sk_ch` and the password key MUST be `Secret<64>` and `Secret<32>`, and every buffer holding the plaintext record or the canonical password MUST be a `zeroize::Zeroizing<Vec<u8>>`, including the output of `secretbox_open` as soon as it is returned. These are existing secret types, so `SECRET_TYPES` gains nothing. `Config` MUST NOT implement `Clone`, `Debug` or `Display`.
+- R19 `core::Error` MUST be written by hand, with no derive crate, and MUST carry every variant of `docs/spec.md` §9 except `Store`, which arrives with spec 020-store-files. Every variant MUST be a unit variant, carrying no data. `CryptoError::InitFailed` and `CryptoError::OutOfMemory` MUST become `Error::Internal`, and `CryptoError::Forged` from `secretbox_open` MUST become `Error::BadPassphrase`; the mapping of the AEAD belongs to spec 013-wire-message.
+- R20 A config that fails any check MUST leave no trace: no partially built `Config` is returned, and no error carries a byte of `K_ch` or of the password.
 
 ## Limits
 
 | Input | Range | Out of range |
 | --- | --- | --- |
-| Serialised config | 0..=512 B | `BadConfig` |
-| `server_url` | 1..=256 B, grammar of R5 | `BadConfig` |
-| Host of `server_url` | 1..=253 B, labels 1..=63 B | `BadConfig` |
-| Port | 1..=65535, no leading zero | `BadConfig` |
-| `ttl_seconds` | 60..=2 592 000 | `BadConfig` |
-| `suggested_name` | 0..=64 B UTF-8, no Cc, no Cf | `BadConfig` |
-| `invite_expires_at` on export | `now`..=`now + 86 400 000` | `BadConfig` |
-| `password` | 1..=256 B | `BadPassphrase` |
+| Encoded record | 0..=512 B | `BadConfig` |
+| QR text | 1..=683 base64url characters | `BadConfig` |
 | `.chatcfg` file | 61..=573 B | `BadConfig` |
+| `server_url` | 1..=256 B, grammar of R5 | `BadConfig` |
+| Host name | 1..=253 B, labels 1..=63 B | `BadConfig` |
+| IPv4 number | 0..=255, no leading zero | `BadConfig` |
+| Port | 1..=65535, no leading zero, not 443 | `BadConfig` |
+| `ttl_seconds` | 60..=2 592 000 | `BadConfig` |
+| `suggested_name` | 0..=64 B UTF-8, no Cc | `BadConfig` |
+| `invite_expires_at` on import | ≥ `now` | `InviteExpired` |
+| Canonical password | 1..=256 B | `BadPassphrase` |
 | `config_version`, `proto_version` | 1 | `UnsupportedVersion` |
 
-The file is the 45 fixed bytes of its header plus the 16 of the secret box mac plus the config.
+The file is 45 bytes of header, 16 bytes of the secret box tag and the record. The QR text of a record of 512 bytes is 683 characters. The largest valid record is well under the limit: 414 bytes with a `server_url` of 256 bytes and a name of 64.
 
 ## Interface
 
 ```
-crates/core/src/config.rs              Config, its parser and its two forms
-crates/core/src/config/url.rs          the grammar of R5, which is the only URL parsing in the workspace
-crates/core/src/config/tests.rs        s011_* tests
+crates/core/src/error.rs                 core::Error (R19)
+crates/core/src/proto/config.rs          Config, its record, its two forms, the password
+crates/core/src/proto/config/url.rs      the grammar of R5, the only URL parsing in the workspace
+crates/core/src/proto/config/tests.rs    s011_* tests
+crates/core/src/proto/wordlist.rs        the list of R16, shared with spec 014-fingerprint
+crates/core/src/proto/bip39_english.txt  the list itself
 ```
 
 ```rust
-pub struct Config { /* K_ch: Secret<32>, and the fields of §5 */ }
+pub enum Error {
+    BadLength, UnsupportedVersion, WrongChannel, Expired, RetiredKey, PeerLimit,
+    Replay, BadSignature, BadPadding, BadPayload, CounterExhausted,
+    BadConfig, BadPassphrase, InviteExpired, ConfigMismatch, Internal,
+}
+
+pub(crate) struct ChannelId(pub(crate) [u8; 16]);
+
+pub struct Config { /* K_ch: Secret<32>, the fields of §5 except invite_expires_at */ }
 
 impl Config {
     pub fn create(server_url: &str, ttl_seconds: u32, suggested_name: &str, now: u64) -> Result<Config, Error>;
     pub fn parse(bytes: &[u8], now: u64) -> Result<Config, Error>;
+    pub fn parse_qr(text: &str, now: u64) -> Result<Config, Error>;
     pub fn open_encrypted(bytes: &[u8], password: &[u8], now: u64) -> Result<Config, Error>;
-    pub fn export_qr(&self, invite_expires_at: Option<u64>, now: u64) -> Result<Vec<u8>, Error>;
-    pub fn export_encrypted(&self, password: &[u8], invite_expires_at: Option<u64>, now: u64) -> Result<Vec<u8>, Error>;
+    pub fn generate_password() -> Result<Vec<u8>, Error>;
+    pub fn export_qr(&self, now: u64) -> Result<String, Error>;
+    pub fn export_encrypted(&self, password: &[u8], now: u64) -> Result<Vec<u8>, Error>;
     pub fn channel_id(&self) -> [u8; 16];
+    pub fn server_url(&self) -> &str;
+    pub fn suggested_name(&self) -> &str;
+    pub fn ttl_seconds(&self) -> u32;
     pub fn host(&self) -> &str;
+    pub(crate) fn id(&self) -> &ChannelId;
     pub(crate) fn channel_keypair(&self) -> Result<(PublicKey, Secret<64>), CryptoError>;
 }
 ```
 
-The exported forms take `now` because both refuse an expiry beyond the window of R15, and `core` never reads a clock (AGENTS 10).
+The exports take `now` because they write the fixed expiry of R17, and `core` never reads a clock (AGENTS 10). `generate_password` returns bytes, not a `String`, because passwords cross the boundary as bytes (AGENTS 20).
 
 ## Security
 
-- Secrets: `K_ch` (`Secret<32>`), `sk_ch` (`Secret<64>`) and the password key (`Secret<32>`). The password itself is bytes the caller owns and zeroizes; the core never copies it into a `String`.
-- The two error paths a holder of a file can observe, a wrong password and a corrupted file, share one variant on purpose (R13): the secret box tag is already a perfect offline oracle, and a second signal would tell an attacker which of their guesses parse.
-- `K_ch` does not rotate and the file is considered exposed the moment it is sent, so the password is 7 BIP-39 words (77 bits) with Argon2id at the interactive parameters, both fixed by `config_version = 1` (`docs/spec.md` §5).
-- The QR carries the config in the clear: whoever photographs the screen has the channel. The UI measures of §8 (no screenshot, no sharing, hidden after 60 seconds) are not this spec's, but the format is what makes them necessary.
-- Everything variable-length is bounded before it is parsed (R7), and the URL grammar of R5 is a whitelist: no percent-decoding, no Unicode host, no normalisation that could make two configs look different and hash the same.
+- Secrets: `K_ch` (`Secret<32>`), `sk_ch` (`Secret<64>`) and the password key (`Secret<32>`). The password itself is bytes the caller owns and zeroizes; the core copies it only into the zeroizing buffer of its canonical form.
+- `export_qr` hands `K_ch` to the UI inside the QR text. It is the one sanctioned case where a secret crosses the boundary, and it is covered by the non-retention rule of `docs/spec.md` §8: no cache, no log, no `toString`, and the QR hides itself after 60 seconds.
+- A wrong password and a corrupted file share one error on purpose (R13). The secret box tag is already a perfect offline oracle (a way for an attacker to test guesses offline); a second signal would tell an attacker which of their guesses parse.
+- `K_ch` does not rotate and the file is considered exposed the moment it is sent, so the password is 7 words (77 bits) with Argon2id at the interactive parameters, both fixed by `config_version = 1` (`docs/spec.md` §5). The core draws the words itself (R15), so no client needs a random source of its own.
+- Canonicalisation (R14) removes nothing from the password's strength: the 7 words are lowercase ASCII separated by single spaces, so the rule only undoes what a keyboard adds.
+- Everything variable-length is bounded before it is parsed (R7, R11, R12), and the URL grammar of R5 is a whitelist: no percent-decoding, no Unicode host, no IPv6, no default port written out. Each server therefore has exactly one `server_url`, and two members cannot hold two spellings of one server, which would split the channel with `ConfigMismatch`.
+- The version is read before the strict decode (R3), so a config from a future version gets "update the app" (`UnsupportedVersion`) rather than "corrupt config" (`BadConfig`).
 
 ## Public API changes
 
-`Config` is the first public type of the core: `create`, `parse`, `open_encrypted`, `export_qr`, `export_encrypted`, `channel_id` and `host`. `docs/spec.md` §9 lists `export_encrypted` without `now`; this spec adds it, so spec 027-core-api and the bindings of 040-uniffi take the signature above.
+`Config` and `Error` are the first public types of the core. `docs/spec.md` §9 already lists `parse_qr`, `generate_password`, `export_qr`, `export_encrypted` with `now`, and the accessors. This spec names the password parameter `password`; §9 still says `passphrase`, and spec 027-core-api settles the name for the bindings of 040-uniffi.
 
 ## Test cases
 
-- T01 (covers R1, R2): `s011_t01_r01_parses_the_reference_config` on the positive vector; `s011_t02_r02_rejects_malformed_cbor` over a table of documents — duplicate key, unknown key, missing key 2, `K_ch` of 31 bytes, `ttl_seconds` as text, one trailing byte — each `BadConfig`.
-- T03 (covers R3): `s011_t03_r03_rejects_other_versions`: `config_version` 0 and 2, `proto_version` 2 → `UnsupportedVersion`.
-- T04 (covers R4): `s011_t04_r04_rejects_ttl_and_name_out_of_range`: 59, 2_592_001, a name of 65 bytes and a name with U+0000 → `BadConfig`; 60 and 2_592_000 accepted.
-- T05 (covers R5, R6): `s011_t05_r05_url_grammar` over a table of accepted and rejected URLs, including `wss://host`, `wss://host:443`, `wss://1.2.3.4`, `wss://[::1]:9001`, a 56-character `.onion`, and the rejections `ws://host`, `wss://host/path`, `wss://host?q`, `wss://HOST`, `wss://host.`, `wss://host:0`, `wss://host:065`, `wss://user@host` and a URL of 257 bytes; `s011_t06_r06_host_has_no_brackets_or_port` checks `host()` for the IPv6 and the port cases.
-- T07 (covers R7): `s011_t07_r07_rejects_a_document_above_the_limit`: 513 bytes → `BadConfig`, and the check happens before decoding.
-- T08 (covers R8): `s011_t08_r08_channel_id_known_answer` on the vector: `K_ch` → `pk_ch` → `channel_id`; a `ttl_seconds` changed by one gives a different `channel_id`.
-- T09 (covers R9): `s011_t09_r09_create_fills_the_fixed_fields`: two calls give different `K_ch`, versions are 1, `created_at` is the `now` passed and there is no `invite_expires_at`.
-- T10 (covers R10): `s011_t10_r10_rejects_an_expired_invitation`: `invite_expires_at` = `now − 1` → `InviteExpired`; `now` accepted.
-- T11 (covers R11): `s011_t11_r11_qr_is_bare_cbor`: the QR bytes decode as the config and start with a CBOR map header, and carry no `:` in their first 16 bytes.
-- T12 (covers R12, R13): `s011_t12_r12_file_round_trip` on the vector; `s011_t13_r12_rejects_a_foreign_file`: a wrong magic → `BadConfig`, `config_version` 2 → `UnsupportedVersion`; `s011_t14_r13_wrong_password_and_corruption_are_one_error`: a wrong password and every single-byte mutation of the sealed part → `BadPassphrase`.
-- T15 (covers R14): `s011_t15_r14_password_length`: empty and 257 bytes → `BadPassphrase`; 1 and 256 bytes accepted.
-- T16 (covers R15): `s011_t16_r15_invitation_window`: `now + 86_400_001` → `BadConfig` for both export forms; `now + 86_400_000` accepted.
-- T17 (covers R16): `s011_t17_r16_config_holds_no_printable_secret`: the source of `config.rs` derives none of the forbidden traits, and `SECRET_TYPES` lists the types this spec adds.
-- T18 (covers R17): `s011_t18_r17_manifest_pins_dependencies`: the manifest declares exactly `libsodium-sys-stable`, `zeroize`, `ciborium` and `serde`, none with default features beyond what this requirement allows.
-- T19 (covers R18): `s011_t19_r18_a_rejected_config_leaves_nothing`: for every rejection above, the `Store` receives no commit and the error's `Debug` contains no byte of `K_ch` or of the password.
+- T01 (covers R1): `s011_t01_r01_parses_the_reference_config` on the vectors `config_reference` and `config_no_invite`.
+- T02 (covers R2): `s011_t02_r02_rejects_malformed_records` over a table: keys out of order, a repeated key, an unknown key 8, a missing key 2, `K_ch` of 31 bytes, `ttl_seconds` of 3 bytes, a trailing byte → `BadConfig`.
+- T03 (covers R3): `s011_t03_r03_version_is_read_first`: `config_version` 0 and 2 and `proto_version` 2 → `UnsupportedVersion`, also when the same record carries an unknown key 8.
+- T04 (covers R4): `s011_t04_r04_ttl_and_name_ranges`: 59, 2_592_001, a name of 65 bytes, a name with U+0000 and one with U+0085 → `BadConfig`; 60, 2_592_000 and a name with U+200B accepted.
+- T05 (covers R5): `s011_t05_r05_url_grammar` over a table. Accepted: `wss://host`, `wss://host:9001`, `wss://1.2.3.4`, `wss://127.0.0.1:8443` and an `.onion` host of 56 characters plus the suffix. Rejected: `ws://host`, `wss://host/path`, `wss://host?q`, `wss://HOST`, `wss://host.`, `wss://host:0`, `wss://host:065`, `wss://host:443`, `wss://user@host`, `wss://[::1]`, `wss://1.2.3`, `wss://01.2.3.4`, `wss://256.1.1.1`, `wss://a.123` and a URL of 257 bytes.
+- T06 (covers R6): `s011_t06_r06_accessors_and_host`: each accessor returns the field of the vector, and `host()` of `wss://host:9001` is `host`.
+- T07 (covers R7): `s011_t07_r07_rejects_a_record_above_the_limit`: 513 bytes → `BadConfig` before decoding, even when the first bytes are a valid key 0.
+- T08 (covers R8): `s011_t08_r08_channel_id_known_answer` on the vectors: `K_ch` → `pk_ch` → `channel_id`; a `ttl_seconds` that differs by one gives a different `channel_id`.
+- T09 (covers R9): `s011_t09_r09_create_fills_the_fixed_fields`: two calls give different `K_ch`, versions are 1, `created_at` is the `now` passed and the record has no key 6.
+- T10 (covers R10): `s011_t10_r10_expired_invitation_on_every_path`: `invite_expires_at = now − 1` → `InviteExpired` through `parse`, `parse_qr` and `open_encrypted`; `now` accepted, and the `Config` returned re-exports without the old expiry.
+- T11 (covers R11): `s011_t11_r11_qr_is_canonical_base64url`: the QR text of the vector; `=` padding, a `+`, a `/`, non-zero final bits and 684 characters → `BadConfig`.
+- T12 (covers R12): `s011_t12_r12_file_round_trip_and_order` on the vector `chatcfg_reference`; a wrong magic → `BadConfig`, a version byte 2 → `UnsupportedVersion`, 60 and 574 bytes → `BadConfig`, all without calling `password_key`; a record with `config_version` 2 sealed under header byte 1 → `BadConfig`.
+- T13 (covers R13): `s011_t13_r13_wrong_password_and_corruption_are_one_error`: a wrong password, and every single-byte mutation of `salt`, `nonce` and the sealed part → `BadPassphrase`.
+- T14 (covers R14): `s011_t14_r14_password_canonical_form`: `"  Able\tABOUT  above "` opens a file sealed with `"able about above"`; the empty password, one of spaces only and one of 257 bytes → `BadPassphrase`.
+- T15 (covers R15): `s011_t15_r15_generated_password`: 7 words of the list, single spaces, lowercase, at most 62 bytes, canonical by R14, and two calls differ.
+- T16 (covers R16): `s011_t16_r16_word_list_is_pinned`: 2 048 unique lines, sorted, and the BLAKE2b-256 digest of R16.
+- T17 (covers R17): `s011_t17_r17_fixed_invitation_expiry`: the QR decodes with `invite_expires_at = now + 600_000` and the file opens with `now + 86_400_000`; `now = u64::MAX` → `BadConfig`.
+- T18 (covers R18): `s011_t18_r18_no_printable_or_lingering_secret`: the source of `config.rs` derives none of `Clone`, `Debug` or `Display`, the plaintext buffers are `Zeroizing`, and `SECRET_TYPES` is unchanged.
+- T19 (covers R19): `s011_t19_r19_error_mapping`: `InitFailed` and `OutOfMemory` map to `Internal`, `Forged` from the secret box to `BadPassphrase`, and the manifest of `core` still declares only `libsodium-sys-stable` and `zeroize`.
+- T20 (covers R20): `s011_t20_r20_a_rejected_config_leaves_nothing`: for every rejection above, the `Debug` of the error contains no byte of `K_ch` or of the password.
 
 ## Vectors
 
-`specs/vectors/011.json`, schema of `specs/vectors/README.md`, `proto_version = 1`. Produced by the core once this spec is implemented, and from then on frozen (AGENTS 18).
+`specs/vectors/011.json`, schema of `specs/vectors/README.md`, `proto_version = 1`, with `created_at` and `invite_expires_at` as big-endian 8-byte hex. The `derived` values are recomputed by the reference script of spec 015-test-vectors before they freeze (AGENTS 18).
 
 | name | kind | source | origin |
 | --- | --- | --- | --- |
-| `config_reference` | positive | derived | a config with all fields, its CBOR and its `channel_id` |
+| `config_reference` | positive | derived | a config with every field, its record, its QR text and its `channel_id` |
 | `config_no_invite` | positive | derived | the same without key 6 |
 | `channel_id_ttl_60`, `channel_id_ttl_2592000` | positive | derived | the two ends of the TTL range, same `K_ch`, different id |
 | `chatcfg_reference` | positive | derived | the `PCFG` file of `config_reference` with a fixed password, salt and nonce |
-| `mutate_cbor_duplicate_key`, `mutate_cbor_unknown_key`, `mutate_cbor_trailing_byte`, `mutate_kch_31_bytes` | negative | derived | each → `BadConfig` |
-| `mutate_magic`, `mutate_file_version` | negative | derived | → `BadConfig` and `UnsupportedVersion` |
-| `mutate_sealed_byte` | negative | derived | one byte of the secret box → `BadPassphrase` |
+| `record_key_order`, `record_unknown_key`, `record_trailing_byte`, `record_kch_31_bytes` | negative | derived | each → `BadConfig` |
+| `record_version_2` | negative | derived | → `UnsupportedVersion` |
+| `qr_padding`, `qr_nonzero_bits` | negative | derived | → `BadConfig` |
+| `file_magic`, `file_version`, `file_version_mismatch` | negative | derived | → `BadConfig`, `UnsupportedVersion`, `BadConfig` |
+| `file_sealed_byte` | negative | derived | one byte of the secret box → `BadPassphrase` |
 | `invite_expired` | negative | derived | `invite_expires_at` in the past → `InviteExpired` |
 
-Mutation table of the file: any byte of `salt`, `nonce` or the sealed part → `BadPassphrase`; the magic → `BadConfig`; the version byte → `UnsupportedVersion`. Every negative vector asserts `commits = 0`.
+Mutation table of the file: the magic → `BadConfig`; the version byte → `UnsupportedVersion`; any byte of `salt`, `nonce` or the sealed part → `BadPassphrase`.
 
 ## Acceptance criterion
 
-`cargo test -p privatechat-core s011_` green; `cargo clippy --all-targets --all-features -- -D warnings`, `cargo deny --all-features check` and `scripts/doc_lint.sh` green. Non-automatable criterion: a human confirms that the URL grammar of R5 accepts every server the project intends to support, because a rejected URL is a channel nobody can create.
+`cargo test -p privatechat-core s011_` green; `cargo clippy --all-targets --all-features -- -D warnings`, `cargo deny --all-features check` and `scripts/doc_lint.sh` green; the fuzz targets of `parse`, `parse_qr` and the file after the key derivation run for one hour without a crash (spec 016-fuzz-harness). Non-automatable criterion: a human confirms that the URL grammar of R5 accepts every server the project intends to support, because a rejected URL is a channel nobody can create.
 
 ## Out of scope
 
 - The message keys, the envelope, the payload and the fingerprint (specs 012-message-keys, 013-wire-message, 014-fingerprint).
-- The subscription signature to the server, which uses `sk_ch` (spec 031-auth-channel-signature).
+- The record codec itself (spec 017-record-encoding).
+- The subscription signature to the server, which uses `sk_ch` and `host()` (spec 031-auth-channel-signature).
 - Storing the config, the local identity `(pk_u, sk_u)` and the duplicate-channel rule on import (specs 020-store-files and 021-channel-session).
-- Generating the 7 BIP-39 words: the word list arrives with spec 014-fingerprint, which needs it for the 12 words, and the UI asks for it.
+- Showing the password and the QR, and the camera (specs 054-qr-invite and the client specs).
 - Any change to `config_version`, which is a new ADR by definition (AGENTS 3).
 
 ## Open questions
 
-- [ ] 011-R2: an unknown key is an error here, while an unknown key in the payload is ignored so that v1.x can add fields (`docs/spec.md` §4). The asymmetry is deliberate — a config with a field we do not understand is a config we cannot honour — but it means a v1.1 config cannot be read by a v1.0 client even when the new field is optional. Confirm, or make unknown keys ignored and rely on `config_version` alone.
-- [ ] 011-R5: the maximum of 256 bytes for `server_url` and the whitelist grammar are this spec's, not `docs/spec.md`'s. They exclude a Unicode host and any path, which no current use needs. Confirm both numbers.
-- [ ] 011-R14: the maximum of 256 bytes for the password is this spec's. The app generates 7 BIP-39 words, at most 62 bytes, so the margin is for a password typed or pasted by hand in a future version. Confirm.
-- [ ] 011-R17: `ciborium` and `serde` are the third and fourth dependencies of `core` and the first that parse untrusted input. `serde` is unavoidable with `ciborium`; the pair is justified because writing a CBOR decoder by hand would be a larger attack surface than the one it removes. Confirm, and confirm that the fuzz target of spec 016-fuzz-harness covers `Config::parse` from the first day.
-- [ ] 011: `docs/spec.md` §9 names the parameter `passphrase` while §5 and this spec say `password`. The rename is a pending decision of audit D; this spec assumes `password` and spec 027-core-api settles it.
+- [ ] 011-R2: an unknown key is an error here, while an unknown key in the payload is ignored so that v1.x can add fields (`docs/spec.md` §4). The asymmetry is deliberate, because a config with a field we do not understand is a config we cannot honour. It means a v1.1 config cannot be read by a v1.0 client even when the new field is optional. Since the version is read before the strict decode (R3), such a config fails as `UnsupportedVersion` only if v1.1 also raises `config_version`; otherwise it fails as `BadConfig`. Confirm the strict rule.
+- [ ] 011-R5: the maximum of 256 bytes for `server_url`, the whitelist grammar and the exclusion of IPv6 literals and of an explicit `:443` are this spec's, not `docs/spec.md`'s. IPv6 is left out because canonicalising it (RFC 5952, zone ids, IPv4-mapped forms) is more grammar than any current use needs; a server reachable only over IPv6 still works through a DNS name. Confirm.
+- [ ] 011-R14: the maximum of 256 bytes for the canonical password is this spec's. The app generates at most 62 bytes, so the margin is for a password pasted by hand. Confirm.
 
 ## History
 
 - 2026-09-21 in review
+- 2026-09-24 revised after audit E (docs/audit-log.md)
