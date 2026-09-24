@@ -1,14 +1,15 @@
 ---
 name: kotlin
-description: Kotlin and Jetpack Compose standard for the Android client in `clients/android/`. Use it whenever you create or edit a `.kt` or `.kts` file, a Compose screen, a ViewModel, a Gradle build script, an Android manifest or resource, or when reviewing Android code — including "quick" UI tweaks. It assumes you have read the `architecture` skill: the Android app is a thin shell over the Rust core (uniffi) and holds no protocol logic, no crypto and no persistent state of its own.
+description: Kotlin and Jetpack Compose standard for the Android client in `clients/android/`. Use it whenever you create or edit a `.kt` or `.kts` file, a Compose screen, a ViewModel, a Gradle build script, an Android manifest or resource, or when reviewing Android code — including "quick" UI tweaks. It assumes you have read the `architecture` skill, whose §7 "Client shape" holds everything the three clients share; this skill adds only the Android mechanics.
 ---
 
 # Kotlin / Android standard
 
-The Android app does four things: open a socket, drive `Session`, render what it
-says, and ask the Keystore for a key. Everything else is in Rust. If you find
-yourself writing protocol, parsing, counters, TTL maths or anything about
-messages beyond displaying them, stop: it belongs in `core` (architecture §1).
+The shape of the app — layers, state and intents, how the core is driven, how
+secrets are held, lifecycle, testing and tooling — is `architecture` §7. This
+file is the Android delta. If you are writing protocol, parsing, counters, TTL
+maths or anything about messages beyond displaying them, stop: it belongs in
+`core`.
 
 ## Language and platform
 
@@ -16,122 +17,75 @@ messages beyond displaying them, stop: it belongs in `core` (architecture §1).
   `allWarningsAsErrors = true`.
 - Jetpack Compose with Material 3; `minSdk 26`. No Views, no Fragments, no
   XML layouts; a single `Activity`.
-- Gradle Kotlin DSL with a version catalog (`gradle/libs.versions.toml`). Every
-  dependency has a one-line justification in the PR.
-- No third-party SDK: `docs/spec.md` §8 "Telemetry".
+- Gradle Kotlin DSL with a version catalog (`gradle/libs.versions.toml`).
 - Coroutines and `Flow` for everything asynchronous. No RxJava, no callbacks,
   no `LiveData`.
 
-## Architecture inside the app
-
-Unidirectional data flow, three layers, dependencies pointing inwards:
+## Layout
 
 ```
-ui/          Composables. Render state, emit intents. No logic.
-viewmodel/   One ViewModel per screen. Owns a StateFlow<UiState>, handles intents.
-platform/    Keystore, socket, file paths, clipboard, biometrics. The only
-             code that touches Android APIs beyond Compose.
-core (Rust)  via uniffi: Config, Channel, Session, Settings — opaque handles.
+ui/          Composables
+viewmodel/   one ViewModel per screen: StateFlow<XxxUiState>, onIntent(XxxIntent)
+platform/    Keystore, socket, file paths, clipboard, biometrics
 ```
 
-- **UI state is one `sealed interface`** per screen (`Loading`, `Ready(data)`,
-  `Locked`, `Error(kind)`), exposed as `StateFlow<ChannelUiState>`. Composables
-  receive the state and a lambda per intent; they never touch a ViewModel
-  method directly from deep in the tree.
-- **Intents are a `sealed interface`** too (`SendText(text)`, `LabelPeer(id,
-  name)`, `Lock`). One `onIntent(intent)` entry point per ViewModel. This makes
-  every user action greppable and testable.
-- **No business decisions in Composables.** A Composable may format a date
-  and choose a colour; it may not decide whether a peer is trusted — the core
-  already told it.
-- **Constructor injection, by hand.** ViewModels take their dependencies as
-  constructor parameters and a small `AppGraph` object wires them at startup.
-  No Hilt, Dagger or Koin: the app has a dozen classes, and a DI framework
-  would be the largest dependency in it.
-- **Structured concurrency.** Everything runs in `viewModelScope` or a scope
-  that is cancelled with its owner. `GlobalScope` and un-scoped `launch` are
-  bugs. Socket I/O is one coroutine per connection with an explicit
-  `cancel()` on lock.
+- State and intents are `sealed interface`s; state is exposed as
+  `StateFlow<ChannelUiState>`. Composables receive the state and a lambda per
+  intent; they never call a ViewModel method from deep in the tree.
+- Everything runs in `viewModelScope` or a scope cancelled with its owner.
+  `GlobalScope` and un-scoped `launch` are bugs. Socket I/O is one coroutine
+  per connection with an explicit `cancel()` on lock.
 
-## Talking to the Rust core
+## Kotlin idioms that carry a project rule
 
-The contract (opaque handles and records, passwords as bytes, `now` passed in,
-non-retention) is architecture §1. The Android mechanics:
-
-- The wrapped storage key is unwrapped by the Keystore into a `ByteArray`,
-  passed once to `openStore(path, keyBytes)`, and **filled with zeros
-  immediately after**, in a `finally`. Same for the `.chatcfg` password. A
-  `String` cannot be zeroed; password fields use `ByteArray`-backed input.
-- The socket loop is a pure host for `Session`: read a frame → `onFrame(frame,
-  now)` → for each `Event`, update state; write whatever `outgoing()` returns.
-  No inspection of frame contents in Kotlin.
-- `now` is `System.currentTimeMillis()`, passed **into** the core.
-
-## Types and style
-
-- `val` by default; `var` only for state that is truly mutable, and then in a
-  ViewModel or a `platform/` class, never in a Composable.
-- Never `!!`. Use `?.`, `?:`, `requireNotNull(x) { "why" }` in the rare case a
-  null is a programming error.
-- `Result<T>` or a `sealed interface` for outcomes the caller must handle;
-  exceptions only for programming errors. Map uniffi exceptions to the
-  screen's `Error(kind)` state at the ViewModel boundary, once.
-- `data class` for values, `value class` for ids (`@JvmInline value class
-  PeerId(val raw: Long)`), `enum class` or `sealed interface` for closed sets.
-- Names in full English words; Composables are nouns in PascalCase
-  (`ChannelScreen`, `PeerRow`); state is `XxxUiState`; intents `XxxIntent`.
-- One public class per file, file named after it. Composables that are only
-  used by one screen live in that screen's file below the screen.
-- Functions ≤ ~40 lines; Composables ≤ ~60 including the preview.
-
-## Compose specifics
-
-- Stateless Composables: state and lambdas in, nothing out. Hoist state to
-  the ViewModel; `remember` only for purely visual, transient things (scroll
-  position, animation).
-- `@Preview` for every screen-level Composable with representative states,
-  including `Locked` and `Error`. Previews are documentation.
-- Strings in `res/values/strings.xml` (English source plus the languages of
-  `docs/spec.md` §12), never hard-coded. Content descriptions on every icon;
-  minimum 48 dp touch targets; test with TalkBack once per screen.
-- Message lists use `LazyColumn` with stable `key = { it.serverId }`; never
-  re-sort in the Composable — the core delivers order.
-- Secrets never reach a Composable. The QR of a config is rendered from bytes
-  the core returns and the screen sets `FLAG_SECURE`; the password words are
-  shown from a `ByteArray` and cleared on dispose.
+- Never `!!`: the client face of "never panic on external data". Use `?.`,
+  `?:`, and `requireNotNull(x) { "why" }` only for programming errors.
+- `value class` for ids (`@JvmInline value class PeerId(val raw: Long)`),
+  `sealed interface` for closed sets, `data class` for values: illegal states
+  unrepresentable.
+- `val` by default; `var` only in a ViewModel or a `platform/` class, never in
+  a Composable.
+- Map uniffi exceptions to the screen's `Error(kind)` at the ViewModel, once.
+- Composables ≤ ~60 lines including the preview; `@Preview` for every
+  screen-level Composable with representative states, including `Locked` and
+  `Error`.
+- `remember` only for purely visual, transient things. `LazyColumn` with
+  `key = { it.serverId }`.
+- Strings in `res/values/strings.xml`; content descriptions on every icon;
+  minimum 48 dp touch targets; TalkBack once per screen.
 
 ## Platform layer
 
 - Keystore: exactly the parameters in `docs/spec.md` §8, in one class
-  `StorageKey` with `unwrap(): ByteArray` and nothing else. `BiometricPrompt`
+  `StorageKey` with `unwrap(): ByteArray` and nothing else. The unwrapped key
+  goes once to the core and is zero-filled in a `finally`. `BiometricPrompt`
   with `DEVICE_CREDENTIAL` is the app lock; there is no app PIN.
+- Password fields are `ByteArray`-backed; the `.chatcfg` password field uses
+  `textPassword`, `IME_FLAG_NO_PERSONALIZED_LEARNING` and `flagNoExtractUi`
+  (§8 "Keyboard").
+- Screens that show a QR or the password words set `FLAG_SECURE`; the whole
+  app does (§8 "Screenshot blocking").
 - Lifecycle: `onStop` and screen-off → `Session.close()`, zero the key, drop
   the store handle. Reconnect in `onStart` with the core's cursor. No
-  foreground service, no WorkManager, no push (§8 "Background").
+  foreground service, no WorkManager, no push.
 - Manifest: `allowBackup="false"`, `dataExtractionRules` excluding everything,
   no `exported` components, no `usesCleartextTraffic`, no custom URL scheme.
-- Networking: OkHttp WebSocket, configured as in `docs/spec.md` §6
-  "Transport".
+- Networking: OkHttp WebSocket. `now` is `System.currentTimeMillis()`.
+- Clipboard: `ClipDescription.EXTRA_IS_SENSITIVE`, cleared after 60 s (§8).
 
 ## Testing
 
-- Unit tests: JUnit 5 + `kotlinx-coroutines-test` + Turbine for `Flow`. Test
-  ViewModels by sending intents and asserting emitted `UiState`s; fake the
-  core behind a small interface only where the uniffi object cannot be
-  constructed in a test.
-- Names mirror the Rust convention where a test covers a spec requirement:
-  `s051_t02_r03_lock_closes_session_and_zeroes_key()`.
-- Compose UI tests for the two flows that matter most: import a config and
-  verify a peer. Not for every button.
-- No test touches the network or the real Keystore; `platform/` classes have
-  in-memory fakes.
+- JUnit 5 + `kotlinx-coroutines-test` + Turbine for `Flow`. Fake the core
+  behind a small interface only where the uniffi object cannot be constructed
+  in a test.
+- Compose UI tests for the two flows of `architecture` §7.
+- Test names: `s051_t02_r03_lock_closes_session_and_zeroes_key()`.
 
 ## Tooling
 
-- `ktlint` (official style) and `detekt` with the project config; both run in
-  CI and must be clean. No `@Suppress` without a comment.
+- `ktlint` (official style) and `detekt` with the project config; no
+  `@Suppress` without a comment.
 - Reproducible builds: fixed Gradle wrapper, locked dependency versions, no
   build-time network access beyond dependency resolution. F-Droid requires
-  this (§8 "Code integrity").
-- Debug builds only sign with the debug key; release signing happens in CI
-  with the offline key.
+  this.
+- Debug builds sign with the debug key only; release signing happens in CI.
