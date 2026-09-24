@@ -1,42 +1,25 @@
 ---
 name: rust
-description: Rust coding standard for this repository's `core`, `store` and `server` crates — the official Rust Style Guide (formatting via rustfmt, plus its naming, comment, item-ordering and Cargo.toml conventions), crate layout, types, error handling, ownership, `unsafe` policy, testing and tooling. Use it whenever you create or edit any `.rs` file, a `Cargo.toml`, a fuzz target, a test vector loader or a clippy/rustfmt config, and when reviewing Rust code. It assumes you have read the `architecture` skill first. `references/patterns.md` has compile-checked shapes; read only the section you need — §1 `Secret<N>`, §2 fixed-offset parser, §3 `Store`/`WriteBatch`, §4 sans-I/O `Session`, §5 encrypt ordering, §6 vector loader.
+description: Rust coding standard for this repository's `core`, `store` and `server` crates — the official Rust Style Guide as the baseline, crate layout, types, writing code under the workspace lints, the inside of `ffi.rs`, server concurrency, documentation, testing and tooling. Use it whenever you create or edit any `.rs` file, a `Cargo.toml`, a fuzz target, a test vector loader or a clippy/rustfmt config, and when reviewing Rust code. It assumes you have read the `architecture` skill first. `references/patterns.md` has the reference shapes, written to pass the workspace lints; read only the section you need — §1 `Secret<N>`, §2 fixed-offset parser, §3 `Store`/`WriteBatch`, §4 sans-I/O `Session`, §5 encrypt ordering, §6 vector loader.
 ---
 
 # Rust standard
 
 `core` is the only place where cryptography and the protocol exist. `store`
 persists its state. `server` relays blobs. All three are compiled with the
-workspace lints at `deny`, so most of this skill is about writing code that is
-*clear*, not code that merely compiles. Read `architecture` first; this skill
-assumes its layering, error and naming rules.
+workspace lints at `deny` (AGENTS 4), so most of this skill is about writing
+code that is *clear*, not code that merely compiles. The rules themselves are
+`AGENTS.md`; this skill cites them by number and never restates them.
 
 ## The Rust Style Guide is the baseline
 
 The official [Rust Style Guide](https://doc.rust-lang.org/style-guide/) is
-normative for this repository. Its formatting chapters are exactly what
-`rustfmt` produces with the project's `rustfmt.toml`, so `cargo fmt --all`
-before every commit *is* the guide; never hand-format against it or
-`#[rustfmt::skip]` without a reason comment. The rest of the guide applies as
-written; three non-formatting rules are review items here:
-
-- **Item order in a file:** `use` imports, then `mod` declarations, then
-  everything else. Group imports in three blocks separated by one blank line —
-  `std`/`core`, external crates, this crate (`crate::`, `super::`, `self::`) —
-  and let `rustfmt` version-sort inside each block. Avoid `#[path]` on
-  modules; the file tree is the module tree.
-- **Comments are sentences:** start with a capital letter, end with a period,
-  one space after `//`. Prefer a comment on its own line; keep pure-comment
-  lines ≤ 80 columns. Line comments over block comments. Doc comments (`///`)
-  go **before** attributes; `//!` only at crate or module level.
-- **`Cargo.toml`:** `[package]` first; inside it `name`, then `version`, then
-  the remaining keys version-sorted, and `description` **last**. Every other
-  section has its keys version-sorted; one blank line between sections and
-  none inside them; bare keys, `key = value` with single spaces; arrays that
-  do not fit on one line are block-indented with a trailing comma.
-
-When the guide and a rule below disagree, the rule below is a project-specific
-tightening (e.g. no `unwrap`), never a relaxation.
+normative. Its formatting chapters are what `rustfmt` produces with the
+project's `rustfmt.toml`, so `cargo fmt --all` *is* the guide; never
+hand-format against it or `#[rustfmt::skip]` without a reason comment. Its
+non-formatting chapters (items, comments, `Cargo.toml`) are review items. When
+the guide and a rule below disagree, the rule below is a project-specific
+tightening, never a relaxation.
 
 ## Crate and module layout
 
@@ -44,52 +27,43 @@ tightening (e.g. no `unwrap`), never a relaxation.
   No logic.
 - Modules are named after the domain concept they own (`crypto`, `proto`,
   `session`, `peers`), one concept each. Use `foo.rs` + `foo/` directories,
-  never `mod.rs` — the file name should tell you what is inside.
+  never `mod.rs`.
 - Default visibility is private. Reach for `pub(crate)` before `pub`. The
   public API of `core` is the list in `docs/spec.md` §9; anything else that is
   `pub` needs a reason.
 - One `Error` enum per crate at the crate root (`core::Error`), written by
-  hand (`core` carries no dependency beyond libsodium and `zeroize`). Variants mirror the spec's conditions one-to-one. No `anyhow`,
-  no `Box<dyn Error>` in library crates; `server`'s `main` may use `anyhow`
-  for startup only.
+  hand (`core` carries no dependency beyond libsodium and `zeroize`, spec 010
+  R16). Variants mirror the spec's conditions one-to-one. No `anyhow`, no
+  `Box<dyn Error>` in library crates; `server`'s `main` may use `anyhow` for
+  startup only.
 - Every number that appears in the spec is a named `const` next to the code
-  that uses it, with a doc comment pointing at the section. That includes
-  byte offsets and ranges (`CHANNEL_ID_RANGE: Range<usize> = 1..17`), not
-  only lengths; derive what can be derived (`MIN_BLOB = BLOB_OVERHEAD +
-  PAD_BLOCK`) and pin the spec's literals in one test:
-
-  ```rust
-  /// Fixed header length of the wire envelope: version(1) + channel_id(16) +
-  /// enc_hdr(40) + nonce(24). `docs/spec.md` §4.
-  pub(crate) const HEADER_LEN: usize = 81;
-  ```
+  that uses it, with a doc comment pointing at the section — offsets and
+  ranges too (`CHANNEL_ID_RANGE: Range<usize> = 1..17`). Derive what can be
+  derived (`MIN_BLOB = BLOB_OVERHEAD + PAD_BLOCK`) and pin the spec's literals
+  in one test (`references/patterns.md` §2).
 
 ## Types
 
 - **Newtypes for anything that is "some bytes with a meaning"**: `ChannelId([u8;
-  16])`, `ServerId([u8; 16])`, `Counter(u64)`. A `[u8; 16]` can be passed where
-  a `[u8; 32]` was meant; a `ChannelId` cannot. Derive only what the type
-  needs; a key type must not derive `Clone`, `Default`, `Debug` or
-  `PartialEq` (see `Secret<N>` in `references/patterns.md`).
+  16])`, `ServerId([u8; 16])`, `Counter(u64)`. Derive only what the type
+  needs; a key type is `Secret<N>` (AGENTS 5, `references/patterns.md` §1)
+  and derives nothing that could print or copy it.
 - **Enums over booleans.** `PeerState::{Unknown, Labelled, Verified, Muted,
-  Retired}` instead of `verified: bool, muted: bool, retired: bool`, which
-  admits eight states of which five are meaningless.
+  Retired}` instead of three flags that admit eight states.
 - **Construct-valid types.** `Payload::validate()` runs inside the constructor
   path used by both `encrypt` and `decrypt`, so an invalid `Payload` cannot
-  exist. Avoid "make it, then call `.check()`".
-- **`Option` for absence, `Result` for failure.** Never `Option<Result<_>>`;
-  never a sentinel value.
-- Avoid `Rc<RefCell<_>>`, `Arc<Mutex<_>>` and lifetimes in public signatures
-  inside `core`. If you need shared mutable state in `core`, the design has a
-  problem — state belongs in the `Store` and changes in one commit.
+  exist.
+- No lifetimes on `pub` types in `core` (the FFI surface); `pub(crate)`
+  borrowing views like `Envelope<'a>` are preferred for parsers.
+- No `Rc<RefCell<_>>` or `Arc<Mutex<_>>` in `core`: state belongs in the
+  `Store` and changes in one commit (AGENTS 23).
 
-## Errors and panics
+## Writing under the lints
 
-The single source of the lint list is `[workspace.lints]` in the root
-`Cargo.toml` (AGENTS 4 and `docs/spec.md` §10 point there; do not copy the
-list anywhere else). In short: no `unwrap`/`expect`/`panic`, no indexing or
-slicing, no bare arithmetic on external integers, no lossy casts. Write code
-that does not need them:
+The lint list lives in `[workspace.lints]` of the root `Cargo.toml` (AGENTS 4).
+In short: no `unwrap`/`expect`/`panic`, no indexing or slicing, no bare
+arithmetic on external integers, no lossy casts. Write code that does not need
+them:
 
 ```rust
 // Slicing: use `get` and map the failure to the spec's variant.
@@ -111,37 +85,20 @@ A `get` or `try_into` that cannot fail after validation still maps to the
 nearest spec variant (`BadLength`), never to `unwrap`: that is the convention
 for impossible-after-validation failures.
 
-Each crate root relaxes exactly four lints for tests, to build fixtures:
+Tests relax exactly the four lints AGENTS 4 names:
 `#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used,
 clippy::indexing_slicing, clippy::arithmetic_side_effects))]`. Even there
 prefer `?` with `-> Result<(), Error>` test signatures and
 `assert!(matches!(result, Err(Error::X)))` over `unwrap_err()`. `assert_eq!`
-on byte slices is fine in tests; AGENTS 22 (`ct_eq`) is about production
-code.
+on byte slices is fine in tests; AGENTS 22 (`ct_eq`) is about production code.
 
-Order of checks matters and is normative: `docs/spec.md` §4 "Verification on
-receive" lists them; implement them in that order, each returning its own
-variant, so that the mutation table in the spec is a test you can write.
+The order of checks in `docs/spec.md` §4 "Verification on receive" is
+normative: implement them in that order, each returning its own variant, so
+that the spec's mutation table is a test you can write.
 
-## Ownership and signatures
+## Inside `ffi.rs`
 
-- Take `&[u8]` for input, return `Vec<u8>` for output. Take `&str`, return
-  `String`. Do not take `Vec<u8>` by value unless you will store it.
-- `&mut self` on anything that changes state; `&self` otherwise. If a method
-  needs `&mut self` only to update a cache, remove the cache.
-- No lifetimes on `pub` types in `core` (the FFI surface). `pub(crate)`
-  borrowing views like `Envelope<'a>` are fine and preferred for parsers.
-- Iterators over indices: `for (i, item) in xs.iter().enumerate()`, never
-  `for i in 0..xs.len() { xs[i] }`.
-
-## `unsafe` and libsodium
-
-`unsafe`: `#![forbid(unsafe_code)]` in `store` and `server`; `core` uses
-`#![deny(unsafe_code)]` at the crate root and `#![allow(unsafe_code)]` only in
-`crates/core/src/crypto/ffi.rs`, the single point of contact with
-`libsodium-sys-stable`. There, `#![deny(unsafe_op_in_unsafe_fn)]`, every block
-carries `// SAFETY:` and clippy `undocumented_unsafe_blocks` is at `deny`
-(AGENTS 12). Inside `ffi.rs`:
+AGENTS 12 fixes where `unsafe` may appear. Inside that one file:
 
 - The `// SAFETY:` comment states the invariant that makes the block sound
   (buffer lengths, non-null, initialised).
@@ -149,10 +106,9 @@ carries `// SAFETY:` and clippy `undocumented_unsafe_blocks` is at `deny`
   (`fn aead_encrypt(key: &Secret<32>, nonce: &[u8; 24], ...)`) so the rest of
   `core` never sees a raw pointer or a length parameter.
 - Call `sodium_init()` once via `std::sync::OnceLock` and return an error, not a
-  panic, if it fails.
-- Compare fixed-size bytes with `sodium_memcmp` through `crypto::ct_eq`. Never
-  `==` on `[u8; N]` anywhere in `core` (AGENTS 22). Not deciding where
-  constant time matters is the whole point.
+  panic, if it fails (spec 010 R2).
+- `crypto::ct_eq` wraps `sodium_memcmp`; it is the only equality on fixed-size
+  bytes in `core` (AGENTS 22).
 
 ## Concurrency
 
@@ -175,21 +131,17 @@ carries `// SAFETY:` and clippy `undocumented_unsafe_blocks` is at `deny`
   implements, what it deliberately does not do.
 - `///` on every `pub` item, with `# Errors` listing the variants and when,
   and `# Examples` as a doctest where the item is a parser or an encoder.
-  `missing_docs` is a workspace warning that CI turns into an error
-  (`RUSTFLAGS=-D warnings`).
-- Inline comments explain *why* — cite the spec (`// §4 step 5: signature
-  before decrypt so a garbage header never reaches the AEAD.`) or the threat.
-  Never narrate the code. They are complete sentences ending with a period
-  (style guide), in the repository language (AGENTS 11).
+  `missing_docs` is a workspace warning that CI turns into an error.
+- Inline comments explain *why* — cite the spec (`// §4 step 4: signature
+  before any state so a forged header never drives an eviction.`) or the
+  threat. Never narrate the code.
 
 ## Testing
 
-- Names: `sNNN_tTT_rRR_<what>` (`s013_t03_r02_rejects_bad_signature`). One
-  requirement may have several tests; every requirement has at least one.
+- Names: AGENTS 6. One requirement may have several tests; every requirement
+  has at least one.
 - Test vectors are loaded from `specs/vectors/NNN.json`, never retyped in
-  Rust. A helper `vectors::load("013")` returns typed cases; the loader
-  itself has one test. Hex literals are lowercase everywhere, as in the
-  vectors.
+  Rust (`references/patterns.md` §6). Hex literals are lowercase everywhere.
 - **Table-driven** for anything with more than two cases:
 
   ```rust
@@ -198,58 +150,43 @@ carries `// SAFETY:` and clippy `undocumented_unsafe_blocks` is at `deny`
       for len in [1184usize, 64_674, 1_200] {
           let blob = vec![0u8; len];
           assert!(matches!(channel.decrypt(&blob, 0, 0), Err(Error::BadLength)), "len={len}");
-          assert_eq!(store.commits(), 0);
+          assert_eq!(store.commits(), 0); // commits other than the cursor (AGENTS 23)
       }
   }
   ```
 
 - Test modules live at `foo/tests.rs`, declared from `foo.rs` with
   `#[cfg(test)] mod tests;`.
-- **Every rejection asserts `commits == 0`**; the test `Store` counts commits.
-- **`proptest` round-trips** for every encoder/decoder pair
-  (`encrypt(decrypt(x)) == x` for all `k`, all payload sizes) and **mutation
-  tests** for every format. The spec's mutation table is a test of the full
-  `decrypt` (flip a byte in each region, expect that region's variant); a
-  parser-level test only asserts the flipped byte landed in the expected
-  field. Say which level a test is at in its name.
-- **`FailingStore`** that fails at commit *n*: reopen, assert the state equals
-  the state before *n*.
-- **Fuzz targets** in `crates/core/fuzz` for every `parse`, `decrypt`, `open_*`
-  (AGENTS 21). Keep targets tiny: bytes in, call, ignore result, no panics.
+- The test `Store` counts commits other than the cursor's; every rejection
+  asserts `commits == 0` and every stateful spec has a `FailingStore` test
+  (AGENTS 23, `references/patterns.md` §3).
+- Round-trip `proptest`s and fuzz targets: AGENTS 21. The spec's mutation
+  table is a test of the full `decrypt` (flip a byte in each region, expect
+  that region's variant); a parser-level test only asserts the flipped byte
+  landed in the expected field. Say which level a test is at in its name.
 - No `sleep`, no clock, no network in tests. Time is a parameter.
 - Prefer many small tests with precise names over one test with twenty asserts:
   the name of the failing test is the bug report.
 
 ## Tooling
 
-- The local CI commands of `.github/CONTRIBUTING.md` (fmt, clippy, build,
-  test, deny, doc lint, requirements) clean before every commit (AGENTS 17).
-  Do not `#[allow]` a lint or `#[rustfmt::skip]` a block without a comment
-  saying why; never allow the lints the workspace denies.
-- `cargo deny check --all-features` gates dependencies. Adding a crate needs
-  one sentence in the PR. Minimal features (`default-features = false`) unless
-  you need them.
-- `edition = "2024"`, toolchain pinned in `rust-toolchain.toml`. Do not use
-  nightly features.
-- Generated code (uniffi) is not committed.
+- The local CI commands are the list in `.github/CONTRIBUTING.md` (AGENTS 17),
+  including the exact `cargo deny` invocation. Do not `#[allow]` a lint or
+  `#[rustfmt::skip]` a block without a comment saying why; never allow the
+  lints the workspace denies.
+- Minimal features on every dependency (`default-features = false`) unless
+  you need them (AGENTS 8).
+- `edition = "2024"`, toolchain pinned in `rust-toolchain.toml`. No nightly
+  features.
 
-## Idioms to reach for
+## Project idioms
 
 - `?` everywhere; `map_err` to the spec variant at the point where the
   meaning is known, not at the top.
-- `Envelope::parse(blob, &channel_id)` for fixed-offset parsing:
-  `references/patterns.md` §2.
+- `Envelope::parse(blob, &channel_id)` for fixed-offset parsing
+  (`references/patterns.md` §2).
 - `#[must_use]` on functions that return a value the caller must not drop
   (`encrypt` returns the reserved counter's blob — dropping it loses a counter).
-- `matches!` over `if let … { true } else { false }`.
-- `let … else` for early returns on `Option`/`Result`.
-- Small `struct`s with named fields over tuples with more than two elements.
-
-## Idioms to avoid
-
-- `clone()` to satisfy the borrow checker without understanding why; fix the
-  ownership.
-- `String` for anything that is not human text; `Vec<u8>` for bytes.
-- `impl Trait` in return position on public `core` API (uniffi cannot see it).
-- Macros for anything a function can do.
-- Feature flags in `core`. One build, one behaviour.
+- No `impl Trait` in return position on public `core` API (uniffi cannot see
+  it). No feature flags in `core`: one build, one behaviour. No macros for
+  anything a function can do.

@@ -1,8 +1,9 @@
 # Rust patterns used in this repository
 
 These are the shapes the spec assumes. Reuse them; do not invent parallel ones.
-These shapes are written to pass the workspace lints; when the implementing
-spec lands, the real code supersedes the snippet and is re-checked against it.
+They are written to pass the workspace lints; when the implementing spec lands,
+the real code supersedes the snippet and is re-checked against it. Signatures
+that also appear in `docs/spec.md` §9 are copied from there and §9 wins.
 
 Contents:
 1. `Secret<N>` — key material
@@ -12,7 +13,7 @@ Contents:
 5. Encrypt: reserve before you emit
 6. Test vector loader
 
-## 1. `Secret<N>` — the only home for key material
+## 1. `Secret<N>` — the only home for key material (AGENTS 5, spec 010 R3)
 
 ```rust
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -38,33 +39,16 @@ impl<const N: usize> PartialEq for Secret<N> {
 }
 ```
 
-Every secret type is listed in `crypto::SECRET_TYPES` and covered by
-the redacted-`Debug` test of spec 010, which formats each with `{:?}` and asserts
-the exact string.
-
 ## 2. Fixed-offset parsing (`docs/spec.md` §4 envelope)
 
-Conventions this pattern fixes, so you do not have to decide them again:
+Two conventions this shape fixes, so nobody decides them again:
 
-- **Every offset and length is a named constant** with a doc comment pointing
-  at §4. Derived constants (`MIN_BLOB = BLOB_OVERHEAD + PAD_BLOCK`) are
-  preferred over literals, and one test pins them to the spec's literals
-  (1 185, 64 673) so a wrong derivation cannot hide.
 - **Step 1 of "Verification on receive" is three conditions with three
   variants**, checked in order: 1a length class → `BadLength`, 1b version →
   `UnsupportedVersion`, 1c channel → `WrongChannel`. The spec writes them as
-  one numbered step; the skills label them 1a/1b/1c so tests can name them.
-- **1c lives inside the parser**, which therefore takes the expected
-  `ChannelId`. The signature is `Envelope::parse(blob, &channel_id)`, not
-  `TryFrom<&[u8]>` (which cannot carry the channel).
-- **No bare `-`, `%` or indexing**, even where a previous check makes them
-  safe: `checked_sub` and `is_multiple_of` cost nothing and keep the lint
-  list honest. A `get` that "cannot fail" after validation still maps to
-  `BadLength` rather than `unwrap` — that is the convention for
-  impossible-after-validation failures.
-- **Borrowing views with a lifetime are fine here** because `Envelope` is
-  `pub(crate)`; the "no lifetimes on public `core` types" rule is about the
-  FFI surface.
+  one numbered step; tests name them 1a/1b/1c. 1c lives inside the parser,
+  which therefore takes the expected `ChannelId`: `Envelope::parse(blob,
+  &channel_id)`, not `TryFrom<&[u8]>`.
 - The parser exposes `aad` (`blob[0..81]`) and `signed_bytes`
   (`blob[0..len-64]`) so the offsets exist exactly once; the caller never
   re-slices.
@@ -145,15 +129,10 @@ impl<'a> Envelope<'a> {
 Tests for this function: the length boundaries (1 184, 1 185, 64 673, 64 674,
 1 200 → `BadLength`), version and channel mutations, the constant-pinning
 test, and a field-placement test (mutate one byte, assert it lands in the
-expected field and nowhere else). The spec's **mutation table is a test of
-`decrypt`, not of the parser**: for `enc_hdr`, `nonce`, `ciphertext` and
-`signature` the parser accepts and the error (`BadSignature`, `Replay`, …)
-comes from later steps. Say which level a mutation test is at in its name.
+expected field and nowhere else). The full mutation table belongs to
+`decrypt`, not to the parser (rust skill, "Testing").
 
-Fixtures may use indexing and plain arithmetic under the test-only relaxation
-in SKILL.md "Errors and panics"; production code never gets it.
-
-## 3. `Store` trait and `WriteBatch` — one commit per operation
+## 3. `Store` trait and `WriteBatch` — one commit per operation (AGENTS 23)
 
 ```rust
 pub trait Store {
@@ -173,15 +152,13 @@ pub struct WriteBatch {
 }
 ```
 
-`Channel` builds one `WriteBatch` per logical operation and commits it once.
-Rejections build a batch containing only `cursor`. Tests use two in-memory
-stores: `CountingStore` (asserts `commits == 0` on rejection) and
+`Channel` builds one `WriteBatch` per logical operation and commits it once;
+a rejection builds a batch containing only `cursor`. The two in-memory test
+stores are `CountingStore` (counts commits other than the cursor's) and
 `FailingStore { fail_at: n }` (returns `StoreError::Io` at the n-th commit;
 tests reopen and compare state).
 
-## 4. Sans-I/O `Session`
-
-The session never touches a socket. The host drives it:
+## 4. Sans-I/O `Session` (ADR 0020)
 
 ```rust
 pub struct Session { /* nonce, subscriptions, per-channel cursors, outbox view */ }
@@ -203,14 +180,12 @@ impl Session {
 }
 ```
 
-Host loop (any platform): connect → `on_connect` → loop { write everything from
-`outgoing()`; read a frame; `on_frame` } → on `Event::Reconnect`, back off and
-reconnect. All protocol decisions — nonce expiry, `since` rounding, dedupe by
-`server_id`, paging — live inside `on_frame`. One `Session` per server host.
-The integration test runs two `Session`s against the real server binary in
-Docker with a fake clock.
+The host loop is `architecture` §7 "Talking to the core". All protocol
+decisions — nonce expiry, `since` rounding, dedupe by `server_id`, paging —
+live inside `on_frame`. The integration test runs two `Session`s against the
+real server binary in Docker with a fake clock.
 
-## 5. Encrypt: reserve before you emit
+## 5. Encrypt: reserve before you emit (`docs/spec.md` §4 "Send counter")
 
 ```rust
 pub fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> Result<(ClientRef, Vec<u8>), Error> {
@@ -228,14 +203,11 @@ pub fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> R
 }
 ```
 
-The order is the requirement (`docs/spec.md` §4 "Send counter"): the
-counter and the blob hit disk together, before the caller can send anything.
-
-## 6. Test vector loader
+## 6. Test vector loader (spec 015)
 
 ```rust
 // cfg(test) only. No serde: `core` carries no dependency beyond libsodium and
-// zeroize, so the loader is a small JSON reader over `include_str!` (spec 015).
+// zeroize, so the loader is a small JSON reader over `include_str!`.
 pub(crate) fn all(spec: &str) -> Vec<Vector>;          // every vector of specs/vectors/<spec>.json
 pub(crate) fn load(spec: &str, name: &str) -> Vector;  // one by name; a missing name fails the test
 
@@ -250,8 +222,3 @@ fn every_vector_is_checked() {
     }
 }
 ```
-
-The vectors in `specs/vectors/*.json` freeze when phase 1 closes; from then
-on they are regenerated only with a `proto_version` change and an ADR. CI
-(`adr-guard`) fails a diff that touches `specs/vectors/` without adding a new
-ADR file, unless a human sets the `adr-not-needed` label (AGENTS 18).
