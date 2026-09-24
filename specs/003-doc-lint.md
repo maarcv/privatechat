@@ -18,12 +18,12 @@ The source of truth of this project is a set of documents: `docs/spec.md`, the A
 - R3 Every spec identifier `NNN-name` referenced in any tracked `*.md` file except those under `docs/adr/` and `docs/audit-log.md` MUST appear in the table in `docs/spec.md` §10, and every `specs/NNN-*.md` file MUST be listed there.
 - R4 `AGENTS.md` MUST NOT contain any spec range `NNN–NNN` (the list lives only in §10).
 - R5 A line in the `## Requirements` section of a spec MUST NOT contain an example-introducing phrase (the phrases matched by `check_s003_t05_r05_no_examples_in_requirements`): requirements carry fixed values.
-- R6 If `docs/spec.md` changes with respect to the base commit of the PR, the header `Version: … · Updated: YYYY-MM-DD` MUST have changed.
+- R6 If `docs/spec.md` changes with respect to the base commit of the PR, the `Updated: YYYY-MM-DD` of its header MUST equal the date of the latest change to the file: today when the file has uncommitted changes, otherwise the author date of the newest commit in the PR that touches it.
 - R7 `specs/README.md` MUST contain an `## Index` table with one row per `specs/NNN-*.md` file (number, name, phase, state) consistent with the file, and the state of every spec MUST be one of `draft`, `in review`, `accepted`, `implemented`.
 
 ## Limits
 
-- The script only reads files in the repository and, for R6, calls `git diff` and `git show` on the `DOC_LINT_BASE` ref. Without that variable, R6 is not checked (local run or first commit).
+- The script only reads files in the repository and, for R6, calls `git diff`, `git status` and `git log` against the `DOC_LINT_BASE` ref. Without that variable, R6 is not checked (local run or first commit).
 
 ## Interface
 
@@ -72,3 +72,4 @@ DOC_LINT_BASE=<ref>            # optional; base commit for R6
 ## History
 
 - 2026-09-20 draft · 2026-09-20 in review · 2026-09-20 accepted (Marc Vilardebó) · 2026-09-20 implemented
+- 2026-09-24 R6 amended: the header date must equal the date of the latest change to the file, so several changes on one day pass and a forgotten date still fails (audit G)

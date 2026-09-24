@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import date
 import subprocess
 import sys
 from pathlib import Path
@@ -170,27 +171,34 @@ def check_s003_t05_r05_no_examples_in_requirements() -> None:
 
 
 def check_s003_t06_r06_spec_header_date_changes_with_content() -> None:
+    """R6: when docs/spec.md differs from the base, its `Updated` date is the date of its latest change.
+
+    The date of the latest change is today when the file has uncommitted changes,
+    otherwise the author date of the newest commit in base..HEAD that touches it.
+    Comparing dates, not header strings, lets several changes land on one day.
+    """
     base = os.environ.get("DOC_LINT_BASE")
     if not base:
         return
+
+    def git(*args: str) -> str:
+        return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
+
     try:
-        changed = subprocess.run(
-            ["git", "diff", "--name-only", base, "--", "docs/spec.md"],
-            cwd=ROOT, capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        if not changed:
+        if not git("diff", "--name-only", base, "--", "docs/spec.md"):
             return
-        old = subprocess.run(
-            ["git", "show", f"{base}:docs/spec.md"], cwd=ROOT, capture_output=True, text=True, check=True,
-        ).stdout
+        if git("status", "--porcelain", "--", "docs/spec.md"):
+            changed_on = date.today().isoformat()
+        else:
+            changed_on = git("log", "-1", "--format=%as", f"{base}..HEAD", "--", "docs/spec.md") or date.today().isoformat()
     except subprocess.CalledProcessError:
         return  # no base available (first commit): nothing to compare
     header = re.compile(r"^Version: .*Updated: (\d{4}-\d{2}-\d{2})", re.MULTILINE)
-    old_m, new_m = header.search(old), header.search(SPEC.read_text(encoding="utf-8"))
-    if not new_m:
+    m = header.search(SPEC.read_text(encoding="utf-8"))
+    if not m:
         fail("docs/spec.md header 'Version: … · Updated: YYYY-MM-DD' missing")
-    elif old_m and old_m.group(0) == new_m.group(0):
-        fail("docs/spec.md changed but its 'Version · Updated' header did not")
+    elif m.group(1) != changed_on:
+        fail(f"docs/spec.md changed on {changed_on} but its header says 'Updated: {m.group(1)}'")
 
 
 def check_s003_t07_r07_specs_index_matches_files() -> None:
