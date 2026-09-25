@@ -2,6 +2,370 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit J
+
+**2026-09-25 — Audit J, review of the phase 2 draft specs 020–028 before human review, in four independent passes (J-A: coherence and SDD conformance; J-B: adversarial cryptography and protocol; J-C: technical viability and simplicity; J-D: end-to-end scenarios), repeated in rounds until clean.** Round 1: 105 findings (J-A1–J-A35, J-B1–J-B15, J-C1–J-C27, J-D1–J-D28), five Blockers, no break of the key hierarchy, of encrypt-then-sign or of the verification order. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J1 | A stored channel could not be reopened (no call gave back its `Config`), an open channel exposed neither its identity nor its invitation, and the four handles of §9 cannot cross uniffi (by-value moves, borrowed returns, `Box<dyn Store>`, nothing `Send`) (J-C1, J-C4, J-C5, J-D1, J-D2, J-D20, J-A1) | Blocker | One `Device` handle called by id (ADR 0037, `proposed`); `Channel::create`/`open_stored`/`config`; `Store` and `Vault` `Send` (specs 020, 021, 027, 028) |
+| J2 | `commit` took a non-`Clone` batch by value, so nothing was left to install in memory or to retry (J-C2) | Blocker | `commit(&WriteBatch)`, `compact(state, now)`; the store keeps no copy of the state (spec 020) |
+| J3 | Crash points under `cfg(test)` were unreachable from an integration test, and fired only once (J-C3, J-A3) | Blocker | The exit test lives in `crates/store/src/tests/`; crash points take a count, and a fault injector fails the *k*-th system call (specs 020, 028) |
+| J4 | An intruder could plant 530 permanent retired records (a text, then a `key_retired`), closing the channel to new keys and blocking regeneration for ever (J-B1) | High | A retirement from a stranger removes the stranger; only labelled or verified peers become retired by a message; `forget` removes retired records; one's own old keys live in their own list of eight and regeneration is never refused for room (specs 024, 025, 026; §4, §7) |
+| J5 | A full log lost messages silently (the cursor moved past a failed commit), could suppress the own-key alert for good, and blocked the pending `key_retired` (J-B2, J-A4, J-D14) | High | A log headroom checked before any verdict, with a reserve for acks and own-key records; a store failure stalls the channel for the connection and leaves the cursor (specs 021, 028) |
+| J6 | Lowercasing before the UTS #39 skeleton let "AIice" and "B0b" pass; invisible characters outside Cf passed; the Cf table was to be generated against 015 R4 and ADR 0036 (J-B3, J-C8, J-A10, J-A11) | High | Skeleton, lowercase, skeleton; one hand-written table of Cf and `Default_Ignorable_Code_Point`; no vector file for a local comparison (spec 022; ADR 0036 amended before its first commit) |
+| J7 | Streaming pages without an end marker let a live push move the cursor past an unsent backlog; the server could hide deletions through `oldest_retained_at`; a future `received_at` poisoned the cursor for good; every junk push rewrote `state.bin` (J-B4–J-B7, J-D13) | Medium | The server sends the backlog before `ok` and no live push before it; truncation judged by the client clock; the cursor clamped to `now`; cursor-only commits at most once a minute (specs 021, 028) |
+| J8 | Session gaps: 16 subscribes in one millisecond against "1 authentication attempt/s", a late channel waiting for a `hello` that never comes, re-subscribing and republishing on a second `hello`, rejected publishes stuck in flight, error codes without their channel, `ack` outcomes invisible (J-D5–J-D7, J-D11, J-D12, J-D28, J-B8, J-B14, J-A14) | High | One `subscribe` per second, `Reconnect` past the nonce window, only unsubscribed channels re-subscribed, in-flight and queued sets, every error code with its effect, `AckOutcome`, `abandon` (specs 021, 028) |
+| J9 | Own messages: hidden before they could be sent in a short-TTL channel, placed before the message they answer, unmatchable to their `ClientRef`, and a thief's messages indistinguishable from one's own (J-D8–J-D10, J-D15, J-B15) | High | Listed while publishable, ordered by real times, `client_ref` in `Message`, `Sender::OwnKeyElsewhere` (specs 021, 023) |
+| J10 | Storage: sizes checked after reading, a late `fsync` failure breaking R10, two stores on one directory, log entries not bound to their channel, a deleted settings file silently dropping Tor (J-C9, J-C10, J-C12, J-B11, J-B12, J-A5, J-A8, J-A9) | High | Sizes before reading; poisoning after a late failure; one live store per directory; per-directory and settings keys; `settings_reset` (spec 020; ADR 0035 amended before its first commit) |
+| J11 | Kept signatures of a retired key could not be told apart after a reopen (J-A7) | Medium | An `epoch` in each kept signature; §4 reworded (spec 021) |
+| J12 | Phase 2 fuzz targets not added to spec 016, `MemoryStore` invisible under `cfg(fuzzing)`, a random identity in a fuzz target, dependencies against the merged `s010_t25` (J-A2, J-C6, J-C7) | High | Each spec amends 016 R2, R8, R9; `testing` under `cfg(any(test, fuzzing, feature = "test-support"))`; `Channel::for_fuzzing`; 020 and 022 amend 010 R16/T25 |
+| J13 | PR slices over 400 lines; duplicated rules; tests of later specs inside earlier ones; missing `FailingStore` tests; `commits = 0` missing; an unworkable `api_surface.txt`; a no-oracle property false as stated (J-C11, J-C15–J-C19, J-A15, J-A19, J-A20, J-A30, J-B13) | Medium | Slices in every spec; one owner per rule; hooks until the later spec lands; a `FailingStore` test per stateful spec; `unreachable_pub` and function-pointer coercions; R16 scoped with its two documented exceptions |
+| J14 | Small ones: the `proto_versions` cap, header `Blocks` lists, the vectors text fields, the late `ack` of a retirement, `DEFAULT_SERVER_URL`'s owner, the new domain tags in §4, a T22 boundary, a log minimum size, the pre-verification label rule, the own-name claim, a direction of re-sealing, the Unicode test file (J-A12, J-A13, J-A16–J-A18, J-A21–J-A35, J-B9, J-B10, J-C13, J-C14, J-C20–J-C27, J-D16–J-D19, J-D21–J-D27) | Low | Corrected in the specs, `specs/vectors/README.md`, spec 015 R1, spec 016 R2 and §4, §7 |
+
+Round 2: 85 findings (J2-A1–J2-A24, J2-B1–J2-B10, J2-C1–J2-C21, J2-D1–J2-D28), no Blocker, 9 High. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J15 | With ticks every 10 s only five subscribes fit the 50 s nonce window, so connections with more channels reconnected for ever (J2-A1, J2-D1) | High | `on_tick` at least every 1 000 ms; subscribes 1 100 ms apart (specs 027 R12, 028 R6, R7) |
+| J16 | A repeated `ok` reset the gap baseline at will, and truncation was decided after the backlog it concerned (J2-B1, J2-B2, J2-D5, J2-D6) | High | Truncation decided when the subscribe is queued; an `ok` accepted once; `synced` moves the cursor at `ok`, so a quiet channel is not flagged (specs 021 R19, 028 R8, R9) |
+| J17 | A proxy switched on kept direct sockets whose channel set did not change; the SOCKS username revealed the `channel_id` prefix to observers of a remote proxy; a lost settings file connected before the warning (J2-D2, J2-D3, J2-D9, J2-B4, J2-B7) | High | The route is part of a plan's identity; the username comes from the keyed directory name; nothing connects while the settings are reset, and corrupt settings count as lost (spec 027 R1, R2, R10) |
+| J18 | A not-delivered own message was never on screen, stale in-flight entries never timed out, and the tick path reported nothing (J2-D4, J2-B3, J2-A4) | High | Own messages listed until their `purge_at`, shown `NotDelivered` once they cannot leave in time; in-flight entries time out a minute later; every `outbox` path reports (specs 021 R21, 023 R1, R3, 028 R14) |
+| J19 | The on-disk exit test needed about 90 000 fsyncs, each state seal wiped 2.25 MiB, and the fault injector raced across parallel tests (J2-C1–J2-C3) | High | A counted no-op `fsync` mode under `cfg(test)`; buffers at the exact encoded length; faults per instance; crash points through a child process with `Command::env` (spec 020) |
+| J20 | A full log still hid the own-key alert and stalled the retirement; a stale-message own-key event contradicted "no event"; queued entries a thief had overtaken still showed `Delivered` (J2-B5, J2-B9, J2-D7, J2-A5) | Medium | Under `LogFull` the own-key event is committed alone; a `LogFull` stall stops receiving only and ends when room returns; overtaken entries are removed as not delivered (specs 021 R14, R18, 028 R10, R13) |
+| J21 | A lost `ack` duplicated blobs on reconnect; `send` dropped the events of its `outbox` step; `Delivered` did not say where the row goes; no `on_disconnect` in `Session` (J2-D12, J2-D16, J2-D19, J2-D18, J2-A2, J2-A3) | Medium | An echo matching an `outbox` entry acknowledges it; `send` and `regenerate_identity` return their events; `Delivered` carries `server_id` and `received_at`; `Session::on_disconnect` |
+| J22 | Store failures: no reopen of a poisoned store, a compaction failure before its state write poisoned anyway, broken channels without a reason, a failed `leave` hid the channel (J2-D8, J2-D10, J2-D26, J2-D27, J2-C10) | Medium | Poison only at or after the state rename; `Device` reopens or moves to `broken` with the reason; `replace_broken` on import; a failed `leave` keeps the channel (specs 020 R11, 027 R5, R8, R14, R15) |
+| J23 | Plans reshuffled every run on each create or leave; the probe socket's route was undefined (J2-D13, J2-D14, J2-D21) | Medium | Stable runs; `probe_plan` with a fresh SOCKS username; `probe_hello` applies 028 R2 (spec 027 R10, R12) |
+| J24 | The periodic purge rewrote the whole log every minute; `own_old_keys` dropped young keys; a `key_retired` un-muted a spammer; an old-key entry could follow its retirement (J2-B6, J2-B8, J2-B10, J2-D11) | Medium | Purge when expired records reach 1 MiB, a quarter of the log or a day; sixteen old keys, expired ones dropped first; a muted unknown keeps its record with a closed counter; the retirement waits for the old key's entries (specs 023 R5, 024 R2, 025 R1, R4) |
+| J25 | Boundary: `Config` still `pub` in 011, the 016 reach check blind to `pub(crate)` and `decode`, `unreachable_pub` cannot prove "exactly", `dead_code` allows removed too early, `FailingStore` could not fail a compaction and no `FailingVault` existed, `state_eq` failed on the store's own fields (J2-A7–J2-A9, J2-A18, J2-A20, J2-C4–J2-C8, J2-C15, J2-C19–J2-C21) | Medium | 027 amends 011 and 016 R6, removes the allows; api-surface tests in both crates and review for extras; `FailingStore` counts `compact`, `FailingVault`, `state_eq` ignores log positions; `Event` defined in 028 |
+| J26 | AGENTS 22 (`ct_eq` for every `[u8; N]`) against lookups and orderings by public identifiers (J2-C9) | Medium | Open question 021-R9 with a recommendation for the human reviewer |
+| J27 | Small ones: §7 name-key order and "Unknown ⇔ label IS NULL", stale §4 wording, the size figures, the entry length prefix in the headroom, the 45-byte minimum, `purge_at` of a foreign own-key record, header pairs, 014 and 017 obligations, `expires_at` for rows, `fingerprint` of any key, `ExportedFile`, `set_local_name`, `duplicate`, PR slice order, the session fuzz input, directory `fsync` errors, and more (J2-A10–J2-A17, J2-A19, J2-A21–J2-A24, J2-C11–J2-C14, J2-C16–J2-C18, J2-D15, J2-D17, J2-D20, J2-D22–J2-D25, J2-D28) | Low | Corrected in the specs, §4 and §7 |
+
+Round 3: 75 findings (J3-A1–J3-A21, J3-B1–J3-B10, J3-C1–J3-C19, J3-D1–J3-D27), no Blocker, 5 High. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J28 | After a `LogFull` stall or a store failure, the `ok`'s `synced` or a later push moved the cursor past the dropped blobs, which were never sent again (J3-B1, J3-D1) | High | A dropped push freezes the channel for the connection: no later `decrypt`, no `synced`, and a reconnect from the same cursor once room returns or after the reopen (spec 028 R9, R10) |
+| J29 | `synced` put the local clock into the server-time cursor, so a fast clock skipped messages; `synced` never committed, so quiet channels were flagged after every unlock (J3-B4, J3-D2, J3-D3) | Medium | `synced_at` kept apart from the cursor, local time, committed by the once-a-minute rule and used only for truncation (spec 020 key 17, spec 021 R20, spec 028 R8) |
+| J30 | A stall hid the own-key alert from every push after the first, and the `LogFull` own-key commit ignored the retention rule, so an old replay raised a false alarm (J3-B2, J3-B3, J3-D4) | Medium | `check_own_key` runs `verify` and `open` with no state and applies the `2·(ttl_ms + 360 000)` rule; the session runs it on every push of a stalled channel (spec 021 R19, spec 028 R10) |
+| J31 | A failing `leave` could not keep a channel it had consumed; the `Device` could not tell which channel failed inside a session step; `OutboxFull` reopened a healthy store (J3-C1, J3-C2, J3-A4, J3-A5, J3-D5, J3-D6, J3-C4) | High | `destroy` and `leave` take `&mut self`, a failure after the rename is `Ok`; `Session` returns a `Step` with per-channel failures; only `Io` and `Corrupt` reopen (specs 020 R21, 021 R27, 027 R8, R14, 028 Interface) |
+| J32 | The `store` tests could not build a batch; the exit test could not reach the state it compares and sat in a spec its `Device` depends on (J3-C3, J3-C6, J3-A7) | High | `testing` builders and `FailingVault::last_committed`; the exit test moved to spec 027 (R23) |
+| J33 | A message dated to expire on arrival was consumed, moved `max_counter` and was never shown, hiding a deletion (J3-B5) | Medium | `decrypt` rejects it as `Expired` after `verify`; open question 021-R9 proposes adding the clause to §4 |
+| J34 | A full log was rewritten for every push once one record expired; the periodic purge's 1 MiB clause amplified writes (J3-B6, J3-C8) | Medium | The headroom compacts only when a mebibyte has expired; the periodic purge only at a quarter of the log or a day (specs 021 R18, 023 R5) |
+| J35 | Refused, unsubscribed or unsupported channels never cleaned their `outbox`; a pending retirement was re-sealed every minute offline; entries removed by the own-key rule gave no event; broken channels stayed in the plan (J3-D7, J3-D8, J3-D13, J3-D19, J3-B9) | Medium | `expire_outbox` for every channel not subscribed, with no re-seal; removed entries queued as outcomes; a broken channel leaves its run (specs 021 R14, R23, 027 R12, R14) |
+| J36 | The probe ignored the settings gate; a fresh install showed "settings lost"; imports over a broken channel lost its reason and could delete a newer app's data; refused channels blocked good ones; the SOCKS username linked a device's channel across plans (J3-B7, J3-B8, J3-D9–J3-D12, J3-A6) | Medium | `probe_plan` gated; the flag only when channels exist or the file is bad; the broken reason returned and `replace_broken` for `Corrupt` only; refused channels skipped until the plan changes; a random username per plan (spec 027 R1, R2, R5, R10, R11) |
+| J37 | Small ones: `OutboxStep` for clippy, `MessageContent`, `OwnKeyElsewhere { pk }`, `Delivered.expires_at`, `decrypt` returning an `Option`, the 1 000-message channel property, the pacing figure, the pause on `after_send`, the hold of a refused retirement, the wait for a `hello`, R19's keep-if-logged rule, `Vault::dir_name`, the IO script's word match and allow, the regex with lifetimes, `mod storage`'s allow, slice splits, §6/§7/§13 wording, the 014 and 017 references (J3-A1–J3-A3, J3-A8–J3-A21, J3-B10, J3-C5, J3-C7, J3-C9–J3-C17, J3-C19, J3-D14–J3-D18, J3-D20–J3-D27) | Low | Corrected in the specs, §4, §7 and §13 |
+
+Not changed on purpose in round 3: public newtypes for `channel_id`, `server_id` and `pk` (J3-C18) are left to spec 040-uniffi, which maps the two array sizes once as custom types.
+
+Round 4: 53 findings (J4-A1–J4-A14, J4-B1–J4-B8, J4-C1–J4-C15, J4-D1–J4-D16), no Blocker, 1 High. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J38 | The test doubles could not be observed once `Channel` or `Device` had taken them, could not fail late or count commits, and `FailingStore<S>` did not type-check over a `Box<dyn Store>` (J4-C1, J4-C3) | High | `MemoryStore`/`MemoryVault` as `Clone` handles with `reopen` and `commits`; a shared `Faults` handle with `fail_at`, `poison_after`, vault faults and `last_committed`; `state_eq` and `records_eq`; the rust skill allows `Arc<Mutex<_>>` in `testing` only (spec 020) |
+| J39 | A `LogFull` stall ended only when the user sent; the 1 MiB compaction still amplified writes about 60×; publishing went on after the own-key alert (J4-B1, J4-B3, J4-B5, J4-D1) | Medium | The `Device` compacts stalled channels on the tick; the headroom compaction at most once every ten minutes; nothing more published after `check_own_key` fires (specs 021 R18, 027 R12, 028 R10) |
+| J40 | A server could date a message just inside the display window to hide it with no gap; the display rule skipped the own-key branch (J4-B2, J4-B6) | Medium | Display time `r = max(received_at, sent_at − 360 000)` for peers, after `open`; the own-key branch follows its own rules (spec 021 R10, R26, spec 023 R2) |
+| J41 | `synced_at` moved only at `ok`, so a long quiet connection could be staged as truncation; a future clock froze it; a truncation found before a lost connection was never reported (J4-B4, J4-B8, J4-D4) | Medium | `synced` on every tick while subscribed, committed when half a TTL old; `synced_at = now`, a future value ignored; the pending truncation kept by the channel until an `ok` takes it (specs 021 R20, R24, 028 R8, R9) |
+| J42 | An `ack` lost to a lock and then expired showed `NotDelivered` for a delivered message; an always-late `ack` of the retirement republished every tick (J4-D2, J4-D3) | Medium | An echo proving in-time storage re-acknowledges an entry already reported not delivered; a late `ack` of the current retirement holds it until its next re-seal (specs 021 R13, 023 R3, 028 R12) |
+| J43 | Recovery after a poisoned commit could not find the `ClientRef`; direct calls had nowhere to return reopen events; reconnection after a network drop and plans of refused channels were undefined; any settings setter released the gate (J4-C4, J4-D5, J4-D6, J4-D9, J4-D10, J4-B7) | Medium | `send_counter` and `outbox_ref`; reopen events queued for the next `on_tick`; the client repaints after `StorageFailed`; peer-closed sockets reopen with backoff, fully refused plans are left out; only `acknowledge_settings` and `set_socks5_proxy` clear the gate (specs 021 R33, 027 R2, R9, R11, R14) |
+| J44 | `Message` carried the crate-internal `Content`; stale "021 R…" references after the renumbering; `duplicate` declared in the later spec; 028 and 023 relying on 025 without depending on it; `MAX_LABEL` in the later spec (J4-A1, J4-A2, J4-A5–J4-A7, J4-A9, J4-C2, J4-C10, J4-D7) | Medium | `MessageContent`; references corrected; `duplicate` in 020, `MAX_LABEL` in 022; 028 depends on 025; 023's test uses the builders |
+| J45 | Small ones: `R3`'s exceptions, `load` without `state.bin`, a test for 021 R1, T order, `remove_broken` failures, `commits = 0`, citations, the expiry index, `purge_expired` with nothing expired, the tick's `expire_outbox` split, the seeded exit test, the live-name set, stored-config decode errors, cfg gating, `Frame` without `PartialEq`, long calls off the UI thread, slice sizes, cleaning every name handed out, row placement, `ChannelFull` per channel, unnamed refusals, discarding stale subscribes (J4-A3, J4-A4, J4-A8, J4-A10–J4-A14, J4-C5–J4-C9, J4-C11–J4-C15, J4-D8, J4-D11–J4-D16) | Low | Corrected in the specs and in ADR 0037's consequences |
+
+Round 5: 53 findings (J5-A1–J5-A15, J5-B1–J5-B6, J5-C1–J5-C17, J5-D1–J5-D15), no Blocker, 2 High. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J46 | While the settings gate was up, any setter wrote a settings file without the lost proxy, so the next unlock connected directly (J5-D1) | High | While the gate is up, only `acknowledge_settings` and `set_socks5_proxy` write the file; the other setters change memory only (spec 027 R2) |
+| J47 | A server that queues a whole backlog at once hits the 4 MiB send-queue close, and every reconnect repeats it (J5-D2) | High | The backlog is written at the pace the socket drains and is bounded per subscription, outside the close rule (spec 028 R4; spec 030 inherits it) |
+| J48 | The re-acknowledgement of a not-delivered entry could not find its `ClientRef`, and a replayed echo wrote a record every time (J5-B1, J5-B2, J5-D6) | Medium | Kept signatures carry the entry's `client_ref`; the re-acknowledgement happens once (spec 020 key 13, spec 021 R13, R15) |
+| J49 | A future `sent_at` pinned a message to the bottom of the list, and live and repainted rows disagreed (J5-B4, J5-A3, J5-D5, J5-A11) | Medium | Rows ordered by `received_at` clamped to the decrypt time, carried by `Received` and `Message`; the display time bounds only the expiry (specs 021 R11, R12, 023 R2) |
+| J50 | After the own-key alert stopped publishing during a stall, the retirement could not leave; a server that never sends `ok` hid a truncation; a channel could wait for `ok` for ever (J5-B3, J5-B5, J5-D3) | Medium | A regeneration on a stopped channel asks for a reconnect; `HistoryTruncated` is produced when truncation is decided; no `ok` within a minute → reconnect, and a `rate_limited` subscribe is queued again (specs 027 R9, 028 R8, R9, R16) |
+| J51 | The periodic purge and the stalled-channel compaction had no `Channel` method; `synced_at` could lag half a TTL at lock or stay in the future; §4 did not list the new step 0 and step-6 duplicates (J5-A2, J5-A5, J5-B6, J5-D4, J5-C6) | Medium | `purge_due` and `relieve_headroom`; `flush` at lock, a capped and future-proof `synced_at` rule; §4 steps 0 and 6 (specs 021 R18, R20, 023 R5, 027 R12, R24) |
+| J52 | Oversized PR slices; `poison_after` ambiguous across a shared handle; an infeasible collision test (J5-C1–J5-C3) | Medium | More slices and a `testing/` layout; poisoning belongs to one store instance and counts from arming; precomputed collision fixtures |
+| J53 | Small ones: `MAX_NAME` in 020 (026's duplicate rule removed), `PeerId` in 021, `MessageContent` in 027's list, builder notes on tests of later states, test renumbering in 021, `commits = 0`, the own record's grace, the settings range and `seal`, fuller frame vectors, the save retry, `Io`-broken import retry, `.leaving` leftovers, unnamed `bad_blob`, `on_disconnect` on every close, one repaint list, a peers-changed flag, `Sent` with its `Message`, `probe_plan` on a bad URL, the compaction timer, directory `fsync`s at creation, stray entries in `channels/`, crash helpers and temporary directories, the exit-test schedule, `LogRecord` without placement fields, the fuzz reach of sealed `open`s (J5-A1, J5-A6–J5-A10, J5-A12–J5-A15, J5-C4, J5-C5, J5-C7–J5-C17, J5-D7–J5-D15) | Low | Corrected in the specs |
+
+Round 6: 27 findings (J6-A1–J6-A12, J6-B1–J6-B4, J6-C1–J6-C6, J6-D1–J6-D5), no Blocker, 1 High. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J54 | The one-key name comparison of round 1 let "ALICE" pass next to "Alice": the first skeleton turns the capital I into an l before lowercasing (J6-C1, checked against `confusables.txt`) | High | Two keys per name — skeleton, lowercase, skeleton; and lowercase, skeleton — and a collision when either matches (spec 022 R4, ADR 0036 amended before its first commit, §7). For the human reviewer to confirm |
+| J55 | A thief's overtaking message plus a lost `ack` let the round 5 re-acknowledgement mark as delivered a message every receiver rejected (J6-B1) | Medium | No re-acknowledgement once `own_key_used_elsewhere` is set (spec 021 R13) |
+| J56 | Ordering by the clamped server time let a server bury a message a TTL back, and a future-dated `ack` pinned one's own row; one's own row used the raw server time (J6-B2, J6-B3, J6-D1) | Medium | Peer rows at `min(r, now)`, own rows at the `ack`'s time clamped to `now`; `acked` takes `now` (specs 021 R11, R13, R17, 023 R1, R2, 028 R12) |
+| J57 | The gap baseline after truncation was lost at the next lock, so expired messages read as a deletion days later (J6-D2) | Medium | `truncated_before` persisted (state key 18); a sender last seen before it counts no gap (specs 020, 021 R24) |
+| J58 | Slices untestable in their own order or over 400 lines; the round 5 own `purge_at` not carried into 023 R1; a 022 test and a 021 test relying on later specs (J6-C2, J6-C3, J6-C4, J6-A1–J6-A3, J6-D4) | Medium | Slices reordered and split; 023 R1 cites 021 R26; the tests moved to the specs that own the behaviour |
+| J59 | Small ones: the server's bound on held pushes closes and never drops, `nonce_expired` resets only the named channel, the `ok` wait in Limits, the `Io` retry drops the broken entry, `regenerate_identity` gets its reopen events, T01 and T10 values, `commits = 0`, the framing owned by `store`, 011's `RecordError` sentence, §4/§7 re-seal wording, §7 label size, 017's record owners (J6-A4–J6-A12, J6-B4, J6-C5, J6-C6, J6-D3, J6-D5) | Low | Corrected in the specs, §4 and §7 |
+
+Round 7: 24 findings (J7-A1–J7-A7, J7-B1–J7-B3, J7-C1–J7-C7, J7-D1–J7-D7), no Blocker, 1 High. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J60 | Two name keys still let "ALlCE" (a small L for the I) and "0LIVIA" pass next to "Alice" and "Olivia": collision under case and confusables is not transitive (J7-B2, checked against `unicode-security` 0.1.2) | High | One key again, with a final fold of `i` into `l` after the second skeleton; every listed pair collides and "Alice"/"Alicia" does not (spec 022 R4, ADR 0036 amended before its first commit, §7). For the human reviewer to confirm, with J54 |
+| J61 | A past-dated `ack` hid one's own message and buried it a TTL back (J7-B1) | Medium | The acked time is clamped between `sent_at − 360 000` and `now` (spec 021 R13, R17; spec 023 R1) |
+| J62 | A foreign own-key blob seen only through `check_own_key` removed no overtaken entries, and a second one did not stop publishing (J7-D2) | Medium | `check_own_key` applies R14's removal within the reserve and returns `true` for every foreign blob (spec 021 R19, spec 028 R10) |
+| J63 | Truncation used the skew margin although both times are local, so short-TTL unlocks showed false gaps; a persisted boundary silenced a quiet sender's later gaps for ever; re-queued subscribes re-decided truncation (J7-D1, J7-B3, J7-D6) | Medium | `last + ttl_ms < now`; `truncated_at` stored, `None` only for a message within a TTL of it, later gaps marked `spans_truncation`; one decision per channel per connection (specs 020 key 18, 021 R24, 028 R8) |
+| J64 | An unsolicited `nonce_expired` would reconnect every minute; one channel's long backlog tripped another's `ok` timeout (J7-D3, J7-D4) | Medium | The server sends `nonce_expired` only in reply to a late `subscribe`, naming it; the `ok` timeout counts silence on the whole connection (spec 028 R4, R9) |
+| J65 | The framing move of round 6 was half applied, so the file checks had no home; PR slices still untestable in their order or over 400 lines (J7-A1, J7-A2, J7-C1–J7-C4) | Medium | `open`/`seal` take `nonce ‖ box`; R4, R7 and their tests split between `store` and `core`; slices reordered and `testing` split in three (specs 020, 021, 022, 027, 028) |
+| J66 | Small ones: `truncated_at` among the pending values and in `flush`, `acked`'s `now` in R16, the fuzz target's name, §4/§7 rendering set, 017's frame owner, U+1160 in T05, the `Io` retry's new reason (J7-A3–J7-A7, J7-C5–J7-C7, J7-D5, J7-D7) | Low | Corrected in the specs, §4 and §7 |
+
+Round 8: 30 findings (J8-A1–J8-A12, J8-B1–J8-B3, J8-C1–J8-C6, J8-D1–J8-D9), no Blocker, no High. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J67 | An i or a dotless ı with a combining dot still escaped the name key (J8-B1, checked with the real crates) | Medium | Canonical decomposition and removal of combining marks after the fold (spec 022 R4, ADR 0036 before its first commit, §7). With J54 and J60, for the human reviewer |
+| J68 | Under a full log, `check_own_key` skipped the send-counter bump and its removal could hit `LogFull` and take the alert with it; overtaken old-key entries were removed after the new key was stolen, and not removed when the old key's thief kept writing (J8-B2, J8-B3, J8-A1, J8-C6, J8-D2, J8-D3) | Medium | R19 applies R14's counter bump and removal, falling back to the flag and counter alone on `LogFull`; removals skip entries under the retired key, and a thief's old-key blob removes the overtaken old-key entries at step 5 (spec 021 R3, R9, R14, R19) |
+| J69 | The session could not build a clamped `Delivered`, a stopped channel's outcomes waited for a later `decrypt`, the stall begun by a thief's blob did not stop publishing, and a regeneration on a stopped channel had no reconnect rule in 028 (J8-D4, J8-D1, J8-D8, J8-A6) | Medium | `acked` returns an `Outcome` with the clamped time; outcomes drained after `check_own_key` too; a stopped channel expires on the tick and a regeneration reconnects (spec 021 R17, spec 028 R10–R12, spec 027 R9) |
+| J70 | Senders without a peer record lost their unknown mark and warnings; a retired label did not count for `claims_name_of`; an `ack` dated before `sent_at` in a short channel gave `Delivered` for a message receivers reject (J8-D5, J8-D6, J8-D7) | Medium | `Message::stranger` computed by the core; retired labels count; `Delivered` only when the clamped time is in the window and still displayable (specs 022 R13, 023 R3, 021 R17) |
+| J71 | PR slices whose tests need a later slice, again, across 020, 021, 022, 027 and 028 (J8-A3–J8-A5, J8-A9, J8-A10, J8-C1–J8-C5) | Medium | One rule in every slice list: each test clause lands in the slice that implements the last behaviour it needs; the specific moves of R5, R26, T09, T14 stated |
+| J72 | Small ones: R5 split between `store` and `core`, R6 leaving the verdict to R7, 028 T08/T09 for the round 7 rules, `commits = 0` on two own-key rejections, `sent_at` in `NotDelivered` for a row no longer listed (J8-A2, J8-A7, J8-A8, J8-A11, J8-A12, J8-D9) | Low | Corrected in the specs |
+
+Round 9: 30 findings (J9-A1–J9-A11, J9-B1–J9-B6, J9-C1–J9-C4, J9-D1–J9-D9), no Blocker, 1 High. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J73 | The round 8 step-5 removal also removed the pending `key_retired`, which an echo of a superseded copy could trigger with an honest server, leaving the retirement pending for ever (J9-A1, J9-B3) | High | Step 5 removes only ordinary entries under the retired key, only for a blob that is not stale, with outcomes queued (spec 021 R9; J9-A2, J9-B5, J9-B6) |
+| J74 | `NotDelivered.sent_at` had no source; the echo re-acknowledgement bypassed round 8's displayability rule; `check_own_key` did not do step 5 during a stall; the stop withheld the retirement and old-key entries too, and did not cover `ok` or `encrypt` (J9-A3, J9-A4, J9-A8, J9-B2, J9-B4, J9-C1, J9-D3–J9-D7) | Medium | `sent_at` in `Outcome`, `OutboxStep`, `expire_outbox` and `abandon`; R13 applies R17's conditions; R19 applies step 5 for the retiring key; a stopped channel withholds only ordinary entries of the current key, at `ok` and after `encrypt` too (specs 021, 028) |
+| J75 | Two more pixel-identical names escaped the key: a dotless ȷ with a combining dot and a trailing U+2800 (J9-B1, J9-D1) | Medium | `ȷ` folded into `j`; blank-rendering characters listed in `INVISIBLE`; the name comparison's residual stated in spec 022's Security, so that new look-alikes are additions to the table, not design breaks (spec 022, ADR 0036 before its first commit) |
+| J76 | After `StatusChanged` nothing said to re-read `messages`, so a vanished record's warnings were lost (J9-D2) | Medium | The re-read list of spec 027 R14 covers `StatusChanged` |
+| J77 | Small ones: T10/T13/T19 cases, `acked`'s public-API sentence, the vectors README's `commits = 0` exception, R5's halves in the slice list, a single-row `message`, `peers`/`messages` returning `Result`, `MemoryStore` applying R16, a new peer never evicting itself, `own_display_name` in `ChannelInfo` (J9-A5–J9-A7, J9-A9–J9-A11, J9-C2–J9-C4, J9-D8, J9-D9) | Low | Corrected in the specs |
+
+Round 10: 18 findings (J10-A1–J10-A7, J10-B1, J10-B2, J10-C1–J10-C3, J10-D1–J10-D6), no Blocker, no High. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J78 | The stopped state had no mechanism: no `outbox` call, and no way to tell which blobs to hold (J10-A1, J10-C1, J10-D1) | Medium | `outbox(…, withhold_current)` hands out only the retirement and old-key entries; the session calls it for stopped channels (spec 021 R22, spec 028 R9, R10, R14) |
+| J79 | A thief's own-key blob dated too far ahead skipped the removal of overtaken entries, which later readers then reject (J10-B1) | Medium | Removals gated on the past side of staleness only; the counter rule of ADR 0029 unchanged (spec 021 R9, R14, R19) |
+| J80 | A refused entry re-sent after a later one of the same channel reaches every receiver as `Replay` but is acked `Delivered` (J10-D2) | Medium | An in-time `ack` of an entry removes every lower ordinary entry of the same key as not delivered (spec 021 R17) |
+| J81 | The client was not told to re-read `gaps`; a verified peer without a label escaped the collision checks (J10-D3, J10-D4) | Medium | `gaps` in the re-read list after `StatusChanged`; `verify` requires a label (specs 027 R14, 022 R8) |
+| J82 | Small ones: `Outcome.sent_at` optional, R22's text, `message` infallible, `own_display_name` accessor and cleaning, §7's key and invisible set, §4's exception list, `all_commits`, the peer record kept while a copy can be accepted (so the pair check holds against republished expired blobs), the re-acknowledgement's `server_id`, the no-channel settings residual (J10-A2–J10-A7, J10-B2, J10-C2, J10-C3, J10-D5, J10-D6) | Low | Corrected in the specs, §4 and §7 |
+
+Round 11: 22 findings (J11-A1–J11-A7, J11-B1–J11-B4, J11-C1–J11-C6, J11-D1–J11-D5), one High, overlapping heavily. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J83 | Every consumed message set the peers-changed flag, so every push made the client re-read every list (J11-D1) | High | The flag is set only by a peer created or removed, a change of label, verified, muted, retired or name, or a gap change; one re-read per step (specs 021 R1, 028 R13, 027 R14) |
+| J84 | A peer record lapsed a whole TTL before copies of its blob stopped being accepted, so a server could revive an expired message (J11-B1) | Medium | Peer `purge_at` second term `sent_at + 2·ttl_ms + 360 000` (spec 021 R26, T26) |
+| J85 | `check_own_key` still gated removals on full non-staleness; a blob dated a decade ahead removed delivered entries (J11-A2, J11-B2, J11-B3, J11-C3, J11-C4, J11-D3) | Medium | One "within reach" test in R14 (no `sent_at`, or past side fresh and at most `2·ttl_ms + 360 000` ahead), used by R9, R14 and R19; counter bump still needs not stale; tests |
+| J86 | Outcomes queued by `acked` were not drained (J11-A3, J11-C1, J11-D2) | Medium | Spec 028 R11 drains after `acked`; T12 |
+| J87 | `verify` needing a label left no 12-word path for a new key whose name an unverified old key holds; its admission check was dead (J11-A4, J11-C2, J11-D4) | Medium | `verify(peer, label, now)`: a label for an unlabelled peer, rules of R7 with the target verified, admission check, all or nothing (specs 022 R8, 026 R4, 027, `docs/spec.md` §9) |
+| J88 | An echo of an entry removed by a later entry's `ack` was re-acknowledged `Delivered` (J11-D5) | Low | Spec 021 R13: no re-ack when an acked record names a later own message of the same epoch |
+| J89 | Small ones: T10's `purge_at`, R8's `sent_at`, the testing builders in T09/T19/T22, 025 R4's `outbox` signature, `None` from `message` → `Internal`, the server's publish order in the contract (J11-A1, J11-A5–A7, J11-B4, J11-C5, J11-C6) | Low | As listed (specs 021, 025, 027, 028 R4, T04) |
+
+Round 12: 18 findings (J12-A1–J12-A8, J12-B1–J12-B3, J12-C1, J12-D1–J12-D6), no High. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J90 | A peer's whole message stayed on disk about two TTLs, and a far-dated flood stalled a channel up to three (J12-B1) | Medium | A small seen record (`server_id`, `sender_pk`, `counter`) carries the long `purge_at` and the step-6 checks; the message record goes at its display expiry (specs 020 log schema and vectors, 021 R9, R11, R26, T10, T26) |
+| J91 | Direct calls never raised `StatusChanged`, and an offline channel never consumed the peers-changed flag (J12-D2, J12-B3) | Medium | The `Device` compares status and the flag around every direct writer, and `on_tick` consumes the flag of unconnected channels; `own_display_name` sets the flag (specs 027 R14, 021 R1, 028 T13) |
+| J92 | One's own delivered message keeps its plaintext up to one TTL after its row goes (J12-D1) | Medium | Documented in 023 Security and raised as an open question with a recommendation; 023 R1's parenthetical corrected |
+| J93 | The "within reach" bounds ignored members' clock skew (J12-B2) | Low | Both bounds widened by the margin (spec 021 R14, T09, T14) |
+| J94 | A republished foreign own-key blob wrote a second record and row (J12-D3) | Low | After the echo rule, a seen record from one's own key with the same counter → `Replay` (spec 021 R9, T09) |
+| J95 | Small ones: T10's `purge_at`, `Unreadable` with a `sent_at`, T09's stale case, the guard's key, `Internal` vs "MUST return `Ok`" and when `message` is read, T01's label clause moved to 022 T10, the `acked` drain tested in T11, 014/022 on `verify_scanned`, retired labels in `label_collides`, the imported `created_at` margin, `last_seen` not live (J12-A1–A8, J12-C1, J12-D4–D6) | Low | As listed (specs 014, 020, 021, 022, 023, 027, 028) |
+
+Round 13: 11 findings (J13-A1–J13-A3, J13-B1, J13-C1, J13-C2, J13-D1–J13-D3), one Medium. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J96 | One's own `pk_u` was not excluded from the room check, peer creation or a stranger's retirement, so 50 muted unknowns swallowed the own-key alert (J13-B1) | Medium | "Other than one's own `pk_u`" in specs 021 R9, 022 R1, 024 R2, 026 R2; tests in 021 T14 and 026 T02 |
+| J97 | The own-key seen record lapsed six minutes before R14 stops accepting a copy; R13 and §4 lacked the J94 step (J13-A1, J13-A2) | Low | Its second term `sent_at + 2·(ttl_ms + 360 000)`; R13 and §4 name the check; T26 |
+| J98 | A first commit poisoned after its rename left a phantom channel; an R14 broken entry did not say which channel (J13-D2, J13-D3) | Low | Create and import reopen once and adopt a standing state; `BrokenChannel` gains optional `channel_id` and name (spec 027 R4, R14, T04, T14) |
+| J99 | Small ones: T26's scenario, `purge_expired` among the direct writers, `on_tick`'s flag producing the event, the no-`sent_at` residual (J13-A3, J13-C1, J13-C2, J13-D1) | Low | As listed (specs 021 R26, Security, T26; 023 Security; 027 R14, T14) |
+
+Round 14: 10 findings (J14-A1, J14-A2, J14-B1, J14-C1, J14-C2, J14-D1–J14-D4), two Medium. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J100 | A compaction failing on every call (a disk with less room than the log) was retried and reopened every second, keeping every channel of the run disconnected (J14-D1) | Medium | Every compaction attempt counts for the ten-minute limit; a failed relief returns `LogFull`; `purge_due` holds off for ten minutes; a failed purge or relief raises `StorageFailed` without reopening (specs 021 R18, T18; 023 R5; 027 R15, T15) |
+| J101 | A backlog whose every push raises `StatusChanged` made the client re-read every list per push (J14-D2) | Medium | The client marks the channel and re-reads at most once a second, at its tick (spec 027 R14) |
+| J102 | Under a full log, a stale foreign `key_retired` made the channel read-only, unlike `decrypt` (J14-B1) | Low | `read_only` goes with the counter bump, only when not stale (spec 021 R19, T19) |
+| J103 | Small ones: which name `BrokenChannel` carries, the flag test that could not be written (the flag now starts set at load), 022 R1's own-key test, create's retry returning which error and a failed retry going to `broken`, an unreadable `settings.bin` blocking every unlock (J14-A1, J14-A2, J14-C1, J14-C2, J14-D3, J14-D4) | Low | Specs 021 R1, T01; 022 T01; 027 R1, R4, R14, T01, T04, T14 |
+
+Round 15: 17 findings (J15-A1–J15-A5, J15-B1–J15-B3, J15-C1–J15-C5, J15-D1–J15-D4), five Medium, overlapping. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J104 | A failed purge or relief was told both to reopen and not to; a poisoned relief on a receive-only channel stalled it for the session; any reopen reset the ten-minute hold; `relieve_headroom`'s result undefined (J15-A1, J15-B1, J15-C3, J15-D1) | Medium | A failed purge or relief raises `StorageFailed` and reopens; every reopen carries `last_compaction()`; `relieve_headroom` returns `Ok(true)`, `Ok(false)` or the error (specs 021 R18, Interface, T18; 027 R14, R15, T15) |
+| J105 | Create's retry could not tell "no state" from `Corrupt`, and T04's clause could not be produced (J15-A2, J15-C1) | Medium | The retry calls `Store::load` first; `Faults` gains `fail_create_at(n)` and `fail_compactions(on)` (specs 027 R4, T04; 020 testing module) |
+| J106 | A local writer could make the device save proxy-less settings by hiding the channels for one unlock; the first save could come after the first channel (J15-B3, J15-D3) | Low | A fresh install saves nothing until the user's first write; create and import save before `Vault::create`; the tick retry removed (spec 027 R1, R4, R12, T01, T12, Security) |
+| J107 | A relief that cannot restore room still rewrote the log; a failed write left its temporary file taking the space (J15-C4, J15-D2) | Low | Relief only when enough has expired to restore room; a failed commit or compaction deletes its temporary file (specs 021 R18, T18; 020 R11, T11) |
+| J108 | Small ones: `read_only` in R19's fallback, the ten-minute hold tested in 023 and 021, an empty run left in the plan, T01's duplicate (J15-A3–A5, J15-B2, J15-C2, J15-C5, J15-D4) | Low | Specs 021 R19, T19, T18; 023 T05; 027 R10, T10, T01 |
+
+Round 16: 13 findings (J16-A1–J16-A5, J16-B1–J16-B4, J16-C1, J16-D1–J16-D4), one Medium. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J109 | A channel readable but not writable looped through reopen and reconnect, keeping the rest of its run from subscribing (J16-D1) | Medium | A second `Io` within ten minutes of a reopen moves the channel to `broken` and out of its run (spec 027 R14, T14) |
+| J110 | A relief poisoned inside `encrypt`/`decrypt` returned `LogFull`, stalling a receive-only channel ten minutes (J16-B1, J16-D2) | Low | A failed compaction there returns its error, so R14 reopens at once (specs 021 R18, T18; 027 T15) |
+| J111 | Texts still gave the old 1 MiB relief threshold; `purge_due` after a clock set back (J16-A1, J16-B3, J16-B4, J16-C1) | Low | Specs 021 R18, Limits, T18; 023 R5, T05 |
+| J112 | Small ones: a T18 clause needing spec 023 moved there, `state.bin.tmp` deletion tested, a saved setting kept after a failed create, T15's poisoned-compaction path, the per-unlock bound documented, a first commit cut before its header, `flush` attempting every channel (J16-A2–A5, J16-B2, J16-D3, J16-D4) | Low | Specs 020 R11, R13, R19, T11, T13, T19; 021 Security; 023 T05; 027 R1, R24, T15, T21, T24 |
+
+Round 17: 23 findings (J17-A1–J17-A7, J17-B1–J17-B4, J17-C1–J17-C6, J17-D1–J17-D6), four Medium, overlapping. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J113 | The J109 rule contradicted R15's reopens and T15, had no time for calls without `now`, no strict window, no clock-set-back rule, no double, and did not drop the store (J17-A1, J17-A3, J17-C1–C3, J17-C6, J17-D2, J17-D3, J17-D5) | Medium | Only R14's own reopens count, less than 600 000 ms ago, measured with the largest `now` seen; a later recorded time counts as not within; the `Channel` is dropped; `Faults::fail_commits` (specs 027 R14, T14, Limits; 020 testing module) |
+| J114 | A channel broken by a full disk never came back without an unlock (J17-D1) | Medium | `on_tick` retries `Io`-broken entries every ten minutes (spec 027 R12, T14) |
+| J115 | R9 and §4 step 0 still said every headroom failure gives `LogFull`; `send` had no outcome when R14 went straight to `broken` (J17-A2, J17-A4, J17-C5, J17-D4) | Low | R9 and §4 name the compaction error; the `Device` reopens once to read a `send` or regeneration outcome (specs 021 R9, 027 R9, 028 R10, `docs/spec.md` §4) |
+| J117 | One poisoned store could be counted twice in one step and go to `broken` (J17-B1; J17-B2–B4 as J113, J115) | Low | Only failures of the instance the reopen handed out count, once per step (spec 027 R14, T14) |
+| J116 | Small ones: the size rule would erase a compacted channel that lost its state, and the doubles did not follow it; the per-unlock bound's exceptions; deletions at open not best effort (J17-A6, J17-A7, J17-C4, J17-D6) | Low | Specs 020 R12, R13, R19, T13, T19, testing module; 021 Security |
+
+Round 18: 19 findings (J18-A1–J18-A9, J18-B1–J18-B3, J18-C1–J18-C3, J18-D1–J18-D4), five Medium, overlapping. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J118 | Dropping a channel to `broken` after two `Io` failures let one leaked config, by filling the disk, empty the whole channel list, hide all history and block `leave` of the flooded channel (J18-B1) | Medium | The channel is reopened and marked `write_failed` instead: listed, readable, `leave` working, out of its run; `on_tick` puts it back every ten minutes, counted as an R14 reopen (spec 027 R9, R12, R14, `ChannelInfo`, Limits, T12, T14) |
+| J119 | R12's retry could not open an entry with no `channel_id`, had no clock rule, and a restored channel was not re-listed by the client (J18-A1, J18-A2, J18-A4, J18-B2, J18-B3, J18-C1, J18-C2, J18-D1, J18-D4) | Medium | Retry only entries with a `channel_id`, which a failed import retry now fills in; a later time reset to `now`; the client re-reads `channels()` and `status()` after `StatusChanged` for a channel it does not list and after an import (spec 027 R5, R12, R14, T05, T12) |
+| J120 | Slice d2 far over 400 lines (J18-C3) | Medium | Split into d2a and d2b (spec 027 slices) |
+| J121 | Small ones: §4 step 0 and 021 Security on R19 after a failed compaction, R12's test in T12, the per-unlock bound's list, a `Corrupt` recorded as `Io`, T13's 9-byte cases, R14's `.new` deletion best effort, a passing `Io` on settings overwriting the proxy (J18-A3, J18-A5–A9, J18-D2, J18-D3) | Low | Specs 020 R14, T13, T14; 021 Security; 027 R2, R14, T02, T12; `docs/spec.md` §4 |
+
+Round 19: 17 findings (J19-A1–J19-A5, J19-B1–J19-B3, J19-C1–J19-C3, J19-D1–J19-D6), one High and four Medium, all but two in the `write_failed` state of round 18. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J122 | A `write_failed` channel was reloaded every second by the tick's writers; its failures had no rule; direct writers never cleared it (J19-A1, J19-C1, J19-D1, J19-D2, J19-D3, J19-A5) | High | While marked: no tick writers, session and tick failures change nothing, a failing direct writer reopens once silently for R9, a succeeding one clears the mark; event counts stated (spec 027 R12, R14, T14) |
+| J123 | On a full disk the own-key alert never arrived and the pending retirement never left, since a marked channel left its run (J19-B1) | Medium | A marked channel stays in its run in the receive-only stall of 028 R10; `check_own_key` keeps the flag in memory when its commit fails (specs 021 R19, T19; 027 R10, R12, R14, Limits; 028 R10, Interface, T10) |
+| J124 | "Its run" undefined on the way back; R12's clock rule contradicted T12 (J19-A2, J19-A3, J19-A4, J19-C2, J19-D4) | Low | Resolved by staying in the run; a later recorded time counts as passed (spec 027 R10, R12) |
+| J125 | Small ones: a flooded `Io`-broken channel could not be removed; `leave` does not make the retries due; `set_socks5_proxy` after a passing `Io` reset other settings; gate-time setter changes lost on re-read; `fail_*` switches; a poisoned direct write on a marked channel; `BrokenChannel`'s comment (J19-B2, J19-B3, J19-C3, J19-D5, J19-D6) | Low | Specs 027 R2, R3, R14, Interface, T02, T03, T14; 020 testing module |
+
+Round 20: 29 findings (J20-A1–J20-A11, J20-B1–J20-B3, J20-C1–J20-C8, J20-D1–J20-D7), thirteen Medium, overlapping, all on the full-disk path of round 19. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J126 | The own-key alert could still be lost on a full disk: the first failing push never reached `check_own_key`, the mark was forgotten at reconnect or a new plan, a store error before the mark kept pushes from `check_own_key`, and every reopen dropped the in-memory flag (J20-A1, J20-A3, J20-A4, J20-B1, J20-B3, J20-C1, J20-C2) | Medium | A push whose `decrypt` fails with a store error goes to `check_own_key` first; marks survive reconnects and are set on every new `Session`; the mark overrides the dropped state; reopens carry the flag (`hold_own_key_alert`) (specs 021 Interface; 027 R14, T14; 028 R5, R10, Interface, T10) |
+| J127 | The pending `key_retired` did not leave on a full disk once its minute had passed, nor behind a stale entry (J20-B2, J20-C3) | Medium | A failing `outbox` commit still hands out, from memory, what needs no change, stale entries counted as gone, the retirement re-sealed for that call only (spec 021 R22, `OutboxStep::store_error`, T22; 028 R10, T10) |
+| J128 | A marked channel republished acked entries every tick; clearing resumed `decrypt` on the same connection (J20-A2, J20-C4) | Medium | A failed `acked` holds its `client_ref`; the stall lasts until `on_disconnect` (spec 028 R10, T10) |
+| J130 | An R15 reopen after a clearing restarted the count, giving three `StorageFailed` per cycle; a marked channel could still commit `synced_at` (J20-D6, J20-D7; J20-D1–D5 as J126–J128) | Low | R15's reopens pass the R14 record on; no cursor or `synced` commit while marked (specs 027 R14, T14; 028 R10) |
+| J129 | Small ones: event counts and "in every case", the session's own `StorageFailed`, `synced` while stalled, R19's result, which writers clear a mark, the Limits row, the `leave` clause in T03, the clock rule for clearing (J20-A5–A11, J20-C5–C8) | Low | Specs 021 R19; 027 R3, R14, Limits, T03, T14; 028 R9, R10 |
+
+Round 21: 24 findings (J21-A1–J21-A8, J21-B1, J21-B2, J21-C1–J21-C6, J21-D1–J21-D8), one Medium, all on the full-disk path; pass C judged the machinery out of proportion and sketched a simpler one, which was adopted. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J131 | The full-disk handling had grown per-instance counting, first/marking/silent reopens, records passed between R14 and R15, and a clearing that reconnected the run every ten minutes to refetch up to 64 MiB on a disk still full (J21-C info, J21-D1, J21-D2, J21-D8, J21-A1, J21-A6) | Medium | Replaced by one rule: the first store failure reopens once and marks the channel `write_failed` (receive-only stall, no `Reconnect`); R12 probes it with a state-only commit after 60 000 ms, then every 600 000 ms, and clears it with `Reconnect` only when that commit succeeds; a direct writer returning `Ok`, `leave` or `remove_broken` makes the probe due (specs 027 R12, R14, R15, Limits, T14, T15; 021 R20 `probe`, R22, R32; 028 R10) |
+| J132 | A carried flag gave a freshly regenerated key a false alert; an alert held in memory was lost at lock (J21-B1, J21-B2, J21-C1, J21-D7) | Low | The flag is carried only onto the same own `pk_u`; `flush` persists it; the residual documented (specs 021 R20, Security; 027 R14, T14) |
+| J133 | Small ones: `hold_own_key_alert` defined, the two exceptions to R2, `synced` at `ok` when stalled, stopping on the `Io` path, the retirement hold with memory-only re-seals, 025 R4's exception and the T22/T04 split, events of a failing `send`, `not_delivered` under `store_error`, acks held marked or not (J21-A2–A5, J21-A7, J21-A8, J21-C2–C6, J21-D3–D6) | Low | Specs 021 R19, R22, T19, T20, T22; 025 R4, T04; 028 R9, R10, R12, R16, T10 |
+
+Round 22: 17 findings (J22-A1–J22-A6, J22-B1–J22-B4, J22-C1–J22-C3, J22-D1–J22-D4), seven Medium, overlapping, all on the probe design of round 21. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J134 | A state-only probe does not prove the failed write works: a full channel reconnected and refetched every eleven minutes, and a disk with room for the state but not a message probed every minute (J22-D1, J22-D2) | Medium | With `storage_full` the probe clears the mark without `Reconnect`, back into the `LogFull` stall; a failure within ten minutes of a clearing probes after 600 000 ms (specs 027 R12, R14, T14, T15; 028 R10) |
+| J135 | An `outbox` failure on an unmarked channel never reached R14; old-design clauses in T14 (J22-A1, J22-A2, J22-C1) | Medium | A `store_error` is reported in `failed`, marked or not; T14 rewritten (specs 028 R14, T14; 027 T14) |
+| J137 | On an unwritable disk only the own-key flag was held: the counter bump and `read_only` were lost once the thief's blob left the server, and later messages read `Delivered` while nobody accepted them (J22-B2; J22-B1 as J134) | Medium | The fallback holds the counter bump and `read_only` in memory too; `hold_own_key_alert` carries all three over a reopen (specs 021 R19, R20, Interface, T19; 027 R14) |
+| J138 | A failed `abandon` on a marked channel republished its entry every tick (J22-B4; J22-B3 as J135) | Low | A failed `abandon` holds the `client_ref`; `NotDelivered` only on `Ok(Some)` (spec 028 R16) |
+| J136 | Small ones: R9 vs a marked channel, the Limits row, the session's `expire_outbox` on a marked channel, T03's wording, a citation, the session's events after a store error, a reopen to `broken` with no event, stale entries never reported while marked, `Reconnect` for an unconnected channel (J22-A3–A6, J22-C2, J22-C3, J22-D3, J22-D4) | Low | Specs 021 R22, Interface, T22; 027 R9, R12, R14, Limits, T03, T14; 028 R10, R14 |
+
+Round 23: 14 findings (J23-A1–J23-A4, J23-B1, J23-B2, J23-C1–J23-C5, J23-D1–J23-D3), three Medium. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J139 | On a full disk, entries a thief overtook stayed in the `outbox` and left once his blob expired, reading `Delivered` (J23-B1) | Medium | The held own-key values include the overtaken counter; `outbox` never hands those entries out, and the next successful commit removes them as not delivered (`HeldOwnKey`, `held_own_key`, `hold_own_key`; specs 021 R19, Interface, T19; 027 R14) |
+| J140 | Slice 021 (d) at about 700 lines, 028 (c1) near 500 (J23-C4, J23-C5) | Medium | Split into (d1)/(d2) and (c1a)/(c1b) |
+| J141 | No clock for calls without `now` (a regression of J131) (J23-C1, J23-D1) | Medium | Times measured with the `now` of the last call that carried one (spec 027 R14, T14) |
+| J142 | Small ones: a memory-only retirement copy acknowledged against the stored `sent_at`; `own_pk` for the key comparison; `storage_full` passed to `set_write_failed`; any `Ok` direct writer skipping the ten-minute wait; empty cleaned names; missing tests and the Limits row (J23-A1–A4, J23-B2, J23-C2, J23-C3, J23-D2, J23-D3) | Low | Memory copies get a fresh `client_ref`; specs 021 R20, R22, Interface, Security, T20; 022 R6, T06; 025 R4, T04; 027 R7, R12, Limits, slices, T07, T14; 028 R10, Interface, T10, T16 |
+
+Round 24: 15 findings (J24-A1–J24-A4, J24-B1–J24-B3, J24-C1–J24-C5, J24-D1, J24-D2), five Medium, overlapping. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J143 | A memory-only retirement copy, minted with a fresh `client_ref` on every call, was published every tick while the disk failed (J24-A1, J24-B3, J24-C1, J24-D1) | Medium | One memory copy per minute, kept and handed out again, counted in flight, `acked` as `Ignored` with its `sent_at`, and held as the current copy (specs 021 R22; 025 R4, T04; 028 R12) |
+| J144 | A regeneration with own-key values held in memory gave the new key the old key's `read_only` and exhausted counter; the old key's overtaken entries had no hold (J24-B1, J24-B2) | Medium | The regeneration commit first applies the held values and removal to the old key; `HeldOwnKey` gains `old_key_overtaken_through` (specs 025 R1, T01; 021 R19, Interface, T19) |
+| J145 | Small ones: outcomes of the held removal not drained; an `ack` of a covered entry; empty and whitespace-only names, U+2028/U+2029; the `local_name` Limits row; a stale comment (J24-A2–A4, J24-C2–C5, J24-D2) | Low | Specs 021 R19, Interface, T19; 022 R5, R6, T06; 027 R14, Limits, T07; 028 R11 |
+
+Round 25: 12 findings (J25-A1–J25-A4, J25-B1, J25-C1–J25-C3, J25-D1, J25-D2, and J25-B2 as information), four Medium. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J146 | A removal held after `LogFull` made every later state-only commit, regeneration included, fail with `LogFull` (J25-C1) | Medium | A commit carrying a held removal that fails with `LogFull` is retried once without it; regeneration moves the held counter to `old_key_overtaken_through` (specs 021 R19, T19; 025 R1, T01) |
+| J147 | Entries held from `outbox` still blocked the retirement behind them (J25-D1) | Medium | They count as gone for 025 R4's ordering rule (specs 021 R19, T19; 025 R4, T01) |
+| J148 | Slices 021 (d2) and 025 over 400 lines (J25-C2, J25-C3) | Medium | 021 (d2a)/(d2b); 025 gains slices (a)/(b) |
+| J149 | Small ones: a memory copy's `ack` in 025 R5, `decrypt`'s old-key fallback untested, §7's invisible set, T05's members, an echo of a held entry, a downgraded config shown as corrupt (J25-A1–A4, J25-B1, J25-B2, J25-D2) | Low | Specs 021 R6, R13, R19, T06, T09, T13, T19; 022 T05, T06; 025 R5; `docs/spec.md` §7 |
+
+Round 26: 10 findings (J26-A1–J26-A5, J26-C1–J26-C3, J26-D1, J26-D2); pass B clean. Two passes stopped at the spend limit and were run again. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J150 | A newer app's state, log or settings read as `Corrupt` by an older app and was offered for removal (J26-D1) | Medium | Key 0 of the state and settings records read first, `UnsupportedVersion` when not 1; any later schema change raises it (spec 020 R8, T08) |
+| J151 | A suspended process or dead socket marked the channel synced on resume, hiding a truncation (J26-D2) | Medium | A call more than 5 000 ms after the previous one stops `synced` on that connection and asks for a reconnect; the half-open window documented (spec 028 R9, T09, Security) |
+| J152 | Slices 021 (c) and 028 (b) far over 400 lines (J26-C1, J26-C2) | Medium | Split into (c1)/(c2) and (b1)/(b2) |
+| J153 | Small ones: the old-key hold not covering `acked`, R3's exception list, the (d2a) guards, T06's Cc clause, test labels and `commits = 0`, a 021 clause needing spec 025 moved to 025 T04 (J26-A1–A5, J26-C3) | Low | Specs 021 R3, R19, slices, T06, T19; 022 T06; 025 T04 |
+
+Round 27: 13 findings (J27-A1–J27-A4, J27-B1, J27-B2, J27-C1–J27-C3, J27-D1, J27-D2 and two already fixed during the pass), one High. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J154 | The 5 000 ms rule of round 26 measured from before a reconnect, so a slow handshake reconnected for ever; an `on_frame` after a suspension dodged it (J27-A1, J27-B2, J27-C1, J27-C2) | High | Measured from the latest `on_connect`, `on_tick` or `on_frame`, only with a subscribed channel, for frames too; `on_connect` resets it (specs 028 R5, R9, Limits, T09; 021 R20; 027 Limits) |
+| J155 | `HeldOwnKey` had no flag, so an old-key-only hold raised a false alert over a reopen (J27-C3) | Medium | `own_key_used_elsewhere` field; `hold_own_key` sets the flag only when held (specs 021 Interface, R19, T19; 025 T01) |
+| J156 | A forged `store_version` byte made a channel unremovable; a downgrade overwrote a newer app's settings (J27-B1, J27-A3) | Low | `remove_broken` and `replace_broken` offered for `UnsupportedVersion` behind a destructive confirmation; `settings_reason`, and no save over a newer `settings.bin` (spec 027 R1, R2, R3, R5, T02, T05) |
+| J157 | Small ones: R3's exception for held values, several compactions in one tick, `leave` of a poisoned marked channel (J27-A4, J27-D1, J27-D2) | Low | Specs 021 R3, T03; 027 R8, R12, T12, T14 |
+
+Round 28: 14 findings (J28-A1–J28-A6, J28-B1, J28-B2, J28-C1, J28-C2, J28-D1–J28-D4), one Medium, overlapping. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J158 | A newer (or forged) `settings.bin` could never be written over again: every unlock gated, no proxy (J28-B1, J28-D1) | Medium | A version byte forged over a version-1 box reads as `Corrupt`; `acknowledge_settings(replace_newer)` overwrites a genuine newer file behind a destructive confirmation (specs 020 R7, T07; 027 R2, Interface, T02) |
+| J159 | The settings `UnsupportedVersion` path left the flag, the re-read after `Io` and the memory-only setters undefined (J28-A2, J28-A3, J28-C1, J28-C2, J28-D2) | Low | `settings_reset` cleared, `settings_reason` kept for the unlock; the re-read follows the same branch; tests (spec 027 R2, T01, T02) |
+| J160 | Small ones: 021 R6's reason, `ok` after the gap on the same connection, the handshake not covered by the 5 000 ms rule, R8's test label, probes and retries outside the per-tick budget, the clearing time after a clock set back (J28-A1, J28-A4–A6, J28-B2, J28-D3, J28-D4) | Low | Specs 021 R6; 027 R12, R14, Limits, T08, T12, T14; 028 R9, Limits, Security, T09 |
+
+Round 29: 10 findings (J29-A1–J29-A5, J29-B1, J29-C1, J29-C2, J29-D1, J29-D2), one Medium. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J161 | The clamps added for row placement had undone ADR 0034's two-sided `ack` check: a sender clock a day off showed every message `Delivered` while every receiver discarded it (J29-D1) | Medium | `Delivered` needs the server's unclamped `received_at` within the margin of `sent_at`; the clamped time only places the row (spec 021 R13, R17, T17) |
+| J162 | The forged-header exception was undefined for `messages.log` and could not be told apart through the Interface; R8 still let `store_version` rise alone (J29-A1, J29-A2, J29-B1, J29-C1, J29-C2, J29-D2) | Low | Exception defined by `open` returning `Ok`, for `state.bin` and `settings.bin` only; a log byte other than 1 next to a version-1 state is `Corrupt`; schema changes raise key 0 (spec 020 R7, R8, code split, T07) |
+| J163 | Small ones: `replace_newer` outside `UnsupportedVersion`, the failure rule and T21's settings writers, T03 against the per-tick budget (J29-A3–A5) | Low | Spec 027 R2, T02, T03, T21 |
+
+Round 30: 11 findings (J30-A1–J30-A5, J30-C1, J30-C2, J30-D1–J30-D4), one Medium; pass B clean. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J164 | A device clock off by more than the TTL showed a dead channel and failing messages with no reason; the §6 clock warning had no implementation (J30-D1) | Medium | `ChannelStatus::clock_off` from the server's `received_at` of the last `ack` or push (spec 021 R25, Interface, T25) |
+| J165 | Small ones: T13/T17 inputs and the echo path of J161, 020's code split and T07 against R7, T05's early `ack`, no `hello` timeout after `on_connect` or for the probe, the server's frame types under `proto_version` 1, an unreadable `Io` entry without `channel_id` never removable (J30-A1–A5, J30-C1, J30-C2, J30-D2–D4) | Low | Specs 020 code split, T07; 021 T13, T17; 025 T05; 027 R3, R12, T03; 028 R4, R7, T07 |
+
+Round 31: 10 findings (J31-A1–J31-A6, J31-B1, J31-C1, J31-D1, J31-D2), one Medium. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J166 | `clock_off` turned on falsely after nearly every reconnect, from backlog pushes that are legitimately old, teaching users to ignore it or to change a correct clock (J31-B1, J31-C1) | Medium | Set and cleared by `acked`; only set by a push dated ahead of `now`; advice from an untrusted server, the client never suggesting a time (spec 021 R1, R25, T25, Security) |
+| J168 | A marked channel with no connection never reported its stale entries, so failed rows vanished still `Pending` (J31-D2; J31-D1 as J166) | Low | `expire_outbox` runs on marked channels too and, like `outbox`, reports stale entries from memory when its commit fails (specs 021 R23, T23; 027 R12, R14, T14; 028 R14, T14) |
+| J167 | Small ones: `clock_off` beside, not instead of, §6's per-message warning; R4's "table above"; the `hello` wait row; the probe timeout's Limits row (J31-A1–A6) | Low | Specs 021 R25, Public API changes; 027 Limits; 028 R4, Limits |
+
+Round 32: 10 findings (J32-A1, J32-A2, J32-B1–J32-B3, J32-C1, J32-D1–J32-D4), four Medium. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J169 | `expire_outbox` could not return its stale entries and its error together (J32-A1, J32-C1) | Medium | It returns an `OutboxStep` with `store_error`; callers treat that error as R14 does (specs 021 R23, Interface; 027 R12; 028 R14) |
+| J170 | `clock_off` missed short channels and read-only devices, stuck after a fixed clock, rose falsely on a suspended `ack` or held push (J32-B1–B3, J32-D1) | Medium | Fed only by `clock_sample(received_at, now, live)` from the session: live for an `ack` within 5 000 ms of its publish and a push after `ok`, not for a frame past R9's gap; a short-TTL threshold for acks (specs 021 R25, Interface, T25; 028 R11, T11) |
+| J171 | Without a proxy a `.onion` channel got a direct route, asking the ISP's resolver for the hidden service (J32-D2) | Medium | Such a channel is in no run and shows `needs_proxy`; `probe_plan` refuses it (spec 027 R10, R12, `ChannelInfo`, T10, T12) |
+| J172 | Small ones: the client rule for `clock_off` had no home; a reopen lost the gaps, ignored keys and `clock_off`; the truncation banner could not be repainted (J32-A2, J32-D3, J32-D4) | Low | Specs 021 R1, R25, Interface, T01, T24, Security; 027 R14, T14 |
+
+Round 33: 19 findings (J33-A1–J33-A8, J33-B1–J33-B3, J33-C1–J33-C4, J33-D1–J33-D4), one High and four Medium. Grouped, with the changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| J173 | `carry_session(&Channel)` needed the old channel after it had to be dropped (J33-C1) | High | `session_carry()` read before the drop, `carry_session(SessionCarry)` after (specs 021 R1, Interface, T01; 027 R14; 026 R6) |
+| J174 | `clock_off` still rose falsely on buffered and held pushes, and a live push cleared a short-channel alarm (J33-A1, J33-B1, J33-B2, J33-A2, J33-A3) | Medium | Only an `ack` within 5 000 ms of its publish, on a connection whose gap has not tripped, is a live sample; pushes only set it when dated ahead, and a newer in-margin one clears it; the read-only fast clock documented (specs 021 R25, T25, Security; 028 R11, R13, T11, T13) |
+| J175 | A clock ahead by more than the TTL advanced the cursor past pushes the server still held (J33-D1) | Medium | Such a push leaves the cursor (spec 021 R20, T20, Security; 028 Security) |
+| J176 | `truncated_before` needed a `now` `status()` does not take (J33-C2) | Medium | Judged against the `now` of R1's latest timed call (specs 021 R1, R25, T24) |
+| J177 | Small ones: `.onion.` with a trailing dot, the stray comment, `needs_proxy` fields and re-read, `probe_plan` precedence while reset, a future `truncated_at`, own rows after a corrected clock, test labels (J33-A4–A8, J33-B3, J33-C3, J33-C4, J33-D2–D4) | Low | Specs 021 R24, T24, Security; 027 R2, R7, R10, R12, R14, `ChannelInfo`, T02, T10 |
+
+Audit J was stopped after round 33 with the human reviewer's agreement: rounds 22–33 kept finding 10–20 findings each, nearly all Low edge cases of the full-disk, clock and version paths, and pass B (adversarial) had come back clean in rounds 26 and 30. What remains is left to implementation and its tests.
+
+**Decisions** (taken with the human reviewer on 2026-09-25, every recommendation accepted): ADR 0037 accepted (one `Device` handle); 020-R10 (`state.bin` rewritten on every commit); 021-R9 (an AGENTS 22 exception for public identifiers used as map keys and for ordering, applied to AGENTS when 021 is accepted) and the display-expiry clause for §4 step 2; 022-R7 (no "remove label" in v1) and the documented residual for look-alike names; 023-R1 (one's own delivered plaintext kept up to one TTL longer, said in §1) and 023-R5 (purge thresholds, §8 reworded); 026-R2/R3 (muted unknowns never evicted) and 026-R6 (the ignored-keys count in memory); 028-R4 (backlog before `ok`) and 028-R16 (`error` names the channel and the entry). The reviewer also accepted the design choices made during the audit: seen records (J90), the `write_failed` probe (J131), `clock_off` (J164–J174), no `.onion` without a proxy (J171) and version handling (J150, J158).
+
+Not changed on purpose: the whole log of an open channel stays in memory (J-C12), documented in spec 021 with a lazy list as a v1.x option; the unread marker is out of v1 (J-D19); the muted-unknown exception, the backlog before `ok` and the `error` keys are open questions of specs 026 and 028 for the human reviewer; ADR 0037 is `proposed` until the human reviewer decides it.
+
+## Phase 2 drafts
+
+**2026-09-25 — Decisions taken while drafting the phase 2 specs 020–028.** Not an audit: writing specs 020-store-files and 021-channel-session raised five questions, which the human reviewer decided with the recommended option before specs 022–028 were written. The specs themselves stay `draft` until their own review.
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| P1 | ADR 0021 had no log header, nothing binding a log entry to its place, and channel directories named by the plain `channel_id` | Log header with a generation; `generation` and `offset` inside each record; directory named by a keyed hash under `K_db` | ADR 0035; spec 020 R4, R7, R18 |
+| P2 | `encrypt` returned the blob while `outbox()` also publishes it (D10 of audit I) | `encrypt` returns only the `ClientRef`; every blob leaves through `outbox()` | §9; spec 021 R6 |
+| P3 | §8 and spec 100 assumed a crate that logs | `core` emits no log in v1; the log test runs over the server | §8; spec 021 R25; spec 100 depends on 035 |
+| P4 | The name comparison of §7 needs Unicode tables `core` did not have | `unicode-normalization` and `unicode-security` in `core`; casefold is the lowercase mapping | ADR 0036; §7, §9; spec 022 R4 |
+| P5 | The frame keys were spec 030's (phase 3), but the client session of spec 028 (phase 2) needs them first | Spec 028 fixes the frame keys; spec 030 reuses its encoders on the server | §6; spec 028 R1–R3 |
+
 ## Audit I
 
 **2026-09-24 — Audit I, fourth review of the phase 1 specs 011–017 before acceptance, in four independent passes (I-A: order and coherence of the set against `docs/spec.md`, the ADRs and the code; I-B: simplicity against the promises of §1 and the threats of §2; I-C: technical viability under the pinned toolchain, libsodium and the workspace lints; I-D: end-to-end scenarios walked as a user and as each device).** No Blocker: no byte on the wire, no key derivation and no ADR decision changes. Pass B found the phase 1 scaffolding doing the same work twice and phase 2 concerns specified a phase early; pass D found the phase 2 seam and two product truths the specs implied but never said. The human reviewer decided the simplifications (I1–I8) and the phase 2 seam items (I10); the viability corrections (I9) are wording. Grouped, with the changes applied:

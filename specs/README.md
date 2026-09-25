@@ -20,6 +20,15 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 015 | 015-test-vectors | 1 | in review |
 | 016 | 016-fuzz-harness | 1 | in review |
 | 017 | 017-record-encoding | 1 | in review |
+| 020 | 020-store-files | 2 | draft |
+| 021 | 021-channel-session | 2 | draft |
+| 022 | 022-peers-tofu | 2 | draft |
+| 023 | 023-ttl-purge | 2 | draft |
+| 024 | 024-key-retired | 2 | draft |
+| 025 | 025-identity-regen | 2 | draft |
+| 026 | 026-peer-limits | 2 | draft |
+| 027 | 027-core-api | 2 | draft |
+| 028 | 028-session-sans-io | 2 | draft |
 | 100 | 100-log-test | 6 | draft |
 
 Phase 0 was bootstrapped with implementation and review in parallel; from spec 010 on, acceptance precedes code.

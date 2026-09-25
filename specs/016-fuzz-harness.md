@@ -4,7 +4,7 @@ Status: in review
 Phase: 1
 Related ADRs: 0012, 0023, 0027, 0032
 Depends on: 010-primitives-wrapper, 015-test-vectors, 017-record-encoding, 011-config-format, 012-message-keys, 013-wire-message, 014-fingerprint
-Blocks: 021-channel-session, 063-beta
+Blocks: 020-store-files, 021-channel-session, 022-peers-tofu, 027-core-api, 028-session-sans-io, 063-beta
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
@@ -22,7 +22,7 @@ The phase 1 exit criterion asks for one hour per target without a crash (`docs/s
 ## Requirements
 
 - R1 `crates/core/fuzz` MUST be a `cargo-fuzz` crate excluded from the workspace, so that its dependencies never reach `core`, `store` or `server`.
-- R2 There MUST be exactly these seven targets, each calling the `fuzz_entry` function of the same name: `record_decode`, `config_parse`, `config_parse_qr`, `payload_decode`, `receive`, `receive_signed` and `verify_qr_parse`.
+- R2 There MUST be exactly these seven targets, each calling the `fuzz_entry` function of the same name: `record_decode`, `config_parse`, `config_parse_qr`, `payload_decode`, `receive`, `receive_signed` and `verify_qr_parse`. A later spec that adds a target amends this list, R8 and R9 in its own pull request (specs 020-store-files, 021-channel-session, 022-peers-tofu and 028-session-sans-io do).
 - R3 `fuzz_entry::record_decode` MUST drive the test schema of spec 017-record-encoding (compiled under `cfg(any(test, fuzzing))` and written like production code, since the test lint relaxations of AGENTS 4 do not apply under `cfg(fuzzing)`): key 0 `u8` mandatory, 1 `u32`, 2 `u64`, 3 `bytes` of at most 64 bytes, 4 `bytes32`, 5 `text` of at most 64 bytes, the whole record at most 512 bytes — every type phase 1 implements — under the unknown-key policy chosen by the first input byte (0 → `Ignore`, any other value → `Reject`).
 - R4 `fuzz_entry::receive` MUST read its input as `BE64(received_at) ‖ BE64(now) ‖ blob`, return at once on an input shorter than 16 bytes, and run `verify` and then `Verified::open` of spec 013-wire-message with the `ChannelCtx` of the inputs of the 013 vector `text_k1`, declared once in `proto/envelope/text_k1.rs` (spec 013-wire-message), so that the `Expired` and stale arithmetic is fuzzed too and a seed made from a 013 blob reaches `open`.
 - R5 `fuzz_entry::receive_signed` MUST read its input as `BE64(counter) ‖ nonce (24 bytes) ‖ BE64(received_at) ‖ BE64(now) ‖ plaintext`, return at once on an input shorter than 48 bytes, truncate the plaintext to 64 512 bytes and extend it with zero bytes to the next multiple of 1 024 (at least 1 024), and pass it to the crate-internal `seal_padded` of spec 013-wire-message with the `ChannelCtx` of R4 and the `SenderKey` of the `text_k1` seed, skipping `validate`, and then run `verify` and `open`, so that every input reaches the steps after the signature check; the target itself MUST contain no sealing logic.

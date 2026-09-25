@@ -4,7 +4,7 @@ Status: in review
 Phase: 1
 Related ADRs: 0005, 0006, 0007, 0025, 0028
 Depends on: 010-primitives-wrapper, 011-config-format, 015-test-vectors
-Blocks: 016-fuzz-harness, 022-peers-tofu, 055-verify-ui
+Blocks: 016-fuzz-harness, 022-peers-tofu, 027-core-api, 055-verify-ui
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
@@ -22,7 +22,7 @@ Other specs own the rest:
 - the word list and the strict base64url codec: spec 011-config-format, which uses both first;
 - what the user interface does with the three presentations, including the partial-match rule: `docs/spec.md` §7 and spec 055-verify-ui;
 - how short-identifier collisions between peers are reported: spec 022-peers-tofu;
-- the fingerprint of a retired key: spec 025-identity-regen.
+- the fingerprint of a retired key, a peer's or one's own old key: spec 022-peers-tofu R12, which computes it for any `pk`.
 
 In plain words: the fingerprint is a hash of "this key, in this channel". Two people who see the same 12 words, or whose phones accept each other's QR, are looking at the same key.
 
@@ -75,7 +75,7 @@ pub(crate) fn presentation(channel_id: &ChannelId, pk_u: &PublicKey) -> Result<F
 
 `fingerprint` returns `Error::Internal` only when libsodium fails (`CryptoError::InitFailed`); hashing a fixed-size input has no other failure.
 
-The functions are `pub(crate)`; `Fingerprint` is `pub` with public fields and is built only by `presentation`. It is the `Record` of the core boundary (`docs/spec.md` §9) and reaches the UI through `Channel::fingerprint` and the verification screen's call, both of which spec 027-core-api defines; the same type crosses the uniffi boundary, which has no fixed-size arrays, so its fields are `Vec<String>` with the lengths R8 guarantees. No client re-implements any of the three presentations. No function of `core` takes four words as input (R6).
+The functions are `pub(crate)`; `Fingerprint` is `pub` with public fields and is built only by `presentation`. It is the `Record` of the core boundary (`docs/spec.md` §9) and reaches the UI through `Channel::fingerprint` and the verification screen's call, both of which spec 022-peers-tofu defines and spec 027-core-api exposes; the same type crosses the uniffi boundary, which has no fixed-size arrays, so its fields are `Vec<String>` with the lengths R8 guarantees. No client re-implements any of the three presentations. No function of `core` takes four words as input (R6).
 
 The word list is the one of spec 011-config-format, `crates/core/src/proto/wordlist.rs`, whose BLAKE2b-256 digest `6fefd6b6e47ee66e6bbf8ee322305deebeefb1bd9b24e8618bf126d870175bb7` that spec pins, and the base64url codec is its `proto/base64url.rs`; this module embeds neither a second copy of the list nor a second codec.
 
@@ -95,7 +95,7 @@ The word list is the one of spec 011-config-format, `crates/core/src/proto/wordl
 
 ## Public API changes
 
-`Fingerprint`, `Channel::fingerprint` and `Channel::own_fingerprint` are already in `docs/spec.md` §9, `short` field included. `parse_verify_qr` needs a call that takes the scanned bytes, which §9 does not list yet (it has only `Channel::verify(PeerId)`); spec 027-core-api adds it, and this spec leaves it that obligation.
+`Fingerprint`, `Channel::fingerprint` and `Channel::own_fingerprint` are already in `docs/spec.md` §9, `short` field included. `parse_verify_qr` needs a call that takes the scanned bytes, which spec 022-peers-tofu defines as `verify_scanned` and spec 027-core-api exposes.
 
 ## Test cases
 
@@ -131,7 +131,7 @@ All of these are `derived`: each value follows from the formulas of `docs/spec.m
 
 - The verification screen, the QR camera, the pre-verification flow, the "identifier, not verification" label and the rule that all 12 words must match (`docs/spec.md` §7, spec 055-verify-ui).
 - Reporting short-identifier collisions between peers, what is stored about a peer, the labels and the peer limits (specs 022-peers-tofu, 026-peer-limits).
-- The fingerprint of one's own retired key, key regeneration and the retirement record (specs 024-key-retired, 025-identity-regen).
+- Key regeneration and the retirement record (specs 024-key-retired, 025-identity-regen); the fingerprint of any retired key is spec 022-peers-tofu R12.
 - The word list, its digest and the base64url codec (spec 011-config-format).
 - Any other word list: the English one is the only list of v1 (`docs/spec.md` §12).
 
@@ -146,3 +146,4 @@ None. Closed after audit F: the list lives in `core`, owned by spec 011-config-f
 - 2026-09-24 revised after audit F (`docs/audit-log.md`): base64url codec of 011 reused, verification QR as bytes both ways, purity requirement dropped, generator and reference-script sections and the dispatch test added, open questions closed
 - 2026-09-24 revised after audit H (`docs/audit-log.md`): QR round-trip as a proptest, `presentation` as a requirement, prefix compared with `ct_eq`, the impossible final-bits case dropped, the dispatch rule cited as 015 R10; round 4: fixed-size constants for `ct_eq`, `words` returns `Result` under the lints; round 8: the script also checks the words
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): `Fingerprint` holds `Vec<String>` fields with lengths guaranteed by `presentation`, one type inside `core` and across uniffi; the reference script produces the vectors and the Rust tests reproduce them, `s014_vectors_dispatch` stated in the Interface; the list-and-codec reuse and the "no input of four words" clause moved to the Interface and their source-scan tests dropped; R6–R9 renumbered R6–R8, T06–T09 renumbered T06–T08
+- 2026-09-25 revised after audit J round 12 (`docs/audit-log.md`)

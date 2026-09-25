@@ -3,19 +3,19 @@
 Status: draft
 Phase: 6
 Related ADRs: —
-Depends on: 021-channel-session
+Depends on: 035-server-ops
 Blocks: 063-beta
 Human reviewer: — · Accepted on: —
 
 ## Context
 
-`docs/spec.md` §8 "Logging" promises two tests. The first one, the redacted `Debug` of every type in `SECRET_TYPES`, belongs to spec 010 and is written there. The second one, the log test — an in-memory `tracing` subscriber that watches a full flow and proves no key reaches it — cannot live in spec 010: that spec is the libsodium wrapper, it emits nothing, and no crate of the workspace has a log emitter until the session (spec 021-channel-session). §8 and `AGENTS.md` rule 19 pointed at spec 010 for it, which is a promise no test could keep.
+`docs/spec.md` §8 "Logging" promises two tests. The first one, the redacted `Debug` of every type in `SECRET_TYPES`, belongs to spec 010 and is written there. The second one, the log test — an in-memory `tracing` subscriber that watches a full flow and proves no key reaches it — cannot live in spec 010: that spec is the libsodium wrapper, it emits nothing, and `core` emits no log at all in v1 (spec 021-channel-session R28, decided on 2026-09-25): the first crate that emits is the server (spec 035-server-ops). §8 and `AGENTS.md` rule 19 pointed at spec 010 for it, which is a promise no test could keep.
 
 This spec is the parking place for that obligation, and it is `draft` on purpose. It holds the requirements until a spec that does emit logs can adopt them; if none does, it is implemented on its own. `docs/spec.md` §10 makes phase 6 the deadline: the project does not close with this spec still `draft`.
 
 ## Requirements
 
-- R1 A test MUST install an in-memory `tracing` subscriber at TRACE level, run a full encrypt and decrypt flow with known keys, and assert that the captured output contains neither the lowercase hex nor the base64 of `K_ch`, `sk_u`, `sk_ch`, `K_msg`, `K_hdr` and `mk`, and not the full `channel_id` (`docs/spec.md` §8 "Logging").
+- R1 A test MUST install an in-memory `tracing` subscriber at TRACE level on the server, run a full flow in which two clients with known keys subscribe, publish and receive through it, and assert that the captured output contains neither the lowercase hex nor the base64 of `K_ch`, `sk_u`, `sk_ch`, `K_msg`, `K_hdr` and `mk`, and no full `channel_id`, `server_id` or client IP (`docs/spec.md` §6 "Operation", §8 "Logging").
 - R2 The same test MUST assert that every `channel_id` and every `pk` that reaches the captured output appears only as the 8 lowercase hex characters of its first 4 bytes (`AGENTS.md` rule 19).
 - R3 `scripts/doc_lint.sh` MUST fail while any tracked `*.rs` file contains the token `tracing::` and this spec is `draft`, so the obligation cannot stay parked once there is something to log.
 
@@ -57,8 +57,9 @@ None: no format and no derivation.
 
 ## Open questions
 
-- [ ] 100-R1: the preferred outcome is that spec 021-channel-session adopts R1 and R2 under its own number and deletes this file in the same pull request, leaving no spec numbered outside the phases. Confirm when 021 is written.
+- [ ] 100-R1: spec 035-server-ops may adopt R1 and R2 under its own number and delete this file in the same pull request, leaving no spec numbered outside the phases. Decide when 035 is written.
 
 ## History
 
 - 2026-09-21 draft, created to hold the log test that spec 010 could not carry (open question 010-R15)
+- 2026-09-25 moved to the server: `core` emits no log in v1 (spec 021-channel-session R28)

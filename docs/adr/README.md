@@ -47,3 +47,6 @@ One decision per file, template in `TEMPLATE.md`. The documentation lint (spec 0
 | 0032 | Mask the envelope signature with the header keystream | 2026-09-24 | accepted |
 | 0033 | Seal every `key_retired` with the last counter | 2026-09-24 | accepted |
 | 0034 | Publish no stale `outbox` entry, and re-seal a pending `key_retired` | 2026-09-24 | accepted |
+| 0035 | Bind every log entry to its place and name channel directories by a keyed hash | 2026-09-25 | accepted |
+| 0036 | Compare names with the unicode-rs normalisation and confusable tables | 2026-09-25 | accepted |
+| 0037 | Expose one `Device` handle at the core boundary | 2026-09-25 | accepted |

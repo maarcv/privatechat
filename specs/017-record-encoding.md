@@ -4,7 +4,7 @@ Status: in review
 Phase: 1
 Related ADRs: 0015, 0021, 0023
 Depends on: 010-primitives-wrapper, 015-test-vectors
-Blocks: 011-config-format, 013-wire-message, 016-fuzz-harness, 020-store-files, 030-ws-protocol
+Blocks: 011-config-format, 013-wire-message, 016-fuzz-harness, 020-store-files, 028-session-sans-io, 030-ws-protocol
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
@@ -15,9 +15,9 @@ In plain words: a record is a list of fields, and each field is a number that sa
 
 This spec implements the six types the two phase 1 records use — `u8`, `u32`, `u64`, `bytes`, `bytesN` and `text` — and the framing rules. `docs/spec.md` §4 defines the full type list of the encoding; `bool`, nested records and `list<T>` arrive with the first schema that needs them (Out of scope).
 
-**PR slices.** Two pull requests of at most 400 lines each (AGENTS 14), the spec marked `implemented` after the second: (a) `Reader`, `RecordError`, the test schema, the `check-cfg` entry and the decoding tests over hand-built bytes (R2–R9, R12); (b) `Writer`, the round trip, `017.json` with its reference-script section, and the dispatch test (R1, R10, R11, R13). `mod proto` carries `#[allow(dead_code, reason = "callers arrive with spec 021-channel-session")]`, like `mod crypto` today, and spec 021 removes both.
+**PR slices.** Two pull requests of at most 400 lines each (AGENTS 14), the spec marked `implemented` after the second: (a) `Reader`, `RecordError`, the test schema, the `check-cfg` entry and the decoding tests over hand-built bytes (R2–R9, R12); (b) `Writer`, the round trip, `017.json` with its reference-script section, and the dispatch test (R1, R10, R11, R13). `mod proto` carries `#[allow(dead_code, reason = "reached through Device, spec 027-core-api")]`, like `mod crypto` today, and spec 027-core-api removes both.
 
-This spec fixes the codec. Which keys each record has, and which error a failure becomes, belong to the spec that owns the record (011-config-format, 013-wire-message, 020-store-files, 030-ws-protocol). The codec is crate-internal: `store` and `server` reach records only through `pub` functions of `core` that specs 020-store-files and 030-ws-protocol define (`docs/spec.md` §9).
+This spec fixes the codec. Which keys each record has, and which error a failure becomes, belong to the spec that owns the record (011-config-format, 013-wire-message, 020-store-files, 028-session-sans-io, whose frames 030-ws-protocol reuses on the server). The codec is crate-internal: `store` and `server` reach records only through `pub` functions of `core` that specs 020-store-files and 028-session-sans-io define (`docs/spec.md` §9).
 
 ## Requirements
 
@@ -105,7 +105,7 @@ A schema decoder reads its keys in order and may check a value as soon as it is 
 - A declared length is never trusted before it is compared with the bytes actually present (R2). A 4-byte length of 4 GiB costs the decoder nothing.
 - Nothing recurses on input (R9): a value is never a record and nothing nests.
 - The writer never grows (R11) because the config record carries `K_ch` and the state record carries `sk_u`: a `Vec` that reallocates frees its old copy without wiping it.
-- `store` and `server` never call the codec directly; each `pub` function of `core` that 020 or 030 adds to reach it has its own fuzz target (AGENTS 21).
+- `store` and `server` never call the codec directly; each `pub` function of `core` that 020 or 028 adds to reach it has its own fuzz target (AGENTS 21).
 
 ## Public API changes
 
