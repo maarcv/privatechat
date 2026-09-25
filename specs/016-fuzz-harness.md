@@ -4,7 +4,7 @@ Status: in review
 Phase: 1
 Related ADRs: 0012, 0023, 0027, 0032
 Depends on: 010-primitives-wrapper, 015-test-vectors, 017-record-encoding, 011-config-format, 012-message-keys, 013-wire-message, 014-fingerprint
-Blocks: 020-store-files, 021-channel-session, 022-peers-tofu, 027-core-api, 028-session-sans-io, 063-beta
+Blocks: 020-store-files, 021-channel-session, 022-peers-tofu, 027-core-api, 028-session-sans-io, 030-ws-protocol, 031-auth-channel-signature, 063-beta
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

@@ -4,7 +4,7 @@ Status: implemented
 Phase: 1
 Related ADRs: 0002, 0005, 0012
 Depends on: 000-repo-layout, 001-ci
-Blocks: 011-config-format, 012-message-keys, 013-wire-message, 014-fingerprint, 015-test-vectors, 016-fuzz-harness, 017-record-encoding, 020-store-files, 022-peers-tofu
+Blocks: 011-config-format, 012-message-keys, 013-wire-message, 014-fingerprint, 015-test-vectors, 016-fuzz-harness, 017-record-encoding, 020-store-files, 022-peers-tofu, 031-auth-channel-signature, 032-storage-ttl
 Human reviewer: Marc Vilardebó · Accepted on: 2026-09-21
 
 ## Context

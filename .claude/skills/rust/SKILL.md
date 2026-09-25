@@ -118,12 +118,17 @@ AGENTS 12 fixes where `unsafe` may appear. Inside that one file:
 - Bounded channels only (`mpsc::channel(N)`), never `unbounded_channel`. When a
   channel is full, the spec says what happens (`rate_limited`); an unbounded
   queue says "OOM later".
-- One writer task owns the SQLite connection. Everything else sends it
-  `WriteBatch`es.
+- One writer thread owns the SQLite write connection, reads use a small pool
+  of read-only connections, and every write is a `WriteRequest` to that
+  thread (spec 032-storage-ttl R4, R9).
 - Every task has an explicit shutdown path (`CancellationToken` or a
   `select!` on a shutdown signal). Tasks that "just run forever" leak on
   reload.
-- Timeouts on every await that touches the network (`tokio::time::timeout`).
+- A deadline on every await that touches the network. In the server they are
+  measured with `Clock::mono_ms` and enforced by the deadline task, so that a
+  manual clock drives them in tests (spec 032-storage-ttl R14, spec
+  033-rate-limit-quotas R4, R5); `tokio::time::timeout` only where no
+  `Clock` deadline applies.
 
 ## Documentation
 

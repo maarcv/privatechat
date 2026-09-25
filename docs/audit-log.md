@@ -2,6 +2,138 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit K
+
+**2026-09-25 — Audit K, review of the phase 3 draft specs 030–035 and ADR 0038 before human review, in four independent passes (K-A: coherence and SDD conformance; K-B: adversarial security and privacy; K-C: technical viability and simplicity; K-D: end-to-end scenarios), repeated in rounds until they bring nothing new.** Round 1:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| K1 | A subscribe released just before a newer `hello` arrived was signed with the replaced nonce, got `bad_auth` and left the channel refused for the plan (K-A1, K-D1) | Medium | The previous nonce is kept; a signature under it gets `nonce_expired` and a `hello` repeating the latest nonce, not a failed attempt (spec 031 R1, R5, R9, T01) |
+| K2 | The start-up line logged listener addresses, which the log test forbids (K-A2, K-C2, K-D5) | Medium | Ports and whether the onion listener is on, no address (spec 035 R4, T04, T05) |
+| K3 | `PRIVATECHAT_DOMAIN` in `.env` would stop the server as an unknown `PRIVATECHAT_` variable (K-A3) | Medium | Renamed `SERVER_DOMAIN` (spec 034 R2, R3, R7) |
+| K4 | The server was a binary only, so the exit test, the shutdown test and the log test could not run in process, and the tests of 031 and 032 needed spec 030's socket or spec 035's binary (K-A4, K-C1) | Blocker | `lib.rs` with `run(settings, clock, shutdown)` returning an `Outcome`; 027 R16 names the server's `pub` items; the log tests in their own process; 031's server tests over `AuthState`, 032's over the writer and reader; the SIGKILL test moved to 035 (specs 027 R16; 031 Interface, T01, T05–T09; 032 R3, T03, T10; 035 R7–R11) |
+| K5 | `031.json` carried URLs and hosts as text, which spec 015 R1 forbids (K-A5) | Medium | Written as the hex of their ASCII bytes (spec 031 R10) |
+| K6 | The two new fuzz targets amended only spec 016 R2, not its seed rule R8 and its nightly matrix R9 (K-A6) | Medium | Both amend R2, R8 and R9 (spec 030 R2, T02; 031 R11) |
+| K7 | `Blocks` lines missing the phase 3 dependents (K-A7) | Low | Specs 010, 015, 016, 027, 028, 031, 032 brought up to date |
+| K8 | §6 changes not listed: `HiddenServicePort 80`, HTTP 429 (K-A8) | Low | Listed under Public API changes (specs 033, 034) |
+| K9 | The `server_id` retry loop and its numbers disagreed, and guarded against a 2⁻¹²⁸ event (K-A9, K-C10) | Low | A collision refuses that request with `server_full`, never retried (spec 032 R6, T06) |
+| K10 | `relay::channel_id` and the other `relay` calls could fail with no stated effect (K-A10) | Low | `Error::Internal` from any `relay` call closes with 1011 (spec 030 R16, T16; 031 R5) |
+| K11 | Backlog pages were bounded by rows only (500 × 64 673 B ≈ 32 MB), held until the socket took them, for 16 subscriptions per connection and thousands of connections: an out-of-memory attack from one IP, and a thundering herd after a restart (K-B1, K-D4) | Medium | Pages ≤ 500 rows and ≤ 1 MiB; 256 page permits for the whole server; one shared buffer per push (spec 030 R7, Tasks, Security, T07; 032 R9, T09) |
+| K12 | `max_connections` shared by both listeners and no per-IP cap after authentication: a Tor flood or one IP could lock every user out with 503 (K-B2) | Medium | A per-IP cap on all open connections; each listener with its own caps, unauthenticated ones included (spec 033 R8, R10; 035 variables) |
+| K13 | One IPv6 /64 could fill the 65 536-entry table and every new address was then refused (K-B3) | Medium | IPv6 keyed by /64; a full table admits new addresses under the listener caps (spec 033 R8, T08) |
+| K14 | `ws://` onion URLs crossed any SOCKS5 proxy the user set, so a remote proxy put plain WebSocket on the LAN, readable and forgeable (K-B4) | Medium | A `ws://` channel is planned only behind a loopback proxy, otherwise `needs_proxy` (spec 027 R10, T10); ADR 0038 left unchanged, the rule narrows it |
+| K15 | Old WAL frames could keep expired blobs on disk indefinitely (K-B5) | Medium | `journal_size_limit = 0`, a truncating checkpoint after each purge, and a test that no byte of a purged blob remains (spec 032 R2, R10, R13) |
+| K16 | The reference proxies' error logs and Docker's unbounded log files kept client IPs on disk (K-B6) | Low | nginx `error_log stderr crit`; Caddy's two client-naming loggers discarded; the `local` driver with limits (spec 034 R2–R4) |
+| K17 | A flooded channel overflowing its held pushes closed the whole connection, taking the other 15 channels down in a loop (K-B7) | Low | That subscription alone ends with `rate_limited`; spec 028 R16 re-queues it without stopping publishes (spec 030 R8, T08; 028 R16) |
+| K18 | `ack` by `oneshot` and pushes through the hub were two paths, so an echo could precede its `ack` and acks could reorder (K-C4) | Medium | One path: the writer hands every result, with its connection and `client_ref`, to the hub in order (spec 030 R12, Tasks; 032 R7, Interface) |
+| K19 | Deadlines under a `ManualClock` had nothing to wake them, and the 10 ms batch window was real time and made T05 flaky (K-C3) | Medium | Deadline owners wake every 100 ms of real time and compare `Clock`; the batch takes what is already waiting (spec 032 R5, R14) |
+| K20 | No write deadline, and the pong deadline ignored a backlog queued ahead of the ping: a stuck peer held its buffers forever, and a slow link was closed in a loop and could stall a channel for good (K-C5, K-D3) | Medium | A write pending 30 s drops the TCP connection; the pong rule closes only when no write completed during the wait (spec 033 R4, R5, T04, T05) |
+| K21 | The size quota counted free pages, so after a large expiry the server answered `server_full` for hours (K-C6) | Medium | Live pages only (spec 032 R8, T08) |
+| K22 | "`SQLITE_IOERR` of a full disk" cannot be detected without `unsafe` and is already `SQLITE_FULL` (K-C7) | Low | Clause removed; T07 forces `SQLITE_FULL` with `max_page_count` (spec 032 R7) |
+| K23 | The image: glibc of a trixie builder newer than the bookworm runtime, a `/data` the non-root user cannot write, SQLite temp files on a read-only root, `nginx -t` failing on the upstream name (K-C8) | Medium | Bookworm builder; `/data` and Tor's directory owned by their users; `temp_store = MEMORY`; `--add-host` (spec 034 R1, R5, R8, T01; 032 R2) |
+| K24 | Tests whose sizes clash with the defaults (K-C9) | Low | Resized (spec 030 T07, T10; 033 T05) |
+| K25 | Spec 100's lint, kept as 035 R7, guarded a state AGENTS already forbids (K-C10) | Low | Dropped (spec 035 Context) |
+| K26 | `std::env::vars` panics on a non-UTF-8 variable (K-C11) | Low | `vars_os`; a non-UTF-8 `PRIVATECHAT_` name or value is a configuration error (spec 035 R1) |
+| K27 | After `nonce_expired` the next subscribe left at once and met the 1 000 ms rule, and every `rate_limited` stopped all publishing for a minute (K-D2) | Low | Spacing counts across `hello`s; a `rate_limited` naming a channel and no `client_ref` re-queues that subscribe only (spec 028 R6, R16, T06, T16) |
+| K28 | A restart whose start-up purge emptied the table reset `received_at` below the clients' cursors (K-D6) | Low | `last_received_at` kept in `meta`, read before the purge (spec 032 R1, R6, T06) |
+| K29 | Tor users of a public server share an exit address under the per-IP limits (K-D7) | Low | Documented, with the values to raise (spec 033 Security; 034 R7) |
+
+Round 2:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| K30 | One address could fill the whole disk (256 connections × 30 publishes of 64 KB per 57 s ≈ 8.7 MB/s, 8 GiB in 16 min), and the onion listener faster (K-B1 round 2) | High | A byte budget per address (/64 and /48) and one for the whole onion listener; the residual stated: availability is outside the model (spec 033 R12, Security; 035 variables) |
+| K31 | The 256 page permits could be held by a few slow or stalled connections, starving every subscription and tripping the client's 60 s silence rule (K-B2, K-D1 round 2) | High | One permit per connection, 64 for the onion listener, a page written within 30 s or close 1013, and a permit wait over 20 s ends the subscription with an error (spec 030 R7, Limits, Security, T07) |
+| K32 | Subscribing to one's own channel made a connection "authenticated", so 16 IPv4 addresses or one /56 could hold every main-listener slot (K-B3 round 2) | High | `ip_connections` lowered to 64; IPv6 also counted by /48 at four times the /64 limits (spec 033 R8, Limits, T08) |
+| K33 | IPv4-mapped IPv6 put every IPv4 client in one `::/64` bucket and broke trusted-proxy matching (K-B4 round 2) | Medium | `IpAddr::to_canonical` before keying and matching (spec 033 R8, T08) |
+| K34 | `expires_at` from `received_at` kept blobs past their TTL after a clock excursion or a flood that runs `received_at` ahead (K-B5 round 2) | Medium | `expires_at = wall + ttl` (spec 032 R6, T06) |
+| K35 | The previous-nonce rule could be repeated at will for 16 verifications a second with no failure charged (K-B6 round 2) | Low | It applies only within 10 s of the latest `hello`; the cost stated as 16 (spec 031 R5, Limits, Security, T01) |
+| K36 | A truncated WAL gives its disk blocks back unwiped; R13 only proves what the files hold (K-B7 round 2) | Low | Stated in spec 032 Security, with disk encryption at rest as the defence |
+| K37 | Spec 028 R4 still said the server closes the connection when the held-push bound is reached (K-A1, K-C5, K-B note, round 2) | Medium | 028 R4 amended to the ending of one subscription |
+| K38 | `main.rs` could not build `SystemClock` or tell `StartError` from `ConfigError`, and the exit test could not learn the server's port (K-A2, K-A3, K-C1 round 2) | Medium | `bind` → `Bound::local_addrs` → `Bound::run`; `SystemClock`, `StartError` with its reason and `ConfigError` `pub`; the test's URL has no port and the harness connects to the bound address (spec 035 R10, R11, T10; 027 R16; 032 Interface) |
+| K39 | Two types named `Outcome` (K-A4 round 2) | Low | The writer's is `WriteOutcome` (spec 032) |
+| K40 | `run` cannot be coerced to a function pointer (K-A5, K-C round 2) | Low | A compile-only call pins it (spec 035 T10) |
+| K41 | 031 T06 relied on a socket test that 030 did not have (K-A6 round 2) | Low | 030 T06 covers the third failure and the first-subscribe deadline on a socket |
+| K42 | A full writer queue had no stated answer to the publisher (K-A7 round 2) | Low | `rate_limited` naming both fields, at once (spec 030 R11, T11) |
+| K43 | T04 had no file, and no one installed the stderr subscriber (K-A8, K-C2 round 2) | Medium | `main.rs` calls `log::init`; `run` never does; T04 in `s035_log.rs`; R5 and R6 checked inside the exit run's process; the configuration message is the one direct stderr write (spec 035 R4, R5, Interface, T04, T05) |
+| K44 | A subscription ended under 030 R8 could still send its `ok` or pushes after the error, leaving the client subscribed to nothing (K-D2, K-C6 round 2) | Medium | Ending is decided under the hub's lock and stops everything of it; the client answers `Reconnect` to a `rate_limited` naming a subscribed channel (spec 030 R8, T08; 028 R16) |
+| K45 | `probe_plan` ignored the loopback-proxy rule, and `localhost` trusted a resolver (K-D3, K-B note round 2) | Low | `probe_plan` refuses `ws://` behind a proxy that is not a loopback IP literal; `needs_proxy` worded as "a proxy on this device" (spec 027 R10, R12, T10) |
+| K46 | Deadlines ran on the wall clock, so a clock step fired every ping at once or none for an hour (K-D4 round 2) | Low | `Clock::mono_ms` for every deadline and window; `wall_ms` only for `received_at`, `expires_at` and the purge's `now` (spec 032 R14, T14; 033 Interface) |
+| K47 | The exit harness never reopened a socket closed by the server, and could outrun the server's 100 ms wake (K-D5 round 2) | Low | It reopens every closed socket still in the plan and paces the clock after the frames and 100 ms of real time (spec 035 R11) |
+| K48 | A link under about 17 kbit/s cannot take a 64 KB frame within the write deadline (K-D6 round 2) | Low | The floor is stated (spec 033 Security); the write deadline counts from the start of one write (spec 033 R5) |
+| K49 | Carrier-grade NAT and offices meet the per-IP limits (K-D7 round 2) | Low | Documented with `ip_connections` among the values to raise (spec 033 Security; 034 R7) |
+| K50 | A stalled client made every graceful stop `Fatal` (K-C3 round 2) | Medium | Closes are queued, 2 s wait, then TCP dropped, which is not a failure (spec 035 R7, T07) |
+| K51 | Compose's 10 s grace period raced the server's 10 s shutdown (K-C4 round 2) | Medium | `stop_grace_period: 15s` (spec 034 R2, T02) |
+| K52 | nginx logs unknown SSL errors with the client's address at `crit` (K-C7 round 2) | Low | `error_log /dev/null emerg` (spec 034 R4) |
+| K53 | A real-time bound in 032 T14 would be flaky; T08 had no way to send SIGTERM without `unsafe` (K-C8 round 2) | Low | Polling up to 5 s; `kill -TERM` through `Command` (spec 032 T14; 035 T08) |
+| K54 | Simplifications: a separate log-test run, `Arc<[u8]>` against axum's `Bytes`, a 100 ms wake in every connection task (K-C S1–S3 round 2) | Low | The log checks inside the exit run; `Bytes`; one server-wide deadline task (specs 035, 030, 032 R14) |
+| K55 | Test hooks had no stated gate (K-B note round 2) | Low | `cfg(test)`, and `ManualClock` only under `test-support`; a release build checked without it (spec 035 R10, T10; 030 T16) |
+
+Round 3:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| K56 | The server-wide pool of page permits could still be held by one /48 or four IPv4 addresses, a connection's own subscriptions used up each other's 20 s wait, and a 1 MiB page in 30 s set a catch-up floor of about 280 kbit/s (K-B1, K-D1, K-D2, K-D3, K-C4, K-C5 round 3) | High | The pool, the 20 s wait and the page deadline removed: pages of ≤ 256 KiB, one in memory per connection, streamed in turn; each connection pays for its own page, and the per-frame write deadline of 033 R5 remains the only floor (about 17 kbit/s) (spec 030 R7, Limits, Security, T07; 032 R9, T09) |
+| K57 | A channel flooding at its limit could overflow its hold after `ok` on a slow link, and the client could only reconnect, dropping the other 15 (K-D4 round 3) | Low | Held pushes are sent before `ok`, and `ok` is sent when none is left, under the hub's lock: a subscription can end only before `ok`, which the client re-queues (spec 030 R7, R8, T08; 028 R4, R16, T04) |
+| K58 | `bind` opened the database without the clock the writer needs (K-A1, K-C1 round 3) | Medium | `bind(settings, clock)`, `Bound::run(shutdown)` (spec 035 R10, R11, Interface) |
+| K59 | 030 tests exceeded spec 033's fixed per-connection limits once 033 lands (K-A2 round 3) | Medium | Sized to 30 publishes per connection and run with the channel limits raised; the queue filled by a hook (spec 030 T08, T11, T12) |
+| K60 | The backlog read's `now` is a wall-clock comparison that R14 did not allow (K-A3 round 3) | Medium | Named in 032 R14 and 030 R7 |
+| K61 | The harness moved one clock reading, took 2.4 h of real time for the final move, and could reopen before the restarted server was bound (K-A4, K-C2, K-D scenario 6 round 3) | Low | Both readings move together, the final move in one step with the purge polled, and sockets reopen after the new `bind` (spec 035 R11) |
+| K62 | Small ones: `Instant::now` unchecked, `StartReason` unlisted, the previous-nonce rule missing from the §6 list (K-A5, K-A6, K-A §6 round 3) | Low | Specs 032 T14; 027 R16, 035 R10 and Interface; 031 Public API changes |
+| K63 | `cargo tree -e features` shows dev-dependency features; T04's warn filter and `log` check had no mechanism; T05's IP scan hit module paths; the WAL file is deleted, not emptied; the sync `bind` and T08's reserved port (K-C3, K-C6–K-C9 round 3) | Low | `-e normal,build,features`; T04 filters its capture and checks `log::max_level`; `with_target(false)` and a defined tokenizer; "empty or absent"; std listeners made non-blocking; port 0 read from the start line (spec 035) |
+| K64 | The /48 multiplier on bytes and new connections let one device lock out a carrier's /48, and the shared byte budget was missing from the NAT note (K-B2, K-D scenario 3 round 3) | Low | The /48 count only for open connections; `ip_bytes_per_min` in the note and the guide (spec 033 R8, R12, Security; 034 R7) |
+| K65 | A server clock step deletes or keeps blobs by the size of the step and upsets short-TTL channels; R6 claimed too much (K-B3, K-D5 round 3) | Low | Stated as a residual in 032 Security, with slewed authenticated time sync in the guide (spec 032 R6, Security; 034 R7) |
+| K66 | A repeated `hello` could restart the 10 s previous-nonce window (K-B4 round 3) | Low | The window counts from the first `hello` of the latest nonce (spec 031 R5, Limits, T01) |
+
+Round 4:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| K67 | Holds were bounded per subscription, so one connection could pin 16 × 4 MiB for as long as a trickled catch-up lasts: about 4 GiB from one IPv4 address and 68 GiB through the onion listener (K-B1 round 4) | Medium | One hold bound of 256 frames and 4 MiB for all of a connection's subscriptions, ending the one holding most; about 8.3 MiB per connection in all, stated with the memory to plan for (spec 030 R8, Limits, Security; 034 R7) |
+| K68 | After K64 a /48 had no byte bound: rotating /64s filled 8 GiB in about 15 minutes (K-B2 round 4) | Medium | A /48 byte budget at sixteen times the /64's (spec 033 R12, Limits) |
+| K69 | A re-queued subscribe was always past the client's 50 s nonce window, so every ended subscription became a full `Reconnect` (K-D1 round 4) | Medium | A re-queued subscribe is released however old its nonce; the server's `nonce_expired` and fresh `hello` re-queue it under the new one (spec 028 R7, T16) |
+| K70 | The connection task could write backlog pages ahead of its queue, delaying `ack`s and live pushes of subscribed channels into a 1013 close; `ok` was not counted (K-D2, K-C4 round 4) | Low | The queue is written before each backlog page and held batch; `ok` counts (spec 030 R7, R10, T07) |
+| K71 | A short-TTL channel waiting its turn could lose its backlog to expiry with no banner, and `synced` then hid it (K-D3 round 4) | Low | Truncation checked again at `ok`; no `synced` there when found (spec 028 R9, T08) |
+| K72 | tungstenite never sends 1009 by itself; recognising `Capacity` behind `axum::Error` needs `tungstenite` as a direct dependency (K-C1 round 4) | Medium | Added, default features off, at the version axum pins (spec 030 Interface) |
+| K73 | Tests that depended on kernel buffer sizes and on stored rows beyond the channel limits (K-C2, K-C3, K-A3, K-A4 round 4) | Low | A 65 536-byte receive buffer, a `cfg(test)` read counter stable over 500 ms, rows through `submit` with limits raised, the 4 MiB and 256-frame bounds each reached (spec 030 T07, T08, T10; 033 T05) |
+| K74 | The writer had no stop operation for the shutdown's drain and checkpoint (K-C5 round 4) | Low | `Writer::finish`, awaited under the 10 s limit (spec 032 Interface; 035 R7) |
+| K75 | The rust skill contradicted the specs on the writer and on network timeouts (K-C6 round 4) | Low | Both bullets point to specs 032 and 033 |
+| K76 | Small ones: the causes of a database refusal, a wrong reference, T11's pacing claim, R5 worded as a presence (K-A1, K-A2, K-A5, K-A7 round 4) | Low | `DbCause`; specs 032 R3, R14, T03; 033 T11; 035 R5; 027 R16 |
+| K77 | ADR 0038 said a config moved to the other scheme would become another channel's; `channel_id` does not depend on `server_url` (K-A6 round 4) | Low | The consequence corrected in the ADR (accepted today, in this branch, not yet reviewed): only the route's `tls` changes. Logged here as the correction the ADR README allows |
+| K78 | An intruder flooding a channel at its limit can keep a member on a link slower than about twice the flood from finishing that channel's catch-up (K-B3 round 4) | Low | Stated as a residual of a flooded channel, whose answer is a new channel (spec 030 Security) |
+
+Round 5:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| K79 | The truncation re-check at `ok` used the cursor, which any surviving backlog push had already moved past the expired stretch, so messages could be lost with no banner (K-D1 round 5) | Medium | The re-check uses the `last` captured when the subscribe was first queued (spec 028 R9, T08) |
+| K80 | One /48 could fill the shared IP table with its own /64s and then escape every per-address bound, taking the connection caps and filling the disk (K-B1 round 5) | High | IPv6 entries per /48 with at most 256 /64s inside, never a /64 without its /48; a full table still checks every known address (spec 033 R8, Limits, Interface, T08) |
+| K81 | The ping's own write always completes, so R4 never fired for a peer that had stopped reading (K-A1 round 5) | Medium | The ping's own write does not count as progress (spec 033 R4) |
+| K82 | The builder image has no `make`, which the vendored libsodium build needs: the image could not build (K-C1 round 5) | Blocker | `make` installed in the builder stage (spec 034 R1) |
+| K83 | On Linux the kernel absorbs megabytes before a non-reading client stalls the server, so the queue, hold and shutdown tests could not reach their bounds (K-C2 round 5) | Medium | A `cfg(test)` hook that pauses a connection's socket writes (spec 030 Interface, T08; 033 T05; 035 T07) |
+| K84 | Small ones: 030 T06's single clock step also tripped the ping rule; 035 R4's closed event list forbade the `debug` events its tests need; 035 R7's order did not fit `Writer::finish`; 028 R4 still said the bound was per subscription; 032 R7 covered only a failing commit (K-A2–K-A5, K-C3 round 5) | Low | Specs 030 T06; 035 R4, R7; 028 R4; 032 R7 |
+
+Round 6:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| K85 | The /48 bounds were fixed multiples, so a few devices in a mobile carrier's shared /48, or more than 256 honest connections from it, kept the rest out and the operator could not fix it (K-B1, K-D1 round 6) | Medium | Four configurable `ip48_` values in place of the multipliers; the shared carrier /48 stated with them among the values to raise (spec 033 R8, R12, Limits, Security, T08; 035 variables; 034 R7) |
+| K86 | A primary-key failure on `server_id` would now roll back the whole batch, and a rollback left the in-memory counters, windows and `last` inflated (K-A1 round 6) | Medium | A `SELECT` finds a used id and refuses that request alone; counters, windows and `last` change only on commit (spec 032 R6, R7, T07) |
+| K87 | What a failed backlog read does was unstated, and the shutdown closed the database under running streams (K-A2 round 6) | Medium | A failed `read_page` closes with 1011; backlog streams stop at shutdown step 1; `StoreError` defined (spec 030 R7, T16; 032 Interface; 035 R7) |
+| K88 | A short-TTL channel queued last could lose history waiting for its subscribe turn (K-D2 round 6) | Low | Subscribes released in ascending `last + ttl_ms` (spec 028 R6, T06) |
+| K89 | Measured deploy details: Tor refuses a host name as `HiddenServicePort` target; Caddy's catch-all TLS policy and a required `SERVER_DOMAIN` for `caddy validate`; `.env` absent in CI; an override cannot remove a service; T08's binary needs URLs and a database path (K-C85–K-C89 round 6) | Low | Specs 034 R5, R8, T02, T03; 035 R4, T08 |
+| K90 | Caddy has a JSON switch for session tickets but no Caddyfile form (K-C90 round 6) | Low | Recorded in the open question 034-R3, with the recommendation to keep the Caddyfile |
+
+Round 7:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| K91 | "Change only on commit" made the blobs of one transaction see the values from before it: equal `received_at`s and limits crossed by up to 255 blobs (K-A round 7) | Medium | A working copy per transaction, committed or discarded; the channel checks count the transaction's own blobs (spec 032 R7, T06; 033 R6, R7, T07) |
+| K92 | Docker's IPv4 userland proxy gives every IPv6 client one address at Caddy, so one IPv6 client could lock every IPv6 user out through the per-IP limits (K-B1 round 7) | Medium | IPv6 enabled on `front` with a fixed ULA subnet; the guide requires hosts that keep the real address (not rootless Docker, not ip6tables disabled) (spec 034 R2, R7, T02) |
+| K93 | One Tor client can use up the shared onion byte budget for every onion user (K-B2 round 7) | Low | Stated as a residual of an address-free listener, with the values to raise (spec 033 Security; 034 R7) |
+| K94 | With seconds of download delay, two re-queued subscribes signed with the old nonce could straddle the 10 s window and one would get `bad_auth` and stay refused (K-D1 round 7) | Medium | At most one stale-nonce subscribe outstanding; the fresh `hello` re-queues the rest (spec 028 R7, T16) |
+| K95 | The test client, the exit harness and the smoke example need `futures-util` for `SinkExt`/`StreamExt`, and T04 needs `log` (K-C1 round 7) | Low | Added to the dev-dependencies; the axum/tungstenite pin explained (tungstenite 0.30 brings the banned `chacha20`) (specs 030, 034, 035) |
+
 ## Phase 3 drafts
 
 **2026-09-25 — Decisions taken while drafting the phase 3 specs 030–035.** Not an audit: writing the server specs raised these questions. The human reviewer decided P2–P4 with the recommended option before the specs were written. P1 had no alternative and P5–P7 are drafting choices, all recorded here for the review. The specs themselves stay `draft` until their own review.

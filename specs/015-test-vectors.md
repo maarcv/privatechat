@@ -4,7 +4,7 @@ Status: in review
 Phase: 1
 Related ADRs: 0012, 0023, 0029
 Depends on: 010-primitives-wrapper
-Blocks: 017-record-encoding, 011-config-format, 012-message-keys, 013-wire-message, 014-fingerprint, 016-fuzz-harness, 020-store-files, 028-session-sans-io, 040-uniffi
+Blocks: 017-record-encoding, 011-config-format, 012-message-keys, 013-wire-message, 014-fingerprint, 016-fuzz-harness, 020-store-files, 028-session-sans-io, 031-auth-channel-signature, 040-uniffi
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

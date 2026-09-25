@@ -16,6 +16,6 @@ Date: 2026-09-25 · Status: accepted
 ## Consequences
 - Spec 011-config-format R5 gains the `ws://` branch, restricted to v3 onion hosts, and R6 `host()` returns the onion host the same way. A `wss://` onion URL stays valid for an operator who has a certificate.
 - The plan of spec 027-core-api groups channels by scheme, host and port, and `Route` gains `tls: bool`, so `ws://x.onion` and `wss://x.onion` never share a socket. The clients (specs 050–052) skip TLS only when `tls` is false, and `tls` is false only for a `.onion` host behind the proxy.
-- The subscription signature (spec 031-auth-channel-signature) covers the host with no scheme, as before. Since the scheme is part of `server_url`, and `server_url` is part of the config, a config cannot be moved from one scheme to the other without becoming another channel's config.
+- The subscription signature (spec 031-auth-channel-signature) covers the host with no scheme, as before, and `channel_id` does not depend on `server_url`: a config moved to the other scheme names the same channel and the same host. Only the route's `tls` changes, and the two schemes never share a socket.
 - The server gets a second listener for the onion service, which carries no client address (specs 033-rate-limit-quotas, 035-server-ops), and `deploy/torrc` maps `HiddenServicePort 80` to it (spec 034-docker).
 - `docs/spec.md` §5, §6 and §12 describe the two schemes.
