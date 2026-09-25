@@ -147,6 +147,7 @@ Round 7:
 | P5 | §6 exempts connections from `127.0.0.1` from the per-IP limits "for the .onion service", but behind a reverse proxy on the same host every client comes from a local address | A second listener for the onion service, carrying no client address; the per-IP limits apply on the main listener only | Specs 033 R8, R9; 035 R2; 034 R2, R6 |
 | P6 | §6 calls every limit configurable, but the client paces itself against the per-connection ones (spec 028 R6, R15) | Per-connection limits are protocol constants; the channel, IP and global limits are configurable. The server's publish window is 57 000 ms, so network jitter cannot refuse a client that keeps to 30 per 60 000 ms | Spec 033 R1, R11 |
 | P7 | §6 "Order and time" computes `received_at` per process, and a restart with a clock set back would give new blobs times below the clients' cursors | The writer starts from the largest stored `received_at` | Spec 032 R6 |
+| P8 | Caddy turns off TLS session tickets only in JSON, not in the Caddyfile, while §6 asks for no tickets (open question 034-R3) | Decided with the human reviewer after audit K: keep the Caddyfile with tickets on and document them as unused, since the clients never resume a session; nginx keeps them off | Spec 034 Open questions, Security, R7 |
 
 ## Audit J
 
