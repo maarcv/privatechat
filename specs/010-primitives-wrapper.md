@@ -185,19 +185,19 @@ A bump of `libsodium-sys-stable` moves three pinned values at once (the version 
 - Domain tags, KDF contexts, `channel_id`, `K_msg`, `K_hdr`, `mk`, the envelope, the payload and the fingerprint (specs 011–014).
 - The public `Error` of `docs/spec.md` §9 and its mapping from `CryptoError` (spec 011-config-format R20).
 - Fuzz targets: this module parses nothing; the fuzz harness (spec 016) targets the receive path, the payload and the config parsers.
-- The `tracing`-based "no secrets in logs" test of `docs/spec.md` §8 "Logging": there is no log emitter yet, so it is parked in spec 100-log-test.
+- The `tracing`-based "no secrets in logs" test of `docs/spec.md` §8 "Logging": there is no log emitter yet; it was parked in a spec of its own and now belongs to spec 035-server-ops.
 - Any primitive not in the §4 table (no X25519, no `crypto_box`, no SHA-2).
 
 ## Open questions
 
-- [x] 010-R15, 010-R16, 010-R14 — closed on 2026-09-21; the resolutions are in the History and in the text they changed (spec 100-log-test, "Bumping libsodium", R14).
+- [x] 010-R15, 010-R16, 010-R14 — closed on 2026-09-21; the resolutions are in the History and in the text they changed (the log test, now in spec 035-server-ops; "Bumping libsodium"; R14).
 - [x] 010-R3 — closed on 2026-09-24 (Marc Vilardebó): a `compile_fail` doctest is compiled as a separate crate and cannot name a `pub(crate)` type, so none could reach `Secret`; the source-scan test `s010_t04_r03_secret_has_no_forbidden_traits`, which reads `secret.rs` and asserts the exact derive list and the exact set of `impl` blocks, is the resolution. Spec 011-config-format adds `copy_from` inside the existing `impl` block, so the set of blocks does not change.
 
 ## History
 
 - 2026-09-20 draft · 2026-09-20 in review · 2026-09-21 accepted (Marc Vilardebó)
 - 2026-09-21 "Vectors" amended: three primitives have no published vector at the parameters §4 fixes, so they are `pinned` and each vector declares its `source` (Marc Vilardebó)
-- 2026-09-21 open question 010-R15 closed: the log test is parked in spec 100-log-test (Marc Vilardebó)
+- 2026-09-21 open question 010-R15 closed: the log test is parked in a spec of its own, since folded into spec 035-server-ops (Marc Vilardebó)
 - 2026-09-21 R14 amended three times: the wrapper bounds only what libsodium requires; the protocol number 65 535 and the 1 024 B password bound leave for specs 013 and 011; the empty-password guard is declared as policy; a password above `crypto_pwhash_PASSWD_MAX` is `TooLong`, not `OutOfMemory` (Marc Vilardebó)
 - 2026-09-21 open question 010-R16 closed: the bump procedure is the section "Bumping libsodium" (Marc Vilardebó)
 - 2026-09-21 Interface amended: the vector loader is its own `cfg(test)` file (Marc Vilardebó)

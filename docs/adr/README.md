@@ -50,3 +50,4 @@ One decision per file, template in `TEMPLATE.md`. The documentation lint (spec 0
 | 0035 | Bind every log entry to its place and name channel directories by a keyed hash | 2026-09-25 | accepted |
 | 0036 | Compare names with the unicode-rs normalisation and confusable tables | 2026-09-25 | accepted |
 | 0037 | Expose one `Device` handle at the core boundary | 2026-09-25 | accepted |
+| 0038 | Allow a plain `ws://` server URL for `.onion` hosts only | 2026-09-25 | accepted |

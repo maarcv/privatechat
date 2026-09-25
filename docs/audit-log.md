@@ -2,6 +2,20 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Phase 3 drafts
+
+**2026-09-25 — Decisions taken while drafting the phase 3 specs 030–035.** Not an audit: writing the server specs raised these questions. The human reviewer decided P2–P4 with the recommended option before the specs were written. P1 had no alternative and P5–P7 are drafting choices, all recorded here for the review. The specs themselves stay `draft` until their own review.
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| P1 | The WebSocket stack fixed by §9 (`axum` + `tungstenite`) brings `sha1` and `rand`, which `deny.toml` bans. Every WebSocket server needs SHA-1 for the RFC 6455 handshake, and `tungstenite` uses `rand` only for client masks | Named wrapper exceptions: `sha1` under `axum` and `tungstenite`, `tungstenite` added to the wrappers of `rand` (AGENTS 2 allows a justified wrapper exception) | Spec 030 R1, T01 |
+| P2 | `server_url` must be `wss://`, and a TLS certificate for a `.onion` name is out of reach for most operators, so the onion service of §1, §2 and §6 would exist only on paper | `ws://` allowed for v3 onion hosts only, opened with no TLS and only through Tor | ADR 0038; spec 011 R5, R6, T05, vectors; spec 027 R10, `Route::tls`; §5, §6 "Transport", §12 |
+| P3 | Spec 100-log-test was parked until the first crate that logs, and its open question left the choice to spec 035 | Spec 035 takes over its R1–R3 as R5–R7, and the file is deleted | Spec 035; AGENTS 19; §8, §10; specs 010, 013, 021 (references); `specs/README.md` |
+| P4 | How the server reads its configuration | Environment variables only, no file and no parser dependency; an unknown `PRIVATECHAT_` variable stops the server | Spec 035 R1 |
+| P5 | §6 exempts connections from `127.0.0.1` from the per-IP limits "for the .onion service", but behind a reverse proxy on the same host every client comes from a local address | A second listener for the onion service, carrying no client address; the per-IP limits apply on the main listener only | Specs 033 R8, R9; 035 R2; 034 R2, R6 |
+| P6 | §6 calls every limit configurable, but the client paces itself against the per-connection ones (spec 028 R6, R15) | Per-connection limits are protocol constants; the channel, IP and global limits are configurable. The server's publish window is 57 000 ms, so network jitter cannot refuse a client that keeps to 30 per 60 000 ms | Spec 033 R1, R11 |
+| P7 | §6 "Order and time" computes `received_at` per process, and a restart with a clock set back would give new blobs times below the clients' cursors | The writer starts from the largest stored `received_at` | Spec 032 R6 |
+
 ## Audit J
 
 **2026-09-25 — Audit J, review of the phase 2 draft specs 020–028 before human review, in four independent passes (J-A: coherence and SDD conformance; J-B: adversarial cryptography and protocol; J-C: technical viability and simplicity; J-D: end-to-end scenarios), repeated in rounds until clean.** Round 1: 105 findings (J-A1–J-A35, J-B1–J-B15, J-C1–J-C27, J-D1–J-D28), five Blockers, no break of the key hierarchy, of encrypt-then-sign or of the verification order. Grouped, with the changes applied:

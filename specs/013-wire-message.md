@@ -254,7 +254,7 @@ A mutated `enc_hdr` or `nonce` fails at the signature, and not at the header, be
 - The keys, the plaintext header and the keystream (spec 012-message-keys), the record encoding (spec 017-record-encoding) and the fingerprint (spec 014-fingerprint).
 - Steps 5, 6 and 8 of `docs/spec.md` §4 and every write: the retired-key and peer-limit checks, `Replay` and the counter, gap, retention and own-key verdicts that read state, the single commit of message, `max_counter`, peer and cursor, the rule that a rejection commits only the cursor, the persistence of `Unreadable`, the mapping of `Stale` to `Expired` with only the cursor and the own-key event written, drawing the nonce and the outbox commit of `encrypt` (specs 021-channel-session, 022-peers-tofu, 026-peer-limits).
 - The handling of a `key_retired` — signed by the key it retires, consumed without creating a peer when the key is unknown (ADR 0016) — and one's own `key_retired` (spec 024-key-retired).
-- The no-oracle rule at the session level (spec 028-session-sans-io) and the log test (spec 100-log-test).
+- The no-oracle rule at the session level (spec 028-session-sans-io) and the log test (spec 035-server-ops).
 - The server's own blob validation, which repeats the length and prefix checks without any key (spec 030-ws-protocol).
 - The expiry of stored `Unreadable` messages (spec 023-ttl-purge).
 - Keeping the signatures this device sealed and comparing them for the own-key echo (specs 020-store-files and 021-channel-session, ADR 0029).

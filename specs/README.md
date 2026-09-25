@@ -29,8 +29,11 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 026 | 026-peer-limits | 2 | draft |
 | 027 | 027-core-api | 2 | draft |
 | 028 | 028-session-sans-io | 2 | draft |
-| 100 | 100-log-test | 6 | draft |
+| 030 | 030-ws-protocol | 3 | draft |
+| 031 | 031-auth-channel-signature | 3 | draft |
+| 032 | 032-storage-ttl | 3 | draft |
+| 033 | 033-rate-limit-quotas | 3 | draft |
+| 034 | 034-docker | 3 | draft |
+| 035 | 035-server-ops | 3 | draft |
 
 Phase 0 was bootstrapped with implementation and review in parallel; from spec 010 on, acceptance precedes code.
-
-Spec 100 carries a number outside the phase ranges on purpose: it holds an obligation of `docs/spec.md` §8 that no spec could carry yet. It sits in phase 6 and stays `draft` until a spec that emits logs adopts it or it is implemented on its own before phase 6 closes.

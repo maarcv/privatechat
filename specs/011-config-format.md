@@ -2,7 +2,7 @@
 
 Status: in review
 Phase: 1
-Related ADRs: 0001, 0008, 0009, 0010, 0014, 0022, 0023, 0028, 0031
+Related ADRs: 0001, 0008, 0009, 0010, 0014, 0022, 0023, 0028, 0031, 0038
 Depends on: 010-primitives-wrapper, 015-test-vectors, 017-record-encoding
 Blocks: 012-message-keys, 013-wire-message, 014-fingerprint, 016-fuzz-harness, 020-store-files, 027-core-api, 028-session-sans-io, 031-auth-channel-signature
 Human reviewer: Marc Vilardebó · Accepted on: —
@@ -42,8 +42,8 @@ In plain words: a config is a short list of numbered fields: the channel key, th
 - R2 The config MUST be decoded with a `Reader` under `UnknownKeys::Reject`, which MUST be closed with `end()`, and every `RecordError` MUST become `Error::BadConfig`: a key out of order or repeated, an unknown key, a missing mandatory key, a value of the wrong width, text that is not UTF-8, or bytes that do not complete a field.
 - R3 Decoding MUST run in this order: the size of R7; then the reader walks the keys in order, and after key 1 is read and before key 2, a `config_version` or `proto_version` other than 1 MUST return `Error::UnsupportedVersion`, while any failure before that point (a malformed or missing key 0 or 1) MUST return `Error::BadConfig`; then the rest of the strict decode of R2; then the ranges of R4 and R5; then the expiry of R10; and only then any derivation. Any later version that adds a config key MUST raise `config_version`, so that a v1 client says "update the app" instead of "corrupt config".
 - R4 `ttl_seconds` MUST be within 60..=2_592_000, and `suggested_name` MUST be at most 64 bytes of UTF-8 with no Cc character (U+0000..=U+001F, U+007F..=U+009F); outside those ranges the result MUST be `Error::BadConfig`.
-- R5 `server_url` MUST be at most 256 bytes and MUST be `wss://` ‖ host ‖ optional `:` port ‖ end, now or in any later `config_version`, where host MUST be at least one byte of `a-z`, `0-9`, `-` and `.` (the URL bound is the only bound on its length), and port MUST be a decimal number within 1..=65535 with no leading zero and MUST NOT be 443. Any other text MUST return `Error::BadConfig`.
-- R6 `host()` MUST return the host of `server_url` without the port, and `channel_key()` MUST borrow `K_ch` for the derivations of specs 012-message-keys and 013-wire-message. The host is the string the subscription signature covers (`docs/spec.md` §6, spec 031-auth-channel-signature), not the key that groups channels on one connection, which is the host and the port together.
+- R5 `server_url` MUST be at most 256 bytes and MUST be, now or in any later `config_version`, either `wss://` ‖ host ‖ optional `:` port ‖ end, where host MUST be at least one byte of `a-z`, `0-9`, `-` and `.` (the URL bound is the only bound on its length) and port MUST NOT be 443, or `ws://` ‖ onion host ‖ optional `:` port ‖ end, where the onion host MUST be exactly 56 bytes of `a-z` and `2-7` followed by `.onion` and port MUST NOT be 80 (ADR 0038); in both forms port MUST be a decimal number within 1..=65535 with no leading zero. Any other text MUST return `Error::BadConfig`.
+- R6 `host()` MUST return the host of `server_url` without the scheme or the port, and `channel_key()` MUST borrow `K_ch` for the derivations of specs 012-message-keys and 013-wire-message. The host is the string the subscription signature covers (`docs/spec.md` §6, spec 031-auth-channel-signature), not the key that groups channels on one connection, which is the scheme, the host and the port together (spec 027-core-api R10).
 - R7 The encoded record MUST be at most 512 bytes, and a longer one MUST return `Error::BadConfig` before any byte of it is decoded.
 - R8 `sk_ch` and `pk_ch` MUST be `sign_keypair_from_seed(kdf_derive(K_ch, CHANNEL_AUTH_CONTEXT))`, and `channel_id` MUST be the first 16 bytes of `hash(CHANNEL_ID_TAG ‖ pk_ch ‖ BE32(ttl_seconds))`, held in the type `ChannelId` and compared only with `ct_eq` (`docs/spec.md` §4).
 - R9 `CHANNEL_ID_TAG` MUST be the 19 ASCII bytes `privatechat/chid/v1` and `CHANNEL_AUTH_CONTEXT` the 8 ASCII bytes `chauth__`, as named constants next to the code that uses them, equal to the literals of `docs/spec.md` §4.
@@ -71,7 +71,8 @@ In plain words: a config is a short list of numbered fields: the channel key, th
 | QR text | 1..=683 ASCII bytes, length mod 4 ≠ 1 | `BadConfig` |
 | `.chatcfg` file | exactly 1 085 B | `BadConfig` |
 | `server_url` | 1..=256 B, grammar of R5 | `BadConfig` |
-| Host | ≥ 1 B of `a-z`, `0-9`, `-`, `.`; the `server_url` bound of 256 B is its only bound (250 B at most) | `BadConfig` |
+| Host | after `wss://`: ≥ 1 B of `a-z`, `0-9`, `-`, `.`; the `server_url` bound of 256 B is its only bound (250 B at most). After `ws://`: exactly 56 B of `a-z`, `2-7`, then `.onion` | `BadConfig` |
+| Port | 1..=65535, no leading zero; never 443 after `wss://`, never 80 after `ws://` | `BadConfig` |
 | Port | 1..=65535, no leading zero, not 443 | `BadConfig` |
 | `ttl_seconds` | 60..=2 592 000 | `BadConfig` |
 | `suggested_name` | 0..=64 B UTF-8, no Cc | `BadConfig` |
@@ -165,7 +166,7 @@ Base64url is implemented once, in `proto/base64url.rs`; spec 014-fingerprint reu
 - T02 (covers R2): `s011_t02_r02_rejects_malformed_records` over a table: keys out of order, a repeated key, an unknown key 8, a missing key 2, `K_ch` of 31 bytes, `ttl_seconds` of 3 bytes, one extra byte after the record → `BadConfig`.
 - T03 (covers R3): `s011_t03_r03_version_is_read_first`: `config_version` 0 and 2 and `proto_version` 2 → `UnsupportedVersion`, also when the same record carries an unknown key 8 or a malformed tail after key 1; a record with no key 1, or a key 0 of 2 bytes → `BadConfig`.
 - T04 (covers R4): `s011_t04_r04_ttl_and_name_ranges`: 59, 2_592_001, a name of 65 bytes, a name with U+0000 and one with U+0085 → `BadConfig`; 60, 2_592_000 and a name with U+200B accepted.
-- T05 (covers R5): `s011_t05_r05_url_grammar` over a table. Accepted: `wss://host`, `wss://host:9001`, `wss://1.2.3.4`, an `.onion` host of 56 characters plus the suffix, and a host of 250 bytes (a URL of 256). Rejected: `ws://host`, `wss://host/path`, `wss://host/`, `wss://host?q`, `wss://HOST`, `wss://host:0`, `wss://host:065`, `wss://host:443`, `wss://user@host`, `wss://[::1]` and a URL of 257 bytes → `BadConfig`.
+- T05 (covers R5): `s011_t05_r05_url_grammar` over a table. Accepted: `wss://host`, `wss://host:9001`, `wss://1.2.3.4`, an `.onion` host of 56 characters plus the suffix, a host of 250 bytes (a URL of 256), and `ws://` with a 56-character onion host, alone and with `:9001`. Rejected: `ws://host`, `ws://` with a 55-character onion host, with a `1` in it, without `.onion` and with `:80`, `wss://host/path`, `wss://host/`, `wss://host?q`, `wss://HOST`, `wss://host:0`, `wss://host:065`, `wss://host:443`, `wss://user@host`, `wss://[::1]` and a URL of 257 bytes → `BadConfig`.
 - T06 (covers R6): `s011_t06_r06_accessors_and_host`: each accessor returns the field of the vector, and `host()` of `wss://host:9001` is `host`.
 - T07 (covers R7): `s011_t07_r07_rejects_a_record_above_the_limit`: 513 bytes → `BadConfig` before decoding, even when the first bytes are a valid key 0.
 - T08 (covers R8): `s011_t08_r08_channel_id_known_answer` checks the vectors `K_ch` → `pk_ch` → `channel_id`; a `ttl_seconds` that differs by one gives a different `channel_id`.
@@ -194,13 +195,14 @@ Base64url is implemented once, in `proto/base64url.rs`; spec 014-fingerprint reu
 | --- | --- | --- | --- |
 | `config_reference` | positive | derived | a config with every field, its record, its QR text and its `channel_id` |
 | `config_no_invite` | positive | derived | the same without key 6 |
+| `config_onion_ws` | positive | derived | a config whose `server_url` is `ws://` with a 56-character onion host (ADR 0038) |
 | `channel_id_ttl_60`, `channel_id_ttl_2592000` | positive | derived | the two ends of the TTL range, same `K_ch`, different id |
 | `chatcfg_reference` | positive | **pinned** | the `PCFG` file of `config_reference` with a fixed password, salt and nonce, produced once by T18 under libsodium 1.0.22 and pasted into the script |
 | `record_key_order`, `record_unknown_key`, `record_extra_byte`, `record_kch_31_bytes` | negative | derived | each → `BadConfig` |
 | `record_version_2`, `record_proto_version_2` | negative | derived | → `UnsupportedVersion` |
 | `record_513_bytes` | negative | derived | → `BadConfig` before decoding |
 | `ttl_59`, `ttl_2592001`, `name_65_bytes`, `name_control` | negative | derived | each → `BadConfig` |
-| `url_path`, `url_uppercase`, `url_port_443` | negative | derived | each → `BadConfig`, so that every binding agrees on the grammar |
+| `url_path`, `url_uppercase`, `url_port_443`, `url_ws_not_onion`, `url_ws_onion_port_80` | negative | derived | each → `BadConfig`, so that every binding agrees on the grammar |
 | `qr_padding`, `qr_nonzero_bits`, `qr_length_mod_4` | negative | derived | → `BadConfig` |
 | `mutate_magic`, `mutate_version` | negative | derived | one byte of the pinned file → `BadConfig`, `UnsupportedVersion` |
 | `mutate_salt`, `mutate_nonce`, `mutate_sealed` | negative | derived | one byte of each region of the pinned file → `BadPassword` |
@@ -238,3 +240,4 @@ None. Decided in audit F (`docs/audit-log.md`):
 - 2026-09-24 revised after audit F (docs/audit-log.md)
 - 2026-09-24 revised after audit H (`docs/audit-log.md`): five PR slices with their vectors; `create` and the round trips as requirements; the file padded to 1 085 bytes (ADR 0031); the version pre-read is a partial read; `RecordError` stays inside `proto`; `channel_key()` for 012 and 013; more negative vectors; round 2: `seal_file_with_key` pads in a buffer of fixed capacity, the header byte is compared inside R3, `From<CryptoError>`, slices corrected, a canonicalisation proptest; round 4: no secret buffer grows (base64url, canonicalisation), `padded_record` as the observable seam; round 5: T19 and R19 match what canonicalisation can do, R6 in one slice, the label and host limits tested; round 6: `Secret::copy_from`, a test for `RecordError` staying inside `proto`; round 9: the one file builder is the non-test one; round 10: the header byte is no longer compared with key 0, the host bounded by the URL alone
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): the reference script of spec 015 produces `011.json` and the Rust tests reproduce it, with `chatcfg_reference` pinned from T18 (R22); the version check runs in the in-order reader after key 1, with no partial-read mode (R3); the URL grammar is `wss://` ‖ host ‖ optional port with no label, IPv4 or all-digits rule (R5, T05, vectors); the file header is checked before the password bounds and before the key (R13, R15); visibility, absent trait impls and parameter lists moved to the Interface and their source-scan tests deleted (R6, R12, R16, R18, R19, R20; T06, T16, T19, T20); the dispatch test is an Interface sentence; no requirement renumbered
+- 2026-09-25 amended by ADR 0038 while drafting phase 3: `ws://` for v3 onion hosts only, port never 80 (R5, R6, T05)
