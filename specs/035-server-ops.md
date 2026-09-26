@@ -4,7 +4,7 @@ Status: draft
 Phase: 3
 Related ADRs: 0022, 0038
 Depends on: 027-core-api, 030-ws-protocol, 031-auth-channel-signature, 032-storage-ttl, 033-rate-limit-quotas
-Blocks: 034-docker
+Blocks: 034-docker, 041-desktop-bridge
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
@@ -49,7 +49,7 @@ This spec also takes over spec 100, the log test that was parked until a crate e
 **Logging**
 
 - R4 The server MUST log through `tracing` to standard error, with no colour, at the level of `PRIVATECHAT_LOG`, through a subscriber that `main.rs` installs with `log::init` once the configuration is read (never `run`, so that tests install their own), and, at `info` and above, only these events:
-  - start-up: the version, the bound port of each listener and whether the onion listener is on, and the number of configured URLs;
+  - start-up: the version, the bound port of each listener as the fields `listen_port` and, when the onion listener is on, `onion_port`, whether the onion listener is on, and the number of configured URLs;
   - stop;
   - each start-up refusal, by reason;
   - each database error, by SQLite result code;
@@ -258,6 +258,7 @@ None.
 ## History
 
 - 2026-09-25 draft; takes over the log test of spec 100 and deletes that file (`docs/audit-log.md`, "Phase 3 drafts", P3)
+- 2026-09-26 amended by spec 041-desktop-bridge R18 during audit L round 2 (`docs/audit-log.md`): the start line names its port fields
 - 2026-09-25 revised after audit K round 6 (`docs/audit-log.md`): the four `ip48_` variables; backlog streams stopped at shutdown; T08's environment
 - 2026-09-25 revised after audit K round 5 (`docs/audit-log.md`): the closed list of events is for `info` and above; the shutdown order matches `Writer::finish`; T07 on the write-pause hook
 - 2026-09-25 revised after audit K round 4 (`docs/audit-log.md`): R5 worded as an absence; the writer's stop through `Writer::finish`; `DbCause`

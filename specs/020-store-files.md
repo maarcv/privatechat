@@ -4,7 +4,7 @@ Status: draft
 Phase: 2
 Related ADRs: 0019, 0020, 0021, 0023, 0029, 0034, 0035
 Depends on: 010-primitives-wrapper, 011-config-format, 015-test-vectors, 016-fuzz-harness, 017-record-encoding
-Blocks: 021-channel-session, 023-ttl-purge, 027-core-api, 028-session-sans-io
+Blocks: 021-channel-session, 023-ttl-purge, 027-core-api, 028-session-sans-io, 040-uniffi, 041-desktop-bridge
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

@@ -4,7 +4,7 @@ Status: in review
 Phase: 1
 Related ADRs: 0001, 0008, 0009, 0010, 0014, 0022, 0023, 0028, 0031, 0038
 Depends on: 010-primitives-wrapper, 015-test-vectors, 017-record-encoding
-Blocks: 012-message-keys, 013-wire-message, 014-fingerprint, 016-fuzz-harness, 020-store-files, 027-core-api, 028-session-sans-io, 031-auth-channel-signature
+Blocks: 012-message-keys, 013-wire-message, 014-fingerprint, 016-fuzz-harness, 020-store-files, 027-core-api, 028-session-sans-io, 031-auth-channel-signature, 040-uniffi, 041-desktop-bridge
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
@@ -196,7 +196,7 @@ Base64url is implemented once, in `proto/base64url.rs`; spec 014-fingerprint reu
 | `config_reference` | positive | derived | a config with every field, its record, its QR text and its `channel_id` |
 | `config_no_invite` | positive | derived | the same without key 6 |
 | `config_onion_ws` | positive | derived | a config whose `server_url` is `ws://` with a 56-character onion host (ADR 0038) |
-| `channel_id_ttl_60`, `channel_id_ttl_2592000` | positive | derived | the two ends of the TTL range, same `K_ch`, different id |
+| `channel_id_ttl_60`, `channel_id_ttl_2592000` | positive | derived | the two ends of the TTL range, same `K_ch`, different id; each carries its record, so that the bindings import it (spec 040-uniffi R13, R14) |
 | `chatcfg_reference` | positive | **pinned** | the `PCFG` file of `config_reference` with a fixed password, salt and nonce, produced once by T18 under libsodium 1.0.22 and pasted into the script |
 | `record_key_order`, `record_unknown_key`, `record_extra_byte`, `record_kch_31_bytes` | negative | derived | each → `BadConfig` |
 | `record_version_2`, `record_proto_version_2` | negative | derived | → `UnsupportedVersion` |
@@ -241,3 +241,4 @@ None. Decided in audit F (`docs/audit-log.md`):
 - 2026-09-24 revised after audit H (`docs/audit-log.md`): five PR slices with their vectors; `create` and the round trips as requirements; the file padded to 1 085 bytes (ADR 0031); the version pre-read is a partial read; `RecordError` stays inside `proto`; `channel_key()` for 012 and 013; more negative vectors; round 2: `seal_file_with_key` pads in a buffer of fixed capacity, the header byte is compared inside R3, `From<CryptoError>`, slices corrected, a canonicalisation proptest; round 4: no secret buffer grows (base64url, canonicalisation), `padded_record` as the observable seam; round 5: T19 and R19 match what canonicalisation can do, R6 in one slice, the label and host limits tested; round 6: `Secret::copy_from`, a test for `RecordError` staying inside `proto`; round 9: the one file builder is the non-test one; round 10: the header byte is no longer compared with key 0, the host bounded by the URL alone
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): the reference script of spec 015 produces `011.json` and the Rust tests reproduce it, with `chatcfg_reference` pinned from T18 (R22); the version check runs in the in-order reader after key 1, with no partial-read mode (R3); the URL grammar is `wss://` ‖ host ‖ optional port with no label, IPv4 or all-digits rule (R5, T05, vectors); the file header is checked before the password bounds and before the key (R13, R15); visibility, absent trait impls and parameter lists moved to the Interface and their source-scan tests deleted (R6, R12, R16, R18, R19, R20; T06, T16, T19, T20); the dispatch test is an Interface sentence; no requirement renumbered
 - 2026-09-25 amended by ADR 0038 while drafting phase 3: `ws://` for v3 onion hosts only, port never 80 (R5, R6, T05)
+- 2026-09-26 amended by spec 040-uniffi R14 during audit L round 2 (`docs/audit-log.md`): `channel_id_ttl_60` and `channel_id_ttl_2592000` carry their record

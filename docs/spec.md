@@ -104,7 +104,8 @@ Each row corresponds to the file `docs/adr/NNNN-*.md`; titles are copied verbati
 | 0036 | Compare names with the unicode-rs normalisation and confusable tables | accepted | The impersonation check needs Unicode data that hand-written tables would get wrong |
 | 0037 | Expose one `Device` handle at the core boundary | accepted | The clients' bindings cannot move or borrow objects; one handle called by id can |
 | 0038 | Allow a plain `ws://` server URL for `.onion` hosts only | accepted | An onion service already encrypts and authenticates; a `.onion` certificate is out of reach for most operators |
-| 0039 | Open the desktop client's TLS connections with rustls, in a workspace of its own | accepted | The server accepts TLS 1.3 only, the OS stack on macOS lacks it, and the web view cannot use a SOCKS5 proxy |
+| 0039 | Open the desktop client's TLS connections with rustls, in a workspace of its own | superseded by 0040 | The server accepts TLS 1.3 only, the OS stack on macOS lacks it, and the web view cannot use a SOCKS5 proxy |
+| 0040 | Check the desktop client's certificates with no network request of their own | accepted | The OS verifier fetches revocation data outside Tor; rustls in a workspace of its own, its WebPKI verifier over the OS roots |
 
 ## 4. Cryptographic model
 
@@ -410,7 +411,7 @@ The device is where the real attacks land; these measures are mandatory in v1 un
 | Push notifications | None in v1 (§12) | None | None |
 | Telemetry | No third-party SDK (crash, analytics, ads). Only the OS crash logs, which the user controls | Same | Same |
 | Keyboard | `.chatcfg` password field with `textPassword`, `IME_FLAG_NO_PERSONALIZED_LEARNING` and `flagNoExtractUi`; one-time warning if a third-party keyboard is active | `secureTextEntry`; `autocorrectionType = .no` in the composer | n/a |
-| FFI boundary | The password is passed as a `ByteArray` and zeroized on the UI side after the call; the boundary types are listed in §9; outside the core no erasure is promised, **non-retention** is promised (no cache, no log, no `toString`) | Same with `[UInt8]` | Rust to Rust; the Svelte UI strings are copied into a `Uint8Array` and filled with zeros |
+| FFI boundary | The password is passed as a `ByteArray` and zeroized on the UI side after the call; the boundary types are listed in §9; outside the core no erasure is promised, **non-retention** is promised (no cache, no log, no `toString`) | Same with `Data` | Rust to Rust; the Svelte UI strings are copied into a `Uint8Array` and filled with zeros |
 | Deletion | Purge of expired messages on open and on unlock = compaction of `messages.log` (rewrite without the expired ones, `rename`). Leaving the channel = deleting the channel directory. The cryptographic guarantee covers all files (`K_db` in the Keystore/SE); deleting a record is physical and does not resist old copies (§2) | Same | Same |
 | Clipboard | Copying a message: `ClipDescription.EXTRA_IS_SENSITIVE`; cleared after 60 s. The OS or keyboard clipboard histories are not erased; the config is never copied to the clipboard | `UIPasteboard.setItems(_, options: [.localOnly: true, .expirationDate: +60 s])` (best-effort) | Cleared after 60 s; Win+V may retain it |
 | Window and WebView | n/a | n/a | Fixed window title = app name; WebView without cache or persistent storage (temporary `data_directory`) |
@@ -675,4 +676,4 @@ None of the open decisions blocks phases 0–2. Those that would change the wire
 
 ## 13. Audit log
 
-Audits A (2026-09-19), B, C and D (2026-09-20), E, F, G, H and I (2026-09-24), the decisions taken while drafting phase 2, audit J, the decisions taken while drafting phase 3 and audit K (2026-09-25), and the decisions taken while drafting phase 4 (2026-09-26): findings and applied changes are in `docs/audit-log.md`. Every PR that changes §3–§6 adds a row there.
+Audits A (2026-09-19), B, C and D (2026-09-20), E, F, G, H and I (2026-09-24), the decisions taken while drafting phase 2, audit J, the decisions taken while drafting phase 3 and audit K (2026-09-25), the decisions taken while drafting phase 4 and audit L (2026-09-26): findings and applied changes are in `docs/audit-log.md`. Every PR that changes §3–§6 adds a row there.

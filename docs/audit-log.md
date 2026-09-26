@@ -2,6 +2,168 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit L
+
+**2026-09-26 — Audit L, review of the phase 4 draft specs 040 and 041 and ADR 0039 before human review, in four independent passes (L-A: coherence and SDD conformance; L-B: adversarial security and privacy; L-C: technical viability, measured in throwaway projects with uniffi 0.32.2, Tauri 2.11.6, tauri-specta 2.0.0-rc.25, rustls 0.23.45, tokio-tungstenite 0.30.0 and keyring 4.2.0; L-D: end-to-end scenarios), repeated in rounds until they bring nothing new.** The human reviewer decided four questions with the recommended option:
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| L-Q1 | `rustls-platform-verifier` lets macOS and Windows fetch OCSP, CRLs and intermediates on their own, outside the SOCKS5 proxy, which tells the network and the CA which server a Tor user talks to (L-B1, L-C7, L-D11) | Certificates are checked by `rustls`'s WebPKI verifier over the OS roots (`rustls-native-certs`), with no revocation fetch, with or without a proxy | Spec 041 R12, Security, T12; ADR 0039 |
+| L-Q2 | `export_qr` handed the invitation text, which holds `K_ch`, to the web view, so an injected script could export every channel (L-B2, L-A4) | The Rust side renders the QR as an SVG on the `qr` scheme, which the page can show but no script can read | Spec 041 R6, R8, Security, T06 |
+| L-Q3 | `tungstenite` needs `sha1` and `rand`, and Tauri needs `getrandom`, all banned by AGENTS 2 (L-A2, L-C1, L-B20) | Allowed in the desktop workspace as named wrappers: RFC 6455 mechanics, never a key or a message | Spec 041 R2, R3; ADR 0039 |
+| L-Q4 | An injected script could erase the local data or change the proxy with one command (L-B3) | Both ask for a native confirmation drawn by the Rust side | Spec 041 R9, R16, T16 |
+
+Round 1:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| L1 | The events inside `Sent` and `regenerate_identity`'s result bypassed the host: a `Reconnect` after an own-key alert was never acted on and the retirement never left (L-A3, L-D1) | Blocker | The host takes the events out of every result; `send` returns `Sent` without them, `regenerate_identity` nothing (spec 041 R7, Interface, T07) |
+| L2 | The CSP had no `connect-src` for Tauri's IPC scheme, so every invoke fell back to JSON `postMessage` and the password crossed as JSON (L-C3, L-B13) | Blocker | `connect-src ipc: http://ipc.localhost` (spec 041 R8, T08) |
+| L3 | The measured graph brings `sha1`, `rand`, `chacha20`, three `getrandom`, `sha2`, `png`/`miniz_oxide`, `brotli` and the Secret Service crypto; `ring` also sits under `rustls-webpki`; brotli and the PNG decoder run at run time (L-A2, L-C1) | Blocker | The measured wrapper list; `tauri` without `compression`, `brotli` banned; AGENTS 24 amended at acceptance (spec 041 R2, R3; ADR 0039) |
+| L4 | `tauri-specta` has no stable release for Tauri 2, cannot type `Request`/`Response` commands and refuses `u64` (L-C2) | Blocker | Exact `rc` pin; raw commands outside specta with hand-written wrappers; `JsU64` saturating newtype; mirror types in `wire.rs` (spec 041 R5, R6) |
+| L5 | `generated.ts` was committed, against AGENTS 16 (L-A1, L-C11) | Medium | Generated at build and in CI, git-ignored (spec 041 R5, T05) |
+| L6 | Drains from different calls could reach the socket out of order, and an `ack` of #6 before #5 lost #5 (L-D2) | Medium | One ordered writer queue per plan, filled in the same lock hold as the call (spec 041 R10, T10) |
+| L7 | A server that stopped reading froze commands and `lock` (L-B7) | Medium | No command waits on a write; 256-frame queue; a 30 000 ms write deadline (spec 041 R10, R12, R17) |
+| L8 | `lock` did not wait for tasks, so events followed `locked` and a new `Device` could reuse an old plan id; double `unlock` undefined (L-D3, L-B11) | Medium | Unlock generations; `lock` aborts and awaits every task and call, `locked` last; `unlock` while unlocked is `Ok` (spec 041 R10, R16, R17, T10, T16, T17) |
+| L9 | First-run races between two instances, a read-back with no rule, and a keychain entry planted before the first run (L-B5, L-B6, L-D4, L-D5) | Medium | An instance lock outside the data directory; the read-back must equal the drawn key; an entry with no data is replaced; "holds data" defined (spec 041 R15, R16, T15, T16) |
+| L10 | `reset_local_data` while unlocked, or deleting the entry before the directory, could leave data with no key (L-D6) | Medium | Lock first, delete the directory, then the web view directory, then the entry; `FileIo` keeps the entry (spec 041 R16) |
+| L11 | The file dialog had no cancel, size, retry or `replace_broken` path (L-D9, L-B19) | Medium | `choose_chatcfg` reads a regular file of ≤ 1 085 B into one pending file; `Cancelled` and `FileIo`; `x-replace-broken` header (spec 041 R4–R6, T06) |
+| L12 | Tauri's request buffer cannot be zeroed without `unsafe` (L-B15, L-C4) | Medium | The command's copy is `Zeroizing`; Tauri's buffer a documented residual (spec 041 R6) |
+| L13 | `Fingerprint` could not be both JSON and a raw response (L-A6, L-C16, L-D13) | Low | Its `qr` crosses as a string, public (spec 041 R5) |
+| L14 | Without an app manifest Tauri allows every registered command, and the capability file granted dialogs and allowed `core:default` (L-C10, L-A5, L-B14) | Medium | `AppManifest::commands` in `build.rs`; no dialog permission, no `core:default` (spec 041 R8, T08) |
+| L15 | Navigation, forms and `<base>` were not covered by the CSP; the asset protocol was open (L-B4, L-B13) | Medium | `form-action`, `base-uri`, `frame-ancestors` `'none'`; navigation handler; new windows refused; asset protocol off (spec 041 R8) |
+| L16 | The desktop workspace lost the root release profile, inherited the root `clippy.toml` (which forbids its clock), and could resolve another libsodium; only `[bans] deny` was copied (L-A8, L-A9, L-C8, L-C9, L-C15) | Medium | Same profile; its own `clippy.toml`; the same `libsodium-sys-stable` in both locks; `[bans.build]`, `[sources]`, `[advisories]`, `[licenses]` copied; `[graph] targets` (spec 041 R1, R2, T01, T02) |
+| L17 | The connection states were undefined (`server_full` never ends; `needs_proxy` channels are in no plan) (L-A14, L-A15, L-D12) | Medium | Each state's start and end; `needs_proxy` read from `ChannelInfo`; `proxy_refused` added (spec 041 R7, R13) |
+| L18 | A permissive SOCKS5 client would accept "no authentication" and merge circuits (L-B12, L-D15) | Low | Only method `0x02`, strict status and reply parsing, `proxy_refused` (spec 041 R12, T12) |
+| L19 | A healthy onion server failed the 30 s connect bound on a first rendezvous (L-D16) | Low | 60 000 ms through a proxy to `.onion` (spec 041 R12, T12) |
+| L20 | The exit test could not start the server (two `:0` on one address), knew no port and had no time bound; it named spec 034 but used 035 (L-D10, L-A7) | Medium | `[::1]:0` for the onion listener, ports from the start line, `PRIVATECHAT_SERVER_BIN`, 120 s; §10 wording names 035 and the two hosts (spec 041 R18; 040 R14) |
+| L21 | Panic messages could cross uniffi into crash reports, and into stderr on the desktop (L-B8) | Medium | A `catch_unwind` guard and a silent panic hook (spec 040 R4, T04; 041 R10) |
+| L22 | R9 asked to zero the array `generateStorageKey` returns, the key itself (L-B10) | Medium | Removed; T09 checks two different non-zero keys (spec 040 R9, T09) |
+| L23 | One thread per `Core` let a new `open` overtake the old `close`; Kotlin's `close` shut the dispatcher, so later calls were cancelled, not `Closed` (L-D7, L-D8) | Medium | One executor per process, never closed (spec 040 R9, T09) |
+| L24 | Kotlin typealiases hide nested sealed subclasses, so the apps could not match events without the generated module (L-C5) | Medium | No typealiases; the use check forbids `FfiDevice` and the free functions by name (spec 040 R9, R10, T10) |
+| L25 | `wildcard_enum_match_arm` misses a `_` that covers one variant (L-C6) | Medium | `match_wildcard_for_single_variants` denied too (spec 040 R3; 041 R1) |
+| L26 | A `--workspace` build unified uniffi's `cli` feature into the shipped library (L-C13) | Low | The bindgen crate is a workspace of its own; builds use `-p` (spec 040 R1, R11, T01) |
+| L27 | Swift receives `Data`, not `[UInt8]`; the swift skill forbids GCD and names SwiftLint and SwiftFormat (L-C14, L-A12, L-B16) | Medium | `actor Core` over one `DispatchSerialQueue` executor, `inout Data` with `resetBytes`; the swift skill and AGENTS 20 amended at acceptance; §8 says `Data`; the copies listed as residuals (spec 040 R9, R12, Security) |
+| L28 | `SODIUM_USE_PKG_CONFIG` and `SODIUM_SHARED` could also link a system libsodium (L-B20) | Low | All three variables unset and checked (spec 040 R11, T11) |
+| L29 | The vector rules of R13 were not exact (which call, `now`, `info.id`, `fingerprint_reference`, `short`, the label, a `hello` without `event`) (L-A19, L-D14) | Low | Each made exact; spec 028 amended so that every `hello` vector carries `event` (spec 040 R13, R14; 028 Vectors) |
+| L30 | Plain key arrays outside `crypto` against AGENTS 5 (L-A11) | Medium | AGENTS 5 names the caller-owned arrays at acceptance (spec 040 R8, T14) |
+| L31 | Test names that `check_requirements` cannot see (040 T09, T10, T12; T08 in 027's name space) (L-A13, L-A16, L-A17) | Low | Renamed (spec 040 T08–T12; 027 Interface) |
+| L32 | The skills, §8 and CONTRIBUTING had drifted from 041 (L-A23) | Low | Amended at acceptance (spec 041 R3, R18) |
+| L33 | Missing and one-way `Depends on` and `Blocks` edges (L-A24) | Low | Specs 010, 011, 014, 020, 028, 030, 033 and 035 list 040 or 041; 040 and 041 list 020, 030 and 033 |
+| L34 | Smaller fixes: R2's `ClientRef` (L-A18), the four host commands of R4 (L-A20), the probe's `BadPayload` (L-A22), the tick count of T11 (L-C17), the reason for `Display` (L-C18), the crate features (L-C19), the Windows entry's persistence (L-B17, L-D17), the web view's temporary directory (L-B18), the `tempfile` comment (L-A25, L-C13) | Low | Specs 040 R2, R4, R1; 041 R4, R8, R11, R12, R14, R16, T11 |
+
+Not taken: jitter on the backoff and a random delay before the first connect (L-B9). The plans of one device share a server only when a plan's channel limit splits them, and a random wait of up to 30 s at every unlock costs every user for that case; it is a documented residual (spec 041 Security).
+
+Round 2. The human reviewer decided two more questions with the recommended option:
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| L-Q5 | An actor on a custom serial executor, which the Swift layer needs to run every call in order, exists only from iOS 17; the spec said iOS 16 (L-A2, L-C8, L-D7) | iOS 17 is the floor; `Core` is isolated to a `CoreActor` global actor over one `DispatchSerialQueue`, static calls included | Spec 040 R9, R14, Interface, T09; §9 and the swift skill at acceptance |
+| L-Q6 | An injected script could still accept default settings without the previous proxy, remove a broken channel or replace one, which spec 027 puts behind destructive confirmations the web view draws (L-B1, L-D6) | Those three go through the native confirmation too; leaving a channel stays an ordinary action, a documented residual | Spec 041 R16, Security, T16 |
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| L35 | ADR 0039, accepted and pushed, was edited in place against spec 002 R4 (L-A1) | Medium | ADR 0039 restored and `superseded by 0040`; ADR 0040 restates it with the verifier and crate list of L-Q1 and L-Q3; spec 041, the ADR index and §3 point to 0040 |
+| L36 | Measured again, the wrapper list was wrong in five places, two bans it named were not in the root list, the copied `[advisories]` and `[bans.build]` failed on the Tauri stack, and the path dependencies were wildcards (L-C1–L-C5) | Blocker | The corrected wrappers; `png`, `native-tls` and `webpki-roots` added as desktop bans; seven advisory ignores; the WebView2 loader bypass; `allow-wildcard-paths`; the doc-lint check accepts exactly these differences (spec 041 R1, R2, T02) |
+| L37 | The writer queue outlived its socket, so an old `subscribe` went out on the new socket, got `bad_auth` and refused the channel (L-D1) | Blocker | Frames carry their socket number; the queue is emptied with `on_disconnect` (spec 041 R10, T10) |
+| L38 | `lock` aborted the tasks before waiting for calls in flight, which then started new ones (L-D2) | Blocker | `lock` raises the generation first, then waits, stops the tick, aborts, flushes (spec 041 R17, T17) |
+| L39 | The keychain entry did not depend on the data directory, so an install at another path deleted the real key (L-D4, L-B6) | Medium | User `storage-key:` followed by the data directory's path (spec 041 R16, T16) |
+| L40 | `Path::exists` reads an I/O error as "no data", which would draw a new key (L-B5, L-D5) | Medium | `try_exists` and `read_dir`, any other error `FileIo` with the keychain untouched; `try_lock` errors defined and retried (spec 041 R15, T15) |
+| L41 | Native dialogs could be accepted by a stray Return, repeated until accepted, and showed a proxy the script chose (L-B2) | Medium | Cancel as default, one at a time, a 60 s silence after a decline, host-composed text (spec 041 R9, T09) |
+| L42 | Web permission requests (screen capture, clipboard read, camera) were never denied (L-B4) | Medium | A deny-all permission handler per engine and a `Permissions-Policy` header (spec 041 R8, T08) |
+| L43 | keyring 4 cannot set Windows persistence; only `keyring-core` with the `Local` modifier can (L-C7) | Medium | `keyring-core`'s `new_with_modifiers` on Windows; a Windows-runner test (spec 041 R16, T16) |
+| L44 | The exit test's own `PRIVATECHAT_` variable stopped the server; `[::1]` may be absent; the start line had no field names (L-D3, L-D9) | Medium | `DESKTOP_TEST_SERVER_BIN`, `env_clear`, a probed port on 127.0.0.1; spec 035 R4 names `listen_port` and `onion_port` (spec 041 R18; 035 R4) |
+| L45 | A cancelled Kotlin caller lost the events of a call that had run (L-D8) | Medium | `withContext(NonCancellable + dispatcher)` (spec 040 R9, T09) |
+| L46 | `init` as a name broke the use check and a Swift twin, and the silent hook depended on the app calling it (L-A4, L-B8) | Medium | The export is `core_init`, called by `Core` itself; the guard installs the hook once; `Drop` guarded; `close` recovers a poisoned lock (spec 040 R2, R4, R6, R9, R10, T04, T10) |
+| L47 | The invitation text holds `K_ch` but was not zeroed or counted as a secret (L-A5, L-B10) | Medium | `import_qr` zeroes it on both sides; six crossings listed; the desktop QR text and SVG in `Zeroizing`, served `no-store` (spec 040 R7, R9, Security; 041 R6) |
+| L48 | SwiftPM cannot reach sources outside its package; build output dirtied the tree; the README was stale (L-A3, L-A8) | Medium | Swift output in `bindings/uniffi/swift/Generated/`; the ignore entries; the README rewritten (spec 040 R11) |
+| L49 | uniffi's `tempfile` path is a runtime dependency, not a proc macro, so T01 as written failed (L-C6) | Medium | The path named; T01 checks where they sit and that `nm` finds none (spec 040 R1, T01) |
+| L50 | Two 011 vectors had no record to import (L-A6) | Medium | Spec 011 amended: they carry their record; record-only negatives are encoded too (spec 040 R13, R14; 011 Vectors) |
+| L51 | Blocking dialogs called on the main thread freeze the app (L-C11) | Low | Dialog commands `async`, `Dialogs` inside `spawn_blocking` (spec 041 R4, R9, T04) |
+| L52 | Sockets the host closed itself were not reopened by R13's wording (L-A11) | Low | Any close but the stop rules and `lock` reopens (spec 041 R13, T13) |
+| L53 | A panicking plan task left its plan dead (L-B8) | Low | Handled as a closed socket (spec 041 R10, T10) |
+| L54 | T12 asserted a verifier type that rustls does not expose (L-C9) | Low | Tested by behaviour: a leaf with local CRL, OCSP and AIA addresses, which see no connection (spec 041 T12) |
+| L55 | The SOCKS5 `VER`, sub-negotiation and `ATYP` errors were unstated (L-B, closing note) | Low | Each defined (spec 041 R12, T12) |
+| L56 | The web view directory is ignored by WKWebView and WebKitGTK when incognito and locked by WebView2 at quit (L-C10, L-D11) | Low | Best-effort deletion, leftovers removed at the next start (spec 041 R8, R16) |
+| L57 | `lock` during an `unlock`, and a second instance after the first quits (L-D10) | Low | `lock` waits for `unlock`; `unlock` retries the instance lock; keychain calls in `spawn_blocking` (spec 041 R15, R16) |
+| L58 | Time Machine keeps history past its TTL (L-B11) | Low | The backup exclusion attribute on macOS (spec 041 R15, T15) |
+| L59 | The honest list of what an injected script can do, the QR side channels, the roots that `rustls-native-certs` trusts (L-B3, L-B7, L-B9) | Low | Documented residuals; a per-engine check of the QR on Windows and Linux in the acceptance criterion (spec 041 Security, Acceptance criterion) |
+| L60 | The amendment lists at acceptance missed AGENTS 2 and 20, §9's "Protocol tests" and "Mobile bindings", `bindings/README.md`, the skill's CSP and raw wrappers (L-A7, L-A9) | Low | Listed (spec 040 R14, T14; 041 R3, T03) |
+| L61 | `Host`'s Interface lacked the confirming, file and raw-body methods and the paths; the test seam of 040 was unnamed; Kotlin test names not in snake case; no pending file read as `BadConfig` (L-A10, L-A12, L-D12) | Low | Named (spec 041 Interface; 040 R1, R5, Interface, T09, T13; 041 R6) |
+
+Not taken: a key-check value in the data directory, so that a replaced keychain entry reads as `KeyLost` rather than `Corrupt` (L-B6). Binding the entry to its path (L39) removes the case that caused it; what is left is a same-user process that rewrites the entry, which §8 already leaves out of scope, and the check needs a new core function. It is a documented residual (spec 041 Security). Showing the QR in a second, script-free window (L-B3) is left to spec 054-qr-invite, since the canvas and fetch paths are closed and measured on macOS.
+
+Round 3. `cargo deny check` is green with exactly the differences of spec 041 R2 (measured). The human reviewer decided two more questions with the recommended option:
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| L-Q7 | Tauri has no hook to deny web permissions; on macOS and Windows one needs `unsafe`, which spec 041 R1 forbids (L-C2, L-B9) | Per engine, with no `unsafe`: a WebKitGTK handler on Linux, no camera or microphone usage description on macOS, the `Permissions-Policy` header and no clipboard access on Windows, the WebView2 prompt a documented residual | Spec 041 R8, Security, T08 |
+| L-Q8 | Reading the keychain asks the user for nothing, so a script that outlives an automatic lock can unlock at once (L-B3) | Every unlock after a lock asks a native confirmation; the first of the process does not | Spec 041 R16, Security, T16 |
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| L62 | The replace confirmation could not name the entry, since only the core reads the invitation's `channel_id` (L-A1, L-B2, L-D4) | Medium | Two steps: the host calls with `replace_broken = false`, and only on `Corrupt` or `UnsupportedVersion` asks with fixed text and calls again; the header is gone (spec 041 R6, R16, Interface, T06) |
+| L63 | `acknowledge_settings(true)` was unconfirmed once the flag cleared, and an `Io` reset's dialog promised "no proxy" before a re-read (L-A2, L-D3) | Medium | `ReplaceNewerSettings` whenever a newer file stands; the `Io` text says the file is read again (spec 041 R16, T16) |
+| L64 | Whether a dialog holds the lock, and what a yes after `lock` does, was unstated (L-B1, L-D5) | Medium | Dialogs run with no lock and never count for `lock`; a yes re-checks the generation and the target (spec 041 R9, T09) |
+| L65 | Script-chosen text could reach a dialog through `remove_broken`'s name (L-B2) | Medium | The name is looked up in `broken` first; unknown → `UnknownChannel`, no dialog; shown by `channel_name` or a fixed phrase (spec 041 R9) |
+| L66 | A blocking closure queued before `lock` could run on the next `Device`, and a `std` guard cannot be held across `.await` (L-D1) | Medium | Every closure checks its generation under the lock; `lock` awaits with the lock released, then calls `on_disconnect` in one hold (spec 041 R10, R17, T10) |
+| L67 | `reset_local_data` and `unlock` could interleave and lose a new key; the wait rules were circular (L-D2) | Medium | One FIFO async mutex serialises `unlock`, `lock` and reset (spec 041 R15, T15) |
+| L68 | The path string of the keychain user differs for one directory reached by a symlink (L-B5, L-D6) | Medium | `fs::canonicalize`; a moved directory is a documented residual; the 513-character Windows limit (spec 041 R16, T16, Limits) |
+| L69 | `keyring-core` has no default store until `keyring` sets it lazily, and the modifier is Windows-only (L-C1) | Medium | `store_status()` first; `keyring-core` pinned to `keyring`'s version; the modifier under `cfg(windows)` (spec 041 R16) |
+| L70 | The round-2 Kotlin fix still lost the result: `withContext` returns to a cancelled caller with prompt cancellation (L-B4) | Medium | Nested `withContext(NonCancellable) { withContext(dispatcher) { … } }` (spec 040 R9, T09) |
+| L71 | Calls from unrelated Swift tasks reached the executor out of order in 12 % of pairs (L-C5) | Medium | The guarantee is for calls made in sequence or from one actor; T09 uses the main actor (spec 040 R9, T09) |
+| L72 | The exit test's crate was binary-only, so `tests/` could not reach the host (L-A4) | Medium | A library `privatechat_desktop`; the in-memory store under `test-support` (spec 041 R1, Interface) |
+| L73 | Keychain reads were plain vectors, and the drawn key's fate on a mismatch unstated (L-A5) | Medium | `Zeroizing` reads; the drawn array to `from_bytes` or zeroed; AGENTS 5 names the buffer (spec 041 R16; 040 R14) |
+| L74 | `privatechat-store` has no `test-support` feature (L-A3) | Medium | Only the core's (spec 040 R1) |
+| L75 | The use check flagged the `Core.` twins (L-A8) | Low | Qualified matches defined; passing fixtures (spec 040 R10, T10) |
+| L76 | `AckOutcome` and `Frame` were not excepted in R2 (L-A6); the "never a record field" sentence (L-A7) | Low | Excepted; reworded (spec 040 R2, Security) |
+| L77 | No default-button setter exists in the dialog plugin (L-C4) | Low | `OkCancelCustom(<safe>, <action>)`, only `Custom(<action>)` accepts; a Linux manual check (spec 041 R9, Acceptance criterion) |
+| L78 | The 60 s silence looked like a decline (L-B6, L-D8) | Low | `Suppressed { retry_after_ms }` (spec 041 R5, R9, T09) |
+| L79 | `probe_server` had no concurrency bound (L-B7) | Low | One at a time; the LAN probe listed as a residual (spec 041 R14, Security, T14) |
+| L80 | Launcher variables could re-enable WebView2 debugging or a persistent profile (L-B8) | Low | `WEBVIEW2_*` and `WEBKIT_INSPECTOR*` refused at start; hook first in `main`; no log subscriber (spec 041 R8, T08) |
+| L81 | Temporary directories already read as excluded by `tmutil`; `xattr` does not build on Windows without defaults (L-C6, L-C7) | Low | The exact value, compared by bytes; `xattr` macOS-only (spec 041 R15, T15) |
+| L82 | Windows lacks the signals the server needs, and `env_clear` drops `SystemRoot` (L-D7) | Low | The exit test on Linux and macOS; the Windows leg without T18 (spec 041 R18) |
+| L83 | Amendment lists missed the §9 reason, the swift skill's `[UInt8]`, and §8 "Backup exclusion" (L-A10) | Low | Listed (spec 040 R14; 041 R3) |
+| L84 | Undefined Interface names, the Limits row for the keychain, `disallowed-types`, the `on_frame` comment, `defaultServerUrl` (L-A cosmetic) | Low | Fixed (specs 040, 041) |
+
+Round 4 (no question for the reviewer):
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| L85 | `tauri-plugin-dialog` maps rfd's `Cancel` to the second label, so with the action label second, Esc or the close button on Windows and Linux ran the destructive action (L-C1) | Blocker | Confirmations call `rfd` directly, with the gtk3 and common-controls-v6 backends; only rfd's `Custom(<action>)` accepts; a test maps each backend's dismissal (spec 041 R9, Interface, T09) |
+| L86 | The FIFO mutex held across the reset and unlock dialogs let a script hold off `lock` and quit indefinitely, against R9 (L-A1, L-B1, L-D1) | Medium | The mutex is never held across a dialog; unlock and reset ask first and re-check under it (spec 041 R9, R15, T09) |
+| L87 | Reset calling `lock` inside the non-reentrant mutex deadlocked as written (L-A1, L-D2) | Medium | The lock steps are one routine run with the mutex held; reset runs it inside its hold (spec 041 R15, R17) |
+| L88 | Quitting during a dialog could hang the main thread (L-D3) | Medium | Close and exit are refused, the app locks in a task and then exits (spec 041 R17, T17) |
+| L89 | `acknowledge_settings(true)` after an `Io` re-read that finds a newer file replaced it behind the weaker dialog; two dialogs could apply (L-A2, L-D4) | Medium | `replace_newer` passed only after `ReplaceNewerSettings`, which alone is shown when both apply (spec 041 R16, T16) |
+| L90 | The broken-channel dialogs dropped spec 027 R3's text for `UnsupportedVersion` (L-A3) | Medium | The variants carry the reason and use 027 R3's texts (spec 041 R9, R16, Interface) |
+| L91 | The second step of a file import could use a newly chosen file, and the kept body outlived `lock` (L-A4, L-B2, L-D6) | Low | One host-owned `Zeroizing` slot with both copies, emptied by `lock` (spec 041 R6, R17, T17) |
+| L92 | A poisoned lock outlived `lock` and `unlock` (L-A5) | Low | `lock` clears the poison after dropping the `Device` (spec 041 R10, T17) |
+| L93 | The dialog texts had no localisation source; T16 touched the real keystore (L-A6) | Low | `src-tauri/strings/` in the OS locale; the Windows persistence check moved to the non-automatable criteria (spec 041 R9, Acceptance criterion) |
+| L94 | A script can pick the moment and argument of a confirmation, and keep a kind suppressed (L-B3) | Low | Per-kind button labels; stated as residuals (spec 041 R9, Security) |
+| L95 | WebKitGTK emits no camera request by default, and the macOS bundle must name no usage description at all (L-C2, L-B4) | Low | T08 uses geolocation and notification requests in the app-built window; no `NS*UsageDescription` (spec 041 R8, T08) |
+| L96 | WKWebView's "Paste" callout after a click (L-B5); registry and `defaults` switches outside the environment (L-B6) | Low | Residuals; a manual check on macOS (spec 041 R8, Security, Acceptance criterion) |
+| L97 | "First unlock of the process" was undefined; commands while locked could open dialogs (L-B7, L-D5) | Low | Defined as "no `Device` opened yet"; already unlocked → `Ok` first; locked commands return `Locked` before any dialog (spec 041 R9, R16, T09) |
+| L98 | An `open` from an unrelated task could overtake a queued `close` on mobile (L-D7) | Low | Ordered only when the caller awaited the `close`; spec 053 serialises (spec 040 R9) |
+| L99 | Cosmetic: `leave` through `call` could not drop the QR; `Cancelled` omitted a busy slot; the use check on substrings; the Swift twin's `throws`; an already-cancelled Kotlin caller still runs (L-A cosmetic, L-C3) | Low | Fixed (specs 040 R9, R10, Interface; 041 R5, Interface) |
+
+Round 5 (no question for the reviewer):
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| L100 | A synchronous rfd dialog run on the main thread stops the event loop on macOS (measured), and by rfd's source deadlocks on Linux, so no event, `locked` or close request was handled while a confirmation was open (L-C1) | Blocker | Async rfd on a `tokio` task on macOS and Windows, blocking rfd inside `spawn_blocking` on Linux; never on the main thread; a Linux check in the acceptance criterion (spec 041 R9, T09) |
+| L101 | `prevent_exit` then `exit(0)` loops (measured); the macOS Quit item is `terminate:` and skips `ExitRequested` (L-C2, L-C3, L-D2) | Medium | A "quitting" flag; a custom Quit item; `RunEvent::Exit` drops the `Device` best effort, a residual (spec 041 R17, Security, T17) |
+| L102 | A yes answered after the quit's lock reopened or half-erased the device (L-D1) | Medium | The quit task keeps the R15 mutex until exit; every dialog and `unlock` is `Cancelled` once quitting (spec 041 R17, T17) |
+| L103 | A click timed by the page could accept a dialog unread (L-B1) | Medium | An accept within 1 000 ms is a decline; no dialog while the main window is unfocused (spec 041 R9, T09, Limits) |
+| L104 | Chained dialogs, file dialogs included, could keep the user from quitting (L-B3) | Low | File dialogs share the slot; a 3 000 ms quiet period after any dialog; quitting cancels every dialog (spec 041 R9, R17) |
+| L105 | Unlocks queued before the first open skipped the confirmation after a later lock (L-B2) | Low | The open count checked under the mutex (spec 041 R15, T16) |
+| L106 | A panic inside a plan task's call left a dead device that never locked, and `flush` would write a half-done state (L-D3) | Low | The first poisoned hold starts the lock routine; a poisoned `Device` is dropped without `flush`, on the desktop and in 040's `close` (spec 041 R10, R17, T17; 040 R6) |
+| L107 | Translated labels could carry access keys or lose placeholders (L-B4) | Low | Strings embedded at build time; a check of keys, placeholders, distinct labels and no `&` or `_` (spec 041 R9, T09) |
+| L108 | The keychain entry could not be named once reset had deleted the data directory (L-A3, L-D5) | Low | The user is built from the canonical `app_local_data_dir()`, which always exists (spec 041 R16, T16) |
+| L109 | The re-check after a yes had no stated result per kind (L-A1); T09 contradicted R15 on a yes to Unlock (L-A2) | Low | Each kind's target and result stated; T09 follows R15 (spec 041 R9, T09) |
+| L110 | The kept slot could be overwritten by a concurrent import and outlived a decline (L-D4) | Low | The dialog slot claimed first; the kept slot emptied on every decline (spec 041 R6, T06) |
+| L111 | Leftover web view directories deleted without the instance lock (L-A4); a non-regular file had three answers (L-A5); no accessor for the QR image (L-A6) | Low | Deleted only under `instance.lock`; `FileIo` via `symlink_metadata`; `Host::qr_image` (spec 041 R6, R8, Interface, Limits) |
+| L112 | The macOS Esc behaviour could not be measured; the type is `rfd::MessageButtons`; §12, not §9, lists the UI languages (L-C4, L-A cosmetic) | Low | Manual check in the acceptance criterion; names and references fixed; AGENTS 11 amended at acceptance (spec 041 R3, R9; 040 Limits) |
+
 ## Phase 4 drafts
 
 **2026-09-26 — Decisions taken while drafting the phase 4 specs 040 and 041.** Not an audit: these questions came up while writing the bindings specs. The human reviewer decided Q1–Q3 with the recommended option before the specs were written. P1–P6 are drafting choices, recorded here for the review. The specs themselves stay `draft` until their own review.

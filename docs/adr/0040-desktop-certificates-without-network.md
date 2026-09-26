@@ -1,0 +1,23 @@
+# ADR 0040 — Check the desktop client's certificates with no network request of their own
+
+Date: 2026-09-26 · Status: accepted · Supersedes: 0039
+
+## Context
+AGENTS 2 allows no cryptographic primitive outside libsodium anywhere in the workspace, and `deny.toml` bans `rustls`, `ring`, `aws-lc-rs` and `openssl` by name. TLS terminates at the reverse proxy on the server side (`deploy/`), so the server never needed a TLS stack. The desktop client does. Its sockets live in the Rust side of the Tauri process, since the web view is the least trusted part and cannot reach a SOCKS5 proxy (spec 041-desktop-bridge). The server accepts TLS 1.3 only (`docs/spec.md` §6 "Transport"). The operating system's TLS through `native-tls` does not do TLS 1.3 on macOS, where it uses Secure Transport. Tauri and the WebSocket crate also bring crates that the root `deny.toml` bans, measured on 2026-09-26: randomness (`getrandom` for Tauri's CSP nonces; `rand` for the WebSocket handshake key and frame masks), `sha1` for the WebSocket accept key, `sha2` for Tauri's CSP hashes at build time, a PNG decoder and its inflater under the menu crate at run time, and the session encryption of the Linux Secret Service. So the desktop crate could not join the root workspace in any case. ADR 0039 settled the workspace and `rustls` while drafting phase 4 (`docs/audit-log.md`, "Phase 4 drafts", Q2). Audit L then found that the verifier it chose, `rustls-platform-verifier`, lets the operating system fetch revocation data outside the SOCKS5 proxy, and that its list of banned crates was incomplete; the human reviewer decided both (`docs/audit-log.md`, "Audit L", L-Q1 and L-Q3). This ADR restates ADR 0039's decision with those two corrections.
+
+## Decision
+`clients/desktop/src-tauri/` is a Cargo workspace of its own, with its own `Cargo.lock` and its own `deny.toml`. That file keeps every ban of the root one, except for the wrappers that spec 041-desktop-bridge R2 names one by one. The desktop client opens its `wss://` connections with `rustls`, with the `ring` provider, TLS 1.3 only and session resumption disabled. It verifies certificates with `rustls`'s own WebPKI verifier over the roots of the operating system's trust store, read with `rustls-native-certs`, and fetches no revocation data, so that the TLS stack makes no network request outside the socket, which may run through Tor. The WebSocket crate's randomness and SHA-1 serve only the mechanics of RFC 6455, never a key or a message, and are allowed there by name.
+
+## Alternatives considered
+- `native-tls`, the operating system's stack: no new cryptographic crate, but no TLS 1.3 on macOS, so it cannot reach the reference server.
+- The web view's own WebSocket: its browser engine already carries TLS, but it cannot connect through a SOCKS5 proxy with a per-plan username (spec 027-core-api R10), so the desktop client would lose Tor.
+- `rustls` with its default `aws-lc-rs` provider: the same library with a C and assembly build that needs CMake, and a larger code base to trust than `ring`.
+- `rustls-platform-verifier`, which hands the chain to the operating system: it checks revocation, but macOS and Windows then fetch OCSP responses, CRLs and missing certificates on their own, outside the SOCKS5 proxy, which would tell the network and the certificate authority which server a Tor user talks to. It has no switch to turn those fetches off.
+- A hand-written WebSocket client drawing its masks from libsodium: it avoids the named exceptions, but it is more code to maintain, and Tauri would still bring its own randomness.
+
+## Consequences
+- The TLS layer protects only the transport. Message confidentiality and authenticity still come from libsodium in the core (`docs/spec.md` §4). A flaw in `rustls` or `ring`, or a revoked certificate that is still accepted, exposes what a network observer of a plain connection would see (the server name, timing and sizes, ciphertext), never a message or a key.
+- AGENTS 2 names the desktop workspace as its second exception, next to the reference script of spec 015-test-vectors. AGENTS 24 names the PNG decoder under the menu crate. `docs/spec.md` §9 names the desktop TLS stack.
+- The desktop workspace duplicates the root `[workspace.lints]`, the release profile and the `deny.toml` sections, and the documentation lint checks that nothing was dropped (spec 041-desktop-bridge).
+- Android and iOS keep their platform stacks (OkHttp over the platform's TLS, `URLSession`), so each platform's TLS fingerprint still reveals the platform, as §6 already documents.
+- Affected: AGENTS 2 and 24, `docs/spec.md` §9; specs 041-desktop-bridge and 050-desktop-mvp.

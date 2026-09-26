@@ -4,7 +4,7 @@ Status: draft
 Phase: 2
 Related ADRs: 0010, 0020, 0022, 0023, 0037
 Depends on: 011-config-format, 015-test-vectors, 016-fuzz-harness, 017-record-encoding, 020-store-files, 021-channel-session, 023-ttl-purge, 024-key-retired, 025-identity-regen
-Blocks: 027-core-api, 030-ws-protocol, 031-auth-channel-signature, 033-rate-limit-quotas, 035-server-ops
+Blocks: 027-core-api, 030-ws-protocol, 031-auth-channel-signature, 033-rate-limit-quotas, 035-server-ops, 040-uniffi, 041-desktop-bridge
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
@@ -173,7 +173,7 @@ A `Step` never fails as a whole: a store failure in one channel goes to `failed`
 
 ## Vectors
 
-`specs/vectors/028.json`: one encoded frame of each type, produced by the reference script (`derived`), and one case per schema rule, whose outcome is written in the text field `event` (`specs/vectors/README.md`): `type` 7, a missing mandatory key and a 33-byte `code` → `reconnect`; an `ok` with an unknown key → `accepted`; a `hello` with nine versions, with none and without 1 → `unsupported_server`. Every vector carries the input `frame_type`, the number at key 0 of its frame, so that Kotlin and Swift can check each frame through `probe_hello` (spec 040-uniffi R13, R14). Spec 030-ws-protocol's server reproduces them.
+`specs/vectors/028.json`: one encoded frame of each type, produced by the reference script (`derived`), and one case per schema rule, whose outcome is written in the text field `event` (`specs/vectors/README.md`): `type` 7, a missing mandatory key and a 33-byte `code` → `reconnect`; an `ok` with an unknown key → `accepted`; a `hello` with nine versions, with none and without 1 → `unsupported_server`. Every vector carries the input `frame_type`, the number at key 0 of its frame, and every `hello` vector, the derived one included, carries `event`, so that Kotlin and Swift can check each frame through `probe_hello` (spec 040-uniffi R13, R14). Spec 030-ws-protocol's server reproduces them.
 
 ## Acceptance criterion
 
@@ -231,3 +231,4 @@ Decided on 2026-09-25: the frame keys belong to this spec (`docs/spec.md` §6).
 - 2026-09-25 amended after audit K round 2 (`docs/audit-log.md`): the server ends a flooded subscription instead of closing (R4); a `rate_limited` naming a subscribed channel → `Reconnect` (R16)
 - 2026-09-25 amended after audit K round 1 (`docs/audit-log.md`): subscribe spacing counts across `hello`s (R6); a `rate_limited` naming a channel and no `client_ref` re-queues that subscribe and does not stop publishing (R16)
 - 2026-09-26 amended by spec 040-uniffi R14 while drafting phase 4: every vector carries `frame_type`
+- 2026-09-26 amended after audit L round 1 (`docs/audit-log.md`): every `hello` vector carries `event` (spec 040-uniffi R14)

@@ -4,7 +4,7 @@ Status: draft
 Phase: 3
 Related ADRs: 0010, 0014, 0017, 0020, 0022, 0023, 0038
 Depends on: 013-wire-message, 016-fuzz-harness, 027-core-api, 028-session-sans-io, 031-auth-channel-signature, 032-storage-ttl
-Blocks: 033-rate-limit-quotas, 035-server-ops
+Blocks: 033-rate-limit-quotas, 035-server-ops, 041-desktop-bridge
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

@@ -4,7 +4,7 @@ Status: in review
 Phase: 1
 Related ADRs: 0005, 0006, 0007, 0025, 0028
 Depends on: 010-primitives-wrapper, 011-config-format, 015-test-vectors
-Blocks: 016-fuzz-harness, 022-peers-tofu, 027-core-api, 055-verify-ui
+Blocks: 016-fuzz-harness, 022-peers-tofu, 027-core-api, 055-verify-ui, 040-uniffi
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

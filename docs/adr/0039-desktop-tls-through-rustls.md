@@ -1,6 +1,6 @@
 # ADR 0039 — Open the desktop client's TLS connections with rustls, in a workspace of its own
 
-Date: 2026-09-26 · Status: accepted
+Date: 2026-09-26 · Status: superseded by 0040
 
 ## Context
 AGENTS 2 allows no cryptographic primitive outside libsodium anywhere in the workspace, and `deny.toml` bans `rustls`, `ring`, `aws-lc-rs` and `openssl` by name. TLS terminates at the reverse proxy on the server side (`deploy/`), so the server never needed a TLS stack. The desktop client does. Its sockets live in the Rust side of the Tauri process, since the web view is the least trusted part and cannot reach a SOCKS5 proxy (spec 041-desktop-bridge). The server accepts TLS 1.3 only (`docs/spec.md` §6 "Transport"). The operating system's TLS through `native-tls` does not do TLS 1.3 on macOS, where it uses Secure Transport. Tauri itself also brings crates that the root `deny.toml` bans (`sha2` and `brotli`, for its build-time asset handling), so the desktop crate could not join the root workspace in any case. The question came up while drafting phase 4 (`docs/audit-log.md`, "Phase 4 drafts", Q2).

@@ -100,7 +100,7 @@ pub struct ConnectionPlan { pub id: u64, pub route: Route, pub channels: Vec<[u8
 pub struct SettingsView { pub default_server_url: String, pub lock_timeout_seconds: u32, pub socks5_proxy: Option<String> }
 
 pub fn init() -> Result<(), Error>;
-pub fn generate_storage_key(out: &mut [u8; 32]) -> Result<(), Error>;   // added by spec 040-uniffi R8: randombytes_buf into the caller's array
+pub fn generate_storage_key(out: &mut [u8; 32]) -> Result<(), Error>;   // added by spec 040-uniffi R8: randombytes_buf into the caller's array; tested by s040_t08_r08_generate_storage_key_core
 pub fn probe_hello(frame: &[u8]) -> Result<bool, Error>;
 pub const DEFAULT_SERVER_URL: &str;
 

@@ -4,7 +4,7 @@ Status: draft
 Phase: 3
 Related ADRs: 0008, 0010, 0038
 Depends on: 028-session-sans-io, 030-ws-protocol, 031-auth-channel-signature, 032-storage-ttl
-Blocks: 035-server-ops
+Blocks: 035-server-ops, 041-desktop-bridge
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
