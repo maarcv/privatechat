@@ -11,46 +11,47 @@ Human reviewer: Marc Vilardebó · Accepted on: —
 
 `docs/spec.md` §8 lists the measures that protect a device: where the storage key `K_db` lives and what unwraps it, when the app locks, what is kept out of backups, screenshots, notifications, the clipboard, the keyboard and the build flags. This spec turns that table into requirements, one mechanism per platform, so that the three UI specs (050, 051, 052) build on one definition of "locked" and "unlocked". The desktop's keychain entry, its lock routine and its web view already live in spec 041-desktop-bridge; this spec adds what 041 left to it (the operating system's authentication at unlock, when the app locks on its own, notifications, the clipboard) and references the rest.
 
-Before drafting, the human reviewer decided on 2026-09-26 (`docs/audit-log.md`, "Phase 5 drafts"): every desktop unlock asks the operating system's user authentication where one exists (Q2), and local notifications exist on the desktop only (Q4).
+Before drafting, the human reviewer decided on 2026-09-26 (`docs/audit-log.md`, "Phase 5 drafts"): every desktop unlock asks the operating system's user authentication where one exists (Q2), local notifications exist on the desktop only (Q4), and Android starts at API 30 (Q5). During audit M the reviewer decided that a system screen the app opens itself does not lock it for up to 120 s (M-Q1), and that an iOS screenshot is a residual the app reacts to (M-Q2) (`docs/audit-log.md`, "Audit M").
 
-**In plain words.** Everything the app keeps on a device is encrypted with one 32-byte key. On a phone, that key is itself locked by the phone's secure chip, and only the phone's own fingerprint, face or PIN prompt can open it; on a computer, it sits in the system keychain, and the system's Touch ID, Windows Hello or password prompt must be passed before the app reads it. "Locked" means the key has been wiped from memory, the files are closed and the app is offline; the app locks when it goes to the background, when the screen turns off, when the computer's session locks, or when the user asks. Nothing the app holds goes into backups, screenshots or notification texts, and nothing is sent to any analytics service.
+**In plain words.** Everything the app keeps on a device is encrypted with one 32-byte key. On a phone, that key is itself locked by the phone's secure chip, and only the phone's own fingerprint, face or PIN prompt can open it; on a computer, it sits in the system keychain, and the system's Touch ID, Windows Hello or password prompt must be passed before the app reads it. "Locked" means the key has been wiped from memory, the files are closed, the screens hold nothing, and the app is offline; the app locks when it goes to the background, when the screen turns off, when the computer's session locks, or when the user asks. The one exception is a system screen the app opened itself, such as the file picker, for up to two minutes. Nothing the app holds goes into backups, notification texts or logs, and nothing is sent to any analytics service. On an iPhone a screenshot cannot be prevented, so the app hides the secret on screen and warns at once.
 
 ## Requirements
 
 **The storage key on Android**
 
-- R1 `platform/StorageKey.kt` MUST keep `K_db` as the AES-GCM encryption, under one Android Keystore key, of 32 bytes drawn with `Core.generateStorageKey` (spec 040-uniffi R8). The Keystore key MUST be an AES key of 256 bits with block mode GCM, no padding, `setUserAuthenticationParameters(t, AUTH_BIOMETRIC_STRONG or AUTH_DEVICE_CREDENTIAL)` where `t` is the grace of R7, `setInvalidatedByBiometricEnrollment(false)`, `setUnlockedDeviceRequired(true)` and `setIsStrongBoxBacked(true)` when `PackageManager.FEATURE_STRONGBOX_KEYSTORE` is present (a `StrongBoxUnavailableException` falls back to the TEE once, at creation). The wrapped key MUST be the file `noBackupFilesDir/storage-key.wrap`, holding the 12-byte IV followed by the ciphertext and its 16-byte tag, written with a temporary file and a rename. The unwrapped bytes go once to `Core.open`, which zeroes them (spec 040-uniffi R9); the class exposes `unwrap(): ByteArray` and `create(): ByteArray` and nothing else.
+- R1 `platform/StorageKey.kt` MUST keep `K_db` as the AES-GCM encryption, under one Android Keystore key, of 32 bytes drawn with `Core.generateStorageKey` (spec 040-uniffi R8). The Keystore key MUST be an AES key of 256 bits with block mode GCM, no padding, `setUserAuthenticationRequired(true)` (without which the Keystore adds no authentication requirement at all and ignores the next call), `setUserAuthenticationParameters(t, AUTH_BIOMETRIC_STRONG or AUTH_DEVICE_CREDENTIAL)` where `t` is the grace of R7, `setInvalidatedByBiometricEnrollment(false)`, `setUnlockedDeviceRequired(true)` only on API 35 and later (it has known defects on API 31–34, and the locks of R8 already cover it), and `setIsStrongBoxBacked(true)` when `PackageManager.FEATURE_STRONGBOX_KEYSTORE` is present (a `StrongBoxUnavailableException` falls back to the TEE once, at creation). There are two key aliases, `storage-key-a` and `storage-key-b`. The wrapped key MUST be the file `noBackupFilesDir/storage-key.wrap`, holding one generation byte (`a` or `b`, naming the alias that wraps it), the 12-byte IV, and the ciphertext with its 16-byte tag, written with a temporary file and a rename. The unwrapped bytes go once to `Core.open`, which zeroes them (spec 040-uniffi R9). The class exposes exactly `create(activity)`, `unwrap(activity)` and `rewrap(activity, graceSeconds)` of the Interface.
 
 **The storage key on iOS**
 
-- R2 `Platform/StorageKey.swift` MUST keep `K_db` as the encryption, under one P-256 key in the Secure Enclave, of 32 bytes drawn with `Core.generateStorageKey`. The Secure Enclave key MUST be created with `kSecAttrTokenIDSecureEnclave`, `SecAccessControl(kSecAttrAccessibleWhenUnlockedThisDeviceOnly, [.privateKeyUsage, .userPresence])`, and a fixed application tag. The 32 bytes are encrypted with `SecKeyCreateEncryptedData` and `.eciesEncryptionCofactorVariableIVX963SHA256AESGCM` to the key's public half, and the ciphertext is one Keychain generic-password item, `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, so that neither leaves the device or reaches an iCloud backup. Decryption passes the `LAContext` of R6 as `kSecUseAuthenticationContext`. The class exposes `unwrap(context:) async throws -> Data` and `create() async throws -> Data` and nothing else. This wrapping is the operating system's own cryptography, which §8 mandates; it touches only `K_db`, never a channel key or the wire format (AGENTS 2).
+- R2 `Platform/StorageKey.swift` MUST keep `K_db` as the encryption, under one P-256 key in the Secure Enclave, of 32 bytes drawn with `Core.generateStorageKey`. The Secure Enclave key MUST be created with `kSecAttrTokenIDSecureEnclave`, `SecAccessControl(kSecAttrAccessibleWhenUnlockedThisDeviceOnly, [.privateKeyUsage, .userPresence])`, and a fixed application tag. The 32 bytes are encrypted with `SecKeyCreateEncryptedData` and `.eciesEncryptionCofactorVariableIVX963SHA256AESGCM` to the key's public half (measured on 2026-09-26: 113 bytes for 32), and the ciphertext is one Keychain generic-password item, `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, so that neither leaves the device or reaches an iCloud backup. Decryption passes the `LAContext` that `LockController` holds (R7) as `kSecUseAuthenticationContext`. The class exposes exactly `create()` and `unwrap(context:)` of the Interface. This wrapping is the operating system's own cryptography, which §8 mandates; it touches only `K_db`, never a channel key or the wire format (AGENTS 2).
 
 **The storage key on the desktop**
 
-- R3 On macOS the entry of spec 041-desktop-bridge R16 MUST be a data-protection Keychain item written through the `security-framework` crate with the access control `USER_PRESENCE` and `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, in place of `keyring`'s macOS store, so that reading it makes the system ask for Touch ID or the account password before it returns the key. The item keeps 041 R16's service and user. This spec amends spec 041-desktop-bridge R16 for macOS in the pull request that marks it `accepted`.
-- R4 On Windows every `unlock` MUST first ask `Windows.Security.Credentials.UI.UserConsentVerifier::RequestVerificationAsync` (the `windows` crate's WinRT projection), with the fixed text of R19, and read the Credential Manager entry of spec 041-desktop-bridge R16 only after `Verified`. `Canceled`, `RetriesExhausted` or any other result returns `Cancelled` with nothing read. When `CheckAvailabilityAsync` is not `Available` (no Windows Hello and no PIN set up), `unlock` falls back to the native confirmation of spec 041-desktop-bridge R9 and R16. On Linux, where no standard equivalent exists, `unlock` keeps 041's confirmation. On macOS and Windows, where the system prompt asks for the user, it replaces 041's `Unlock` confirmation, and it is asked at every `unlock`, the first of the process included.
+- R3 On macOS the entry of spec 041-desktop-bridge R16 MUST be a data-protection Keychain item written through the `security-framework` crate with its `OSX_10_15` feature (for `PasswordOptions::use_protected_keychain`, which compiles without `unsafe`), the access control `USER_PRESENCE` and `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, in place of `keyring`'s macOS store, so that reading it makes the system ask for Touch ID or the account password before it returns the key. The item keeps 041 R16's service and user. The prompt's text is the system's: the crate offers no safe setter for `kSecUseOperationPrompt`. Results map as follows: `errSecUserCanceled` (−128) and `errSecAuthFailed` → `Cancelled`; `errSecInteractionNotAllowed` → `KeychainUnavailable`; `errSecMissingEntitlement` (−34018), which every build not signed with a team certificate and a provisioning profile gets (measured on 2026-09-26: an unsigned binary gets −34018, and an ad-hoc build with the `keychain-access-groups` entitlement is killed at launch) → a release build refuses to start with the fixed text of R19, and only a debug build compiled with the cargo feature `dev-login-keychain` falls back to `keyring`'s login-keychain item and spec 041-desktop-bridge's `Unlock` confirmation. The release CI job fails when that feature is enabled.
+- R4 On Windows every `unlock` MUST first ask `Windows.Security.Credentials.UI.UserConsentVerifier::RequestVerificationAsync` (the `windows` crate's WinRT projection, awaited through `windows-future` with its `std` feature, with no `unsafe`), with the fixed text of R19, and read the Credential Manager entry of spec 041-desktop-bridge R16 only after `Verified`. `Canceled`, `RetriesExhausted` or any other result returns `Cancelled` with nothing read. When the key is created, the app records in the non-secret file `app_local_data_dir()/presence.none` whether `CheckAvailabilityAsync` was `DeviceNotPresent` or `NotConfiguredForUser`. `unlock` falls back to the native confirmation of spec 041-desktop-bridge R9 and R16 only when that file exists and the check still gives one of those two results; any other unavailability (`DeviceBusy`, `DisabledByPolicy`, a check that turns unavailable after Windows Hello was present) returns `Cancelled`. On Linux, where no standard equivalent exists, `unlock` keeps 041's confirmation. On macOS and Windows, where the system prompt asks for the user, it replaces 041's `Unlock` confirmation, and it is asked at every `unlock`, the first of the process included.
 
 **Unlocking**
 
-- R5 On Android and iOS, `unlock` MUST follow the rules of spec 041-desktop-bridge R16 for the key's presence, with the wrapped key (R1, R2) in place of the keychain entry and the same meaning of "holds data" (041 R15):
-  - A wrapped key and a Keystore or Secure Enclave key that decrypts it, and the directory holds data: open.
-  - The directory holds no data: delete any wrapped key and platform key, create both (R1, R2), unwrap the new key once to check it, and open.
-  - The directory holds data, and the wrapped key or the platform key is missing, or the platform reports the key permanently invalidated (`KeyPermanentlyInvalidatedException`, `errSecItemNotFound` on the Secure Enclave key): return `KeyLost` and create nothing.
-  - The prompt was cancelled, failed or timed out, or the platform reports a transient error: return `Cancelled` or `KeychainUnavailable`, stay locked, and create nothing. No transient failure ever draws a new key (`docs/spec.md` §8 "Loss of the wrapping key").
-  After `KeyLost` the app offers only `reset_local_data`, behind a destructive confirmation that says the local history is lost and that each channel comes back by importing a new invitation (`docs/spec.md` §7 "Leave channel", §8).
-- R6 The app lock MUST be the operating system's prompt and nothing else, with no app PIN or password: `BiometricPrompt` with `BIOMETRIC_STRONG or DEVICE_CREDENTIAL` on Android, an `LAContext` evaluating `.deviceOwnerAuthentication` on iOS, and R3 and R4 on the desktop. The prompt's title and reason are fixed texts of R19 that name no channel.
-- R7 `lock_timeout_seconds` (spec 027-core-api R13, default 60, 0..=86 400) MUST be the grace within which a return to the app unlocks without a prompt, counted from the last successful prompt:
-  - Android: it is the Keystore key's `t` (R1). A change of the setting re-wraps `K_db` under a new Keystore key with the new `t`, after one prompt, and deletes the old key only once the new wrap is written. `t = 0` needs a `CryptoObject` with every prompt.
-  - iOS: the evaluated `LAContext` of R6 is kept for that many seconds after the app goes to the background and invalidated afterwards (`invalidate()`); a return within the grace decrypts with it and shows no prompt.
+- R5 On Android and iOS, `unlock` MUST follow the rules of spec 041-desktop-bridge R16 for the key's presence, with the wrapped key (R1, R2) in place of the keychain entry and the same meaning of "holds data" (041 R15), and return an `UnlockResult` of the Interface:
+  - No device credential is set (`KeyguardManager.isDeviceSecure` false on Android; `canEvaluatePolicy` failing with `passcodeNotSet` on iOS): `Unavailable`, with the fixed text "Set a screen lock (PIN or passcode) to use this app" of R19 and an action that opens the system settings, and nothing created.
+  - A wrapped key and a platform key that decrypts it, and the directory holds data: open; `Unlocked`.
+  - The directory holds no data: delete any wrapped key and platform key, create both (R1, R2), unwrap the new key once to check it, and open; `Unlocked`.
+  - The directory holds data, and the wrapped key or the platform key is missing, or the platform reports the key permanently invalidated (`KeyPermanentlyInvalidatedException` on Android; on iOS `errSecItemNotFound` for the Secure Enclave key or the item, but only while `isProtectedDataAvailable` is true and a second query gives the same answer): `KeyLost`, and create nothing.
+  - The prompt was cancelled, failed or timed out: `Cancelled`. Any other platform error, the iOS query of the previous row while protected data is unavailable or the two queries disagree included: `Transient`. Both stay locked and create nothing: no transient failure ever draws a new key (`docs/spec.md` §8 "Loss of the wrapping key").
+  - `Core.open` fails: `Failed` with its `FfiError`, and the unwrapped key is zeroed.
+  After `KeyLost` the app offers only `reset()` (R23), behind a destructive confirmation whose fixed text (R19) says that the local history is lost, that each channel comes back by importing a new invitation (`docs/spec.md` §7 "Leave channel", §8), and that the user's old keys stay valid for the others, so the members of each channel should be asked to mark the old key as retired (§7 "Key regeneration").
+- R6 The app lock MUST be the operating system's prompt and nothing else, with no app PIN or password: `BiometricPrompt` with `BIOMETRIC_STRONG or DEVICE_CREDENTIAL` on Android, hosted by a `FragmentActivity`; an `LAContext` evaluating `.deviceOwnerAuthentication` on iOS; and R3 and R4 on the desktop. The prompt's title and reason are fixed texts of R19 that name no channel.
+- R7 `lock_timeout_seconds` (spec 027-core-api R13, default 60, 0..=86 400) MUST be the grace within which an `unlock` skips the in-app prompt, with one definition on both phones: fewer than that many seconds have passed since the last successful in-app prompt, a time `LockController` keeps in memory only (a new process always prompts). Outside the grace the prompt is always shown, whatever the platform would allow. `0` is the "strict" option of §8: every `unlock` prompts. "Lock now" (R10) clears the time, so that the next `unlock` prompts. The grace never keeps the device unlocked: the locks of R8 always happen, only the next prompt is skipped.
+  - Android: the Keystore key's `t` (R1) equals the grace and is its upper bound, since the Keystore authorises a timed key after any authentication of the device, the lock screen's included. At every `unlock`, when `t` (`KeyInfo.userAuthenticationValidityDurationSeconds`) differs from `settings().lock_timeout_seconds`, the app re-wraps. A re-wrap, whether from a change of the setting or from that check, MUST, after the prompt that unwraps `K_db`: create the other alias with the new `t`; encrypt `K_db` under it (with `t = 0` this needs a second prompt with a `CryptoObject`, so a change to 0 costs two prompts and any other change one); write `storage-key.wrap` with the new generation byte through a temporary file and a rename; and only then call `set_lock_timeout_seconds` when the setting is what changed. The old alias is deleted only after the next `unlock` succeeds under the new generation. `unwrap` tries the alias the generation byte names, so a crash at any step leaves one wrap and its key.
+  - iOS: `LockController` keeps the evaluated `LAContext` and invalidates it (`invalidate()`) once the grace has passed since the prompt; within the grace, `unwrap(context:)` decrypts with it and shows no prompt.
   - Desktop: no grace; every `unlock` prompts (R3, R4, Q2).
-  `0` is the "strict" option of §8: every return prompts. The grace never keeps the device unlocked: locking (R8) always happens, only the next prompt is skipped.
 - R8 The app MUST lock (close the `Core` on mobile, run spec 041-desktop-bridge R17's lock routine on the desktop) on each of these events:
-  - Android: `ProcessLifecycleOwner` `ON_STOP`; `ACTION_SCREEN_OFF`; "Lock now".
-  - iOS: `sceneDidEnterBackground`; `protectedDataWillBecomeUnavailable`; "Lock now".
-  - Desktop: the main window unfocused for `lock_timeout_seconds` (0: at once), which the operating system's session lock also triggers; the session lock itself, where the platform reports it without `unsafe` (logind's `Lock` signal over D-Bus on Linux); "Lock now"; quit (041 R17).
-  Locked is disconnected: no socket stays open and no work runs in the background (`docs/spec.md` §8 "Background").
-- R9 On Android and iOS, one `LockController` per app MUST serialise lock and unlock as spec 041-desktop-bridge R15 does: a first-in, first-out queue held for the whole of each, never across a prompt, with every `Core.open` awaiting the last `Core.close` (spec 040-uniffi R9). An `unlock` while unlocked returns at once; a lock requested while a prompt is open dismisses the prompt's result and locks.
-- R10 "Lock now" MUST exist on every platform: an in-app action on every screen of 050, 051 and 052; an app shortcut on Android (`ShortcutManager`, static, with no data); a home-screen quick action on iOS (`UIApplicationShortcutItem`, with no data); and a menu item with the accelerator `CmdOrCtrl+L` on the desktop.
+  - Android: `ProcessLifecycleOwner` `ON_STOP`; `ACTION_SCREEN_OFF`; "Lock now". While a system screen the app itself started for a result is in front (the document pickers of spec 054-qr-invite, its share chooser, the camera permission's settings screen, and the device-credential screen of `BiometricPrompt`), `ON_STOP` does not lock for up to 120 000 ms after that screen started; the app locks when that time runs out before it is back, and screen-off always locks (decided with the human reviewer, `docs/audit-log.md`, "Audit M", M-Q1).
+  - iOS: `sceneDidEnterBackground`; `protectedDataWillBecomeUnavailable`; "Lock now". The same 120 000 ms exception applies to the document picker, exporter and share sheet of spec 054-qr-invite, if they move the scene to the background.
+  - Desktop: the main window unfocused for `lock_timeout_seconds` (0: at once), where the time a dialog or prompt the host itself opened is in front (the dialogs of spec 041-desktop-bridge R9 and R6, and the prompts of R3 and R4) does not count, and the count starts again when it closes; the session lock itself, reported on Linux by the logind session's `LockedHint` becoming true (a `PropertiesChanged` signal over D-Bus, through `zbus`, already in the tree) and by its `Lock` signal, and on macOS and Windows by the session-lock notification of each system where one is reachable without `unsafe` (053-R8); "Lock now"; quit (041 R17). Where a session-lock signal is not reachable, the focus timer alone applies.
+  Locked is disconnected: no socket stays open and no work runs in the background (`docs/spec.md` §8 "Background"). A desktop window that stays focused while nobody uses it does not lock: the app cannot count input, since the web view's input events are untrusted and a script could fake them, so the operating system's own screen lock is the defence, which the help recommends. That is a documented residual.
+- R9 On Android and iOS, one `LockController` per app MUST serialise lock, unlock and reset as spec 041-desktop-bridge R15 does: a first-in, first-out queue held for the whole of each, never across a prompt, with every `Core.open` awaiting the last `Core.close` (spec 040-uniffi R9). An `unlock` while unlocked returns at once; a lock requested while a prompt is open dismisses the prompt's result and locks.
+- R10 "Lock now" MUST exist as an in-app action on every screen of 050, 051 and 052, and as a menu item with the accelerator `CmdOrCtrl+L` on the desktop. There is no launcher shortcut and no home-screen quick action: they can only be used while the app is already locked. "Lock now" also ends the grace (R7).
 
 **Storage, backups and screens**
 
@@ -58,65 +59,86 @@ Before drafting, the human reviewer decided on 2026-09-26 (`docs/audit-log.md`, 
   - Android: `noBackupFilesDir/data`, with `android:allowBackup="false"`, `android:fullBackupContent="false"` and `dataExtractionRules` that exclude every domain from `cloud-backup` and `device-transfer`.
   - iOS: `Application Support/data`, with `isExcludedFromBackup = true` and the file protection `.complete`, so that its files cannot be read while the device is locked.
   - Desktop: spec 041-desktop-bridge R15 (the macOS attribute); on Windows and Linux the data lives outside the user's sync folders, and the help says that File History and similar tools should exclude it.
-- R12 Screens MUST NOT be captured:
-  - Android: `FLAG_SECURE` on the one activity, for the whole app.
-  - iOS: an opaque cover over the whole window on `sceneWillResignActive` and while `UIScreen.isCaptured` is true (`capturedDidChange`), removed on `sceneDidBecomeActive` when the screen is not captured.
-  - Desktop: not possible; the help says so.
-- R13 Local notifications MUST exist on the desktop only (Q4). While the device is unlocked and the main window is not focused, a `core-event` `Message` from a peer raises one notification whose title is the app name and whose body is the fixed text "New messages" of R19, at most one every 60 000 ms, through `tauri-plugin-notification` from the Rust side, with no channel, peer, count or content. Android and iOS MUST NOT request notification permission (`POST_NOTIFICATIONS`, `UNUserNotificationCenter`) and post none.
-- R14 The clipboard MUST hold only what the user copied from a message, and only for 60 000 ms: copying a message's text sets `ClipDescription.EXTRA_IS_SENSITIVE` on Android, `UIPasteboard.setItems(_, options: [.localOnly: true, .expirationDate: now + 60 s])` on iOS, and on the desktop goes through a Rust command that writes the text and clears the clipboard after 60 000 ms when it still holds that text. On Android the app clears it after 60 000 ms when the clip is still its own. An invitation text, a `.chatcfg` password and the export password MUST NOT be copied by any action of the app.
-- R15 Text entry MUST follow §8 "Keyboard": on Android the `.chatcfg` and export password fields use `textPassword`, `IME_FLAG_NO_PERSONALIZED_LEARNING` and `flagNoExtractUi`, and the app shows a one-time warning when the default input method (`Settings.Secure.DEFAULT_INPUT_METHOD`) is not a system app; on iOS password fields use `isSecureTextEntry`, the composer uses `autocorrectionType = .no` and `spellCheckingType = .no`, and the app refuses custom keyboards (`application(_:shouldAllowExtensionPointIdentifier:)` returns `false` for `.keyboard`).
+  A restore onto another device therefore brings back no data directory and no wrapped key, and the app starts empty (R5's "holds no data" row), never with `KeyLost`.
+- R12 Screens MUST NOT be captured where the platform allows it:
+  - Android: `FLAG_SECURE` on the one activity, and `SecureFlagPolicy.SecureOn` on every Compose `Dialog`, `Popup`, `DropdownMenu` and `ModalBottomSheet`, since each is a window of its own that the activity's flag does not reach. The invitation QR, the export password and the 12 words are only ever drawn on full screens of the activity window (specs 054-qr-invite, 055-verify-ui).
+  - iOS: an opaque cover over the whole window on `sceneWillResignActive` and while the window scene's `traitCollection.sceneCaptureState` is `.active` (observed with `registerForTraitChanges`), removed on `sceneDidBecomeActive` when it is not. A screenshot cannot be blocked: on `UIApplication.userDidTakeScreenshotNotification`, a screen that shows a secret hides it at once and shows the warning of spec 054-qr-invite, a documented residual (M-Q2).
+  - Desktop: the one window is created with `contentProtected: true`, which excludes it from capture on Windows 10 2004 and later (`WDA_EXCLUDEFROMCAPTURE`) and on macOS as far as the system honours it (`NSWindow.sharingType = .none`); on Linux nothing, and the help says so.
+- R13 Local notifications MUST exist on the desktop only (Q4). While the device is unlocked and the main window is not focused, a `core-event` `Message` from a peer that is not muted raises one notification whose title is the app name and whose body is the fixed text "New messages" of R19, at most one every 60 000 ms, through the `notify-rust` crate from the Rust side (not `tauri-plugin-notification`, which brings a banned `rand`), with no channel, peer, count or content. Since the app locks once the window has been unfocused for `lock_timeout_seconds` (R8), notifications only cover that time after the user leaves the window, and none with `0`; the help says so. Android and iOS MUST NOT request notification permission (`POST_NOTIFICATIONS`, `UNUserNotificationCenter`) and post none.
+- R14 The clipboard MUST hold only what the user copied from a message, and only briefly; an invitation text, a `.chatcfg` password and the export password MUST NOT be copied by any action of the app:
+  - Android: the clip carries `ClipDescription.EXTRA_IS_SENSITIVE` (which hides its preview from API 33; no effect on API 30–32) and a fixed label that names nothing. The app clears it (`clearPrimaryClip`) when it locks within 60 000 ms of the copy, and at the next foreground when the clip still carries its label and is older than 60 000 ms, since a background app cannot read the clipboard (053-R14). Otherwise Android's own clearing (API 33 and later) applies, a documented residual.
+  - iOS: `UIPasteboard.setItems(_, options: [.localOnly: true, .expirationDate: now + 60 s])`.
+  - Desktop: the Rust command `copy_message(text)`, which writes the text through the `arboard` crate and clears it on a timer of 60 000 ms that the lock routine does not abort, and at lock when the clipboard still holds that text. `arboard` brings BSL-1.0 crates, which spec 041-desktop-bridge R2's licence list gains (R20).
+- R15 Text entry MUST follow §8 "Keyboard":
+  - Android: the `.chatcfg` and export password fields are Compose text fields with `KeyboardType.Password`, auto-correction off, and `IME_FLAG_NO_PERSONALIZED_LEARNING` set through `InterceptPlatformTextInput` (Compose sets no such flag itself, and always sets `IME_FLAG_NO_FULLSCREEN`, which stands for `flagNoExtractUi`); the message composer gets the same flag and auto-correction off, so the keyboard learns no message text. While a password field is shown, the window's root view is `IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS`, so no autofill service offers to save the password. The app shows a one-time warning when the default input method (`Settings.Secure.DEFAULT_INPUT_METHOD`) is not a system app.
+  - iOS: password fields are `SecureField` with `textContentType` nil (never `.password`), the composer has `autocorrectionDisabled()` and spell checking off, and the app refuses custom keyboards (`application(_:shouldAllowExtensionPointIdentifier:)` returns `false` for `.keyboard`, through the app delegate adaptor).
+  A Compose or SwiftUI text field holds its text as a `String`, so the field's text is copied into bytes on submit, handed over as spec 040-uniffi R9 says, and the field is cleared; the `String` itself is not zeroed, a documented residual.
 
 **The build**
 
-- R16 No client MUST link a third-party analytics, crash-reporting or advertising SDK. Each client MUST have an allowlist of its resolved dependencies, checked in CI: `clients/android/dependencies.allow` against Gradle's resolved runtime classpath, `clients/ios/Package.resolved` against `clients/ios/dependencies.allow`, and the desktop's `Cargo.lock` and `pnpm-lock.yaml` against `clients/desktop/dependencies.allow`. A dependency not listed fails the build; adding one to a list is justified in its pull request (AGENTS 8).
-- R17 The Android release build MUST be `debuggable = false`, with `android:usesCleartextTraffic="false"`, a `networkSecurityConfig` that permits cleartext only for the domain `onion` and its subdomains (spec 027-core-api R10's `ws://` onion routes through a loopback proxy), no `exported` component other than the launcher activity, no custom URL scheme and no `INTERNET`-unrelated dangerous permission beyond `CAMERA` (spec 054-qr-invite). The iOS app MUST declare no background mode, no URL scheme and no App Transport Security exception, and only the camera usage description that spec 054-qr-invite needs.
+- R16 No client MUST link a third-party analytics, crash-reporting or advertising SDK. Each client MUST have an allowlist of the names of its resolved dependencies, direct and transitive, with no versions, checked in CI by `scripts/check_client_dependencies.sh`, which prints the exact lines to add when it fails:
+  - Android: `group:artifact` names of Gradle's `releaseRuntimeClasspath`, against `clients/android/dependencies.allow`.
+  - iOS: the Swift package identities that the Xcode project references and that its `Package.resolved` (under `*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/`) pins, and the frameworks the app target embeds, against `clients/ios/dependencies.allow`.
+  - Desktop: the crates through cargo-deny's `[bans] allow` list in `clients/desktop/deny.toml` (R20), and the package names of `pnpm-lock.yaml`, production and development, against `clients/desktop/dependencies.allow`.
+  A dependency not listed fails the build; adding one to a list is justified in its pull request (AGENTS 8).
+- R17 The Android release build MUST be `debuggable = false`, with `android:usesCleartextTraffic="false"`, a `networkSecurityConfig` that permits cleartext only for the domain `onion` and its subdomains (spec 027-core-api R10's `ws://` onion routes through a loopback proxy; a suffix match, measured in the AOSP source), no custom URL scheme, and no dangerous permission beyond `CAMERA` (spec 054-qr-invite). In the merged release manifest, no component is `exported` other than the launcher activity and the library components listed in `clients/android/exported.allow` with their reason (today `androidx.profileinstaller`'s receiver alone, guarded by the `DUMP` permission), and any other library component is removed with `tools:node="remove"`. The iOS app MUST declare no background mode and no URL scheme, and exactly two usage descriptions, `NSCameraUsageDescription` (spec 054-qr-invite) and `NSFaceIDUsageDescription` (R6), with the fixed texts of R19; whether a `ws://` onion route needs an App Transport Security exception is 053-R17.
 - R18 The app MUST show a one-time, dismissible warning, stored in the settings of the platform (not in the core), when it detects a rooted Android device (an `su` binary on `PATH`, or `Build.TAGS` containing `test-keys`) or a jailbroken iOS device (a write outside the sandbox succeeding, or `/Applications/Cydia.app` present). It never blocks the app.
 
-**Texts and amendments**
+**Texts, the locked state, logging, reset and amendments**
 
-- R19 Every fixed text of this spec (prompt titles and reasons, "New messages", the warnings of R15 and R18, the `KeyLost` explanation) MUST come from the platform's string resources, English source and the UI languages of `docs/spec.md` §12, with no channel, peer or server name in it.
+- R19 Every fixed text of this spec (prompt titles and reasons, the two usage descriptions, "New messages", "Set a screen lock (PIN or passcode) to use this app", the unsigned-build refusal of R3, the warnings of R15 and R18, the `KeyLost` explanation of R5) MUST come from the platform's string resources, English source and the UI languages of `docs/spec.md` §12, with no channel, peer or server name in it.
 - R20 In the pull request that marks this spec `accepted`:
-  - `docs/spec.md` §8 "Storage key `K_db`" MUST name, for the desktop, the macOS access control of R3;
-  - §8 "App lock" MUST name, for the desktop, the prompts of R3 and R4 and the Linux fallback;
-  - §8 "Key life cycle" MUST name the desktop triggers of R8;
+  - `docs/spec.md` §8 "Storage key `K_db`" MUST name `setUserAuthenticationRequired(true)` and the API 35 condition for Android, and, for the desktop, the macOS access control of R3;
+  - §8 "App lock" MUST name, for the desktop, the prompts of R3 and R4 and the Linux fallback, and the grace of R7;
+  - §8 "Key life cycle" MUST name the triggers of R8, the 120 s system-screen exception and the desktop dialog rule;
+  - §8 "Screenshot blocking" MUST name the Compose dialog rule, the iOS screenshot residual and the desktop's `contentProtected`;
   - §8 "Local notifications" MUST say that Android and iOS post none;
-  - §8 "Keyboard" MUST name R15's iOS refusal of custom keyboards;
-  - spec 041-desktop-bridge R16 MUST name R3's macOS store and R4's prompts;
-  - the swift skill MUST name the file protection of R11 and `Data` for the key.
-  - `docs/spec.md` §9 and the kotlin skill MUST set `minSdk 30` (Android 11), which `setUserAuthenticationParameters` of R1 and R7 needs, decided with the human reviewer (`docs/audit-log.md`, "Phase 5 drafts", Q5), and spec 040-uniffi R11 builds at API level 30.
+  - §8 "Keyboard" MUST name R15's autofill exclusion, the composer flags and the iOS refusal of custom keyboards;
+  - §8 "Root / jailbreak / accessibility" MUST name R17's onion cleartext and the allowed exported components;
+  - `docs/spec.md` §9 and the kotlin skill MUST set `minSdk 30` (Android 11), which `setUserAuthenticationParameters` of R1 and R7 needs, decided with the human reviewer (`docs/audit-log.md`, "Phase 5 drafts", Q5), and spec 040-uniffi R11 builds at API level 30;
+  - the kotlin skill MUST name the `FragmentActivity` that `BiometricPrompt` needs, the onion cleartext and the exported launcher, `InterceptPlatformTextInput`, and the `StorageKey` of the Interface;
+  - the swift skill MUST name the file protection of R11, `Data` for the key, the `StorageKey` of the Interface, and the scene and app-delegate hooks of R8, R12 and R15 among its allowed UIKit;
+  - the typescript-svelte skill MUST name the macOS store of R3 and the prompts of R4 next to the `keyring` crate;
+  - spec 041-desktop-bridge MUST gain: in R16, R3's macOS store and R4's prompts; in R8, `contentProtected: true`; in R4, the command `copy_message`; in R2, the BSL-1.0 licence for `arboard`'s crates and the `[bans] allow` list of R16.
+- R21 Locking MUST leave nothing on screen or in the view models: before the app can be seen again, every view model drops its data, the navigation goes to a single `Locked` screen, and the bitmaps and byte arrays of any QR or password are released and zeroed. On iOS the cover of R12 is removed only once the `Locked` screen is in place; on the desktop the web view reloads to its `Locked` screen on the `locked` event of spec 041-desktop-bridge R7 (spec 050-desktop-mvp).
+- R22 No client MUST log content, names, keys or ids (`docs/spec.md` §8 "Logging"): the Android release build strips `android.util.Log` calls (R8 `-assumenosideeffects`); a lint step in CI fails on `Log.`, `println`, `print(`, `NSLog`, `os_log` and `console.` in `clients/` outside test code; exception and error messages interpolate no data; and every screen-state type overrides `toString` or `description` to print no content.
+- R23 On Android and iOS, `LockController.reset()` MUST, inside the queue of R9: lock; delete the data directory; delete `storage-key.wrap` or the Keychain item; delete the platform keys (both Android aliases, the Secure Enclave key); and delete the temporary invitation files of spec 054-qr-invite. Each step ignores what is already absent, so a crash at any point leaves a state that the next `unlock` reads as "holds no data" and cleans up (R5).
 
 ## Limits
 
 | Input | Range | Out of range |
 | --- | --- | --- |
 | `K_db` | exactly 32 bytes | `KeyLost` |
-| `storage-key.wrap` | 12 + 32 + 16 bytes | `KeyLost` when the directory holds data |
+| `storage-key.wrap` | 1 + 12 + 32 + 16 bytes | `KeyLost` when the directory holds data |
 | `lock_timeout_seconds` | 0..=86 400 (spec 020-store-files) | `BadConfig` from the core |
-| Grace after a prompt | `lock_timeout_seconds`; none on the desktop | a new prompt |
-| Desktop window unfocused | `lock_timeout_seconds` | locked |
+| Grace after an in-app prompt | `lock_timeout_seconds`, in memory; none on the desktop | a new prompt |
+| A system screen the app opened (mobile) | ≤ 120 000 ms | locked |
+| Desktop window unfocused | `lock_timeout_seconds`, not counting the app's own dialogs and prompts | locked |
 | Notifications | at most one per 60 000 ms | dropped |
 | Clipboard lifetime | 60 000 ms | cleared |
 
 ## Interface
 
 ```
-clients/android/app/src/main/kotlin/org/privatechat/platform/StorageKey.kt       R1, R5
-clients/android/app/src/main/kotlin/org/privatechat/platform/LockController.kt   R6–R9
+clients/android/app/src/main/kotlin/org/privatechat/platform/StorageKey.kt       R1, R5, R7
+clients/android/app/src/main/kotlin/org/privatechat/platform/LockController.kt   R5–R9, R23
 clients/android/app/src/main/kotlin/org/privatechat/platform/Clipboard.kt        R14
 clients/android/app/src/main/kotlin/org/privatechat/platform/DeviceWarnings.kt   R15, R18
+clients/android/app/src/main/kotlin/org/privatechat/ui/LockedScreen.kt           R21
 clients/android/app/src/main/AndroidManifest.xml                                 R11, R12, R17
 clients/android/app/src/main/res/xml/data_extraction_rules.xml                   R11
 clients/android/app/src/main/res/xml/network_security_config.xml                 R17
-clients/android/dependencies.allow                                               R16
-clients/ios/App/Platform/StorageKey.swift                                        R2, R5
-clients/ios/App/Platform/LockController.swift                                    R6–R9
-clients/ios/App/Platform/PrivacyCover.swift                                      R12
-clients/ios/App/Platform/Pasteboard.swift                                        R14
-clients/ios/App/Platform/DeviceWarnings.swift                                    R15, R18
-clients/ios/App/Info.plist                                                       R17
+clients/android/dependencies.allow, exported.allow                               R16, R17
+clients/ios/Privatechat/Platform/StorageKey.swift                                R2, R5, R7
+clients/ios/Privatechat/Platform/LockController.swift                            R5–R9, R23
+clients/ios/Privatechat/Platform/PrivacyCover.swift                              R12
+clients/ios/Privatechat/Platform/Pasteboard.swift                                R14
+clients/ios/Privatechat/Platform/DeviceWarnings.swift                            R15, R18
+clients/ios/Privatechat/Views/LockedView.swift                                   R21
+clients/ios/Privatechat/Info.plist                                               R17
 clients/ios/dependencies.allow                                                   R16
 clients/desktop/src-tauri/src/key.rs                                             R3 (macOS store), R4
-clients/desktop/src-tauri/src/idle.rs                                            R8 (focus timer, logind)
+clients/desktop/src-tauri/src/idle.rs                                            R8 (focus timer, session lock)
 clients/desktop/src-tauri/src/notify.rs                                          R13
 clients/desktop/src-tauri/src/clipboard.rs                                       R14
 clients/desktop/dependencies.allow                                               R16
@@ -126,14 +148,18 @@ scripts/check_client_dependencies.sh                                            
 ```kotlin
 // org.privatechat.platform
 class StorageKey(private val context: Context) {
-    suspend fun create(activity: FragmentActivity): ByteArray   // draws, wraps, returns K_db once
-    suspend fun unwrap(activity: FragmentActivity): ByteArray   // prompts unless within the grace
-    suspend fun rewrap(activity: FragmentActivity, graceSeconds: Int)
+    suspend fun create(activity: FragmentActivity): ByteArray                 // draws, wraps, returns K_db once
+    suspend fun unwrap(activity: FragmentActivity): ByteArray                 // the prompt, unless LockController is within the grace
+    suspend fun rewrap(activity: FragmentActivity, graceSeconds: Int)         // R7's order
 }
-sealed interface UnlockResult { data object Unlocked; data object Cancelled; data object KeyLost; data object Unavailable }
-class LockController(private val key: StorageKey, private val dataDir: File) {
+sealed interface UnlockResult {
+    data object Unlocked; data object Cancelled; data object Transient; data object KeyLost; data object Unavailable
+    data class Failed(val error: FfiException) : UnlockResult
+}
+class LockController(private val key: StorageKey, private val dataDir: File) {   // holds the last prompt's time
     suspend fun unlock(activity: FragmentActivity): UnlockResult
     suspend fun lock()
+    suspend fun reset()
 }
 ```
 
@@ -143,31 +169,33 @@ final class StorageKey {
     func create() async throws -> Data
     func unwrap(context: LAContext) async throws -> Data
 }
-enum UnlockResult { case unlocked, cancelled, keyLost, unavailable }
-@CoreActor final class LockController {
+enum UnlockResult { case unlocked, cancelled, transient, keyLost, unavailable, failed(FfiError) }
+@CoreActor final class LockController {   // holds the LAContext and the last prompt's time
     func unlock() async -> UnlockResult
     func lock() async
+    func reset() async
 }
 ```
 
 ```rust
 // clients/desktop/src-tauri
 pub trait UserPresence: Send + Sync { fn verify(&self, reason: &str) -> BoxFuture<'static, Presence>; }
-pub enum Presence { Verified, Declined, Unavailable }   // Unavailable → the confirmation of 041 R9
+pub enum Presence { Verified, Declined, Absent, Unavailable }   // Absent → the confirmation of 041 R9; Unavailable → Cancelled (R4)
 ```
 
-The desktop dependencies added here (`security-framework`, `windows` with the `Security_Credentials_UI` feature, `tauri-plugin-notification`, and a clipboard crate) MUST pass spec 041-desktop-bridge R2's `deny.toml` unchanged, or amend 041 R2 in the same pull request.
+The desktop dependencies added here are `security-framework` (feature `OSX_10_15`), `windows` (feature `Security_Credentials_UI`) with `windows-future` (feature `std`), `notify-rust` and `arboard`; `zbus` and `xattr` are already in the tree. Measured on 2026-09-26: `notify-rust` passes spec 041-desktop-bridge R2's bans, and `arboard` needs the BSL-1.0 licence that R20 adds to 041 R2.
 
-**PR slices** (AGENTS 14): (a) Android `StorageKey`, `LockController` and the lifecycle (R1, R5–R10 for Android); (b) iOS the same (R2, R5–R10 for iOS); (c) desktop `UserPresence`, the macOS store and the focus timer (R3, R4, R8, R10 for the desktop); (d) backups, screens and manifests (R11, R12, R17); (e) notifications, clipboard, keyboard and warnings (R13–R15, R18, R19); (f) the dependency allowlists and the amendments (R16, R20).
+**PR slices** (AGENTS 14): (a) Android `StorageKey`, `LockController`, the lifecycle and reset (R1, R5–R10, R23 for Android); (b) iOS the same (R2, R5–R10, R23 for iOS); (c) desktop `UserPresence`, the macOS store and the focus timer (R3, R4, R8, R10 for the desktop); (d) backups, screens, the locked state and manifests (R11, R12, R17, R21); (e) notifications, clipboard, keyboard, warnings and logging (R13–R15, R18, R19, R22); (f) the dependency allowlists and the amendments (R16, R20).
 
 ## Security
 
 - `K_db` is unwrapped only after the operating system's prompt (R1–R4, R6) and lives only in Rust while unlocked; the platform code holds it for one call and zeroes it (spec 040-uniffi R9). On Android and iOS the wrapping key never leaves the secure hardware; on macOS the Keychain enforces user presence; on Windows the prompt is a check the app makes before reading an entry any process of the user can read, and on Linux there is only 041's confirmation. Both are documented residuals of `docs/spec.md` §8 ("within the session, any process of the user can read keychain and files").
-- The grace of R7 skips a prompt, never a lock: a stolen, unlocked phone opened within `lock_timeout_seconds` of the last prompt shows the app without asking. `0` removes the grace.
-- `KeyLost` never draws a new key over data (R5), so a Keystore or Secure Enclave failure costs at most a prompt, and a lost key costs the local history, never silently the files.
-- The file protection `.complete` (R11) keeps iOS files unreadable while the device is locked, even to the app.
-- Notifications carry no content or name (R13), the clipboard holds a copied message for 60 s at most and never an invitation or a password (R14), and no third-party SDK is linked (R16).
-- The warnings of R15 and R18 inform; they do not protect. A rooted device or a third-party keyboard can read what the user types.
+- The grace of R7 skips a prompt, never a lock, and counts only from the app's own prompt: a phone unlocked at its lock screen and handed over still prompts in the app outside the grace. On Android the Keystore alone would authorise the key for `t` seconds after any device unlock; the in-memory time of R7 is what makes the app prompt. `0` removes the grace.
+- The system-screen exception of R8 keeps the app unlocked behind a picker or share sheet for at most 120 s, and never with the screen off.
+- `KeyLost` never draws a new key over data (R5), so a Keystore or Secure Enclave failure costs at most a prompt, and a lost key costs the local history, never silently the files. The re-wrap of R7 keeps a valid wrap and key at every step.
+- The file protection `.complete` (R11) keeps iOS files unreadable while the device is locked, even to the app. Locking also empties the screens and view models (R21).
+- Notifications carry no content or name (R13), the clipboard holds a copied message briefly and never an invitation or a password (R14), no autofill service sees a password (R15), nothing is logged (R22), and no third-party SDK is linked (R16).
+- Documented residuals: an iOS screenshot of a secret (R12); a focused, unused desktop window (R8); the Android clipboard on API 30–32 and after the app leaves the foreground (R14); the `String` of a password field (R15); Linux screen capture (R12). The warnings of R15 and R18 inform; they do not protect: a rooted device or a third-party keyboard can read what the user types.
 - The OS pasteboard and keyboard histories, the macOS Notification Center's record of the notification time, and Windows' clipboard history (Win+V) are outside the app's reach; the help says so.
 
 ## Public API changes
@@ -176,26 +204,29 @@ None. The clients use spec 027-core-api through spec 040-uniffi and spec 041-des
 
 ## Test cases
 
-- T01 (covers R1): Kotlin `s053_t01_r01_keystore_parameters`: the `KeyGenParameterSpec` that `StorageKey` builds (read through a pure builder function) has AES 256, GCM, no padding, `BIOMETRIC_STRONG or DEVICE_CREDENTIAL` with the grace, `invalidatedByBiometricEnrollment = false`, `unlockedDeviceRequired = true`, and StrongBox when the feature is present; `storage-key.wrap` is 60 bytes and written by rename.
+- T01 (covers R1): Kotlin `s053_t01_r01_keystore_parameters`: the `KeyGenParameterSpec` that `StorageKey` builds (read through a pure builder function) has AES 256, GCM, no padding, `userAuthenticationRequired = true`, `BIOMETRIC_STRONG or DEVICE_CREDENTIAL` with the grace, `invalidatedByBiometricEnrollment = false`, `unlockedDeviceRequired` only on API 35 and later, and StrongBox when the feature is present; `storage-key.wrap` is 61 bytes, starts with the generation byte and is written by rename.
 - T02 (covers R2): Swift `s053_t02_r02_secureEnclaveAttributes`: the key attributes and the access control built for the Secure Enclave key, and the Keychain item's attributes, are exactly those of R2 (over an in-memory fake of the Keychain).
-- T03 (covers R3): `s053_t03_r03_macos_access_control`: the item that `key.rs` writes on macOS carries `USER_PRESENCE` and `WhenUnlockedThisDeviceOnly` (a `cfg(test)` builder of the item's attributes).
-- T04 (covers R4): `s053_t04_r04_user_presence`: with a fake `UserPresence`, `Declined` → `Cancelled` and no keychain read; `Unavailable` → the confirmation of 041 R9; `Verified` → the entry read; on macOS and Windows the first `unlock` of the process prompts.
-- T05 (covers R5): Kotlin `s053_t05_r05_unlock_table` and Swift `s053_t05_r05UnlockTable`, over fakes: each row of R5 gives its result, and no path after a transient error or a cancelled prompt creates a key.
-- T06 (covers R6): Kotlin `s053_t06_r06_prompt_is_the_lock` and Swift `s053_t06_r06PromptIsTheLock`: `unlock` never opens the `Core` without a successful prompt outside the grace; no screen offers a PIN.
-- T07 (covers R7): Kotlin `s053_t07_r07_grace` and Swift `s053_t07_r07Grace`, with a fake clock: a return 59 s after the prompt with a grace of 60 opens without a prompt; 61 s prompts; a grace of 0 always prompts; changing the grace on Android re-wraps and keeps the old wrap until the new one is written.
-- T08 (covers R8): Kotlin `s053_t08_r08_lock_triggers`, Swift `s053_t08_r08LockTriggers` and `s053_t08_r08_desktop_idle`: each listed event closes the `Core` or runs the lock routine; on the desktop, a window unfocused for the timeout locks, and refocused before it does not.
-- T09 (covers R9): Kotlin `s053_t09_r09_lock_controller_order` and Swift `s053_t09_r09LockControllerOrder`: a `lock` and an `unlock` from two coroutines or tasks run in call order, and the `open` follows the `close`; a lock during an open prompt ends locked.
-- T10 (covers R10): Kotlin `s053_t10_r10_lock_now`, Swift `s053_t10_r10LockNow`, `s053_t10_r10_desktop_lock_now`: the shortcut, the quick action and the menu item lock.
-- T11 (covers R11): Kotlin `s053_t11_r11_backup_rules` (the manifest and `data_extraction_rules.xml` parsed), Swift `s053_t11_r11ExcludedAndProtected` (the directory's resource values and protection).
-- T12 (covers R12): Kotlin `s053_t12_r12_flag_secure`; Swift `s053_t12_r12CoverOnResignAndCapture`.
-- T13 (covers R13): `s053_t13_r13_notifications`: a `Message` while unfocused raises one notification with exactly the fixed title and body; a second within 60 000 ms none; none while focused or locked; Kotlin `s053_t13_r13_no_notification_permission` and Swift `s053_t13_r13NoNotificationRequest`.
-- T14 (covers R14): Kotlin `s053_t14_r14_clipboard`, Swift `s053_t14_r14Pasteboard`, `s053_t14_r14_desktop_clipboard`: a copied message is sensitive and cleared after 60 000 ms (fake clock); no action copies an invitation or a password.
-- T15 (covers R15): Kotlin `s053_t15_r15_password_fields` and Swift `s053_t15_r15KeyboardRules`.
-- T16 (covers R16): CI step `s053_t16_r16_dependency_allowlists`: a dependency added to each client and not listed fails the step.
-- T17 (covers R17): Kotlin `s053_t17_r17_manifest` (release manifest and network security config parsed) and Swift `s053_t17_r17InfoPlist`.
-- T18 (covers R18): Kotlin `s053_t18_r18_root_warning` and Swift `s053_t18_r18JailbreakWarning`: shown once over fakes, never again after dismissal.
-- T19 (covers R19): Kotlin `s053_t19_r19_strings`, Swift `s053_t19_r19Strings`, `s053_t19_r19_desktop_strings`: every fixed text exists in each UI language.
+- T03 (covers R3): `s053_t03_r03_macos_access_control`: the item that `key.rs` writes on macOS carries `USER_PRESENCE` and `WhenUnlockedThisDeviceOnly` (a `cfg(test)` builder of the item's attributes); −128 and `errSecAuthFailed` map to `Cancelled`, `errSecInteractionNotAllowed` to `KeychainUnavailable`, −34018 to the refusal in a release build; the release CI job fails with `dev-login-keychain` enabled.
+- T04 (covers R4): `s053_t04_r04_user_presence`: with a fake `UserPresence`, `Declined` → `Cancelled` and no keychain read; `Absent` with `presence.none` → the confirmation of 041 R9; `Unavailable`, or `Absent` without `presence.none` → `Cancelled`; `Verified` → the entry read; on macOS and Windows the first `unlock` of the process prompts.
+- T05 (covers R5): Kotlin `s053_t05_r05_unlock_table` and Swift `s053_t05_r05_unlockTable`, over fakes: each row of R5 gives its result, including no device credential → `Unavailable` with nothing created, the iOS not-found while protected data is unavailable → `Transient`, and a failing `Core.open` → `Failed`; no path after a transient error or a cancelled prompt creates a key.
+- T06 (covers R6): Kotlin `s053_t06_r06_prompt_is_the_lock` and Swift `s053_t06_r06_promptIsTheLock`: `unlock` never opens the `Core` without a successful prompt outside the grace; no screen offers a PIN.
+- T07 (covers R7): Kotlin `s053_t07_r07_grace` and Swift `s053_t07_r07_grace`, with a fake clock: an `unlock` 59 s after the in-app prompt with a grace of 60 opens without a prompt; 61 s prompts; a device unlocked 10 s ago with no in-app prompt in this process prompts; a grace of 0 always prompts; after "Lock now" the next `unlock` prompts. Kotlin `s053_t07_r07_rewrap_order`: a crash after each step of the re-wrap leaves a wrap whose generation's alias decrypts it; a cancelled second prompt leaves the old wrap and the old setting; a key whose `t` differs from the setting is re-wrapped at the next `unlock`; the old alias is deleted only after an `unlock` under the new one.
+- T08 (covers R8): Kotlin `s053_t08_r08_lock_triggers`, Swift `s053_t08_r08_lockTriggers` and `s053_t08_r08_desktop_idle`: each listed event closes the `Core` or runs the lock routine; on Android, `ON_STOP` while a document picker the app started is in front does not lock before 120 000 ms and locks after, and screen-off locks at once; on the desktop, a window unfocused for the timeout locks, refocused before it does not, a file dialog open for longer than the timeout does not lock, and a logind `LockedHint` change locks at once.
+- T09 (covers R9): Kotlin `s053_t09_r09_lock_controller_order` and Swift `s053_t09_r09_lockControllerOrder`: a `lock` and an `unlock` from two coroutines or tasks run in call order, and the `open` follows the `close`; a lock during an open prompt ends locked.
+- T10 (covers R10): Kotlin `s053_t10_r10_lock_now`, Swift `s053_t10_r10_lockNow`, `s053_t10_r10_desktop_lock_now`: the in-app action and the menu item lock and end the grace; no launcher shortcut or quick action is declared.
+- T11 (covers R11): Kotlin `s053_t11_r11_backup_rules` (the manifest and `data_extraction_rules.xml` parsed), Swift `s053_t11_r11_excludedAndProtected` (the directory's resource values and protection).
+- T12 (covers R12): Kotlin `s053_t12_r12_flag_secure`: the activity and a `Dialog` and a `ModalBottomSheet` of the app carry the secure flag; Swift `s053_t12_r12_coverAndScreenshot`: the cover on resign and on an active capture state, and a screenshot notification hides a shown secret; `s053_t12_r12_desktop_content_protected`: `tauri.conf.json` sets `contentProtected`.
+- T13 (covers R13): `s053_t13_r13_notifications`: a `Message` while unfocused raises one notification with exactly the fixed title and body; a second within 60 000 ms none; none from a muted peer, none while focused or locked; Kotlin `s053_t13_r13_no_notification_permission` and Swift `s053_t13_r13_noNotificationRequest`.
+- T14 (covers R14): Kotlin `s053_t14_r14_clipboard`, Swift `s053_t14_r14_pasteboard`, `s053_t14_r14_desktop_clipboard`: a copied message is sensitive and has the fixed label; a lock within 60 000 ms of a copy clears it; on the desktop the clear still runs after a `lock` (fake clock); no action copies an invitation or a password.
+- T15 (covers R15): Kotlin `s053_t15_r15_text_entry`: the password fields and the composer carry `IME_FLAG_NO_PERSONALIZED_LEARNING` and auto-correction off, the root view excludes autofill while a password field is shown, and the field is empty after submit; Swift `s053_t15_r15_keyboardRules`: `textContentType` nil, the composer's flags, and custom keyboards refused.
+- T16 (covers R16): CI step `s053_t16_r16_dependency_allowlists`: a dependency added to each client and not listed fails the step and prints the line to add.
+- T17 (covers R17): Kotlin `s053_t17_r17_manifest` (the merged release manifest and the network security config parsed: exported components only those allowed) and Swift `s053_t17_r17_infoPlist` (exactly the two usage descriptions).
+- T18 (covers R18): Kotlin `s053_t18_r18_root_warning` and Swift `s053_t18_r18_jailbreakWarning`: shown once over fakes, never again after dismissal.
+- T19 (covers R19): Kotlin `s053_t19_r19_strings`, Swift `s053_t19_r19_strings`, `s053_t19_r19_desktop_strings`: every fixed text exists in each UI language.
 - T20 (covers R20): `check_s053_t20_r20_amendments` in `scripts/doc_lint.py`, once this spec is `accepted`.
+- T21 (covers R21): Kotlin `s053_t21_r21_locked_state` and Swift `s053_t21_r21_lockedState`: after a lock, the UI tree holds no message, name, QR or word, and the view models are empty.
+- T22 (covers R22): CI step `s053_t22_r22_logging_lint`: a fixture file with `Log.d` in `clients/android/` and one with `print(` in `clients/ios/` fail the step; the release build's bytecode has no `android.util.Log` call.
+- T23 (covers R23): Kotlin `s053_t23_r23_reset` and Swift `s053_t23_r23_reset`: after `reset()` the next `unlock` creates a new key and an empty store; a crash after each step leaves a state that the next `unlock` cleans up.
 
 ## Vectors
 
@@ -204,25 +235,29 @@ None. The core's behaviour is unchanged; the platform measures are checked by th
 ## Acceptance criterion
 
 The tests of each platform green in the CI jobs of specs 050, 051 and 052, and the dependency allowlists green. Non-automatable, on real hardware:
-- on an Android phone with StrongBox and on one without, the key is created, the prompt unlocks, a biometric enrolment change keeps the data, and removing the screen lock gives `KeyLost`;
-- on an iPhone, the prompt unlocks, a restore from backup onto another device gives `KeyLost`, and the data directory is unreadable while the device is locked;
-- on macOS, reading the entry shows the Touch ID or password prompt; on Windows, Windows Hello is asked at every unlock and the fallback applies on a machine without it;
-- screenshots and screen recording show nothing of the app on Android, and the cover on iOS;
+- on an Android phone with StrongBox and on one without, the key is created, the prompt unlocks, a biometric enrolment change keeps the data, removing the screen lock gives `KeyLost`, and the device-credential screen of `BiometricPrompt` does not lock the app;
+- on an iPhone, the prompt unlocks, a restore from backup onto another device starts an empty app, the data directory is unreadable while the device is locked, the file importer and exporter keep the scene active or fall within R8's exception, and a screenshot of a shown secret hides it and warns;
+- on macOS, reading the entry shows the Touch ID or password prompt, and an unsigned release build refuses to start; on Windows, Windows Hello is asked at every unlock, and the fallback applies only on a machine where it was never set up;
+- screenshots and screen recording show nothing of the app on Android, the cover on iOS, and nothing of the window on Windows;
+- on each desktop system, locking the session locks the app;
 - the desktop notification says only "New messages".
 
 ## Out of scope
 
 - The screens that show the lock, the prompts' placement and the `KeyLost` flow's layout (specs 050, 051, 052).
-- Scanning QR codes and the camera permission's use (spec 054-qr-invite).
+- Scanning QR codes, the camera permission's use, and the warning a screenshot of a secret shows (spec 054-qr-invite).
 - Reproducible builds, signing and store publication (spec 060-reproducible-builds).
 - An app password for a desktop with no keychain (`docs/spec.md` §8): not in v1.
 
 ## Open questions
 
-- 053-R3: a data-protection Keychain item needs the `keychain-access-groups` entitlement, so a development build must be signed with a development certificate; whether an ad-hoc build can use it is to be measured before slice (c).
-- 053-R4: `RequestVerificationAsync` from a desktop process takes no window handle, so its prompt may open behind the main window; the handle-taking variant is a COM interop call that needs `unsafe`, which spec 041-desktop-bridge R1 forbids. To be measured before slice (c); the fallback is to accept the placement.
+- 053-R4: `RequestVerificationAsync` from a desktop process takes no window handle, so its prompt may open behind the main window; the handle-taking variant, `IUserConsentVerifierInterop::RequestVerificationForWindowAsync`, is a `pub unsafe fn` in `windows` 0.61.3 (measured on 2026-09-26), which spec 041-desktop-bridge R1 forbids. To be measured on Windows before slice (c); the fallback is to accept the placement.
+- 053-R8: whether the macOS session-lock notification (`com.apple.screenIsLocked`) and the Windows session-lock notification (WTS) are reachable from the desktop crate without `unsafe`. To be measured before slice (c); until then the focus timer alone applies there.
+- 053-R14: whether `clearPrimaryClip` works while the app is not focused on Android 10 and later. To be measured before slice (e); otherwise the clearing happens at the next foreground only.
+- 053-R17: whether spec 052-ios-mvp's socket for a `ws://` onion route through a loopback proxy is subject to App Transport Security. To be measured before 052; either 052 uses a Network.framework connection, which is not, or R17 allows an ATS exception for the domain `onion`, as Android's R17 does.
 
 ## History
 
 - 2026-09-26 draft
 - 2026-09-26 open question 053-R1 decided with the human reviewer: `minSdk 30` (`docs/audit-log.md`, "Phase 5 drafts", Q5)
+- 2026-09-26 revised after audit M round 1 (`docs/audit-log.md`): `setUserAuthenticationRequired(true)`; the grace counted from the app's own prompt, in memory, with one definition on both phones; a crash-safe Android re-wrap with a generation byte; the 120 s system-screen exception (M-Q1) and the desktop dialog rule; session-lock signals; the iOS screenshot residual (M-Q2), `sceneCaptureState`, Compose dialogs and the desktop's `contentProtected`; the locked state, logging and mobile reset (R21–R23); no-credential and `Failed` results; the macOS store's feature, error mapping and unsigned builds (053-R3 closed by measurement); the Windows fallback narrowed; notifications through `notify-rust`, muted peers excluded; implementable clipboard and keyboard rules with autofill excluded; no launcher shortcuts; the dependency allowlist by names; the merged manifest; `NSFaceIDUsageDescription`; the amendment list completed; test names fixed

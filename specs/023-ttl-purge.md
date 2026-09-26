@@ -4,7 +4,7 @@ Status: draft
 Phase: 2
 Related ADRs: 0009, 0014, 0021, 0029
 Depends on: 020-store-files, 021-channel-session, 022-peers-tofu
-Blocks: 027-core-api, 028-session-sans-io
+Blocks: 027-core-api, 028-session-sans-io, 055-verify-ui
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

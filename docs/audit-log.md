@@ -2,6 +2,47 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit M
+
+**2026-09-26 — Audit M, review of the phase 5 draft specs 053, 054 and 055 before human review, in four independent passes (M-A: coherence and SDD conformance; M-B: adversarial security and privacy; M-C: technical viability, measured with ZXing 3.5.4, the `qrcode` crate, Core Image, Vision, the macOS Keychain, `security-framework`, the `windows` crate and `cargo deny`; M-D: end-to-end scenarios), in rounds.** The human reviewer decided four questions with the recommended option:
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| M-Q1 | On Android, a system screen the app opens itself (file picker, share sheet, camera settings) stops the activity, so the lock on `ON_STOP` broke export, file import and sharing (M-A3, M-B8, M-C8, M-D1) | A bounded exception: while a system screen the app opened is in front, the app stays unlocked for at most 120 s; screen-off always locks; secrets are produced only after the return | Spec 053 R8; spec 054 R9, R10, R13 |
+| M-Q2 | iOS cannot block a screenshot of the invitation QR or the seven words; it only reports one afterwards (M-B1, M-C13) | A documented residual; on `userDidTakeScreenshotNotification` the app hides the QR or words at once and warns that a screenshot is in Photos and, if it left the phone, to create a new channel | Spec 053 R12; spec 054 R7, R10, Security |
+| M-Q3 | No client ever produces an invitation as text, so a desktop paste has no legitimate source but a third-party decoder or a photo, §12's first risk (M-B12) | The desktop imports by file only; paste is removed on every platform | Spec 054 R11, R13; decision Q6 narrowed |
+| M-Q4 | An import joined and connected at once, so a planted QR led straight to an attacker's server, possibly under a look-alike name (M-B4) | A confirmation screen before an import commits: the suggested name (editable), the server host, the lifetime, a mark for a server new to this device, a warning for a name close to an existing channel's; a frame with more than one QR delivers nothing | Spec 054 R12, R15 |
+
+Round 1 (about 90 findings, 9 of them blockers, consolidated):
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| M1 | The Android key never called `setUserAuthenticationRequired(true)`, so `K_db` unwrapped with no prompt (M-C1) | Blocker | Added (spec 053 R1, T01; §8 at acceptance) |
+| M2 | Android read QRs through `BYTE_SEGMENTS`, and the desktop and iOS renderers mix segment kinds: about half the desktop invitations and a fifth of verification QRs could not be scanned (measured, M-C2, M-D2, M-A2) | Blocker | The scanner takes `Result.text`, printable ASCII, ≤ 700 characters; the desktop renders one byte segment (spec 041 R6 at acceptance); every renderer decoded by both readers (spec 054 R5, R12, T05, T12) |
+| M3 | The lock on `ON_STOP` broke export, file import and sharing on Android, and the app's own dialogs locked the desktop (M-A3, M-A5, M-B8, M-C8, M-D1, M-D4) | Blocker | M-Q1's bounded exception; the export order; the share file deleted at the next unlock or start; dialogs and OS prompts do not count as unfocused (spec 053 R8; 054 R8, R9, R13) |
+| M4 | A crash or cancel during an Android re-wrap could lose every file; the prompt count and the order with the setting were wrong (M-C7, M-D3, M-B10, M-A17) | Blocker | A generation byte and two aliases, a crash-safe order, the setting saved last, a check at every unlock (spec 053 R1, R7, T07, Limits) |
+| M5 | iOS screenshots were said to be blocked (M-B1, M-C13) | Blocker | M-Q2 (spec 053 R12; 054 R7, R10, Security) |
+| M6 | The grace counted from any device unlock on Android and from backgrounding on iOS (M-B2, M-C6, M-D8, M-A11) | Medium | An in-memory timestamp of the in-app prompt, one definition; `setUnlockedDeviceRequired` only from API 35 (spec 053 R1, R7, T07) |
+| M7 | Locking left decrypted content in view models, visible behind the next prompt (M-B3) | Medium | A single `Locked` state that drops every view model's data first (spec 053 R21, T21) |
+| M8 | Imports joined at once (M-B4); verification over the attacker's route (M-B5) | Medium | M-Q4's confirmation with a core preview (spec 054 R15, R17; 027 and 040 at acceptance); the in-person question and texts (spec 055 R9, R18, R19) |
+| M9 | Compose dialogs escape `FLAG_SECURE`; the desktop can protect its window from capture (M-B6, M-B7) | Medium | Secrets on full screens, dialogs `SecureOn`; `contentProtected` (spec 053 R12; 054 R7, R10; 041 R8 at acceptance) |
+| M10 | Autofill, personalised learning and Compose password fields (M-B9, M-B21, M-C9) | Medium | Excluded; `InterceptPlatformTextInput`; the `String` a residual (spec 053 R15; 054 R14) |
+| M11 | The clipboard rules could not run (Android background reads, the lock aborting the desktop timer, `EXTRA_IS_SENSITIVE` from API 33; no desktop command) (M-B11, M-D18, M-A6, M-A7, M-C10, M-C18) | Medium | A detached desktop timer through `copy_message`; Android cleared at the next foreground or lock; `arboard`'s BSL-1.0 in spec 041 R2 at acceptance (spec 053 R14) |
+| M12 | macOS data-protection items need a team-signed build (measured −34018); `security-framework` needs `OSX_10_15`; a cancel mapped to `KeychainUnavailable` (M-C3, M-C4, M-B23, M-A13) | Medium | Release builds refuse to start on −34018, debug builds may fall back behind a flag; `Cancelled`; 053-R3 closed (spec 053 R3, T03) |
+| M13 | Notifications: `tauri-plugin-notification` brings `rand`; muted peers; the timeout's effect (M-C5, M-D11) | Medium | `notify-rust`; muted excluded; stated (spec 053 R13) |
+| M14 | Session-lock signals on Linux; Windows Hello fallback reachable by "busy" (M-C11, M-D12, M-B19) | Medium | `LockedHint` and `Lock`; fallback only when Hello is absent or unconfigured; macOS and Windows signals an open question (spec 053 R4, R8) |
+| M15 | No device credential, transient iOS failures read as `KeyLost`, mobile reset undefined, the KeyLost text (M-D6, M-C12, M-B25, M-D13, M-D15) | Medium | `Unavailable`, `Transient`, `Failed`; `reset()` with a convergent order; the text names old keys (spec 053 R5, R19, R23) |
+| M16 | Platform logging had no rule (M-B18) | Low | Spec 053 R22 |
+| M17 | Retiring unknown keys, `LabelInUse` without the §7 retire dialog, the stranger dead end (M-D9, M-D10, M-A8, M-B24) | Medium | Retire on every record; the third action; an unlabelled retired peer's text (spec 055 R7, R12, R15, R16, R18, R19) |
+| M18 | Retire as social engineering; names imitating marks (M-B13, M-B14) | Low | The impostor warning; marks outside the name run (spec 055 R2, R15) |
+| M19 | The verify flow's error mapping and label; the presentation inputs; the scanner's purpose (M-D14, M-D20, M-A20, M-D21, M-A9) | Medium | Scan first, shape check, label after; `TrustContext`; `purpose` (spec 054 R12; 055 R1, R10, R19) |
+| M20 | Desktop paste had no legitimate source (M-B12) | Medium | M-Q3 (spec 054 R11, R13) |
+| M21 | The words vs the call; the words and share sheets on background; payloads in verify mode not zeroed (M-D5, M-B15, M-B16, M-B22) | Low | Words first with an "I have told them" step; dropped on background; share-sheet exclusions; every payload zeroed (spec 054 R8–R10, R12) |
+| M22 | Dependency allowlist and manifest checks underspecified (M-B17, M-D19, M-C15) | Low | Names only, `releaseRuntimeClasspath`, cargo-deny `[bans] allow`, Xcode references, the merged manifest (spec 053 R16, R17) |
+| M23 | Restore gives an empty app, not `KeyLost`; "Lock now" shortcuts useless (M-D17, M-C17, M-D7, M-C14) | Low | Corrected; shortcuts dropped (spec 053 R7, R10, R11) |
+| M24 | Interface, paths, names, Depends and Blocks, texts, amendment lists (M-A10, M-A12, M-A14–M-A16, M-A18, M-A19, M-A21–M-A24, M-C16, M-C19, M-C20, M-D16, M-D23) | Low | Aligned; open questions 053-R8, 053-R14 and 053-R17 to be measured (specs 053–055; 021 and 023 Blocks) |
+| M25 | doc_lint read "257-byte" as a spec id in the pushed commit (M-A1) | Blocker | Fixed in 0883c6e |
+
 ## Phase 5 drafts
 
 **2026-09-26 — Decisions taken before drafting the phase 5 specs.** Not an audit: the human reviewer decided Q1–Q4 with the recommended option before the specs were written, and Q5–Q7 once the drafts of 053–055 raised them. Drafting choices follow as P rows.

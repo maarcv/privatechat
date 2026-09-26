@@ -4,7 +4,7 @@ Status: draft
 Phase: 2
 Related ADRs: 0013, 0016, 0019, 0020, 0027, 0029, 0030, 0033, 0034, 0037
 Depends on: 012-message-keys, 013-wire-message, 016-fuzz-harness, 020-store-files
-Blocks: 022-peers-tofu, 023-ttl-purge, 024-key-retired, 025-identity-regen, 026-peer-limits, 027-core-api, 028-session-sans-io
+Blocks: 022-peers-tofu, 023-ttl-purge, 024-key-retired, 025-identity-regen, 026-peer-limits, 027-core-api, 028-session-sans-io, 055-verify-ui
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
