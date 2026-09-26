@@ -51,3 +51,4 @@ One decision per file, template in `TEMPLATE.md`. The documentation lint (spec 0
 | 0036 | Compare names with the unicode-rs normalisation and confusable tables | 2026-09-25 | accepted |
 | 0037 | Expose one `Device` handle at the core boundary | 2026-09-25 | accepted |
 | 0038 | Allow a plain `ws://` server URL for `.onion` hosts only | 2026-09-25 | accepted |
+| 0039 | Open the desktop client's TLS connections with rustls, in a workspace of its own | 2026-09-26 | accepted |

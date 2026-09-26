@@ -2,6 +2,22 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Phase 4 drafts
+
+**2026-09-26 — Decisions taken while drafting the phase 4 specs 040 and 041.** Not an audit: these questions came up while writing the bindings specs. The human reviewer decided Q1–Q3 with the recommended option before the specs were written. P1–P6 are drafting choices, recorded here for the review. The specs themselves stay `draft` until their own review.
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| Q1 | §10 asks Kotlin and Swift to "pass the same vectors as Rust", but most vectors test crate-internal functions that no platform call reaches, and the cryptography exists once, in Rust | Kotlin and Swift drive the real `Device` with every vector that reaches it (011 imports, 014 fingerprints, 028 `hello`). There is no second test-only library that re-exports internal functions. The exit criterion is reworded | Spec 040 R13, R14; specs 014 and 028 vectors amended; §10 |
+| Q2 | `deny.toml` bans `rustls`, the macOS stack of `native-tls` has no TLS 1.3, which the server requires, and a WebSocket opened by the web view cannot use a SOCKS5 proxy | `clients/desktop/src-tauri/` is a workspace of its own with its own `deny.toml`, and uses `rustls` with `ring`, TLS 1.3 only and no resumption | ADR 0039; spec 041 R1–R3, R12; AGENTS 2 and §9 when 041 is accepted |
+| Q3 | Whether spec 041 holds only the commands, or the whole Rust side of the Tauri process | The whole Rust side: commands, events, the socket host (TLS, SOCKS5, backoff, tick) and the keychain; spec 050 keeps the Svelte UI alone | Spec 041 |
+| P1 | uniffi's `cli` feature, needed to generate the Kotlin and Swift sources, brings in `log` | The generator is a separate crate, `privatechat-uniffi-bindgen`, so that the shipped library links no logging crate (measured with uniffi 0.32.2) | Spec 040 R1 |
+| P2 | ADR 0037 has the bindings make every `Device` call off the UI thread, and uniffi's generated methods are synchronous | A thin hand-written `Core` in Kotlin and Swift runs every call on one thread in call order and zeroes the byte arrays it was given. The apps may use only `Core`, which a script checks | Spec 040 R9, R10 |
+| P3 | Who draws the 32 bytes of `K_db`: the desktop has no randomness source allowed outside libsodium | The core gains `generate_storage_key(out: &mut [u8; 32])`, used on all three platforms | Spec 040 R8; spec 027 Interface |
+| P4 | JSON carries no 64-bit integer to TypeScript, and a server-supplied time can be any `u64` | Ids cross as hex strings, and `u64` values as `number` saturated at 2^53 − 1 | Spec 041 R5 |
+| P5 | How the `.chatcfg` password and file cross the desktop IPC | The password as a raw IPC body, never JSON; the file read and written by the Rust side through the native dialog, so it never enters the web view | Spec 041 R6 |
+| P6 | How phase 4 can open a channel against a real server with no test certificate trusted by the operating system | The exit test uses the onion path: a `ws://` onion URL through a test SOCKS5 proxy on loopback to the server's onion listener, which exercises the proxy code with no TLS hook in the product. TLS is tested separately against a local server with a `cfg(test)` root | Spec 041 R18, T12 |
+
 ## Audit K
 
 **2026-09-25 — Audit K, review of the phase 3 draft specs 030–035 and ADR 0038 before human review, in four independent passes (K-A: coherence and SDD conformance; K-B: adversarial security and privacy; K-C: technical viability and simplicity; K-D: end-to-end scenarios), repeated in rounds until they bring nothing new.** Round 1:

@@ -1,6 +1,6 @@
 # Private E2E chat — Specification and plan (SDD)
 
-Version: mvp · Post-audit I revision · Updated: 2026-09-25 · Marc Vilardebó (audits in `docs/audit-log.md`)
+Version: mvp · Post-audit I revision · Updated: 2026-09-26 · Marc Vilardebó (audits in `docs/audit-log.md`)
 
 This file, on the default branch (`mvp` until the first release), is the canonical source of the specification (see §11 "Governance"). Read copy, may lag behind: https://claude.ai/code/artifact/1527bf13-79e8-485a-908d-a515cbd062a4
 
@@ -104,6 +104,7 @@ Each row corresponds to the file `docs/adr/NNNN-*.md`; titles are copied verbati
 | 0036 | Compare names with the unicode-rs normalisation and confusable tables | accepted | The impersonation check needs Unicode data that hand-written tables would get wrong |
 | 0037 | Expose one `Device` handle at the core boundary | accepted | The clients' bindings cannot move or borrow objects; one handle called by id can |
 | 0038 | Allow a plain `ws://` server URL for `.onion` hosts only | accepted | An onion service already encrypts and authenticates; a `.onion` certificate is out of reach for most operators |
+| 0039 | Open the desktop client's TLS connections with rustls, in a workspace of its own | accepted | The server accepts TLS 1.3 only, the OS stack on macOS lacks it, and the web view cannot use a SOCKS5 proxy |
 
 ## 4. Cryptographic model
 
@@ -674,4 +675,4 @@ None of the open decisions blocks phases 0–2. Those that would change the wire
 
 ## 13. Audit log
 
-Audits A (2026-09-19), B, C and D (2026-09-20), E, F, G, H and I (2026-09-24), the decisions taken while drafting phase 2, audit J, the decisions taken while drafting phase 3 and audit K (2026-09-25): findings and applied changes are in `docs/audit-log.md`. Every PR that changes §3–§6 adds a row there.
+Audits A (2026-09-19), B, C and D (2026-09-20), E, F, G, H and I (2026-09-24), the decisions taken while drafting phase 2, audit J, the decisions taken while drafting phase 3 and audit K (2026-09-25), and the decisions taken while drafting phase 4 (2026-09-26): findings and applied changes are in `docs/audit-log.md`. Every PR that changes §3–§6 adds a row there.

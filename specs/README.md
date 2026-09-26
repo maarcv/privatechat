@@ -35,5 +35,7 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 033 | 033-rate-limit-quotas | 3 | draft |
 | 034 | 034-docker | 3 | draft |
 | 035 | 035-server-ops | 3 | draft |
+| 040 | 040-uniffi | 4 | draft |
+| 041 | 041-desktop-bridge | 4 | draft |
 
 Phase 0 was bootstrapped with implementation and review in parallel; from spec 010 on, acceptance precedes code.

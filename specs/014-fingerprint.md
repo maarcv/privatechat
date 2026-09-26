@@ -121,7 +121,7 @@ The word list is the one of spec 011-config-format, `crates/core/src/proto/wordl
 | `qr_wrong_prefix`, `qr_wrong_length`, `qr_standard_base64`, `qr_padding` | negative | derived | each → `BadPayload` |
 | `qr_other_channel` | negative | derived | → `WrongChannel` |
 
-All of these are `derived`: each value follows from the formulas of `docs/spec.md` §4 and the BLAKE2b of spec 010-primitives-wrapper, so the reference script writes every one of them with the Python standard library. The word indices and the words are JSON arrays (`specs/vectors/README.md`). No vector tests non-zero final bits: 48 bytes encode to exactly 64 characters with no bits left over, so every accepted 64-character body is canonical by construction.
+All of these are `derived`: each value follows from the formulas of `docs/spec.md` §4 and the BLAKE2b of spec 010-primitives-wrapper, so the reference script writes every one of them with the Python standard library. The word indices and the words are JSON arrays (`specs/vectors/README.md`). Every vector that carries a `channel_id`, except `fingerprint_other_channel` and `qr_other_channel`, uses the `channel_id` of 011 `config_reference`; `qr_reference` carries the `pk_u` of `fingerprint_reference`, and `words_reference` holds that fingerprint's words, so that Kotlin and Swift reach them through `Device` (spec 040-uniffi R13, R14). No vector tests non-zero final bits: 48 bytes encode to exactly 64 characters with no bits left over, so every accepted 64-character body is canonical by construction.
 
 ## Acceptance criterion
 
@@ -147,3 +147,4 @@ None. Closed after audit F: the list lives in `core`, owned by spec 011-config-f
 - 2026-09-24 revised after audit H (`docs/audit-log.md`): QR round-trip as a proptest, `presentation` as a requirement, prefix compared with `ct_eq`, the impossible final-bits case dropped, the dispatch rule cited as 015 R10; round 4: fixed-size constants for `ct_eq`, `words` returns `Result` under the lints; round 8: the script also checks the words
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): `Fingerprint` holds `Vec<String>` fields with lengths guaranteed by `presentation`, one type inside `core` and across uniffi; the reference script produces the vectors and the Rust tests reproduce them, `s014_vectors_dispatch` stated in the Interface; the list-and-codec reuse and the "no input of four words" clause moved to the Interface and their source-scan tests dropped; R6–R9 renumbered R6–R8, T06–T09 renumbered T06–T08
 - 2026-09-25 revised after audit J round 12 (`docs/audit-log.md`)
+- 2026-09-26 amended by spec 040-uniffi R14 while drafting phase 4: the vectors use the `channel_id` of 011 `config_reference`, so that the bindings reach them through `Device`

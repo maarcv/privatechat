@@ -100,6 +100,7 @@ pub struct ConnectionPlan { pub id: u64, pub route: Route, pub channels: Vec<[u8
 pub struct SettingsView { pub default_server_url: String, pub lock_timeout_seconds: u32, pub socks5_proxy: Option<String> }
 
 pub fn init() -> Result<(), Error>;
+pub fn generate_storage_key(out: &mut [u8; 32]) -> Result<(), Error>;   // added by spec 040-uniffi R8: randombytes_buf into the caller's array
 pub fn probe_hello(frame: &[u8]) -> Result<bool, Error>;
 pub const DEFAULT_SERVER_URL: &str;
 
@@ -258,3 +259,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-09-25 open questions decided with the human reviewer, recommendations accepted (`docs/audit-log.md`)
 - 2026-09-25 amended by ADR 0038 while drafting phase 3: the plan groups by scheme too, and `Route` carries `tls` (R10, R12, T10)
 - 2026-09-25 amended after audit K round 1 (`docs/audit-log.md`): a `ws://` channel is planned only behind a loopback proxy (R10, T10); the `pub` items of `server` and the `relay` items (R16)
+- 2026-09-26 amended by spec 040-uniffi R8 while drafting phase 4: `generate_storage_key` added to the Interface
