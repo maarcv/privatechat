@@ -164,6 +164,34 @@ Round 5 (no question for the reviewer):
 | L111 | Leftover web view directories deleted without the instance lock (L-A4); a non-regular file had three answers (L-A5); no accessor for the QR image (L-A6) | Low | Deleted only under `instance.lock`; `FileIo` via `symlink_metadata`; `Host::qr_image` (spec 041 R6, R8, Interface, Limits) |
 | L112 | The macOS Esc behaviour could not be measured; the type is `rfd::MessageButtons`; §12, not §9, lists the UI languages (L-C4, L-A cosmetic) | Low | Manual check in the acceptance criterion; names and references fixed; AGENTS 11 amended at acceptance (spec 041 R3, R9; 040 Limits) |
 
+Round 6. The confirmation rules added in rounds 3–5 had started to trap the honest user and did not hold on macOS; this round simplifies them (no question for the reviewer):
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| L113 | The exit test and the host tests could not pass the input protection and the focus rule, and the host had no way to learn about focus (L-A1) | Blocker | `Dialogs` is async and reports focus; delays on the `tokio` clock; the exit test's dialogs answer after 1 000 ms (spec 041 R9, R18, Interface) |
+| L114 | A parentless macOS confirmation is drawn by another process: it outlives the app and can keep the slot taken for good (measured, L-C1, L-B4, L-D4) | Medium | The confirmation is parented to the main window on macOS and Windows (a sheet, measured to keep the event loop running); Linux keeps a blocking dialog, and its hiding is a residual (spec 041 R9, Security, Acceptance criterion) |
+| L115 | A too-fast accept counted as a decline and started 60 s of `Suppressed`; Return declines the default-safe Unlock and locked the user out (L-D1, L-B2) | Medium | A too-fast accept shows the dialog again with no penalty; `Unlock` is never suppressed; the quiet period is 1 000 ms (spec 041 R9, T09, Limits) |
+| L116 | File dialogs skipped the focus rule and the input protection, so an Enter meant for the page could export a channel (L-B1) | Low | Every dialog follows the slot, focus and quiet rules; a too-fast save path is `Cancelled` (spec 041 R9, T09) |
+| L117 | The lock routine started from a poisoned hold could wait on itself or lock a fresh unlock; R17 still flushed a poisoned `Device` (L-A2, L-B3) | Medium | Spawned as its own task, generation-tagged; no call on a poisoned `Device`, which is only dropped (spec 041 R10, R17, T17) |
+| L118 | A server that repeats a panicking frame locked the device again at every unlock (L-D5) | Low | That plan is kept `failed` until one of its channels is left (spec 041 R7, R10, Interface, T17) |
+| L119 | Two unlocks at start returned `Cancelled` to the second; after an erase the next unlock asked a confirmation inside the quiet period (L-A4, L-D2, L-D3) | Low | "Already unlocked" first under the mutex; a successful reset sets the open count to 0 (spec 041 R15, T16) |
+| L120 | Reset deleted the live web view directory (L-A6) | Low | Left to the quit path and the next start (spec 041 R16) |
+| L121 | The custom macOS menu dropped Edit, so paste stopped working; the `RunEvent::Exit` drop could block the main thread (L-B, note; L-B5) | Low | An Edit submenu kept; `try_lock` only (spec 041 R17) |
+| L122 | `close` on a poisoned lock had no stated result (L-A5) | Low | `Internal`, no `flush`, poison cleared, then `Closed` (spec 040 R6, T06) |
+| L123 | "1 000 ms after shown" is not measurable; Esc on each backend unverified (L-C2, L-C3) | Low | Measured from the host's `show` call; a manual Esc check on every backend (spec 041 R9, Acceptance criterion) |
+
+Round 7, two passes (L-A, L-D), final:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| L124 | The `failed` plan was recorded by its `id`, which a new `Device` does not keep, so the L118 fix did nothing or failed another plan (L-A1, L-D1) | Medium | Recorded by its `channel_id`s (spec 041 R7, R10, T17) |
+| L125 | The host had no way to refocus the main window (L-A2); the quick re-show failed the focus rule (L-D2) | Low | `Dialogs::focus_main_window`; the re-show skips the focus check (spec 041 R9, Interface, T09) |
+| L126 | A panic in `on_tick` or a command belongs to no plan and locks at every unlock (L-D3) | Low | A documented residual (spec 041 R10, Security) |
+| L127 | Whether rfd's GTK dialog can run off the main thread is read from source in round 5 and doubted from memory in round 7 (L-A3) | Low | Measured on Linux before PR slice (c) (spec 041 Acceptance criterion) |
+| L128 | The unlock check order against quitting; "never suppressed" against the quiet period; the poison routine and the R15 mutex (L-A cosmetic) | Low | Stated (spec 041 R9, R10, R16) |
+
+**Audit L stops here**, by diminishing returns: rounds 1–6 brought about 80, 50, 36, 25, 19 and 20 findings, round 7 five, and the last rounds only refined the desktop's native confirmations, which the implementation of spec 041 slice (c) will settle against the measurements the acceptance criterion names.
+
 ## Phase 4 drafts
 
 **2026-09-26 — Decisions taken while drafting the phase 4 specs 040 and 041.** Not an audit: these questions came up while writing the bindings specs. The human reviewer decided Q1–Q3 with the recommended option before the specs were written. P1–P6 are drafting choices, recorded here for the review. The specs themselves stay `draft` until their own review.
