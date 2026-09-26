@@ -4,7 +4,7 @@ Status: draft
 Phase: 2
 Related ADRs: 0006, 0036
 Depends on: 021-channel-session, 022-peers-tofu, 024-key-retired
-Blocks: 027-core-api
+Blocks: 027-core-api, 055-verify-ui
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

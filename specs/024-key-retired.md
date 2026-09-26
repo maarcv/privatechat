@@ -4,7 +4,7 @@ Status: draft
 Phase: 2
 Related ADRs: 0016, 0029, 0033
 Depends on: 021-channel-session, 022-peers-tofu
-Blocks: 025-identity-regen, 026-peer-limits, 027-core-api, 028-session-sans-io
+Blocks: 025-identity-regen, 026-peer-limits, 027-core-api, 028-session-sans-io, 055-verify-ui
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

@@ -4,7 +4,7 @@ Status: draft
 Phase: 2
 Related ADRs: 0012, 0020, 0021, 0022, 0028, 0037, 0038
 Depends on: 011-config-format, 014-fingerprint, 016-fuzz-harness, 020-store-files, 021-channel-session, 022-peers-tofu, 023-ttl-purge, 024-key-retired, 025-identity-regen, 026-peer-limits, 028-session-sans-io
-Blocks: 030-ws-protocol, 031-auth-channel-signature, 032-storage-ttl, 035-server-ops, 040-uniffi, 041-desktop-bridge
+Blocks: 030-ws-protocol, 031-auth-channel-signature, 032-storage-ttl, 035-server-ops, 040-uniffi, 041-desktop-bridge, 053-device-security, 054-qr-invite, 055-verify-ui
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

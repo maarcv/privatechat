@@ -2,6 +2,47 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Phase 5 drafts
+
+**2026-09-26 — Decisions taken before drafting the phase 5 specs.** Not an audit: the human reviewer decided Q1–Q4 with the recommended option before the specs were written, and Q5–Q7 once the drafts of 053–055 raised them. Drafting choices follow as P rows.
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| Q1 | Whether to draft the six phase 5 specs at once or in two groups | Two groups: first the shared ones, 053-device-security, 054-qr-invite and 055-verify-ui, each group with its own audit; then the three platform UIs, 050, 051 and 052, which build on them | Specs 053–055 first |
+| Q2 | On the desktop, reading the keychain asks the user for nothing, and spec 041 only has a native click to confirm an unlock | Every desktop unlock asks the operating system's user authentication where one exists: Touch ID or the account password on macOS, Windows Hello or the account PIN on Windows; Linux, with no standard equivalent, keeps the native confirmation of spec 041 | Spec 053; the desktop row of §8 "App lock" amended when 053 is accepted |
+| Q3 | Which QR scanner on Android, given §8's "no third-party SDK" and F-Droid; whether the desktop uses a camera | ZXing, open source, on Android; the platform's own scanner on iOS; the desktop never uses a camera and imports by pasted text or file | Specs 054 and 055 |
+| Q4 | Local notifications on mobile, where the app is disconnected whenever it is in the background | Notifications on the desktop only, with the fixed text "New messages", while the main window is not focused; none on Android and iOS, and §8's "Local notifications" row says so | Spec 053; §8 amended when 053 is accepted |
+| Q5 | `setUserAuthenticationParameters`, which §8's Keystore parameters need, exists from Android 11 (API 30); on API 26–29 a second code path could not require the prompt at every open | `minSdk 30` | Spec 053 R20; spec 040 R11; §9 and the kotlin skill at acceptance |
+| Q6 | Whether a phone may import an invitation by pasting its text, which passes through the clipboard | No: a phone imports by scanning or by opening the file; the desktop, with no camera, may paste | Spec 054 R11 |
+| Q7 | Whether the phone may send the `.chatcfg` file through the system share sheet | Yes, through a temporary file deleted when the sheet closes, at lock and at the next start; the password is shown apart and never copied | Spec 054 R9 |
+
+Drafting choices, for the review of specs 053–055:
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| P1 | What `lock_timeout_seconds` means | The grace in which returning to the app skips the prompt, counted from the last prompt; going to the background always locks. On Android it is the Keystore's timeout, so changing it re-wraps `K_db`; on iOS the evaluated `LAContext` is kept that long; the desktop has none | Spec 053 R7 |
+| P2 | How the desktop asks the OS (Q2) | macOS: the keychain entry becomes a data-protection item with user presence, through `security-framework`; Windows: `UserConsentVerifier` before the Credential Manager read, falling back to spec 041's confirmation when Windows Hello is unavailable; on both, the prompt replaces spec 041's `Unlock` confirmation, the first unlock of the process included | Spec 053 R3, R4; spec 041 R16 at acceptance |
+| P3 | Desktop lock triggers | The window unfocused for the timeout, which also covers an OS session lock, and logind `Lock` on Linux | Spec 053 R8 |
+| P4 | Where the wrapped key lives on mobile | `noBackupFilesDir/storage-key.wrap` on Android; an iOS Keychain item sealed to the Secure Enclave key | Spec 053 R1, R2 |
+| P5 | iOS file protection and keyboards | `.complete`; custom keyboards refused | Spec 053 R11, R15 |
+| P6 | How "no third-party SDK" is enforced | A dependency allowlist per client, checked in CI | Spec 053 R16 |
+| P7 | Android cleartext | Allowed only for `.onion` hosts, which spec 027 R10's `ws://` onion route needs | Spec 053 R17 |
+| P8 | Desktop notifications' rate | At most one every 60 s | Spec 053 R13 |
+| P9 | How phones draw the invitation QR | ZXing `QRCodeWriter` on Android, `CIQRCodeGenerator` on iOS, byte mode, level M; the text's bytes zeroed once drawn | Spec 054 R5 |
+| P10 | How long the invitation QR is shown | 60 s with a countdown, as §5 says, next to the invitation's own 10-minute expiry; hidden on background, lock or focus loss; spec 041 R6's image lives as long | Spec 054 R6; spec 041 R6 |
+| P11 | The scanners | Android: CameraX (AOSP) with ZXing `core`, the payload from `BYTE_SEGMENTS`; iOS: `AVCaptureMetadataOutput` for `.qr`. A scan is at most 700 bytes, never opens a URL, keeps no frame; spec 055 reuses it | Spec 054 R12 |
+| P12 | File types and URL schemes | None registered: the file is opened from inside the app | Spec 054 R13 |
+| P13 | Creating a channel | No "create anyway" when the probe fails; lifetimes 1 h, 24 h, 7 days, 30 days, or custom | Spec 054 R1, R2 |
+| P14 | One rendering of trust on three platforms | One pure presentation function per platform, tested against a shared fixture `clients/fixtures/trust_presentation.json`, which is UI data and not a frozen vector | Spec 055 R1, R21 |
+| P15 | The desktop's own verification QR | Through spec 041's `qr` scheme, with a new command `export_verify_qr` | Spec 055 R17; spec 041 R4, R6 |
+| P16 | Verifying on the desktop | By the 12 words only; pasting a peer's verification text is not the in-person check; a phone verifies the desktop by scanning its QR | Spec 055 R20 |
+| P17 | Spec 014's partial-match rule | None: all 12 words in order, two buttons, nothing typed | Spec 055 R18 |
+| P18 | Texts §7 does not fix | English sources written in spec 055; §7's own texts kept word for word | Spec 055 R3, R9–R19 |
+| P19 | Retire and forget | Confirmed in the app, not natively; a script forging them is spec 041's residual | Spec 055 R15 |
+| P20 | Muted peers | Their messages collapsed behind "Muted: show" | Spec 055 R7 |
+
+Open, to be measured before implementation: a macOS data-protection Keychain item needs a signed build with an entitlement (053-R3); Windows Hello's prompt from a desktop process may open behind the window without `unsafe` (053-R4).
+
 ## Audit L
 
 **2026-09-26 — Audit L, review of the phase 4 draft specs 040 and 041 and ADR 0039 before human review, in four independent passes (L-A: coherence and SDD conformance; L-B: adversarial security and privacy; L-C: technical viability, measured in throwaway projects with uniffi 0.32.2, Tauri 2.11.6, tauri-specta 2.0.0-rc.25, rustls 0.23.45, tokio-tungstenite 0.30.0 and keyring 4.2.0; L-D: end-to-end scenarios), repeated in rounds until they bring nothing new.** The human reviewer decided four questions with the recommended option:

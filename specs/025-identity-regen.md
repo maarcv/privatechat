@@ -4,7 +4,7 @@ Status: draft
 Phase: 2
 Related ADRs: 0007, 0016, 0019, 0029, 0033, 0034
 Depends on: 021-channel-session, 024-key-retired
-Blocks: 027-core-api, 028-session-sans-io
+Blocks: 027-core-api, 028-session-sans-io, 055-verify-ui
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

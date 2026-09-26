@@ -37,5 +37,8 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 035 | 035-server-ops | 3 | draft |
 | 040 | 040-uniffi | 4 | draft |
 | 041 | 041-desktop-bridge | 4 | draft |
+| 053 | 053-device-security | 5 | draft |
+| 054 | 054-qr-invite | 5 | draft |
+| 055 | 055-verify-ui | 5 | draft |
 
 Phase 0 was bootstrapped with implementation and review in parallel; from spec 010 on, acceptance precedes code.
