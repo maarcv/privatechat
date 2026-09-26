@@ -4,7 +4,7 @@ Status: draft
 Phase: 2
 Related ADRs: 0006, 0007, 0019, 0029, 0036
 Depends on: 010-primitives-wrapper, 014-fingerprint, 016-fuzz-harness, 021-channel-session
-Blocks: 023-ttl-purge, 024-key-retired, 026-peer-limits, 027-core-api, 055-verify-ui
+Blocks: 023-ttl-purge, 024-key-retired, 026-peer-limits, 027-core-api, 055-verify-ui, 054-qr-invite
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

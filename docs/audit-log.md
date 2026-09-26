@@ -43,6 +43,26 @@ Round 1 (about 90 findings, 9 of them blockers, consolidated):
 | M24 | Interface, paths, names, Depends and Blocks, texts, amendment lists (M-A10, M-A12, M-A14–M-A16, M-A18, M-A19, M-A21–M-A24, M-C16, M-C19, M-C20, M-D16, M-D23) | Low | Aligned; open questions 053-R8, 053-R14 and 053-R17 to be measured (specs 053–055; 021 and 023 Blocks) |
 | M25 | doc_lint read "257-byte" as a spec id in the pushed commit (M-A1) | Blocker | Fixed in 0883c6e |
 
+Round 2 (about 45 findings, no blocker; no question for the reviewer):
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| M26 | The 120 s exception and screen-off relied on callbacks that a frozen or suspended app does not get (M-B1, M-D3) | Medium | Checked at the return on a monotonic clock, before the first frame; the timer best effort; a residual for the frozen process (spec 053 R8, T08) |
+| M27 | An open desktop dialog stopped the lock timer with no limit (M-B2) | Medium | Capped at 120 000 ms and lost when the dialog loses focus; the lock routine closes it (spec 053 R8) |
+| M28 | The desktop clipboard reached Windows' cloud clipboard and history; `copy_message` kept plaintext; `arboard`'s defaults broke `cargo deny` and its threading rules (M-B3, M-B4, M-C3, M-C4, M-A6) | Medium | Exclusion flags on every OS; a hash, not the text; `default-features = false`; one clipboard task (spec 053 R14) |
+| M29 | Saved instance state and scene storage could keep passwords and content outside the lock; the desktop page might ignore `locked` (M-B5, M-B6) | Medium | No saveable secret state; a restored process opens on `Locked`; the host reloads the web view (spec 053 R21; 041 R17 at acceptance) |
+| M30 | The Android re-wrap check at unlock needed `K_db` after `Core.open` zeroed it, and ran outside the queue (M-D2, M-C6) | Medium | A non-secret grace file read before `Core.open`; the re-wrap in the queue; prompt counts per path (spec 053 R1, R7, R9) |
+| M31 | Zeroing conflicted with preview → import → replace, and a refused or cancelled scan was never zeroed (M-A3, M-D1) | Medium | A fresh copy per core call; zeroed on every exit; the scanner's accept predicate zeroes what it refuses; 040 R7 and R9 amended at acceptance (spec 054 R12, R15, R17; 055 R19) |
+| M32 | The scanner stopped after one payload while 055 needed it open; planted codes still won across frames (M-A4, M-B9, M-C7) | Medium | An accept predicate; three consecutive frames; two payloads in a session deliver nothing (spec 054 R12) |
+| M33 | 055 claimed 041 was already amended; 054's list for 041 was incomplete (M-A1, M-A2, M-C5) | Medium | Acceptance-time amendments, complete: `verify_scanned` and `import_qr` out, `preview_file` in, one byte segment with `features = ["svg"]` (spec 054 R17; 055 R20) |
+| M34 | The retire-and-rename offer needed a UI name match, and moved a name to an unverified key in one step (M-A5, M-B8) | Medium | Only after a verification, from `claims_name_of`; `LabelInUse` offers Verify first (spec 055 R15, R18, R19) |
+| M35 | notify-rust posts as Finder or PowerShell and swizzles the bundle id (M-C1, M-D12) | Medium | `set_application` and `app_id`; the swizzle stated (spec 053 R13) |
+| M36 | The in-person question offered a call for a QR (M-B7) | Low | "Is their phone in front of you?" (spec 055 R19) |
+| M37 | A release could be built with the keychain fallback; the merged manifest's permissions were unchecked (M-B10, M-B11) | Low | `compile_error!`; an exact permission list (spec 053 R3, R17) |
+| M38 | Grace edge, invalidated key vs no credential, reset crash, session signals (M-D8, M-D10, M-D11, M-C2, M-A7) | Low | Prompt on `UserNotAuthenticatedException`; `KeyLost` first; a tombstone; 053-R8 closed with the Linux session path (spec 053 R5, R8, R23) |
+| M39 | The share file's deletion, iOS save to a file, the confirmation's name, `is_open` and onion cases, the words flow, desktop focus (M-A10, M-A13, M-D4–M-D7, M-D9, M-D14) | Low | Stated (spec 054 R8–R10, R15, R17) |
+| M40 | Test fixtures, skill and §8/§10 amendment lists, file layout, Blocks, texts (M-A8, M-A9, M-A11, M-A12, M-D13, cosmetic) | Low | Aligned (specs 053–055; 022 and 053 Blocks) |
+
 ## Phase 5 drafts
 
 **2026-09-26 — Decisions taken before drafting the phase 5 specs.** Not an audit: the human reviewer decided Q1–Q4 with the recommended option before the specs were written, and Q5–Q7 once the drafts of 053–055 raised them. Drafting choices follow as P rows.
