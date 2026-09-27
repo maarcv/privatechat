@@ -140,7 +140,7 @@ None: the comparison is local, it decides no byte on the wire, and all three pla
 
 - Retirement, received or manual (spec 024-key-retired); limits, admission and eviction (spec 026-peer-limits).
 - The dialog that retires the old key to free its label: the UI calls `retire` of spec 024 and then `label`.
-- How each client draws grey names, icons and marks (specs 050–052, 055-verify-ui).
+- How each client draws grey names, icons and marks (spec 055-verify-ui R1–R8).
 
 ## Open questions
 
@@ -170,3 +170,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-09-25 revised after audit J round 25 (`docs/audit-log.md`)
 - 2026-09-25 revised after audit J round 26 (`docs/audit-log.md`)
 - 2026-09-25 open questions decided with the human reviewer, recommendations accepted (`docs/audit-log.md`)
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): drawing points to spec 055

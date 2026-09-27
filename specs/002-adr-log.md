@@ -59,8 +59,9 @@ The 22 ADRs in `docs/adr/` are the historical context of every decision and the 
 
 ## Open questions
 
-- [ ] 002-R4: is a script that detects diffs in accepted ADRs outside the state line worthwhile? Proposal: yes, in phase 1 if it proves necessary.
+- [x] 002-R4: is a script that detects diffs in accepted ADRs outside the state line worthwhile? Decided in audit P: no script in v1; the Definition of done item "No accepted ADR modified outside its status line" is checked by the human reviewer of every PR, and a script is proposed with a new spec only if a PR is ever found breaking it.
 
 ## History
 
 - 2026-09-20 draft · 2026-09-20 in review · 2026-09-20 accepted (Marc Vilardebó) · 2026-09-20 implemented
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): open question 002-R4 closed: no script, the reviewer checks the Definition of done item

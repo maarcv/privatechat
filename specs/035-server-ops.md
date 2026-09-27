@@ -4,7 +4,7 @@ Status: draft
 Phase: 3
 Related ADRs: 0022, 0038
 Depends on: 027-core-api, 030-ws-protocol, 031-auth-channel-signature, 032-storage-ttl, 033-rate-limit-quotas
-Blocks: 034-docker, 041-desktop-bridge, 042-connection-host, 063-beta
+Blocks: 034-docker, 041-desktop-bridge, 042-connection-host, 063-beta, 066-public-server
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
@@ -249,7 +249,7 @@ None: no format. The run of R11 uses the vectors of the specs it exercises only 
 
 - The reverse proxy, TLS, the onion service configuration and the image (spec 034-docker).
 - A metrics endpoint, a health endpoint and hot reloading: none in v1. The totals line is the only telemetry, and a configuration change means a restart.
-- The clients' log level and subscriber (specs 050–052).
+- The clients' logging: the connection host logs nothing (spec 042-connection-host), and the platform code follows spec 053-device-security R22.
 
 ## Open questions
 
@@ -265,3 +265,5 @@ None.
 - 2026-09-25 revised after audit K round 3 (`docs/audit-log.md`): `bind` takes the clock and `run` only the shutdown; `StartReason` listed; both clock readings move together, the final move in one step; the harness waits for `Stopped` before rebinding; T04, T05, T07, T08 and T10 made implementable
 - 2026-09-25 revised after audit K round 2 (`docs/audit-log.md`): `bind` and `Bound::run`, so the test learns the port; `main` installs the subscriber; the log checks inside the exit run; a bounded close at shutdown; the harness's reconnect and clock pacing; `StartError`, `ConfigError` and `SystemClock` `pub`; test hooks gated; the ingest-budget variables; `kill -TERM`
 - 2026-09-25 revised after audit K round 1 (`docs/audit-log.md`): a library entry point that returns instead of exiting, so the exit and shutdown tests run in process; the log tests in a process of their own; listener ports, not addresses, in the start line; the crash test moved here from spec 032; `vars_os`; the per-listener and per-IP connection variables; spec 100's lint dropped
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): the clients' logging points to specs 042 and 053; the port fields of the start line, amended on 2026-09-26 under a spec 041-desktop-bridge R18 that no longer exists, are read by spec 042-connection-host R13
+- 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): Blocks names 066

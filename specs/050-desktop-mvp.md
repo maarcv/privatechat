@@ -39,6 +39,12 @@ Spec 041-desktop-bridge defines the Rust side of the Tauri process: the commands
 - R11 `clients/desktop/package.json` MUST pin Node in `.nvmrc`, use `pnpm` with a committed `pnpm-lock.yaml`, and run no `postinstall` script that fetches. The CI job `desktop` of spec 041-desktop-bridge R14 MUST also run, in this order: `pnpm install --frozen-lockfile` in `clients/desktop/`; the generation of `generated.ts` with `cd clients/desktop/src-tauri && cargo test export_bindings`, from inside the Cargo workspace (spec 042-connection-host R15); then, in `clients/desktop/`, `pnpm check` (`svelte-check` and `tsc --noEmit`), `pnpm lint` (ESLint and Prettier), `pnpm test` (Vitest) and `pnpm build`, and `.github/CONTRIBUTING.md` MUST list them (AGENTS 17).
 - R12 The state modules MUST be tested with Vitest over an in-memory fake of the bridge's typed interface, never over Tauri's IPC, and the UI flows of specs 054-qr-invite (import a config), 055-verify-ui (verify a peer) and 056-chat-screens (write and read) with `@testing-library/svelte`.
 
+**Platforms and access**
+
+- R13 The desktop app MUST support exactly these systems, fixed as of 2026-09-28 and checked again when this spec is accepted and at each bump of spec 065-release-maintenance R4: macOS 15 or later (`bundle.macOS.minimumSystemVersion = "15.0"`), Windows 11 on x86-64, and Linux on x86-64 with WebKitGTK 4.1 and the glibc of the Linux build image of spec 060-reproducible-builds R2, which the `.deb` declares as the dependencies Tauri's bundler writes and the landing's download page names; no arm64 Linux build, since spec 060-reproducible-builds builds none. `bundle.windows.webviewInstallMode` MUST be `{ "type": "skip" }`: the installer neither downloads WebView2 at install time nor carries a Microsoft installer that spec 060-reproducible-builds would have to commit under `vendor/bundler/`, since Windows 11 ships the WebView2 runtime. The page's JavaScript and CSS MUST need nothing newer than the web engines of those systems (Safari 18's WebKit, WebView2's current Chromium, WebKitGTK 4.1), the `build.target` of `vite.config.ts` set to match.
+- R14 Every screen MUST be usable with the keyboard and a screen reader alone, beyond R8 and R10: the focus order follows the visual order; opening a screen or a card moves the focus to its heading, and closing it returns the focus to where it was; an in-page confirmation keeps the focus inside it until it is answered; every control has an accessible name and every state change (pending, sent, not delivered, verified) is exposed as text, never as colour alone. The announcement of a new message MUST be the one of spec 056-chat-screens R7, through one `aria-live="polite"` region; the user reads the message by moving to it.
+- R15 At start, before the window is created, the app MUST read the WebView2 runtime's version through Tauri's `webview_version()` and, when it fails, show through `rfd`, in the translated build-time strings of the bridge's dialogs (spec 041-desktop-bridge), the fixed text "This app needs the Microsoft Edge WebView2 runtime, which Windows 11 includes. Download it from Microsoft's WebView2 page and start the app again." and exit without creating a window.
+
 ## Limits
 
 | Input | Range | Out of range |
@@ -46,6 +52,7 @@ Spec 041-desktop-bridge defines the Rust side of the Tauri process: the commands
 | Window width | ≥ 720 CSS px for two panes | one pane with a back action |
 | `Suppressed` wait | `retry_after_ms` from the bridge | shown in whole seconds, rounded up |
 | Text contrast | ≥ 4.5:1 in both schemes | a failing test |
+| System | macOS ≥ 15; Windows 11 x86-64; Linux x86-64 with WebKitGTK 4.1 and glibc ≥ that of the build image | not supported; on Windows without WebView2, R15's text and exit |
 
 ## Interface
 
@@ -74,7 +81,7 @@ The screens themselves, their states and intents are those of specs 053-device-s
 
 Test names: `s050_tTT_rRR_<name>` in the Vitest `test` title, as the typescript-svelte skill gives.
 
-**PR slices** (AGENTS 14): (a) the project, the lint rules, the i18n and the CI steps (R1, R3, R4, R9, R11); (b) the dispatcher, the app state and the Locked page (R2, R6, R7); (c) the window layout, the keys and the look (R5, R8, R10); (d) the tests of R12. The screens of 053–056 land in their own slices, inside this app.
+**PR slices** (AGENTS 14): (a) the project, the lint rules, the i18n, the CI steps the supported systems and the WebView2 check (R1, R3, R4, R9, R11, R13, R15); (b) the dispatcher, the app state and the Locked page (R2, R6, R7); (c) the window layout, the keys, the look and access (R5, R8, R10, R14); (d) the tests of R12. The screens of 053–056 land in their own slices, inside this app.
 
 ## Security
 
@@ -82,6 +89,8 @@ Test names: `s050_tTT_rRR_<name>` in the Vitest `test` title, as the typescript-
 - The page never unlocks on its own (R6), so a lock by the timer never raises Touch ID or Windows Hello over another application (spec 053-device-security R8).
 - Copy goes through the bridge by channel and row key (R4), so the clipboard holds the text of a message the core holds, for 60 s; an injected script can still choose which message is copied and when, within the power of the UI (spec 041-desktop-bridge, Security), but not put a text of its own there.
 - The verified icon is an image, not a character (R10), which with spec 055-verify-ui R2 keeps a name from imitating it.
+- The installer downloads nothing (R13), so every byte it installs is in the reproducible build; what Windows itself tells Microsoft about a downloaded installer (SmartScreen) is in the privacy policy of spec 062-security-docs R2.
+- The "New message" announcement carries no name and no body (R14, spec 056-chat-screens R7), like the notification of spec 053-device-security R13; a screen reader still speaks whatever the user moves to, including message bodies and the seven words of an export, which is spec 053-device-security's documented residual.
 
 ## Public API changes
 
@@ -101,6 +110,9 @@ None.
 - T10 (covers R10): `s050_t10_r10_look`: the tokens give at least 4.5:1 for the primary and secondary text colours in both schemes; every icon button has an `aria-label`; the verified icon is an SVG element.
 - T11 (covers R11): CI step `s050_t11_r11_desktop_ui_job`, which runs the commands of R11; `.github/CONTRIBUTING.md` lists them.
 - T12 (covers R12): `s050_t12_r12_flows`: the three UI flows of R12 pass over the fake bridge.
+- T13 (covers R13): `check_s050_t13_r13_platforms`: `tauri.conf.json` sets `minimumSystemVersion` `15.0` and `webviewInstallMode` `skip`, the bundle targets no arm64 Linux, and `vite.config.ts` a `build.target` no newer than R13's engines; non-automatable, the `.deb` installs on the build image's Debian and the app starts on macOS 15 and Windows 11.
+- T14 (covers R14): `s050_t14_r14_access`: opening a card moves the focus to its heading and closing it returns it; an in-page confirmation keeps Tab inside; a pending and a not-delivered row expose their state as text; three messages from a peer within 2 000 ms while the focus is on the composer give one "New message" in the live region, with no name or body, and a muted peer's gives none (spec 056-chat-screens R7).
+- T15 (covers R15): `s050_t15_r15_webview_missing`: with a fake `webview_version()` that fails, the app shows R15's text and opens no window.
 
 ## Vectors
 
@@ -128,3 +140,5 @@ None.
 - 2026-09-27 revised after audit N round 2 (`docs/audit-log.md`): events of an older generation ignored; one coalesced re-read for unlisted channels; `status()`, `connection_states()` and `take_reset_outcome` at mount; copy by key kind and id, none for position-keyed rows; a desktop `KeyLost` screen; `DialogOpen`
 - 2026-09-27 revised after audit N round 3 (`docs/audit-log.md`): no generation filter in the page, the bridge's alone; `locked { fault }` and `take_lock_notice` at mount; `ReloadPending`; copy of the focused row; the CI order with the bindings generated from inside the workspace
 - 2026-09-27 revised after audit N round 4 (`docs/audit-log.md`): the page is gone after `locked`, since the bridge recreates the window; `Fault { recurring }` at mount; own rows copied by `client_ref`
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): the supported systems and WebView2 with no download at install time (R13, D4); keyboard and screen-reader use with a "New message" announcement that names nothing (R14)
+- 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): fixed, dated floors (macOS 15, Windows 11, Linux x86-64 only); the WebView2 check its own R15 with the download text corrected; no claim that installing tells Microsoft nothing; the announcement rule is 056 R7's

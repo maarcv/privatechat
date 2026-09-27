@@ -68,6 +68,7 @@ AGENTS 23 says every state write goes through `commit`; `compact` (R15) is the o
 - R28 `Store` and `Vault` MUST be `Send`, and `ChannelFiles` MUST share the lock and the key with its `DataDir` through `Arc`, so that the `Device` of spec 027-core-api can live behind a `Mutex` in the bindings.
 - R29 This spec MUST amend spec 016-fuzz-harness R2, R8 and R9 with the targets `state_decode`, `log_record_decode` and `settings_decode` over the plaintext decoders, seeded from the records of `020.json`; the three sealed `open` functions are counted as reached by name by the check of 016-R6, and their decoders are the fuzzed part. Every record kind MUST have a round-trip property test (AGENTS 21).
 - R30 This spec MUST add its section to `scripts/reference/vectors.py`, which produces `020.json`: the encoding of each codec type of R1, one reference state, log and settings record in plaintext, and the negatives of the Vectors table. The sealed files have no vector: no platform other than Rust reads them.
+- R31 An app that raises any version of R8 MUST read every earlier version of each file and write it back in its own version, `state.bin` and `settings.bin` in one commit and `messages.log` by a compaction (R15), never leaving a channel with files of two versions it cannot read together; there is no migration framework, only that rule. So that a later version can prove it, three golden files written by this version under a fixed 32-byte test key, a `state.bin`, a `messages.log` of three entries and a `settings.bin`, MUST be committed in `crates/store/tests/golden/v1/`, never regenerated, and decoded by a test.
 
 ## Limits
 
@@ -287,6 +288,7 @@ The `testing` module compiles under `cfg(any(test, fuzzing, feature = "test-supp
 - T28 (covers R28): `s020_t28_r28_send`: a compile-time assertion that `DataDir`, `ChannelFiles` and `Box<dyn Store>` are `Send`.
 - T29 (covers R29): `s020_t29_r29_records_round_trip`: property tests over valid states, log records of each kind and settings: `open(seal(x))` gives `x` under `state_eq`; the three decoders never panic on arbitrary bytes.
 - T30 (covers R30): `check_s020_t30_r30_section_produces_020_json`, run by the CI step of spec 015-test-vectors; `cargo test` reproduces every vector.
+- T31 (covers R31): `s020_t31_r31_golden_v1_files`: the three golden files of `crates/store/tests/golden/v1/` open under their test key and decode to the values the test names; a check fails if any of them differs from its committed SHA-256.
 
 ## Vectors
 
@@ -346,3 +348,5 @@ Decided on 2026-09-25: 020-R5, R9 and R18 (log header, generation and offset, ke
 - 2026-09-25 revised after audit J round 29 (`docs/audit-log.md`)
 - 2026-09-25 revised after audit J round 30 (`docs/audit-log.md`)
 - 2026-09-25 open questions decided with the human reviewer, recommendations accepted (`docs/audit-log.md`)
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): a later version reads and rewrites every earlier version of the files, and three golden version-1 files are committed for it
+- 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the forward-read rule and the golden files move from R8 to their own R31, citing this spec's compaction (R15)

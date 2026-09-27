@@ -221,7 +221,7 @@ Mutation table of the file: the magic → `BadConfig`; the version byte → `Uns
 - The record codec itself (spec 017-record-encoding).
 - The subscription signature to the server, which uses `sk_ch` and `host()` (spec 031-auth-channel-signature).
 - Storing the config, the local identity `(pk_u, sk_u)` and the duplicate-channel rule on import (specs 020-store-files and 021-channel-session).
-- Showing the password and the QR, and the camera (specs 054-qr-invite and the client specs).
+- Showing the password and the QR, and the camera (spec 054-qr-invite).
 - Any change to `config_version`, which is a new ADR by definition (AGENTS 3).
 
 ## Open questions
@@ -242,3 +242,4 @@ None. Decided in audit F (`docs/audit-log.md`):
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): the reference script of spec 015 produces `011.json` and the Rust tests reproduce it, with `chatcfg_reference` pinned from T18 (R22); the version check runs in the in-order reader after key 1, with no partial-read mode (R3); the URL grammar is `wss://` ‖ host ‖ optional port with no label, IPv4 or all-digits rule (R5, T05, vectors); the file header is checked before the password bounds and before the key (R13, R15); visibility, absent trait impls and parameter lists moved to the Interface and their source-scan tests deleted (R6, R12, R16, R18, R19, R20; T06, T16, T19, T20); the dispatch test is an Interface sentence; no requirement renumbered
 - 2026-09-25 amended by ADR 0038 while drafting phase 3: `ws://` for v3 onion hosts only, port never 80 (R5, R6, T05)
 - 2026-09-26 amended by spec 040-uniffi R14 during audit L round 2 (`docs/audit-log.md`): `channel_id_ttl_60` and `channel_id_ttl_2592000` carry their record
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): the camera pointer names spec 054 alone

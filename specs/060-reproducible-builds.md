@@ -4,7 +4,7 @@ Status: draft
 Phase: 6
 Related ADRs: 0017, 0041
 Depends on: 034-docker, 040-uniffi, 041-desktop-bridge, 042-connection-host, 050-desktop-mvp, 051-android-mvp, 052-ios-mvp
-Blocks: 061-threat-review, 062-security-docs, 063-beta, 064-public-release
+Blocks: 061-threat-review, 062-security-docs, 063-beta, 064-public-release, 065-release-maintenance, 066-public-server
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
@@ -27,6 +27,7 @@ Not every artefact can be bit-for-bit reproducible. The App Store re-signs and e
   - `CARGO_INCREMENTAL=0`, and `--remap-path-prefix` of both the repository root and `$CARGO_HOME` to fixed names, set by `scripts/release_env.sh` since `.cargo/config.toml` cannot expand variables (measured: a different `CARGO_HOME`, or a path dependency outside the workspace, changes the binary without them; `trim-paths` is unstable on 1.98.1);
   - `SOURCE_DATE_EPOCH` set to the tag's commit time, for the tools that read it (buildkit, `dpkg-deb`, the zip and NSIS steps of R3); rustc and `cargo build` do not read it (measured);
   - `libsodium-sys-stable` without its `optimized` feature and with no `CFLAGS` in the environment, since that feature builds with `-march=native`;
+  - the build time, which is the tag's commit time, compiled into every app as an explicit input, never read from the clock at build time, since rustc does not read `SOURCE_DATE_EPOCH`: `build.rs` reads it from the release environment into the desktop, Gradle into `BuildConfig`, and an xcconfig into the iOS `Info.plist`; the age notice of spec 056-chat-screens R22 and the beta expiry below read it;
   - the beta flag of spec 063-beta R3 compiled from the tag's `-beta.N` suffix, together with an expiry 90 days after the tag's time after which the app shows a blocking notice to install a newer build (a local rule, not a remote switch), and the "RC" flag compiled from `-rc.N` (R7), so that beta and rc builds are as reproducible as public ones and cannot pass for them;
   - the versions derived from the tag alone: the displayed version is the tag; the Android `versionCode` is `(((X*100+Y)*100+Z)*100 + C) * 10 + A`, with `C` = `N` (0..=29) for `-rc.N`, 30 + `N` (30..=89) for `-beta.N` and 99 for `vX.Y.Z`, and `A` the ABI index of spec 051-android-mvp R7, so that every later tag installs over an earlier one and a public release over its betas; the iOS `CFBundleVersion` is the single integer `((X*100+Y)*100+Z)*100 + C` and `CFBundleShortVersionString` is `X.Y.Z`, since Apple accepts at most three period-separated integers;
   - no network access after dependency resolution, the vendored libsodium of spec 042-connection-host R15 included.
@@ -69,6 +70,10 @@ Not every artefact can be bit-for-bit reproducible. The App Store re-signs and e
 - R10 The release key's fingerprint MUST be published outside GitHub and the landing's host: in the external review report as the reviewers or the programme publish it on their own site (spec 061-threat-review R8), in the letter to beta testers, on paper or in person (spec 063-beta R4), in F-Droid's app description once the app is there (spec 064-public-release R3), and in the apps' Help screen (spec 056-chat-screens R18), which serves only to check later downloads from an install already verified. The owner derives the fingerprint he publishes from the token itself (`ssh-keygen -K` or an offline copy of the public key) and compares it with `docs/release-keys.md` before publishing.
 - R11 In the pull request that marks this spec `accepted`, the sentences about release signing in CI MUST be replaced by "CI builds; the owner signs on a local machine with hardware keys (spec 060-reproducible-builds)": in the architecture skill ("release signing happens in CI with the offline key"), the kotlin skill ("release signing happens in CI"), the swift skill ("… in CI with the offline certificate") and the typescript-svelte skill ("… in CI with offline keys"); and `docs/spec.md` §8 "Code integrity" MUST name the hashes of the unsigned and signed artefacts, the signed manifest and the residuals of R4, and §11 the files of the Interface.
 
+**Third-party notices**
+
+- R12 Every artefact of R3 MUST carry a file `THIRD-PARTY-NOTICES.txt`, generated inside the build of R3, after dependency resolution and with no network, by `scripts/third_party_notices.py` (Python standard library, like the reference script of spec 015-test-vectors): one section per third-party component that the artefact ships, with its version, its licence identifier and the licence text and any `NOTICE` file exactly as the component's resolved source holds them, or, when the resolved source holds none (a Maven artefact that names its licence only in its POM, a crate published without a licence file), the reviewed text of `licenses/overrides/<name>-<version>.txt`, committed with its SHA-256 in `licenses/overrides/SHA256SUMS` and added only in a pull request the human reviewer approves. The components are read from the lock files of R2 (every Rust crate linked into the artefact, the desktop's pnpm packages bundled into the web view, the Gradle and SwiftPM dependencies packaged into the phone apps) plus libsodium (ISC) and the ZXing `NOTICE` of spec 054-qr-invite. The file is written with sorted entries and `\n` line ends, so that it is part of what R3 compares byte for byte and of the hashes of `SHA256SUMS`; the apps' Help shows it (spec 056-chat-screens R18), and the server image carries it next to its binary. A component that ships in an artefact with neither a licence text in its resolved source nor a committed override whose SHA-256 matches fails the build.
+
 ## Limits
 
 | Input | Range | Out of range |
@@ -91,13 +96,15 @@ docs/release-keys.md               every key and backup, fingerprints, dates, hi
 scripts/release_env.sh             the path remaps and deterministic settings (R2)
 scripts/sign_release.sh            R6, run by the owner from his own verified copy
 scripts/verify_release.sh          R8, run by anyone
+scripts/third_party_notices.py     R12, the notices file of every artefact
+licenses/overrides/                R12, reviewed licence texts for components that ship none, with SHA256SUMS
 deploy/release/Dockerfile          the pinned build container of R6 and R8
 vendor/bundler/                    the bundlers' tools with their SHA-256 (R2)
 ```
 
 `unsigned-hashes.txt` (R3): one line `<sha256>  unsigned/<name>` per artefact. `SHA256SUMS` (R6): `# <tag> <full commit SHA>`, then `<sha256>  unsigned/<name>` and `<sha256>  signed/<name>` lines, then `<sha256>  input/libsodium-1.0.22-stable-msvc.zip`. `ROTATION-<date>.txt` and its `.sig` (R5): a key change signed by a key still listed.
 
-**PR slices** (AGENTS 14): (a) `release_env.sh`, the vendored bundler tools, the double build of the server and the Linux desktop (R2, R3 for them); (b) Android, macOS, Windows and iOS unsigned builds (R3 for them, R4); (c) the keys document, the allowed signers and `sign_release.sh` (R1, R5, R6); (d) `verify_release.sh`, the `verify` job and the APK check (R7–R9); (e) the fingerprint publication and the amendments (R10, R11).
+**PR slices** (AGENTS 14): (a) `release_env.sh`, the vendored bundler tools, the double build of the server and the Linux desktop (R2, R3 for them); (b) Android, macOS, Windows and iOS unsigned builds (R3 for them, R4); (c) the keys document, the allowed signers and `sign_release.sh` (R1, R5, R6); (d) `verify_release.sh`, the `verify` job and the APK check (R7–R9); (e) the fingerprint publication and the amendments (R10, R11); (f) the third-party notices (R12).
 
 ## Security
 
@@ -113,6 +120,7 @@ vendor/bundler/                    the bundlers' tools with their SHA-256 (R2)
 - A key lost with its backup cannot be replaced for Android installs in place, whose users would reinstall and lose their channels (spec 053-device-security); a documented residual, which the backup token and the v3 lineage exist to avoid.
 - Malware on the owner's signing machine can swap what a touch the owner expects signs; the announced touch count, the printed manifest hash and the check on a second machine (R6) narrow it; a documented residual.
 - Releases need the owner, so a client fix waits for them (`.github/SECURITY.md` says so); a documented residual.
+- The notices file is read from the resolved sources, not from the network (R12), so the build that makes it stays offline and reproducible.
 
 ## Public API changes
 
@@ -121,7 +129,7 @@ None.
 ## Test cases
 
 - T01 (covers R1): `check_s060_t01_r01_tags` in CI: a tag signed by a key absent from the `allowed_signers` of the highest-version ancestor `v*` tag stops both jobs; a lightweight tag, a tag not on an allowed branch, and a `review-1` tag start no job; a real tag passes; the repository's rulesets cover `v*` and `review-*`.
-- T02 (covers R2): `check_s060_t02_r02_deterministic_inputs`: the workflow sources `release_env.sh`, builds with `--locked` and network disabled after resolution; the check fails when libsodium's `optimized` feature or `CFLAGS` is set, when a bundler tool lacks its SHA-256, or when a base image has no digest; the version function gives, for `v1.2.3-rc.4`, `v1.2.3-beta.2` and `v1.2.3` on ABI 1, the codes 10203041, 10203321 and 10203991, in rising order; a beta build dated 91 days after its tag shows the blocking notice.
+- T02 (covers R2): `check_s060_t02_r02_deterministic_inputs`: the workflow sources `release_env.sh`, builds with `--locked` and network disabled after resolution; the check fails when libsodium's `optimized` feature or `CFLAGS` is set, when a bundler tool lacks its SHA-256, or when a base image has no digest; the version function gives, for `v1.2.3-rc.4`, `v1.2.3-beta.2` and `v1.2.3` on ABI 1, the codes 10203041, 10203321 and 10203991, in rising order; a beta build dated 91 days after its tag shows the blocking notice; the build time compiled into the desktop, Android and iOS apps equals the tag's commit time and is identical in the two builds of R3, whatever the build machine's clock.
 - T03 (covers R3): CI step `s060_t03_r03_double_build`: the two builds of each artefact compare equal and `unsigned-hashes.txt` lists them; the only run artefact is `unsigned-hashes.txt`, with a 1-day retention; a fixture artefact with one byte changed fails the step.
 - T04 (covers R4): `check_s060_t04_r04_residuals`: `SHA256SUMS` of a test release lists the libsodium input and the iOS archive; the Security section names every residual of R4.
 - T05 (covers R5): `check_s060_t05_r05_keys`: no workflow references a signing secret; no private key or keystore file is in the repository; every key that `docs/release-keys.md` lists has a backup and a `SHA256:` fingerprint, the file names the backups' place, and it agrees with `.github/allowed_signers`; the Google app-signing certificate differs from the Android signing key's; a manifest signed by a retired key and absent from its list is rejected by `verify_release.sh`.
@@ -131,6 +139,7 @@ None.
 - T09 (covers R9): CI step `s060_t09_r09_jobs`: both jobs run only on `v*` tags, `verify` only by `workflow_dispatch`, with read-only permissions, Actions pinned by SHA and no secret; `verify` takes a tag and a download URL and reads no draft release; `.github/CONTRIBUTING.md` has the release section.
 - T10 (covers R10): `check_s060_t10_r10_fingerprint`: the Help string resources hold the fingerprints of `docs/release-keys.md`, and the beta letter holds them and the two commands of R8; non-automatable, the owner records in the release's pull request that the published fingerprint was read from the token.
 - T11 (covers R11): `check_s060_t11_r11_amendments`, once this spec is `accepted`: none of the four skills says that signing happens in CI; §8 and §11 say what R11 lists.
+- T12 (covers R12): `s060_t12_r12_notices`: every artefact of a test release holds `THIRD-PARTY-NOTICES.txt`, identical in the two builds of R3; it has a section for every package of the lock files that the artefact ships, for libsodium and for ZXing's `NOTICE`; a fixture crate with no licence file fails the build, passes with a matching override, and fails again when the override's SHA-256 does not match; the generator makes no network request.
 
 ## Vectors
 
@@ -144,7 +153,8 @@ The jobs `release` and `verify` (started by the owner) green for a `vX.Y.Z-rc.1`
 
 - Google Play, F-Droid and the public release's distribution (spec 064-public-release).
 - Automatic updates inside the apps: v1 is updated through the stores and by downloading a new installer.
-- Building libsodium from source on Windows (a later change, spec 042-connection-host R15).
+- Patch releases, dependency upkeep and notices of new versions after the public release (spec 065-release-maintenance).
+- Building libsodium from source on Windows: not in v1 and planned by no spec; the Windows desktop links the signed binary of spec 042-connection-host R15, a documented residual (Security).
 
 ## Open questions
 
@@ -157,3 +167,5 @@ The jobs `release` and `verify` (started by the owner) green for a `vX.Y.Z-rc.1`
 - 2026-09-27 revised after audit O round 1 (`docs/audit-log.md`): the owner rebuilds before signing; fingerprints published outside GitHub and passed to the verifier; the previous release's signers check the tag; backup tokens, touch per signature and rotation; `-beta.N` and `-rc.N` tags, draft releases and release branches; split `release` and `verify` jobs; the manifest names its tag and commit; the measured determinism settings (path remaps, buildkit, zip, `.deb`, `/Brepro`, vendored bundler tools, snapshot packages); signed installers rebuilt around signed binaries; the signing host and endpoints per step, and the iOS upload; apksigner's working PKCS#11 form; Play and F-Droid moved to spec 064
 - 2026-09-27 revised after audit O round 2 (`docs/audit-log.md`): the owner verifies the tag with his own signers file and runs his own script copy, and rebuilds Windows on his own virtual machine (O-Q5); every release left a draft and published by hand; `verify` by `workflow_dispatch` over uploaded files or a local folder; a first check that needs nothing from the repository, several fingerprints, and Rekor for public releases (O-Q6); rc builds marked and signed with test keys only, beta builds expiring; versions derived from the tag; the App Bundle and the Play keys; PIN and touch per signature, backup certificates, the Android key made on a live boot, a compromise procedure; one run artefact kept a day; one sentence per residual; references to Audit O
 - 2026-09-27 revised after audit O round 3 (`docs/audit-log.md`): Rekor logged by `sign_release.sh` before upload; `verify` fed by a download URL; the third-party check with `check-novalidate` and a stated hash step; an integer iOS build number; the Play bundle and the three Windows signatures in the signing steps; compromise notices through the owner's channels; the iOS archive compared on a macOS host; 056 no longer blocked by this spec
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): R12 third-party notices file in every artefact, shown by Help; building libsodium from source on Windows is a v1 residual with no owner; later releases point to spec 065; blocks 065 and 066
+- 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the build time compiled into every app as an explicit input (R2), read by the age notice of spec 056 R22; committed, reviewed licence overrides for components that ship no licence text (R12)

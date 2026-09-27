@@ -82,8 +82,9 @@ pub const DEFAULT_SERVER_URL: &str = "wss://server.invalid";
 
 ## Open questions
 
-- [ ] 000-R4: when there is a domain, the constant changes with a `chore:` commit; is an ADR needed? Proposal: no, it is configuration, not protocol.
+- [x] 000-R4: when there is a domain, the constant changes with a `chore:` commit; is an ADR needed? Decided in audit P: no, it is configuration, not protocol; the value itself is open question 063-R1.
 
 ## History
 
 - 2026-09-20 draft · 2026-09-20 in review · 2026-09-20 accepted (Marc Vilardebó) · 2026-09-20 implemented
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): open question 000-R4 closed with its proposal

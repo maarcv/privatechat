@@ -85,7 +85,7 @@ None: the limits are rules over state, checked by the unit tests.
 
 ## Out of scope
 
-- How the channel card words the counts (specs 050–052).
+- How the channel card words the counts (spec 055-verify-ui R12).
 - Limits on the server (spec 033-rate-limit-quotas).
 
 ## Open questions
@@ -111,3 +111,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-09-25 revised after audit J round 13 (`docs/audit-log.md`)
 - 2026-09-25 revised after audit J round 33 (`docs/audit-log.md`)
 - 2026-09-25 open questions decided with the human reviewer, recommendations accepted (`docs/audit-log.md`)
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): the card counts point to spec 055

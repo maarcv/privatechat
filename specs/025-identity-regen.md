@@ -89,7 +89,7 @@ None of its own: the blob is the 013 `key_retired` layout; the flow is unit test
 ## Out of scope
 
 - Receiving a retirement (spec 024-key-retired).
-- The warning dialog before regenerating and the "retirement pending" wording (specs 050–052).
+- The warning dialog before regenerating and the "retirement pending" wording (spec 055-verify-ui R14).
 
 ## Open questions
 
@@ -116,3 +116,4 @@ None.
 - 2026-09-25 revised after audit J round 26 (`docs/audit-log.md`)
 - 2026-09-25 revised after audit J round 27 (`docs/audit-log.md`)
 - 2026-09-25 revised after audit J round 30 (`docs/audit-log.md`)
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): warning and "retirement pending" point to spec 055

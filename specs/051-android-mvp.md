@@ -32,7 +32,8 @@ The Android app reaches the core through `Core` of spec 040-uniffi, which wraps 
 - R7 The release build MUST be minified with R8, with keep rules for JNA and the generated uniffi classes and nothing kept beyond them, and MUST pin the Gradle wrapper with its checksum, every dependency version in the catalog, and Gradle's dependency verification (`gradle/verification-metadata.xml` with SHA-256), so that F-Droid can rebuild it. It builds one APK per ABI of spec 040-uniffi R11, with the ABI index `A` of spec 060-reproducible-builds R2 (0 for `arm64-v8a`, 1 for `armeabi-v7a`, 2 for `x86_64`), and every `versionCode` and `versionName` derived from the release tag by that requirement, never written by hand. `clients/android/dependencies.allow` (spec 053-device-security R16) MUST list JNA's `aar`, `kotlinx-coroutines`, the Compose and AndroidX artefacts, `androidx.biometric`, and the ZXing and CameraX artefacts of spec 054-qr-invite, and their transitive dependencies as Gradle resolves them, and nothing else; the script of spec 053-device-security R16 prints what is missing.
 - R8 A CI job `android` MUST run, in `clients/android/`, `./gradlew lintRelease ktlintCheck detekt test assembleRelease` and `connectedCheck` on emulators at API levels 30 and the `targetSdk`, after `scripts/build_bindings.sh android`, together with `scripts/check_client_dependencies.sh` for Android; `.github/CONTRIBUTING.md` MUST list the same commands (AGENTS 17). The job MUST also check, with `llvm-nm --defined-only` from rustup's `llvm-tools`, that the Rust library it packages holds no symbol `uniffi_privatechat_ffi_fn_constructor_ffihost_with_fixed_clock` (spec 040-uniffi's `test-clock` feature) and does hold the symbol of `FfiHost`'s `open`, as a positive control, so that an empty or unreadable symbol list never passes.
 - R9 The view models MUST be tested with JUnit 5, `kotlinx-coroutines-test` and Turbine over a small interface `ChatCore` of the app that `Core` implements through a thin adapter, and a fake of it, since the native library does not load in a JVM unit test; the UI flows of specs 054-qr-invite, 055-verify-ui and 056-chat-screens run as Compose UI tests on the emulators of R8, over the fake.
-- R10 Publication MUST start in this phase (`docs/spec.md` §10): `clients/android/fastlane/metadata/android/` MUST hold the store texts (title, short and full description) in the five UI languages, with no claim beyond `docs/spec.md` §1's lists, for F-Droid and Google Play; the Google Play "Data safety" form states that no data is collected or shared, and the pull request that accepts this spec records that the F-Droid inclusion request and the Play developer account were started. The F-Droid inclusion request, with its `fdroiddata` recipe `metadata/org.privatechat.yml`, is filed but not merged before the beta ends, since F-Droid publishes every tag it builds (spec 064-public-release R3); the Play record is for the public release (spec 064-public-release R4), and the beta reaches Android testers by the owner-signed APK (spec 063-beta R2). The application identifier `org.privatechat` does not change with the product name.
+- R10 Publication MUST start in this phase (`docs/spec.md` §10): `clients/android/fastlane/metadata/android/` MUST hold the store texts (title, short and full description) in the five UI languages, with no claim beyond `docs/spec.md` §1's lists, for F-Droid and Google Play, and the phone screenshots and the Play feature graphic in those languages, rendered by the screenshot tests of R5 (which draw the composables without a window, so `FLAG_SECURE` never has to be lifted) over the fake of R9 with invented names and messages, never a real person, a real config or a real server; the Google Play "Data safety" form states that no data is collected or shared, on the grounds `docs/release-legal.md` records for every store (spec 052-ios-mvp R10: end-to-end encrypted content, opaque blobs kept only until their TTL, addresses in memory only for the connection), the export-compliance answer is the one of spec 052-ios-mvp R10 (052-R10, recorded in `docs/release-legal.md`), and the pull request that accepts this spec records that the F-Droid inclusion request and the Play developer account were started. The F-Droid inclusion request, with its `fdroiddata` recipe `metadata/org.privatechat.yml`, is filed but not merged before the beta ends, since F-Droid publishes every tag it builds (spec 064-public-release R3); the Play record is for the public release (spec 064-public-release R4), and the beta reaches Android testers by the owner-signed APK (spec 063-beta R2). The application identifier `org.privatechat` does not change with the product name.
+- R11 Every Google Play review submission MUST carry, in the Play Console's "App access" instructions kept in `clients/android/fastlane/metadata/android/review_notes.txt`, how to create a channel on the default server (spec 066-public-server) and invite a second device, since a file invitation lasts only 24 h (spec 011-config-format R18) and no account exists to hand over; and the standing answer on user-generated content that spec 052-ios-mvp R12 gives (end-to-end encrypted, no accounts; mute, forget, leave and create a new channel). The IARC content-rating questionnaire is answered once and recorded in the same folder, and the default server MUST be up for the whole review.
 
 ## Limits
 
@@ -57,7 +58,8 @@ clients/android/app/src/main/kotlin/org/privatechat/
   platform/ChatCore.kt      the interface over Core (R9)
   ui/theme/                 Theme.kt, Color.kt (R5)
 clients/android/app/src/main/res/values*/strings.xml, xml/locales_config.xml   R6
-clients/android/fastlane/metadata/android/{en-US,es-ES,fr-FR,ca,it-IT}/        R10
+clients/android/fastlane/metadata/android/{en-US,es-ES,fr-FR,ca,it-IT}/        R10 (texts, screenshots, feature graphic)
+clients/android/fastlane/metadata/android/review_notes.txt                      R11
 ```
 
 ```kotlin
@@ -76,7 +78,7 @@ The screens, their states and intents are those of specs 053-device-security, 05
 
 Test names: `s051_tTT_rRR_<name>` in snake_case, as the kotlin skill gives.
 
-**PR slices** (AGENTS 14): (a) the project, the theme, the strings and the CI job (R1, R5, R6, R8); (b) the graph, the event channel and the navigation (R2, R3); (c) the network callback (R4); (d) the build rules, the allowlist and the publication metadata (R7, R10); (e) the test setup (R9). The screens of 053–056 land in their own slices, inside this app.
+**PR slices** (AGENTS 14): (a) the project, the theme, the strings and the CI job (R1, R5, R6, R8); (b) the graph, the event channel and the navigation (R2, R3); (c) the network callback (R4); (d) the build rules, the allowlist, the publication metadata and the review notes (R7, R10, R11); (e) the test setup (R9). The screens of 053–056 land in their own slices, inside this app.
 
 ## Security
 
@@ -101,7 +103,8 @@ None.
 - T07 (covers R7): `s051_t07_r07_release_build`: `assembleRelease` passes dependency verification; the release APK holds the uniffi classes and no class R8 should have removed (a mapping check); `check_client_dependencies.sh` passes on the real list, which holds the resolved transitive names (`kotlin-stdlib` among them), and fails with one name removed; the release build's `versionCode` for a test tag equals the value spec 060-reproducible-builds R2 gives.
 - T08 (covers R8): CI job step `s051_t08_r08_android_job`, which runs the commands of R8; the symbol check fails on a library built with `test-clock` and on an empty symbol list; `.github/CONTRIBUTING.md` lists them.
 - T09 (covers R9): `s051_t09_r09_flows`: the three UI flows of R9 pass on both emulators.
-- T10 (covers R10): `s051_t10_r10_store_texts`: the metadata exists in the five languages, within the stores' length limits; non-automatable, the requests recorded in the pull request.
+- T10 (covers R10): `s051_t10_r10_store_texts`: the metadata, the screenshots and the feature graphic exist in the five languages, the texts within the stores' length limits; the images come from the screenshot tests over the fake; non-automatable, the requests recorded in the pull request.
+- T11 (covers R11): `check_s051_t11_r11_review_notes`: `review_notes.txt` exists, names the default server and says how to invite a second device, and holds the answer on user-generated content; the IARC answers exist.
 
 ## Vectors
 
@@ -115,12 +118,12 @@ The CI job `android` green. Non-automatable: on a phone with Android 11 and one 
 
 - The storage key, the lock, the manifest's permissions and exports, and backups (spec 053-device-security).
 - The screens' rules (specs 054-qr-invite, 055-verify-ui, 056-chat-screens).
-- Signing and reproducible builds (spec 060-reproducible-builds); the store listings' graphics.
+- Signing and reproducible builds (spec 060-reproducible-builds).
 - Tablets and foldables beyond one pane, widgets, and a background service: none is in v1.
 
 ## Open questions
 
-None.
+- [ ] 051-R11: whether Google Play's user-generated-content policy for the Communication category accepts the standing answer of R11 for an app with no accounts and no one to report to; if Play refuses it, the owner decides, as for 052-R12.
 
 ## History
 
@@ -131,3 +134,5 @@ None.
 - 2026-09-27 revised after audit N round 4 (`docs/audit-log.md`): the event queue drained and discarded at the end of the app's own lock before the map is cleared; the fault count kept outside the view models
 - 2026-09-27 revised after audit O round 1 (`docs/audit-log.md`): the F-Droid request unmerged until the public release, Play for the public release (specs 063-beta, 064-public-release)
 - 2026-09-27 amended after audit O round 2 (`docs/audit-log.md`): the `versionCode` and ABI index derived from the tag (spec 060-reproducible-builds R2)
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): store screenshots and feature graphic from the screenshot tests; the export-compliance answer of 052-R10; review notes, the answer on user-generated content and the IARC rating (R11)
+- 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the "Data safety" answer rests on the reasons `docs/release-legal.md` records

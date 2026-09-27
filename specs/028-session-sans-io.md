@@ -137,7 +137,7 @@ A `Step` never fails as a whole: a store failure in one channel goes to `failed`
 
 ## Security
 
-- A half-open socket on an awake device keeps a channel counted as subscribed until the client's ping timeout (specs 050–052), during which `synced` may still advance while nothing arrives; a suspended process is caught by R9's 5 000 ms rule, during the handshake as after it. Documented residual.
+- A half-open socket on an awake device keeps a channel counted as subscribed until the connection host's silence limit of 75 000 ms (spec 042-connection-host R9), during which `synced` may still advance while nothing arrives; a suspended process is caught by R9's 5 000 ms rule, during the handshake as after it. Documented residual.
 - The subscription signature proves having the config, binds the server's nonce, the channel, the TTL and the host, and is useless to whoever sees it (ADR 0010); the host is the config's, never the socket's.
 - `since` is rounded down to the minute (R6): the server does not learn the exact last message read. The duplicates it brings are rejected by the channel (spec 021-channel-session R9).
 - R4, R8 and R9 together close three holes of streamed history: no live push can move the cursor past an unsent part of the backlog; truncation is decided by the client's clock before the backlog, so a server can neither hide a deletion by claiming everything older expired nor repeat `ok` to reset the gap baseline; and a quiet channel is not flagged as truncated on every reconnect, because `synced_at` records when it was last complete. The cursor itself stays in server time (spec 021-channel-session R20), so a fast device clock skips nothing (spec 021-channel-session R20 leaves the cursor before a push already expired by the local clock).
@@ -182,7 +182,7 @@ A `Step` never fails as a whole: a store failure in one channel goes to `failed`
 ## Out of scope
 
 - The server side of every frame (specs 030–033), apart from the contract of R4.
-- The TLS socket, the WebSocket library, ping and pong, backoff and the SOCKS5 connection (the clients, specs 050–052); `Session` sees only whole binary frames.
+- The TLS socket, the WebSocket library, ping and pong, backoff and the SOCKS5 connection (spec 042-connection-host R9, R10); `Session` sees only whole binary frames.
 - Grouping channels into connections, the probe socket, store recovery and the phase 2 exit test (spec 027-core-api).
 
 ## Open questions
@@ -232,3 +232,4 @@ Decided on 2026-09-25: the frame keys belong to this spec (`docs/spec.md` §6).
 - 2026-09-25 amended after audit K round 1 (`docs/audit-log.md`): subscribe spacing counts across `hello`s (R6); a `rate_limited` naming a channel and no `client_ref` re-queues that subscribe and does not stop publishing (R16)
 - 2026-09-26 amended by spec 040-uniffi R14 while drafting phase 4: every vector carries `frame_type`
 - 2026-09-26 amended after audit L round 1 (`docs/audit-log.md`): every `hello` vector carries `event` (spec 040-uniffi R14)
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): socket, ping and backoff pointers name spec 042

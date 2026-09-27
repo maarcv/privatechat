@@ -67,9 +67,10 @@ DOC_LINT_BASE=<ref>            # optional; base commit for R6
 
 ## Open questions
 
-- [ ] 003-R3: the ADRs stay outside the scope of R3 because they cite, as history, the names of specs they have replaced. Should they be included with an exception list? Proposal: no.
+- [x] 003-R3: the ADRs stay outside the scope of R3 because they cite, as history, the names of specs they have replaced. Should they be included with an exception list? Decided in audit P: no.
 
 ## History
 
 - 2026-09-20 draft · 2026-09-20 in review · 2026-09-20 accepted (Marc Vilardebó) · 2026-09-20 implemented
 - 2026-09-24 R6 amended: the header date must equal the date of the latest change to the file, so several changes on one day pass and a forgotten date still fails (audit G)
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): open question 003-R3 closed with its proposal

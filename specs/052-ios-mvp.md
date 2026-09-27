@@ -32,7 +32,10 @@ The iOS app reaches the core through `Core` of spec 040-uniffi, which wraps the 
 - R7 The project MUST commit its `Package.resolved`, pin the Xcode version used in CI, add no build phase that fetches from the network, and embed no framework beyond the XCFramework of spec 040-uniffi and the system's; `clients/ios/dependencies.allow` (spec 053-device-security R16) MUST list `PrivatechatCore` alone.
 - R8 A CI job `ios` MUST run on a macOS runner, after `scripts/build_bindings.sh ios`, SwiftLint and SwiftFormat in lint mode over `clients/ios/`, and `xcodebuild build test` on simulators of iOS 17 and of the newest release, together with `scripts/check_client_dependencies.sh` for iOS; `.github/CONTRIBUTING.md` MUST list the same commands (AGENTS 17). The job MUST also check, with `llvm-nm --defined-only` from rustup's `llvm-tools`, that the XCFramework it packages holds no symbol `uniffi_privatechat_ffi_fn_constructor_ffihost_with_fixed_clock` (spec 040-uniffi's `test-clock` feature) and does hold the symbol of `FfiHost`'s `open`, as a positive control, so that an empty or unreadable symbol list never passes.
 - R9 The view models MUST be tested with Swift Testing over a protocol `ChatCore` of the app that `Core` conforms to through a thin adapter, and a fake of it; the UI flows of specs 054-qr-invite, 055-verify-ui and 056-chat-screens run as XCTest UI tests on the simulators of R8, over the fake, launched with a launch argument that the release configuration compiles out.
-- R10 Publication MUST start in this phase (`docs/spec.md` §10): `clients/ios/fastlane/metadata/` MUST hold the App Store texts (name, subtitle, description, keywords) in the five UI languages, with no claim beyond `docs/spec.md` §1's lists, and the App Store privacy answers state "Data Not Collected". The export-compliance answer (`ITSAppUsesNonExemptEncryption`) and any declaration it needs are 052-R10, decided by a human before the first submission; the pull request that accepts this spec records that the developer account and the App Store Connect record were started.
+- R10 Publication MUST start in this phase (`docs/spec.md` §10): `clients/ios/fastlane/metadata/` MUST hold the App Store texts (name, subtitle, description, keywords) in the five UI languages, with no claim beyond `docs/spec.md` §1's lists, and the screenshots in those languages, taken by the UI tests of R9 over the fake core with invented names and messages, never a real person, a real config or a real server; the App Store privacy answers state "Data Not Collected", and `docs/release-legal.md` records why for each store: message content is end-to-end encrypted and unreadable by the developer, the server keeps only opaque blobs until their TTL, and it holds addresses in memory only for the connection (spec 033-rate-limit-quotas). The export-compliance answer MUST be one legal checklist, 052-R10, decided by a human before the first submission and recorded in `docs/release-legal.md`: the US classification under the EAR (publicly available source, or mass market, with standard cryptography), France (the ANSSI declaration, mandatory, since the direct downloads and F-Droid reach France whatever the stores do), and the key `ITSAppUsesNonExemptEncryption` the build carries; the same answer is reused by Google Play, F-Droid and the direct downloads (spec 051-android-mvp R10), and spec 064-public-release R1 gates on it. The pull request that accepts this spec records that the developer account and the App Store Connect record were started.
+- R11 The app MUST ship `Privatechat/PrivacyInfo.xcprivacy` with `NSPrivacyTracking` false, no tracking domain, no collected data type, and one `NSPrivacyAccessedAPITypes` entry with its reason for each required-reason API category the built app uses: `UserDefaults` (`CA92.1`, the one-time warnings of spec 053-device-security R18), file timestamps (`C617.1`, the age of the temporary export file of spec 054-qr-invite R9 and the Rust store's `stat` calls) and system boot time (`35F9.1`) when the binary links `mach_absolute_time`; a CI step MUST fail when the file is missing, when it declares tracking or a collected data type, or when a category whose symbols `llvm-nm` finds in the app binary or the XCFramework has no entry.
+- R12 Every App Review submission MUST carry the review notes kept in `clients/ios/fastlane/metadata/review_information/notes.txt`: how to create a channel on the default server (spec 066-public-server) and invite a second device, since a file invitation lasts only 24 h (spec 011-config-format R18) and no account exists to hand over; and the standing answer on user-generated content (App Review guideline 1.2): messages are end-to-end encrypted and there are no accounts, so no one can read or remove them, and a member mutes an unknown key, forgets a key or leaves and creates a new channel (specs 055-verify-ui, 056-chat-screens). The age-rating questionnaire is answered once and recorded in the same folder. The default server MUST be up for the whole review, and before the first submission a person MUST chat from the app on an IPv6-only NAT64 network (macOS Internet Sharing's "Create NAT64 Network") in two channels, one on the default server and one on a server whose host is an IPv4 literal (spec 042-connection-host resolves it through `getaddrinfo` on Apple targets), recorded in the pull request.
+- R13 Before the first submission, 052-R13 MUST be measured on an iPhone and its result recorded in the pull request that closes it, together with the change it makes to the iOS Tor sentence of spec 056-chat-screens R18, which alone holds the Help text.
 
 ## Limits
 
@@ -56,7 +59,10 @@ clients/ios/Privatechat/
   Platform/ChatCore.swift    the protocol over Core (R9)
   Resources/Localizable.xcstrings, Assets.xcassets   R5, R6
 clients/ios/PrivatechatTests/, PrivatechatUITests/   R9
-clients/ios/fastlane/metadata/{en-US,es-ES,fr-FR,ca,it}/   R10
+clients/ios/fastlane/metadata/{en-US,es-ES,fr-FR,ca,it}/   R10 (texts and screenshots)
+clients/ios/fastlane/metadata/review_information/notes.txt   R12
+clients/ios/Privatechat/PrivacyInfo.xcprivacy   R11
+docs/release-legal.md   R10: the answers of 052-R10, shared with spec 051-android-mvp
 ```
 
 ```swift
@@ -69,7 +75,7 @@ The screens, their states and intents are those of specs 053-device-security, 05
 
 Test names: `@Test func s052_tTT_rRR_camelCase()`, as the swift skill gives.
 
-**PR slices** (AGENTS 14): (a) the project, the look, the strings and the CI job (R1, R5, R6, R8); (b) the graph, the event stream and the navigation (R2, R3); (c) the path monitor (R4); (d) the build rules, the allowlist and the publication metadata (R7, R10); (e) the test setup (R9). The screens of 053–056 land in their own slices, inside this app.
+**PR slices** (AGENTS 14): (a) the project, the look, the strings and the CI job (R1, R5, R6, R8); (b) the graph, the event stream and the navigation (R2, R3); (c) the path monitor (R4); (d) the build rules, the allowlist, the publication metadata and the privacy manifest (R7, R10–R13); (e) the test setup (R9). The screens of 053–056 land in their own slices, inside this app.
 
 ## Security
 
@@ -77,6 +83,9 @@ Test names: `@Test func s052_tTT_rRR_camelCase()`, as the swift skill gives.
 - No route and no screen state is saved (R3), so a process the system ended shows nothing but `Locked` (spec 053-device-security R21), and one scene means one lock (R1).
 - Events cross from the host's threads into one stream read on the main actor (R2); the listener never blocks the host (spec 042-connection-host R5).
 - The UI-test launch argument is compiled out of the release configuration (R9), so no release build can start with a fake core.
+- The privacy manifest declares no tracking and no collected data (R11); the store screenshots hold no real person, config or server (R10).
+- A server URL whose host is an IPv4 literal (spec 011-config-format R5 allows one) is resolved through `getaddrinfo`, which synthesises its IPv6 address on a NAT64 network, and R12's check covers one such channel.
+- Until 052-R13 is measured, a Tor connection from an iPhone may be impossible, and with it every `.onion` channel on iOS: a documented residual (R13, spec 056-chat-screens R18).
 
 ## Public API changes
 
@@ -93,7 +102,10 @@ None.
 - T07 (covers R7): `s052_t07_r07_build_rules`: `Package.resolved` is committed and names `PrivatechatCore`'s path alone; the app bundle embeds no framework but the XCFramework's; `check_client_dependencies.sh` passes on the real list and fails with a package added.
 - T08 (covers R8): CI job step `s052_t08_r08_ios_job`, which runs the commands of R8; the symbol check fails on a library built with `test-clock` and on an empty symbol list; `.github/CONTRIBUTING.md` lists them.
 - T09 (covers R9): `s052_t09_r09_flows`: the three UI flows of R9 pass on both simulators; the release build rejects the launch argument (it is absent from the binary's strings).
-- T10 (covers R10): `s052_t10_r10_store_texts`: the metadata exists in the five languages, within the store's length limits; non-automatable, the records started, noted in the pull request.
+- T10 (covers R10): `s052_t10_r10_store_texts`: the metadata and the screenshots exist in the five languages, the texts within the store's length limits; the screenshots come from the UI-test run over the fake; `docs/release-legal.md` holds the three answers of 052-R10 before a tag without a suffix; non-automatable, the records started, noted in the pull request.
+- T11 (covers R11): CI job step `s052_t11_r11_privacy_manifest`: a build without `PrivacyInfo.xcprivacy`, with `NSPrivacyTracking` true, with a collected data type, or with the `UserDefaults` entry removed while the binary still calls it, fails.
+- T12 (covers R12): `check_s052_t12_r12_review_notes`: `notes.txt` exists, names the default server and says how to invite a second device, and holds the answer on user-generated content; the age-rating answers exist; non-automatable, the NAT64 chat in both channels recorded in the pull request.
+- T13 (covers R13): non-automatable, the pull request that closes 052-R13 records the measurement of both modes and the matching change to spec 056-chat-screens R18's iOS sentence.
 
 ## Vectors
 
@@ -107,12 +119,14 @@ The CI job `ios` green. Non-automatable: on an iPhone with iOS 17 and one with t
 
 - The storage key, the lock, the privacy cover, file protection, backups and the `Info.plist` keys (spec 053-device-security).
 - The screens' rules (specs 054-qr-invite, 055-verify-ui, 056-chat-screens).
-- Signing, notarisation and reproducible builds (spec 060-reproducible-builds); the store's screenshots.
+- Signing, notarisation and reproducible builds (spec 060-reproducible-builds).
 - Share extensions, widgets, background modes and push: none is in v1 (`docs/spec.md` §9, one process per data directory).
 
 ## Open questions
 
-- [ ] 052-R10: how to answer App Store Connect's export-compliance question for an app whose messages are end-to-end encrypted with libsodium (`ITSAppUsesNonExemptEncryption`, and whether a self-classification or a national declaration is needed where the app is distributed). A legal decision for the human owner before the first submission; the build carries whatever key that decision names.
+- [ ] 052-R10: the export-compliance checklist of R10 for an app whose messages are end-to-end encrypted with libsodium: the EAR classification (publicly available source or mass market), the French ANSSI declaration (mandatory), and the `ITSAppUsesNonExemptEncryption` key; one answer for every store, F-Droid and the direct downloads. A legal decision for the human owner before the first submission; the build carries whatever key that decision names.
+- [ ] 052-R12: App Review guideline 1.2 asks apps with user-generated content for a way to report content and to block users; the app can block (mute, forget) but has no one to report to. If App Review refuses the standing answer of R12, the owner decides; the design adds no report channel on its own.
+- [ ] 052-R13: measure, on an iPhone, both ways an iOS Tor app can carry this app's traffic: Orbot for iOS's VPN mode (a Network Extension that routes every connection, with no proxy setting), and any SOCKS5 port on `127.0.0.1` a Tor app offers that this app can reach while in the foreground; for each, whether a clearnet server and a `.onion` server (whose name the host hands to the proxy, or which the VPN must resolve) are reachable. The iOS sentence of spec 056-chat-screens R18 and `docs/residuals.md` follow the result.
 
 ## History
 
@@ -122,3 +136,5 @@ The CI job `ios` green. Non-automatable: on an iPhone with iOS 17 and one with t
 - 2026-09-27 revised after audit N round 3 (`docs/audit-log.md`): no generation filter in the reader, `Core`'s alone; a `locked` the host started moves `LockController` to locked; the fallback targets channels `Connecting` or `Retrying`, and also runs at unlock and on `Retrying` over cellular
 - 2026-09-27 revised after audit N round 4 (`docs/audit-log.md`): the event queue drained and discarded at the end of the app's own lock before the map is cleared; the fault count kept outside the view models; the fallback after unlock and `Retrying` calls `retryNow`, only over cellular
 - 2026-09-27 042-R10 measured on a device: the host's native sockets bring up cellular and follow an active VPN, so R4's data-free `NWConnection` fallback is removed
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): store screenshots from the UI tests; one export-compliance checklist for every store; the privacy manifest; App Review notes, the answer on user-generated content, age rating and the NAT64 check; Tor on iPhone to measure (052-R12, 052-R13)
+- 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the ANSSI declaration mandatory; why "Data Not Collected" recorded per store; the NAT64 check with an IPv4-literal channel and its residual removed; Tor measured in VPN and SOCKS5 modes, the Help text in 056 R18 alone

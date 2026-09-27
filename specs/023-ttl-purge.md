@@ -62,6 +62,7 @@ impl Channel {   // pub(crate); spec 027-core-api exposes them through Device
 - Kept signatures outlive the messages on purpose (ADR 0029); they are 64 bytes, a time and an epoch, and hold no content.
 - An expired message leaves the screen at its `expires_at` (R1, R3); its plaintext leaves the disk once expired records reach a quarter of the log, or within a day at most (R5), at open, at unlock or while the app stays open, which bounds the flash writes a flood of short-lived messages can force (audit J, J2-B6) while keeping `docs/spec.md` §1 "deleted … on the client".
 - Deletion is physical and does not resist older copies of the flash (`docs/spec.md` §2); the guarantee is the destruction of `K_db`.
+- A device clock set ahead by more than a channel's TTL makes every message of that channel expire by the local clock, so the purge at open or at unlock removes them from `messages.log` for good, before any connection could raise `clock_off` (spec 021-channel-session); correcting the clock later brings back only what the server still holds. The behaviour is kept, since deleting early is the safe direction for privacy, and Help says to keep automatic time on (spec 056-chat-screens R18). Documented residual.
 
 ## Public API changes
 
@@ -87,7 +88,7 @@ None: the times are rules over the state, checked by the unit tests.
 
 ## Out of scope
 
-- The `purge_at` of each record (spec 021-channel-session R26); the timer that calls `on_tick` (the clients, specs 050–052).
+- The `purge_at` of each record (spec 021-channel-session R26); the timer that calls `on_tick` (spec 042-connection-host R8).
 - The server's purge (spec 032-storage-ttl).
 - Local deletion of a single message by the user, and an unread marker: not in v1.
 
@@ -116,3 +117,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-09-25 revised after audit J round 15 (`docs/audit-log.md`)
 - 2026-09-25 revised after audit J round 16 (`docs/audit-log.md`)
 - 2026-09-25 open questions decided with the human reviewer, recommendations accepted (`docs/audit-log.md`)
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): the `on_tick` timer points to spec 042; the residual of a clock set ahead

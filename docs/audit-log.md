@@ -2,6 +2,77 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit P
+
+**2026-09-28 — Audit P, coverage review of the whole plan once every spec of §10 existed, in three independent passes (P-A: every obligation of `docs/spec.md` §1–§12 and `docs/threat-model.md` mapped to the spec that owns it; P-B: every deferral between specs checked against its target; P-C: what a v1 shipped to the stores needs that no spec covers).** No wire, key or format decision changes. The human reviewer decided two questions:
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| P-Q1 | No spec ran the project's own server at `DEFAULT_SERVER_URL`, yet the beta needs it, the privacy policy makes promises about it and `SECURITY.md` promises redeploys (P-A7, P-B1, P-C2) | A spec of its own | Spec 066-public-server; §10, §11 |
+| P-Q2 | Nothing covered the time after the public release: security patch releases, telling direct and APK users a fix exists, store and toolchain deadlines, dependency upkeep beyond Actions (P-C1, P-C8) | A spec of its own, not folded into 060 or 064 | Spec 065-release-maintenance; §10, §11 |
+
+Drafting choices, recorded for the review:
+
+| # | Choice | Where |
+| --- | --- | --- |
+| P-D1 | `Unreadable` shows the text of §4, "unsupported or corrupt message", next to the sender | Spec 056 R8 |
+| P-D2 | No image registry in v1: the server image's digest is its `SHA256SUMS` line and self-hosters build it from the tag | Specs 001, 062 R1, 064 R2, 066 R2 |
+| P-D3 | `docs/residuals.md` keeps collecting only the exact phrase "documented residual"; the specs that said it in other words were reworded | Specs 032, 041, 061 R2, 062 |
+| P-D4 | WebView2 with `webviewInstallMode: skip` on Windows 11 only: no download from Microsoft at install time and no 127 MB vendored installer | Spec 050 R13 |
+| P-D5 | Accessibility services are not detected on Android: a warning would fire for every screen-reader user; a documented residual | Spec 053 |
+| P-D6 | Phase 1 closes only with a "Phase 1 review" row naming the second reviewer of `proto` and the commit read | Spec 016 acceptance |
+| P-D7 | The public release gates on every spec of the index but 064 being `implemented` (065 and 066 included), the export-compliance record, the EU-rules question of 066 closed and spec 066's server running the release image; phase 6 closes with 064 (round 2) | Spec 064 R1 |
+| P-D8 | A list of community servers, if ever kept, lives on the landing's "Run your own server" page only | §12; spec 062 R1 |
+| P-D9 | Store screenshots in the five languages come from the UI and screenshot tests over invented content | Specs 051 R10, 052 R10 |
+| P-D10 | One export-compliance checklist (EAR, France, the App Store key) in `docs/release-legal.md`, reused by every store; open question 052-R10 for the owner | Specs 051 R10, 052 R10, 064 R1 |
+| P-D11 | A screen reader announces "New message" alone, at most once every 2 000 ms, when the focus is off the open channel's list, never for a muted peer | Specs 050 R14, 056 R7 |
+| P-D12 | A build older than its tag plus 180 days shows a line that blocks nothing and fetches nothing; moved to spec 056 in round 2 so that v1.0.0 carries it, with a release due before the newest tag is 180 days old | Specs 056 R22, 065 R4 |
+| P-D13 | Unlock measured before the beta on an API 30 phone with 16 channels near the log cap; the beta ends only at 10 000 ms or less | Spec 063 R6, R8 |
+
+Findings and changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| P1 | The project's public server had no owner (P-A7, P-B1, P-C2) | High | P-Q1 |
+| P2 | No maintenance after the release; Dependabot covered three of the lock files and no scheduled advisory check ran (P-C1, P-C8, P-A3) | High | P-Q2 |
+| P3 | iOS had no privacy manifest, which App Store Connect requires (P-C4) | High | Spec 052 R11 |
+| P4 | Export compliance only for iOS; nothing for Play, F-Droid or the downloads (P-C3) | Medium | P-D10 |
+| P5 | Store review: no reviewer notes, no answer on user content or age rating, no IPv6-only check; screenshots excluded everywhere (P-C5, P-B3) | Medium | Specs 051 R10, R11, 052 R10, R12; P-D9 |
+| P6 | Third-party licence notices were not shipped (P-C6) | Medium | Spec 060 R12; Help "Licences" (056 R18) |
+| P7 | No desktop platform floors; the default WebView2 bootstrapper downloads from Microsoft at install (P-C7) | Medium | Spec 050 R13; P-D4 |
+| P8 | Security warnings and store listings were translated with no reviewer (P-A10, P-C17) | Medium | Spec 062 R7; 055 R3 and 056 R3 mark their security texts |
+| P9 | Tor on iOS unverified; `.onion` channels may be unreachable on iPhone (P-C12) | Medium | Spec 052 R13, open question 052-R13; Help (056 R18) |
+| P10 | `CounterExhausted` showed a text but did not force regeneration (P-A9) | Medium | Spec 056 R12 |
+| P11 | Several §8 and §2 "documented" promises would never reach `docs/residuals.md` (P-A11, P-A13–P-A15, P-C13, P-C14) | Medium | P-D3; residuals in 023, 032, 041, 053, 062 |
+| P12 | No rule that a later app reads every earlier local file version, and no golden files (P-C9); server schema upgrade unstated (P-C10) | Low | Spec 020 R31; spec 032 R3 |
+| P13 | Desktop keyboard and screen-reader use, announcements, the QR's 60 s under timing rules (P-C11) | Low | Specs 050 R14, 054 R6, 056 R7; P-D11 |
+| P14 | The landing as a site had no owner; the privacy policy omitted its host's logs (P-A4, P-C16) | Low | Spec 062 R1, R2, R8 |
+| P15 | Phase exits "internal review of `proto`" and "no spec left in draft" had no check (P-A1, P-A6) | Low | P-D6, P-D7 |
+| P16 | Unlock time with many channels never measured (P-C15) | Low | P-D13 |
+| P17 | Uninstall leaves data and key; device PIN over biometrics only in Help (P-C14, P-A17) | Low | Spec 053 residual and R5/R19 text; Help (056 R18) |
+| P18 | Building libsodium from source on Windows bounced between 042 and 060 (P-B5) | Low | A v1 documented residual in both |
+| P19 | Local CI equivalents of the client and Docker jobs not required in `CONTRIBUTING.md` (P-A16) | Low | Specs 034 R8, 053 R16, R22 |
+| P20 | About fifteen stale pointers to 050–052 where 042, 053, 055 or 056 own the thing; 012 named functions 021 does not have; 035's History named a missing 041 R18 (P-B7–P-B16) | Low | Wording in 011, 012, 021–026, 028, 034, 035, 055 |
+| P21 | Open questions left unticked in the implemented specs 000–003 (P-B17) | Low | Closed with their proposals; 002-R4 closed as no script |
+
+Round 2 (two passes over the round 1 diff: coherence, and adversarial security with technical viability; about 50 findings, consolidated):
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| P22 | The public server's image check took its key from the repository, so whoever held GitHub chose what the server ran; the server rebuilt on a machine sized for connections; "any member can compare" overstated it | High | The image is built off the host and loaded; the signature is checked against fingerprints written on the host out of band; which code runs is a documented residual (spec 066 R1, R2) |
+| P23 | The age notice and the feed would ship only after v1.0.0, missing the users they exist for | High | The notice is spec 056 R22; 064 gates on 065 and 066 being `implemented`; phase 6 closes with 064 |
+| P24 | Every patch tag broke 061 R3's rule for the release tag; nobody owned re-reviews after the release | High | 061 R3 binds the first public tag only; 065 R1 asks for a new review for a change to 011–017 or the crypto and proto paths, and lists every other change `unreviewed` |
+| P25 | Licence notices would fail every Android build, since many packages ship no licence file | High | Reviewed `licenses/overrides/` (spec 060 R12) |
+| P26 | Desktop floors named unsupported systems and arm64 Linux that no build produces; the WebView2 text sent users to Windows Update | Medium | macOS 15, Windows 11, Linux x86-64, dated; WebView2 check its own R (spec 050 R13, R15) |
+| P27 | IPv4 literals are synthesised on Apple's NAT64 only through `getaddrinfo` | Medium | The host resolves every name through it on Apple targets; open question 042-R9 on the dependency (spec 042 R9; 052 R12) |
+| P28 | Leaving France out of the stores does not keep direct downloads and F-Droid out of France | Medium | The ANSSI declaration is mandatory (spec 052 R10) |
+| P29 | Certificate threshold fixed at 14 days against 45-day certificates; scheduled workflows stop after 60 idle days; memory sized with no headroom; untested port claim | Medium | 7 days, a documented residual and a 065 R4 row, 70 % of measured memory, an owner's `nmap` record (spec 066) |
+| P30 | Disclosure before the stores carried the fix; Dependabot cannot update Gradle's verification metadata; scheduled jobs only see the default branch | Medium | Advisory after the stores or at 7 days; owner's metadata commit; a two-branch matrix (spec 065 R2, R5, R6) |
+| P31 | The landing's attribute scan missed preconnects, forms and SVG links; the legal route and the feed were not among its pages | Medium | A CSP meta on every page and a headless-browser check; seven routes (spec 062 R1, R8) |
+| P32 | Security texts of 053 and 054 not marked for the reviewer rule; 055 and 056 cited the wrong 062 requirement; the client log lint matched `fingerprint(` | Medium | Marked; 062 R7; word-bounded patterns (specs 053 R19, R22, 054 R4, 055 R3, 056 R3) |
+| P33 | Wrong or missing cross-references, asymmetric Depends and Blocks, a rewritten History line, two statements of the announcement rule, Tor Help text in two places | Low | Corrected; the rule in 056 R7 alone, the Tor text in 056 R18 alone, the measurement in 052 |
+
+
 ## Audit O
 
 **2026-09-27 — Audit O, review of the phase 6 draft specs 060, 061, 062 and 063 before human review, in four independent passes (O-A: coherence and SDD conformance; O-B: adversarial security and supply chain; O-C: technical viability, measured with rustc 1.98.1, Docker 29.8 and buildkit, apksigner from build-tools 36 on JDK 22, OpenSSH 10.3 and git 2.54, and read from tauri-bundler 2.9.4; O-D: end-to-end scenarios).** The human reviewer decided six questions with the recommended option (O-Q5 and O-Q6 in round 2):

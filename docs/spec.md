@@ -1,6 +1,6 @@
 # Private E2E chat — Specification and plan (SDD)
 
-Version: mvp · Post-audit I revision · Updated: 2026-09-27 · Marc Vilardebó (audits in `docs/audit-log.md`)
+Version: mvp · Post-audit I revision · Updated: 2026-09-28 · Marc Vilardebó (audits in `docs/audit-log.md`)
 
 This file, on the default branch (`mvp` until the first release), is the canonical source of the specification (see §11 "Governance"). Read copy, may lag behind: https://claude.ai/code/artifact/1527bf13-79e8-485a-908d-a515cbd062a4
 
@@ -539,7 +539,7 @@ Seven phases; each one closes when its specifications have green tests and a hum
 | 3. Server | 030-ws-protocol, 031-auth-channel-signature, 032-storage-ttl, 033-rate-limit-quotas, 034-docker, 035-server-ops (implemented in the order 032, 031, 030, 033, 035, 034) | Core↔server integration test via `Session`; working `docker compose up`; `deploy/README.md` "Deploy your own server"; log test without identifiers |
 | 4. Bindings | 040-uniffi, 041-desktop-bridge, 042-connection-host | Kotlin and Swift pass the same vectors as Rust; the empty Tauri app opens a channel |
 | 5. Clients | 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 053-device-security, 054-qr-invite, 055-verify-ui, 056-chat-screens | One user on each platform chats in the same channel; all measures of §8 applied; store publication process started |
-| 6. Hardening | 060-reproducible-builds, 061-threat-review, 062-security-docs, 063-beta, 064-public-release | Published hashes; external review of the cryptographic and threat model; public documentation of what it promises and does not promise; a closed beta ended; a public release; no spec left in `draft` |
+| 6. Hardening | 060-reproducible-builds, 061-threat-review, 062-security-docs, 063-beta, 064-public-release, 065-release-maintenance, 066-public-server | Published hashes; external review of the cryptographic and threat model; public documentation of what it promises and does not promise; a closed beta ended; a public release; the project's server run as spec 066 says; maintenance after the release in place; no spec left in `draft` |
 
 **Template for each spec**: `specs/TEMPLATE.md`. **Index**: `specs/README.md`, checked by the doc lint.
 
@@ -590,7 +590,7 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 ├─ Cargo.toml                ← workspace with [workspace.lints]
 ├─ rust-toolchain.toml · rustfmt.toml · deny.toml · .editorconfig · .gitignore
 ├─ .github/
-│  ├─ workflows/ci.yml · release.yml (spec 060)
+│  ├─ workflows/ci.yml · release.yml (spec 060) · advisories.yml (spec 065) · probe.yml (spec 066) · landing.yml (spec 062)
 │  ├─ allowed_signers        ← the release keys and their backups (spec 060)
 │  ├─ PULL_REQUEST_TEMPLATE.md · dependabot.yml
 │  └─ CONTRIBUTING.md · SECURITY.md · CODEOWNERS
@@ -600,6 +600,9 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 │  ├─ audit-log.md           ← findings and changes of every audit (§13 points here)
 │  ├─ assistant.example.md   ← template for personal AI-assistant preferences (copied to git-ignored assistant.md)
 │  ├─ release-keys.md        ← every signing key and backup, with fingerprints (spec 060)
+│  ├─ release-legal.md       ← the export-compliance answer every store reuses (spec 052)
+│  ├─ maintenance.md         ← the deadlines of the stores, the toolchain and the certificates (spec 065)
+│  ├─ public-server.md       ← the project's server: host, country, deployments (spec 066)
 │  ├─ fdroid/                ← a copy of the F-Droid recipe for the checks (spec 064)
 │  ├─ residuals.md           ← every documented residual (spec 061)
 │  ├─ review/                ← the external review's package and report (spec 061)
@@ -607,7 +610,7 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 │  └─ adr/README.md (index) · TEMPLATE.md · NNNN-*.md, one per decision
 ├─ specs/                    ← one spec per feature (TEMPLATE.md, README.md index)
 │  └─ vectors/               ← JSON test vectors, produced by the reference script of spec 015 (README.md with the schema)
-├─ scripts/{doc_lint,check_requirements}.{sh,py}, check_fuzz_targets.sh, fuzz_seeds.py, {sign,verify}_release.sh, release_env.sh (spec 060)
+├─ scripts/{doc_lint,check_requirements}.{sh,py}, check_fuzz_targets.sh, fuzz_seeds.py, {sign,verify}_release.sh, release_env.sh (spec 060), check_public_server.sh (spec 066), third_party_notices.py (spec 060)
 │  └─ reference/             ← vectors.py, the reference script that produces the vectors (spec 015), never shipped
 ├─ crates/
 │  ├─ core/                  ← Rust crate: crypto, proto, session (no I/O); fuzz/ in phase 1 (own workspace, Cargo.lock committed)
@@ -615,10 +618,11 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 │  └─ server/                ← Rust axum crate (phase 3)
 ├─ bindings/uniffi/          (phase 4)
 ├─ clients/desktop · android · ios   (phase 5)
-├─ deploy/                   ← reference docker-compose.yml, Caddyfile, nginx.conf, torrc (phase 3); release/ build container (spec 060)
+├─ deploy/                   ← reference docker-compose.yml, Caddyfile, nginx.conf, torrc (phase 3); release/ build container (spec 060); public/env the project's server configuration (spec 066)
 ├─ vendor/libsodium/         ← the signed libsodium archives for Windows builds (spec 042)
 ├─ vendor/bundler/           ← the bundlers' tools with their SHA-256 (spec 060)
-└─ landing/                  ← static multilingual site (Astro); outside the Cargo workspace, no protocol code; src/content/download/ the public links (spec 064)
+├─ licenses/overrides/       ← reviewed licence texts for packages that ship none (spec 060)
+└─ landing/                  ← static multilingual site (Astro); outside the Cargo workspace, no protocol code; src/content/download/ the public links (spec 064), src/content/legal/ the requests-from-authorities page (spec 066), public/security.atom the security-release feed (spec 065)
 ```
 
 **Governance of the specification.** Since the creation of the repository, `docs/spec.md` on the default branch (`mvp` until the first release) is the only canonical version. Claude's living document is a read copy that may lag behind; nothing is edited there. Every change to `docs/spec.md` is made by PR with human review; if it changes a decision of §3–§6, the PR includes a new ADR and a row in `docs/audit-log.md`. The `Version · Updated` header is brought up to date on every change and the doc lint checks it.
@@ -660,7 +664,7 @@ None of the open decisions blocks phases 0–2. Those that would change the wire
 
 - [ ] Product name. Affects only the repo name, the stores and the documentation; affects no protocol literal.
 - [ ] Final value of `DEFAULT_SERVER_URL` (the project's public server; spec 000-repo-layout defines the constant).
-- [ ] List of known community servers: in the documentation, not inside the app.
+- [ ] List of known community servers: in the documentation, not inside the app; if one is kept, it lives on the landing's "Run your own server" page (spec 062-security-docs).
 - [ ] v1.x without a `proto_version` change (new key in the payload record; old receivers ignore it): message quoting (`reply_to` = hash of the quoted blob), presence indicator.
 - [ ] Web client (v2): browser extension with pinned code, or web hosted on an origin and by an operator different from the message server's.
 - [ ] Push notifications (v2): one token per device registered on the connection; the server stores `token → {channel_id}` (the same it already sees through the connection); the tap carries no data and is sent at most once per device every 5 min. Google-free alternative: UnifiedPush. Server-free alternative: periodic OS sync.
@@ -685,4 +689,4 @@ None of the open decisions blocks phases 0–2. Those that would change the wire
 
 ## 13. Audit log
 
-Audits A (2026-09-19), B, C and D (2026-09-20), E, F, G, H and I (2026-09-24), the decisions taken while drafting phase 2, audit J, the decisions taken while drafting phase 3 and audit K (2026-09-25), the decisions taken while drafting phase 4 and audit L (2026-09-26): findings and applied changes are in `docs/audit-log.md`. Every PR that changes §3–§6 adds a row there.
+Audits A (2026-09-19), B, C and D (2026-09-20), E, F, G, H and I (2026-09-24), the decisions taken while drafting phase 2, audit J, the decisions taken while drafting phase 3 and audit K (2026-09-25), the decisions taken while drafting phase 4 and audit L (2026-09-26), audits M, N and O (2026-09-26/27) and audit P (2026-09-28): findings and applied changes are in `docs/audit-log.md`. Every PR that changes §3–§6 adds a row there.

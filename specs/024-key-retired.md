@@ -74,7 +74,7 @@ None of its own: the `key_retired` blob is the 013 vector `key_retired`; the eff
 ## Out of scope
 
 - Sending a retirement, the pending `key_retired` and its re-sealing (spec 025-identity-regen); the gap exclusion of a `key_retired` (spec 021-channel-session R24).
-- `forget` and the limits (spec 026-peer-limits); the dialogs and their wording (specs 050–052).
+- `forget` and the limits (spec 026-peer-limits); the dialogs and their wording (spec 055-verify-ui R15).
 
 ## Open questions
 
@@ -94,3 +94,4 @@ None.
 - 2026-09-25 revised after audit J round 9 (`docs/audit-log.md`)
 - 2026-09-25 revised after audit J round 10 (`docs/audit-log.md`)
 - 2026-09-25 revised after audit J round 13 (`docs/audit-log.md`)
+- 2026-09-28 revised after audit P (`docs/audit-log.md`): dialogs point to spec 055
