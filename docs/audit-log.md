@@ -95,7 +95,7 @@ Round 4, two passes (M-A, M-D), final:
 
 ## Phase 5 drafts
 
-**2026-09-26 — Decisions taken before drafting the phase 5 specs.** Not an audit: the human reviewer decided Q1–Q4 with the recommended option before the specs were written, and Q5–Q7 once the drafts of 053–055 raised them. Drafting choices follow as P rows.
+**2026-09-26 — Decisions taken before drafting the phase 5 specs.** Not an audit: the human reviewer decided Q1–Q4 with the recommended option before the specs were written, Q5–Q7 once the drafts of 053–055 raised them, and Q8–Q10 before the drafts of 050–052. Drafting choices follow as P rows.
 
 | # | Question | Decision | Change |
 | --- | --- | --- | --- |
@@ -106,6 +106,9 @@ Round 4, two passes (M-A, M-D), final:
 | Q5 | `setUserAuthenticationParameters`, which §8's Keystore parameters need, exists from Android 11 (API 30); on API 26–29 a second code path could not require the prompt at every open | `minSdk 30` | Spec 053 R20; spec 040 R11; §9 and the kotlin skill at acceptance |
 | Q6 | Whether a phone may import an invitation by pasting its text, which passes through the clipboard | No: a phone imports by scanning or by opening the file; the desktop, with no camera, may paste | Spec 054 R11 |
 | Q7 | Whether the phone may send the `.chatcfg` file through the system share sheet | Yes, through a temporary file deleted when the sheet closes, at lock and at the next start; the password is shown apart and never copied | Spec 054 R9 |
+| Q8 | Whether Android and iOS open their server connections with the platform stacks (OkHttp, URLSession), as ADR 0040's consequences said, or with the Rust connection host of spec 041 | The Rust host, shared by the three clients through a spec of its own and uniffi: one audited implementation, no revocation fetch outside Tor, one SOCKS5 username per plan, the same headers and TLS fingerprint on every platform | ADR 0041 superseding 0040; new spec 042-connection-host; specs 040 and 041 amended; the kotlin and swift skills at acceptance |
+| Q9 | Whether to draft 050, 051 and 052 one by one or together | Together, after the phase 4 rework of Q8, with one audit N | Specs 050–052 |
+| Q10 | Where the shared host of Q8 takes its trusted roots from, given that iOS lets no app list its trust store and its one API that uses it is the platform verifier ADR 0040 refused | Mozilla's root list, compiled in through `webpki-roots`, on all three platforms: one behaviour, no network request, no root that a user, an employer or a program added; a network that intercepts TLS and a private authority cannot be reached, and a distrusted root stays until the next release | ADR 0041; spec 042 R6; spec 041 R2 and R12 amended |
 
 Drafting choices, for the review of specs 053–055:
 
@@ -133,6 +136,20 @@ Drafting choices, for the review of specs 053–055:
 | P20 | Muted peers | Their messages collapsed behind "Muted: show" | Spec 055 R7 |
 
 Open, to be measured before implementation: a macOS data-protection Keychain item needs a signed build with an entitlement (053-R3); Windows Hello's prompt from a desktop process may open behind the window without `unsafe` (053-R4).
+
+Drafting choices for the phase 4 rework of Q8 and Q10 (ADR 0041), for the review of specs 040, 041 and 042:
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| P21 | Where the shared host lives, given that the root `deny.toml` bans `rustls` and `ring` | `crates/host/`, a workspace of its own; `privatechat-ffi` leaves the root workspace for one of its own; the host's `deny.toml` is the base of the bindings' and the desktop's, and one doc-lint check covers the three workspaces' lints, profiles and libsodium pins | Spec 042 R1, R2; spec 040 R1; spec 041 R1, R2 |
+| P22 | How the phones call a host that owns sockets and timers | uniffi async methods run on a runtime the `FfiHost` owns, events through a foreign `FfiSink`; `Core` keeps zeroing and becomes the one entry point, with no executor of its own, since the host keeps the order | Spec 040 R2, R5, R6, R9 |
+| P23 | How the Kotlin and Swift vector tests pass a vector's `now` when no host method takes one | A `Clock` given to `Host::new`; `FixedClock` through an `internal` `Core` factory the apps cannot reach | Spec 042 R4; spec 040 R5, R9, R13 |
+| P24 | How the desktop's wake check (spec 053 R8) runs before the shared host reconnects | `Sink::before_connect`, asked before every connect; the phones answer true | Spec 042 R9; spec 053 R8 |
+| P25 | How a phone that changes network avoids 75 s of silence before reconnecting | `network_changed()`, which closes older sockets and cuts the backoff short, at most once per 10 s | Spec 042 R10; specs 051 and 052 say when |
+| P26 | `tungstenite` depends on the `log` facade with no option to drop it (measured) | The facade stays; every crate that installs a logger is banned, and no source calls `set_logger` | Spec 042 R2, Security; spec 040 T01 |
+| P27 | How to keep the references of spec 053 to 041 R15–R17 | 041 keeps those numbers; R10–R14 now hold the calls through the host, the network commands, no socket of its own, the panic hook and the CI job; R18, the exit test, becomes 042 R13 | Spec 041 |
+| P28 | Whether the phones' boundary is tested beyond the vectors, now that events cross by callback | Kotlin and Swift each send one message through the server and see it delivered through `CoreListener` | Spec 040 R15 |
+| P29 | Native sockets and App Transport Security, and Android's network security configuration | Neither governs them, so 053-R17 closes with no exception on either platform; whether an iOS native connect brings up cellular is 042-R10, to measure before 052 | Spec 053 R17; spec 042 open question |
 
 ## Audit L
 

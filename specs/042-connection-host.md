@@ -1,0 +1,258 @@
+# 042 — Connection host: the device and its server connections, for every client
+
+Status: draft
+Phase: 4
+Related ADRs: 0020, 0037, 0038, 0041
+Depends on: 020-store-files, 027-core-api, 028-session-sans-io, 030-ws-protocol, 033-rate-limit-quotas, 035-server-ops
+Blocks: 040-uniffi, 041-desktop-bridge, 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 053-device-security, 054-qr-invite
+Human reviewer: Marc Vilardebó · Accepted on: —
+
+## Context
+
+Spec 027-core-api gives the clients one handle, `Device`, which does no I/O: the client opens the sockets its plan names, passes frames in and out, ticks it every second and reconnects with backoff (spec 027-core-api R10–R12). ADR 0041 puts that client-side work in one Rust crate for the three clients, decided with the human reviewer on 2026-09-27 (`docs/audit-log.md`, "Phase 5 drafts", Q8 and Q10). This spec defines that crate, `privatechat-host`:
+
+- the Cargo workspace it lives in, and the bans every workspace that links it keeps;
+- the `Host`, which owns the `Device` behind one lock, takes the events out of its results, and reconciles the sockets with the plan;
+- the sockets: TCP or SOCKS5, TLS 1.3 over Mozilla's root list, WebSocket, the timeouts, the backoff and the probe;
+- the lock routine, which every client runs to close the device;
+- the test that closes phase 4 for all clients: two hosts, with no UI, exchange a message through a real server.
+
+The desktop wraps the host in Tauri commands (spec 041-desktop-bridge), and Android and iOS reach it through uniffi (spec 040-uniffi). What stays per client: where the storage key comes from, what locks the app, the confirmations and file dialogs of the desktop, and the screens.
+
+**In plain words.** Every copy of the app, on a computer or a phone, needs the same plumbing under the screens: open the encrypted connections to the servers (through Tor when a proxy is set), pass messages between the network and the core, reconnect when the network drops, and close everything cleanly when the app locks. This spec writes that plumbing once, in Rust, so that the three apps run the same code, send exactly the same bytes on the network, and trust the same list of certificate authorities, the one Mozilla publishes, built into the app. The apps only tell it when to open (with the storage key), what the user did, and when to lock, and they receive back what happened: a message arrived, a message was delivered, a connection state changed.
+
+## Requirements
+
+**The workspace**
+
+- R1 `crates/host/` MUST be a Cargo workspace of its own, listed in the root `exclude` (ADR 0041), with a committed `Cargo.lock`, whose one crate `privatechat-host` (`publish = false`) is a library that depends on `privatechat-core` and `privatechat-store` by path. Its `[lints]` MUST hold the entries of the root `[workspace.lints]` with the same levels, plus `clippy::wildcard_enum_match_arm` and `clippy::match_wildcard_for_single_variants` at `deny`; its `[profile.release]` MUST equal the root one (`overflow-checks = true`); its own `clippy.toml` MUST hold the root `disallowed-methods` except the clock, file and network entries that the host needs, each removal commented with its reason; and its `Cargo.lock` MUST pin the same `libsodium-sys-stable` version as the root one. The crate root MUST carry `#![forbid(unsafe_code)]`. Its test doubles (the channel `Sink`, the test SOCKS5 proxy, the test TLS root of R9) are `pub` only under a `test-support` feature that no shipped build enables. The same rules hold for every workspace that links the host, today `bindings/uniffi/` (spec 040-uniffi) and `clients/desktop/src-tauri/` (spec 041-desktop-bridge), and `check_s042_t01_r01_client_workspaces` in `scripts/doc_lint.py` MUST check all three: it fails when an entry of the root lint table is missing or weaker, when a release profile differs from the root one, or when a lock pins another `libsodium-sys-stable`.
+- R2 `crates/host/deny.toml` MUST start from the root `deny.toml` and differ from it only in these ways, each commented with its reason (measured on 2026-09-27 with `cargo deny check` over the dependency set of this spec: `rustls` 0.23, `tokio-rustls` 0.26, `webpki-roots` 1, `tokio-tungstenite` 0.30 and `tokio` 1):
+  - `[graph] targets` set to the triples the clients ship: `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `aarch64-linux-android`, `armv7-linux-androideabi`, `x86_64-linux-android`, `aarch64-apple-ios` and `aarch64-apple-ios-sim`.
+  - `[bans] allow-wildcard-paths = true`, for the path dependencies of R1.
+  - These wrappers on entries of the root `[bans] deny` list, added to the root's own wrappers of the same entry:
+    - `rustls` under `privatechat-host` and `tokio-rustls`, and `ring` under `rustls` and `rustls-webpki`: the TLS stack (ADR 0041);
+    - `sha1` and `rand` under `tungstenite`; `rand_core` under `chacha20` and `getrandom`; `chacha20` under `rand`. These serve the WebSocket accept key, and the handshake key and frame masks that RFC 6455 uses against proxy cache poisoning, never secrecy (ADR 0041);
+    - `getrandom` under `ring` and `rand`. `ring` draws the TLS key shares with it; no key of the protocol comes from it (`docs/spec.md` §4).
+  - `[licenses]`: one `[[licenses.exceptions]]` entry that allows `CDLA-Permissive-2.0` for `webpki-roots` alone, the licence of Mozilla's root list.
+  - These entries that the root list does not have, with no wrapper: `native-tls`, `rustls-native-certs`, `rustls-platform-verifier` and `openssl-probe`, so that no path reads the operating system's trust store or hands the chain to its verifier (ADR 0041); and `env_logger`, `android_logger`, `oslog`, `simple_logger`, `fern`, `log4rs`, `tracing-subscriber` and `tauri-plugin-log`, so that no logger can be installed. The `log` facade itself stays: `tungstenite` and `tokio-tungstenite` depend on it with no option to drop it (measured), and with no logger installed its macros write nowhere.
+  `aws-lc-rs`, `aws-lc-sys`, `openssl` and `openssl-sys` MUST stay banned with no wrapper. Every other workspace that links the host MUST start from this file, not from the root one, and add only the differences its own spec lists. `check_s042_t02_r02_client_bans` in `scripts/doc_lint.py` MUST fail on any difference between this file and the root one other than those listed, and on any difference between a linking workspace's file and this one other than those its spec lists; `cargo deny check` in `crates/host/` MUST be green.
+- R3 In the pull request that marks this spec `accepted`:
+  - AGENTS 2 MUST name as its second exception the host workspace and the workspaces that link it, with the TLS stack and the wrappers of R2, in place of the desktop workspace of ADR 0040;
+  - `docs/spec.md` §6 "Transport" MUST say that every client sends the handshake and headers of the host, so that the TLS fingerprint no longer names the platform, and that certificates are checked against Mozilla's root list with no revocation fetch;
+  - `docs/spec.md` §9 MUST name the host in the diagram and the table (a row "Connection host": `rustls` with `ring`, `webpki-roots`, `tokio-tungstenite`, `tokio`; one implementation of the sockets for the three clients), and the §9 bullet "The UI groups the `Channel`s …" MUST say that the host does it;
+  - `docs/spec.md` §11 MUST list `crates/host/` as a workspace of its own;
+  - the architecture, kotlin and swift skills MUST say that no app opens a server connection of its own: sockets, TLS, the proxy and the tick belong to the host;
+  - `.github/CONTRIBUTING.md` MUST list the commands of R14 (AGENTS 17).
+
+**The host and the device**
+
+- R4 `Host::new(runtime, sink, clock)` MUST take the `tokio` runtime handle on which the host spawns every task, the `Sink` it emits through, and the `Clock` it reads. The host MUST hold the `Device` in a `Mutex<Option<Device>>`, with an open generation that every `open` and every lock routine increases, and MUST run every `Device` call inside `tokio::task::spawn_blocking`. It reads `Clock::now_ms` for every `now` it passes to the core: `SystemClock`, the one production clock, reads the system clock in milliseconds since the Unix epoch, which is allowed here because this crate is not `core` (AGENTS 10), and `FixedClock` returns the value it was built with, for the vector tests of spec 040-uniffi R13; no method of the host takes `now`. Timers and timeouts run on the `tokio` clock, never on `Clock`. `open`, `lock` and every other change of the lifecycle are serialised by one first-in, first-out `tokio::sync::Mutex`, the lifecycle lock, which a caller can hold across several steps through `Host::lifecycle()`: `open(data_dir, key)` builds the vault with `DataDir::open` and the device with `Device::open`, and returns `Ok` with no reopen, dropping the key, when a device is already open; `lock()` runs the routine of R12. A method other than those of the lifecycle, called while no device is open, returns `HostError::Locked` without touching anything.
+- R5 After `open` and after each call that spec 027-core-api R11 names, in the same hold of the device lock, the host MUST take the events out of every result that carries them (`on_frame`, `on_tick`, the `events` of `Sent`, and the result of `regenerate_identity`), act on `Reconnect`, `ServerFull` and `UnsupportedServer` as R10 says, and emit every other event through `Sink::core_event` as a `HostEvent`, the `Event` variants of spec 028-session-sans-io that name a channel. `send` therefore returns a `SentView`, which is `Sent` without `events`, and `regenerate_identity` returns nothing. The host MUST also emit `Sink::connection_state(channels, state)` for the channels of a plan whenever their state changes, with `state` one of:
+  - `Connecting`, from the start of the connect;
+  - `Connected`, from `on_connect`;
+  - `Retrying`, while a closed socket waits out its backoff;
+  - `ServerFull`, for 60 000 ms after `ServerFull`, then `Connected` again;
+  - `UnsupportedServer`, until the next `open` or a new plan `id`;
+  - `ProxyRefused`, until `set_socks5_proxy` returns `Ok`;
+  - `Failed`, for a plan kept out of reconcile after a panic (R7), until the recorded channels it holds are left or the process restarts.
+  The host calls the `Sink` while it holds the device lock, so an implementation MUST return without blocking and MUST NOT call the host; one that crosses to another language hands each call off. It MUST call `Sink::locked` last in the lock routine (R12), and no `Sink` call follows it until the next `open` returns `Ok`. A channel that needs a proxy is in no plan (spec 027-core-api R10), and the UI reads it from `ChannelInfo::needs_proxy`.
+- R6 In the same hold of the device lock as R5, the host MUST:
+  - reconcile its sockets with `connections()`: one task per plan `id`, tagged with the generation, started for each new `id` and cancelled when its `id` leaves the plan;
+  - push `outgoing()` of every connected plan onto that plan's ordered writer queue, which holds at most 256 frames.
+  Only the plan's task writes to its socket, in queue order, so that frames drained by different calls never reorder. Each queued frame carries the generation and the number of the socket it was drained for. The queue is emptied in the same hold of the lock as `on_disconnect`, and the task drops any frame whose socket number is not the current one's, so that no frame drained for one socket is ever written on the next. A full queue closes the socket. No method of the host waits on a network write. A frame or an event that carries an older generation MUST be dropped, and every blocking closure records the generation it was started under and, once it holds the lock, returns `Locked` without touching the `Device` when the generation changed.
+- R7 A plan task that ends with a panic MUST be handled as a closed socket (`on_disconnect`, then R10's backoff), its payload dropped. A panic inside a `Device` call MUST return `Core(Internal)` without its payload, and a poisoned device lock MUST make every later call return `Core(Internal)`. The first hold that finds the lock poisoned makes the host spawn the lock routine (R12) as a task of its own, never awaited from inside a `Device` call, tagged with the generation it saw and doing nothing when the generation has changed; the routine drops the poisoned `Device` without `flush`, since the state of a call that panicked half-way is not written, clears the poison (`Mutex::clear_poison`), and its own holds never start another routine. The host records the `channel_id`s of the plan whose call panicked (not its `id`, which a new `Device` does not keep, spec 027-core-api R10), and after every `open` keeps out of reconcile, in the state `Failed`, each plan that holds one of them; a `leave` of a channel removes it from the record, and a restart clears it, so that a frame a server repeats cannot lock the device again and again. A panic in `on_tick` or in a caller's call belongs to no plan and is not recorded. The host installs no panic hook: the process that links it installs one that writes nothing (specs 040-uniffi R4, 041-desktop-bridge R8).
+- R8 While a device is open, the host MUST call `on_tick(now)` every 1 000 ms, the first 1 000 ms after `open`, on a `tokio` interval with `MissedTickBehavior::Delay`. It then handles the events by R5 and reconciles and drains by R6, in the same hold of the lock.
+
+**The sockets**
+
+- R9 For each plan, the task MUST call `Sink::before_connect()` right before each connect, the first included, and, when it returns false, open nothing and wait out its backoff as if the connect had failed (spec 053-device-security R8 locks there after a sleep). Otherwise it MUST open the socket along its `Route`:
+  - Proxy: with `socks5_proxy` set, through the client of `src/socks5.rs`. It sends a SOCKS5 `CONNECT` (RFC 1928) with the host as a domain name (`ATYP` 3), so that no host name is ever resolved on the device. It offers only username and password authentication (RFC 1929), with `socks_username` and an empty password. A reply `VER` other than 5, a selected method other than `0x02`, a sub-negotiation `VER` other than 1, or an authentication status other than `0x00` is `ProxyRefused` (R10). A `CONNECT` reply other than `0x00`, or an unknown `ATYP` in it, closes the socket. The reply's bound address is read at exactly its declared length. Without a proxy, it opens a TCP connection to `host:port`.
+  - TLS: when `tls` is true, TLS 1.3 only, through `rustls` with the `ring` provider (`default-features = false`, features `ring` and `std`, and `tokio-rustls` likewise), `Resumption::disabled()`, and SNI set to `host`. Certificates MUST be checked by `rustls`'s `WebPkiServerVerifier` over the roots of `webpki-roots` (Mozilla's list, compiled in, ADR 0041), with no revocation list and no revocation fetch. The TLS stack makes no network request of its own and reads no file. There is no pinning and no way to skip the check; the one other root store is the test root that the `test-support` feature lets a test add.
+  - WebSocket: `tokio-tungstenite` with `default-features = false` and the `handshake` feature, driven by `client_async_with_config` over that stream. It performs the handshake of `GET /` (spec 030-ws-protocol R3), sending exactly the headers of `docs/spec.md` §6 "Transport" with `User-Agent: privatechat/1`, no `Origin` header and no extension, the same bytes on every platform. The maximum frame and message size is 70 000 bytes (spec 030-ws-protocol R4). A text frame closes the socket.
+  - Timeouts: from the start of the connect to the end of the WebSocket handshake, 30 000 ms, or 60 000 ms through a proxy to a `.onion` host (an onion rendezvous often takes longer than 30 s). A write pending for 30 000 ms closes the socket. After the handshake, 75 000 ms with no frame of any kind received (the server pings every 30 000 ms, spec 033-rate-limit-quotas R4) closes it.
+  - Once open, it calls `on_connect(id, now)`, passes every binary frame to `on_frame`, and calls `on_disconnect(id)` when the socket closes, whoever closed it.
+- R10 A socket that closes for any reason other than the stop rules below and the lock routine MUST be reopened while its `id` is in the plan, after 1 000 ms, then 2 000 ms, doubling up to 60 000 ms. The delay resets once a connection has stayed open for 60 000 ms. The host acts on these events and states:
+  - After `Event::UnsupportedServer`, it MUST close that socket and not reopen it until the next `open` or a new plan `id`.
+  - After `Event::Reconnect`, it MUST close the socket of the connection it names and reopen it with the backoff (spec 027-core-api R11).
+  - After `Event::ServerFull`, it keeps the socket open (spec 028-session-sans-io R16 pauses publishing).
+  - After `ProxyRefused`, it closes the socket and does not reopen it until `set_socks5_proxy` returns `Ok`.
+  `network_changed()`, which a client calls when the operating system reports a new default route, MUST close every socket opened before the call and cut every backoff wait short, so that each plan reopens at once, with its delay reset; calls within 10 000 ms of the last one that took effect are merged into one at the end of that window, so that a flapping network cannot make the host reconnect faster than that.
+- R11 `probe_server(url)` MUST call `probe_plan(url)`, and return `NotYet` for `None` and the error for `Err`. Otherwise it MUST open a socket along the route as R9 does, with R9's connect bound, and pass the first binary frame received within 30 000 ms after the handshake to `probe_hello`. It then closes the socket. The result is:
+  - `Supported` for `Ok(true)` and `Unsupported` for `Ok(false)`;
+  - `ProxyRefused` for the proxy failures of R9;
+  - `Unreachable` for `BadPayload`, for a socket that fails, and when no frame arrives in time (spec 027-core-api R12).
+  A probe is never a planned connection, and one probe runs at a time: a second `probe_server` waits for the first.
+
+**Locking**
+
+- R12 The lock routine MUST run with the lifecycle lock held, and MUST, in this order:
+  - increase the generation under the device lock, so that no reconcile, tick or queued closure after that point starts a task or touches the `Device`;
+  - wait for any `Device` call in flight, with the device lock released;
+  - stop the tick;
+  - abort every plan task and wait for each to end, with the device lock released, then call `on_disconnect` for each plan that was connected, in one hold of the lock; when the lock is poisoned, skip this call and the next;
+  - call `Device::flush(now)` (spec 027-core-api R24), and drop the `Device` whatever `flush` returned; a poisoned lock is recovered only to drop the `Device`, with no call on it, and then cleared;
+  - call `Sink::locked`.
+  After it, every method other than those of the lifecycle returns `Locked`. The routine never waits on a network write, so a server that stops reading cannot keep the device open. `Host::drop_now()`, for a process that is being terminated and cannot await, drops the `Device` synchronously without `flush`, and only when `try_lock` gets the device lock at once.
+- R13 `crates/host/tests/phase4_exit.rs` MUST run two hosts, each over its own temporary data directory and a key from `generate_storage_key` (spec 040-uniffi R8), against the `privatechat-server` binary of spec 035-server-ops, whose path the CI job passes in `HOST_TEST_SERVER_BIN`. The test starts it with an empty environment (`env_clear`) plus exactly:
+  - `PRIVATECHAT_LISTEN=127.0.0.1:0`;
+  - `PRIVATECHAT_ONION_LISTEN=127.0.0.1:<p>`, where `<p>` is a port the test has just bound and released (035 requires an address other than the first, and macOS has no loopback address but 127.0.0.1 by default);
+  - `PRIVATECHAT_URLS` naming the test's `ws://` onion URL;
+  - `PRIVATECHAT_DB` in a temporary directory;
+  - `PRIVATECHAT_LOG=info`.
+  It reads the two bound ports from the fields `listen_port` and `onion_port` of the server's start line (spec 035-server-ops R4). The test SOCKS5 proxy of the `test-support` feature, on `127.0.0.1`, accepts only method `0x02` and forwards every `CONNECT` for the onion host to the onion listener. Both hosts set `127.0.0.1:<proxy port>` as their SOCKS5 proxy. Host A creates a channel with `ws://<56 characters>.onion`, and host B imports the QR text that A's `export_qr` returns. Each sends one message. The test MUST end with:
+  - each host having received the other's message as `HostEvent::Message`, and its own as `Delivered`;
+  - the proxy having seen a different `socks_username` for each plan;
+  - the whole run taking at most 120 s of real time.
+- R14 A CI job `host` MUST run, in `crates/host/`, `cargo test` (R13 included, with the server built from the root workspace), clippy, rustfmt and `cargo deny check`, on Linux, macOS and Windows, the Windows leg with T13 left out (`cfg(not(windows))`: the server stops on signals that Windows lacks). The job MUST also run `cargo check --target` for `aarch64-linux-android` and `aarch64-apple-ios`, so that a dependency that does not build for a phone fails here, before spec 040-uniffi's job.
+
+## Limits
+
+| Input | Range | Out of range |
+| --- | --- | --- |
+| Connect and handshake | ≤ 30 000 ms; ≤ 60 000 ms through a proxy to `.onion` | socket closed, backoff |
+| A pending write | ≤ 30 000 ms | socket closed, backoff |
+| Silence on an open socket | ≤ 75 000 ms | socket closed, backoff |
+| Writer queue per plan | ≤ 256 frames | socket closed, backoff |
+| Backoff | 1 000 ms doubling to 60 000 ms, reset after 60 000 ms connected | — |
+| `network_changed` | one effect per 10 000 ms | merged into one at the end of the window |
+| Probe's first frame | ≤ 30 000 ms after the handshake | `Unreachable` |
+| Probes in flight | one | the next waits |
+| Tick | every 1 000 ms while open, the first 1 000 ms after `open` | delayed, never burst |
+| WebSocket frame and message | ≤ 70 000 B | socket closed |
+| SOCKS5 reply's bound address | its declared length, at most 255 bytes of domain | read in full |
+| SOCKS5 username | the 8 characters of the plan; password empty | — |
+
+## Interface
+
+```
+crates/host/Cargo.toml             a workspace of its own, privatechat-host (R1)
+crates/host/Cargo.lock
+crates/host/clippy.toml            R1
+crates/host/deny.toml              R2
+crates/host/src/lib.rs             Host, Sink, the lifecycle lock, the lock routine (R4, R12)
+crates/host/src/events.rs          HostEvent, ConnectionState, taking events out (R5)
+crates/host/src/plans.rs           reconcile, the writer queues, the failed record, the tick (R6–R8)
+crates/host/src/socket.rs          TCP, TLS and WebSocket per route, the backoff, network_changed (R9, R10)
+crates/host/src/socks5.rs          R9
+crates/host/src/probe.rs           R11
+crates/host/src/testing.rs         the channel Sink, the test SOCKS5 proxy, the test root (test-support only)
+crates/host/src/bin/test_proxy.rs  privatechat-host-test-proxy, the test SOCKS5 proxy as a binary (required-features = ["test-support"]), for spec 040-uniffi R15
+crates/host/tests/phase4_exit.rs   R13
+```
+
+```rust
+pub trait Sink: Send + Sync + 'static {
+    fn core_event(&self, event: HostEvent);
+    fn connection_state(&self, channels: Vec<[u8; 16]>, state: ConnectionState);
+    fn locked(&self);
+    fn before_connect(&self) -> bool;   // R9; true on Android and iOS
+}
+pub trait Clock: Send + Sync + 'static { fn now_ms(&self) -> u64; }
+pub struct SystemClock;              // the system clock (R4)
+pub struct FixedClock(pub u64);      // R4, for vector tests
+pub struct Host { /* Mutex<Option<Device>>, the generation, the lifecycle lock, the plan tasks and their queues, the tick, the failed record, Sink */ }
+pub struct Lifecycle<'a> { /* the held lifecycle lock */ }
+impl Host {
+    pub fn new(runtime: tokio::runtime::Handle, sink: Arc<dyn Sink>, clock: Arc<dyn Clock>) -> Host;
+    pub async fn lifecycle(&self) -> Lifecycle<'_>;                 // first in, first out
+    pub async fn open(&self, data_dir: PathBuf, key: StorageKey) -> Result<(), HostError>;   // lifecycle() then Lifecycle::open
+    pub async fn lock(&self);                                        // lifecycle() then Lifecycle::lock
+    pub fn is_open(&self) -> bool;
+    pub fn generation(&self) -> u64;
+    // a Device call with no events to take out; spawn_blocking, then R5 and R6
+    pub async fn call<T: Send + 'static>(&self, f: impl FnOnce(&mut Device, u64) -> Result<T, Error> + Send + 'static) -> Result<T, HostError>;
+    // the same, returning Locked when the generation is no longer `generation` (a caller that waited on a dialog)
+    pub async fn call_in<T: Send + 'static>(&self, generation: u64, f: impl FnOnce(&mut Device, u64) -> Result<T, Error> + Send + 'static) -> Result<T, HostError>;
+    pub async fn send(&self, channel: [u8; 16], body: String, display_name: Option<String>) -> Result<SentView, HostError>;
+    pub async fn regenerate_identity(&self, channel: [u8; 16]) -> Result<(), HostError>;
+    pub async fn leave(&self, channel: [u8; 16]) -> Result<(), HostError>;                   // also clears the failed record (R7)
+    pub async fn set_socks5_proxy(&self, proxy: Option<String>) -> Result<(), HostError>;    // also ends ProxyRefused (R10)
+    pub async fn probe_server(&self, url: String) -> Result<ProbeResult, HostError>;
+    pub fn network_changed(&self);
+    pub fn drop_now(&self);                                          // R12, termination only
+}
+impl Lifecycle<'_> {
+    pub async fn open(&mut self, data_dir: PathBuf, key: StorageKey) -> Result<(), HostError>;
+    pub async fn lock(&mut self);                                    // the routine of R12
+}
+pub struct SentView { pub client_ref: ClientRef, pub message: Message }
+pub enum HostEvent { Subscribed { channel: [u8; 16] }, HistoryTruncated { channel: [u8; 16], before: u64 },
+                     Message { channel: [u8; 16], received: Received }, Delivered { /* as Event */ }, NotDelivered { /* as Event */ },
+                     StatusChanged { channel: [u8; 16] }, StorageFailed { channel: [u8; 16] },
+                     SubscribeRefused { channel: [u8; 16] }, ChannelFull { channel: [u8; 16] } }
+pub enum ConnectionState { Connecting, Connected, Retrying, ServerFull, UnsupportedServer, ProxyRefused, Failed }
+pub enum ProbeResult { Supported, Unsupported, Unreachable, ProxyRefused, NotYet }
+pub enum HostError { Core(Error), Locked }
+```
+
+`call` and `call_in` MUST NOT be used for `send` and `regenerate_identity`, whose events R5 takes out, nor for `leave` and `set_socks5_proxy`, which have their own methods; and no caller reaches `connections`, `probe_plan`, `on_connect`, `on_frame`, `on_tick`, `outgoing`, `on_disconnect`, `flush` or `purge_expired`, which the host alone calls. `scripts/check_host_use.sh` fails on a closure given to `call` or `call_in`, in `bindings/uniffi/src/` or `clients/desktop/src-tauri/src/`, that names one of those methods. The pull request that adds each dependency justifies it in one sentence (AGENTS 8): `tokio`, `tokio-tungstenite`, `tokio-rustls`, `rustls` with `ring`, `webpki-roots`, `futures-util` and `zeroize`.
+
+**PR slices** (AGENTS 14): (a) the workspace, its lints, profile, `clippy.toml` and bans, and the doc-lint checks (R1–R3); (b) the host without sockets: the device lock, the lifecycle, events, reconcile, the writer queues, the tick, panics and the lock routine (R4–R8, R12); (c) `socks5.rs`, `socket.rs` and the probe (R9, R11); (d) backoff, connection states and `network_changed` (R10, R5's states); (e) the exit test, the use check and the CI job (R13, R14).
+
+## Security
+
+- Every host name is resolved by the proxy when one is set (R9), and one plan is one proxy username, so Tor gives one circuit per plan (spec 027-core-api R10). A proxy that selects no authentication is refused rather than used, so circuits never silently merge. Plain WebSocket runs only to a `.onion` host through a loopback proxy, which is spec 027-core-api R10's rule and is not repeated here.
+- The three clients send the same TLS handshake and the same WebSocket request (R9), so a network observer cannot tell a phone from a computer by them. Their timing, the operating system's TCP stack and the IP layer still differ.
+- TLS is 1.3 only, with no resumption and no ticket, and the certificate check makes no network request and reads no file (R9, ADR 0041), so no revocation or intermediate fetch leaves outside the proxy. These are documented residuals, each exposing the transport and never a message (`docs/spec.md` §4):
+  - a revoked certificate that has not expired is accepted, since no revocation data is fetched;
+  - the roots are those of the build, so a root that Mozilla removes stays trusted until the next release, and a server whose certificate chains to a private authority, or a network that intercepts TLS with its own root, cannot be reached;
+  - Certificate Transparency is not checked.
+- The plans of one device connect at the same moments (open, network return), so a server that holds several of its plans can link their circuits by timing. The per-plan circuits of spec 027-core-api R10 separate servers, and one server holds more than one plan of a device only when a plan's channel limit splits them. This is a documented residual.
+- No method waits on a socket, and the lock routine waits for no network write (R6, R12), so a server that stops reading cannot stop the device from locking.
+- A panic inside the core is a bug, but a server that finds one can trigger it; the plan it came through is kept `Failed` after the next open (R7), so the user can leave its channels. A panic in `on_tick` or a caller's call, for instance from stored state, locks the device again at every open, and only erasing the local data gets out of it. Both are documented residuals.
+- The host logs nothing. The `log` facade is in the graph under `tungstenite` (R2), but no crate that installs a logger is (R2), and neither the host nor a process that links it calls `log::set_logger` or `log::set_boxed_logger` (T01), so the facade's macros write nowhere and nothing of a message, a key or a host name reaches a log through it.
+- The storage key enters as a `StorageKey` (spec 027-core-api R19) and never leaves the host; the host holds no other secret. The invitation text, the `.chatcfg` password and the export password pass through `call` inside the closure its caller gives, which spec 040-uniffi and spec 041-desktop-bridge zero on their side.
+
+## Public API changes
+
+None. The host wraps spec 027-core-api as it stands, together with the `generate_storage_key` that spec 040-uniffi R8 adds; `Host` is a boundary of its own for spec 040-uniffi and spec 041-desktop-bridge, not a change to the core's.
+
+## Test cases
+
+- T01 (covers R1): `check_s042_t01_r01_client_workspaces`: in each of the three workspaces, a `[lints]` with one root entry removed or lowered from `deny` to `warn` fails, as do a different release profile and a lock with another `libsodium-sys-stable`; the real files pass; the root `Cargo.toml` excludes `crates/host`; `cargo tree -e normal -i log` in `crates/host/` names only `tungstenite` and `tokio-tungstenite` as its parents, and no source of the three workspaces names `set_logger` or `set_boxed_logger`; `cargo clippy` there accepts a call of `SystemTime::now` in `lib.rs`.
+- T02 (covers R2): `check_s042_t02_r02_client_bans`: a host `deny.toml` missing `sha1`, with a wrapper that R2 does not list, or with a changed `[licenses]` beyond the `webpki-roots` exception fails; a desktop or bindings file with a difference its spec does not list fails; the real files pass; `cargo deny check` green; `cargo tree -i rustls-native-certs`, `cargo tree -i aws-lc-rs` and `cargo tree -i openssl-sys` find nothing.
+- T03 (covers R3): `check_s042_t03_r03_amendments`, once this spec is `accepted`: AGENTS 2, §6, §9, §11, the three skills and `.github/CONTRIBUTING.md` name what R3 lists.
+- T04 (covers R4): `s042_t04_r04_lifecycle`: a `Host` built in a plain `tokio` test with a channel `Sink` opens a fresh directory; with `FixedClock(t)`, a message sent carries `sent_at` t; a `Sink` call made while the device lock is held returns while a second task waits on the lock; a second `open` → `Ok` with no reopen; a `call` while locked → `Locked` and no `Device` touched; a call runs on a blocking thread, not on the runtime's worker; two `open`s and a `lock` issued at once run in the order issued; a caller holding `lifecycle()` across `lock` and a second step keeps an `open` issued meanwhile waiting until it drops the guard.
+- T05 (covers R5): `s042_t05_r05_events`: a `Message` from `on_frame` reaches the `Sink` as `HostEvent::Message`; an `UnsupportedServer` reaches it only as the state `UnsupportedServer`; `send` returns no `events`; `regenerate_identity` after an own-key alert closes and reopens the socket, and the `key_retired` is published; `ServerFull` gives `ServerFull`, then `Connected` 60 000 ms later with the socket still open; the lock routine calls `locked`, and nothing after it.
+- T06 (covers R6): `s042_t06_r06_reconcile`:
+  - After `create_channel` a socket task exists for the new plan `id`, and after `leave` of its only channel it is cancelled.
+  - A `send` puts its `publish` on the plan's queue before it returns, and 50 concurrent `send`s and ticks put their `publish`es on the socket in `client_ref` order.
+  - A socket closed with a `subscribe` queued, then reopened: the new socket's first frame is not that `subscribe`.
+  - A peer that never reads makes the queue close the socket and does not block `lock`.
+  - A frame tagged with an older generation is dropped, and a closure queued before `lock` that runs after the next `open` does not touch the new `Device`; `call_in` with an older generation → `Locked`.
+- T07 (covers R7): `s042_t07_r07_panics`: a panic inside `call` returns `Core(Internal)`, and a panic in a plan task is followed by a reopen; a panic in `on_frame` makes `locked` reach the `Sink`, no reconnect follows, nothing is flushed and no call reaches the poisoned `Device`; after the next `open` the plan that holds the recorded channels is `Failed` and not reopened, whatever its new `id`, and no other plan is; `leave` of the recorded channel clears it; two holds that find the poison start one routine, and a routine whose generation changed does nothing; after a panic poisoned the lock, `lock` then `open` gives a working device.
+- T08 (covers R8): `s042_t08_r08_tick`: with a paused `tokio` clock, 5 000 ms after `open` give 5 calls of `on_tick`, the first at 1 000 ms, and a 4 000 ms stall gives one delayed tick, not a burst.
+- T09 (covers R9): `s042_t09_r09_socket`:
+  - Against the test SOCKS5 proxy, the `CONNECT` carries `ATYP` 3 with the host name and the plan's username with an empty password, and no DNS query is made. A proxy that selects method `0x00`, replies with `VER` 4, or fails authentication gives `ProxyRefused`. A reply whose bound address is a domain of 255 bytes is read in full.
+  - Against a local TLS server with the test root, TLS 1.2 is refused, and a second connection makes a full handshake with no ticket and no PSK. A leaf whose CRL distribution point and OCSP and AIA addresses point at a local listener completes its handshake, and the listener sees no connection. Without the test root, the same server's certificate is refused. The `ClientHello` bytes, captured with a fixed key share, are equal on the Linux, macOS and Windows legs of the job.
+  - The WebSocket request carries exactly the headers of §6 and no `Origin`. A 70 001-byte frame closes the socket, a text frame closes it, and 75 000 ms of silence closes it.
+  - A connect to an onion host through the proxy is allowed 60 000 ms, and one to another host 30 000 ms.
+  - A `Sink` whose `before_connect` returns false gets no connect, and the task retries after its backoff.
+- T10 (covers R10): `s042_t10_r10_backoff`: with a paused clock, the reopen delays are 1 000, 2 000, 4 000 … 60 000, 60 000 ms, and reset after 60 000 ms connected; a socket that the host closed for silence is reopened with the backoff; after `UnsupportedServer` no reopen happens until a new `open`; after `Reconnect` a reopen follows the backoff; after `ProxyRefused` no reopen happens until `set_socks5_proxy`; `network_changed` during a 32 000 ms wait reopens at once with the delay reset, and closes a socket opened before it; three calls within 10 000 ms give one effect then, and one more at the end of the window.
+- T11 (covers R11): `s042_t11_r11_probe`: two probes at once run one after the other; a server that sends `hello` with version 1 → `Supported`; one with versions 2 and 3 → `Unsupported`; one that sends a `push` first → `Unreachable`; one that sends nothing → `Unreachable` 30 000 ms after its handshake; while `settings_reset` → `NotYet`; a URL with a path → `BadConfig`.
+- T12 (covers R12): `s042_t12_r12_lock`: after `lock`, `call` → `Locked`; the tick stops; each open socket got `on_disconnect`; a task in its backoff sleep or its connect is ended before `locked`; a `send` in flight when `lock` starts leaves no task and no `Sink` call after `locked`; a failing `flush` or a poisoned lock still drops the device; `drop_now` while a call holds the lock drops nothing and returns at once.
+- T13 (covers R13): `s042_t13_r13_phase4_exit`: the run of R13.
+- T14 (covers R14): CI job step `s042_t14_r14_host_job`, which runs the commands of R14, the phone `cargo check` legs and `scripts/check_host_use.sh`, which fails on a fixture closure in a temporary `bindings/uniffi/src/` tree that calls `on_frame` inside `call`, and passes on the real trees; `.github/CONTRIBUTING.md` lists the same commands.
+
+## Vectors
+
+None. The host calls `Device` in-process, in Rust, so every vector already reaches it through `cargo test` in the root workspace.
+
+## Acceptance criterion
+
+`cargo test` in `crates/host/` green, T13 included; the CI job `host` green; the documentation lint green. With specs 040-uniffi and 041-desktop-bridge green as well, phase 4 closes (`docs/spec.md` §10). Non-automatable: a second person reads `socket.rs` and `socks5.rs` next to R9 and confirms that no path resolves a host name while a proxy is set, and that no certificate is accepted without the verifier.
+
+## Out of scope
+
+- Where the storage key comes from, what locks the app, and how the app asks the user (spec 053-device-security; spec 041-desktop-bridge for the desktop's keychain and confirmations).
+- The Tauri commands and the web view (spec 041-desktop-bridge), and the uniffi objects (spec 040-uniffi).
+- Detecting a network change on each platform; the platform specs 050, 051 and 052 say when they call `network_changed`.
+- Keeping connections open in the background: a locked device has none (spec 053-device-security R8).
+
+## Open questions
+
+- [ ] 042-R10: whether a TCP connect from native code on iOS brings up the cellular interface or an on-demand VPN when neither is active, as `URLSession` and `Network.framework` do; Apple documents that plain BSD sockets may not. To be measured on a device before spec 052-ios-mvp; if it does not, 052 opens a `Network.framework` path (`NWPathMonitor`, and one `NWConnection` to the same host, closed at once) before calling `network_changed`, so that the interface is up when the host connects.
+
+## History
+
+- 2026-09-27 draft, taking from spec 041-desktop-bridge its host, sockets, backoff, probe, lock routine and exit test (ADR 0041, `docs/audit-log.md`, "Phase 5 drafts", Q8 and Q10)

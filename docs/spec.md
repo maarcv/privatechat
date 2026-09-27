@@ -1,6 +1,6 @@
 # Private E2E chat — Specification and plan (SDD)
 
-Version: mvp · Post-audit I revision · Updated: 2026-09-26 · Marc Vilardebó (audits in `docs/audit-log.md`)
+Version: mvp · Post-audit I revision · Updated: 2026-09-27 · Marc Vilardebó (audits in `docs/audit-log.md`)
 
 This file, on the default branch (`mvp` until the first release), is the canonical source of the specification (see §11 "Governance"). Read copy, may lag behind: https://claude.ai/code/artifact/1527bf13-79e8-485a-908d-a515cbd062a4
 
@@ -105,7 +105,8 @@ Each row corresponds to the file `docs/adr/NNNN-*.md`; titles are copied verbati
 | 0037 | Expose one `Device` handle at the core boundary | accepted | The clients' bindings cannot move or borrow objects; one handle called by id can |
 | 0038 | Allow a plain `ws://` server URL for `.onion` hosts only | accepted | An onion service already encrypts and authenticates; a `.onion` certificate is out of reach for most operators |
 | 0039 | Open the desktop client's TLS connections with rustls, in a workspace of its own | superseded by 0040 | The server accepts TLS 1.3 only, the OS stack on macOS lacks it, and the web view cannot use a SOCKS5 proxy |
-| 0040 | Check the desktop client's certificates with no network request of their own | accepted | The OS verifier fetches revocation data outside Tor; rustls in a workspace of its own, its WebPKI verifier over the OS roots |
+| 0040 | Check the desktop client's certificates with no network request of their own | superseded by 0041 | The OS verifier fetches revocation data outside Tor; rustls in a workspace of its own, its WebPKI verifier over the OS roots |
+| 0041 | Open every client's server connections through one Rust host | accepted | One implementation of the sockets, the proxy and TLS for the three clients; Mozilla's roots, since iOS lists none |
 
 ## 4. Cryptographic model
 
@@ -536,7 +537,7 @@ Seven phases; each one closes when its specifications have green tests and a hum
 | 1. Crypto core | 010-primitives-wrapper, 015-test-vectors, 017-record-encoding, 011-config-format, 012-message-keys (derivation, encrypted header), 013-wire-message, 014-fingerprint, 016-fuzz-harness (implemented in this order) | `cargo test` 100 % over vectors, including the mutation table of 013; every fuzz target of 016 for 1 h without a crash; internal review of `proto` by a second person; every vector produced by the reference script of 015 reproduced by the `s015_…` checks of `cargo test`, then frozen (AGENTS 18) |
 | 2. Session and storage | 020-store-files, 021-channel-session, 022-peers-tofu, 023-ttl-purge, 024-key-retired, 025-identity-regen, 026-peer-limits, 027-core-api, 028-session-sans-io | Two cores with a real `store` on disk exchange 10 000 messages with 1 % duplicates, `FailingStore` at a random commit *n* and a test that kills the process between the append to the log and the write of `state.bin`: 0 errors, 100 % of duplicates rejected, coherent state on reopening; compaction verified |
 | 3. Server | 030-ws-protocol, 031-auth-channel-signature, 032-storage-ttl, 033-rate-limit-quotas, 034-docker, 035-server-ops (implemented in the order 032, 031, 030, 033, 035, 034) | Core↔server integration test via `Session`; working `docker compose up`; `deploy/README.md` "Deploy your own server"; log test without identifiers |
-| 4. Bindings | 040-uniffi, 041-desktop-bridge | Kotlin and Swift pass the same vectors as Rust; the empty Tauri app opens a channel |
+| 4. Bindings | 040-uniffi, 041-desktop-bridge, 042-connection-host | Kotlin and Swift pass the same vectors as Rust; the empty Tauri app opens a channel |
 | 5. Clients | 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 053-device-security, 054-qr-invite, 055-verify-ui | One user on each platform chats in the same channel; all measures of §8 applied; store publication process started |
 | 6. Hardening | 060-reproducible-builds, 061-threat-review, 062-security-docs, 063-beta | Published hashes; external review of the cryptographic and threat model; public documentation of what it promises and does not promise; no spec left in `draft` |
 

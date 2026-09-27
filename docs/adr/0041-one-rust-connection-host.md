@@ -1,0 +1,25 @@
+# ADR 0041 — Open every client's server connections through one Rust host
+
+Date: 2026-09-27 · Status: accepted · Supersedes: 0040
+
+## Context
+ADR 0040 gave the desktop client its own Cargo workspace and a `rustls` TLS stack that makes no network request of its own, and left Android and iOS on their platform stacks (OkHttp over the platform's TLS, `URLSession`). Drafting the phase 5 platform specs showed what that costs. Each phone would carry its own socket loop, reconcile, writer queue, backoff, probe and SOCKS5 client, next to the desktop's, so the rules of spec 027-core-api R10–R12 would be written three times. Each would have to send one SOCKS5 username per plan and resolve no host name on the device, and neither platform stack offers that as a plain setting. The platform verifiers may fetch revocation data and missing certificates outside the proxy, which ADR 0040 refused on the desktop for that reason. And the TLS fingerprint and headers would differ by platform, which `docs/spec.md` §6 documented as a residual. The human reviewer decided that the three clients share one Rust connection host (`docs/audit-log.md`, "Phase 5 drafts", Q8).
+
+A shared host also needs one source of trusted roots. `rustls-native-certs`, which ADR 0040 chose, reads the desktop systems' stores, but iOS gives an app no way to list its trusted roots. The iOS API that uses them, `SecTrust`, is the platform verifier this project avoids. So the reviewer decided that every platform checks certificates against Mozilla's root list, compiled into the app (`docs/audit-log.md`, "Phase 5 drafts", Q10).
+
+## Decision
+One crate, `privatechat-host` (spec 042-connection-host), in a Cargo workspace of its own, holds the `Device` and every server connection for the three clients. The desktop links it in the Tauri process (spec 041-desktop-bridge), and Android and iOS reach it through uniffi (spec 040-uniffi). It opens TCP directly, or through SOCKS5 with the host name sent as a domain and one username per plan. It speaks TLS 1.3 only, through `rustls` with the `ring` provider and resumption disabled. It checks certificates with `rustls`'s WebPKI verifier over the Mozilla root list of `webpki-roots` and fetches no revocation data. It runs WebSocket through `tokio-tungstenite`, whose randomness and SHA-1 serve only RFC 6455 and are allowed there by name.
+
+## Alternatives considered
+- The platform stacks on Android and iOS (ADR 0040's consequences): three implementations of the socket rules, a SOCKS5 username per plan that neither stack sets per connection, verifiers that may fetch outside the proxy, and a TLS fingerprint that names the platform.
+- The operating system's trust store through `rustls-native-certs` (ADR 0040): iOS cannot list its roots, and on the desktop it trusts every root the user, an employer or a program added.
+- Each platform's own verifier with network fetches turned off (`SecTrust` with fetching disabled on iOS, the platform `TrustManager` on Android): platform code for every handshake, a crossing of the uniffi boundary per connection, and a proof per platform that nothing is fetched.
+- A second WebSocket and TLS implementation per platform on top of the shared session rules: the rules stay single, but the sockets, the proxy and the fingerprint would still differ.
+
+## Consequences
+- The TLS layer protects only the transport, as in ADR 0040. Message confidentiality and authenticity come from libsodium in the core (`docs/spec.md` §4). A flaw in `rustls` or `ring`, a revoked certificate that has not expired, or a root that Mozilla distrusts after the build, exposes what a network observer of a plain connection would see, never a message or a key.
+- The three clients send the same TLS handshake and the same WebSocket headers, so a network observer no longer learns the platform from them. `docs/spec.md` §6 "Transport" is amended.
+- Roots change only with an app release. A network that intercepts TLS with its own root, and a server whose certificate chains to a private authority, cannot be reached. A self-hosted server uses a certificate from a public authority, or an onion address (ADR 0038). A root that the user or an employer added is never trusted.
+- `privatechat-host` sits outside the root workspace, whose `deny.toml` bans `rustls` and `ring`. So `privatechat-ffi` leaves the root workspace too and becomes a workspace of its own (spec 040-uniffi). Each of the three workspaces keeps every root ban except the wrappers it names, and the documentation lint checks them.
+- The phone libraries grow by the TLS stack and the `tokio` runtime. App Transport Security and Android's network security configuration do not govern sockets that native code opens, so the host's rules replace them (spec 053-device-security R17).
+- Affected: AGENTS 2 and 24, `docs/spec.md` §6, §9, §10 and §11; specs 040-uniffi, 041-desktop-bridge, 042-connection-host, 053-device-security, 054-qr-invite, and the platform specs 050, 051 and 052; the kotlin, swift and typescript-svelte skills.

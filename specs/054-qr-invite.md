@@ -2,8 +2,8 @@
 
 Status: draft
 Phase: 5
-Related ADRs: 0008, 0017, 0022, 0028, 0031, 0038
-Depends on: 011-config-format, 022-peers-tofu, 027-core-api, 040-uniffi, 041-desktop-bridge, 053-device-security
+Related ADRs: 0008, 0017, 0022, 0028, 0031, 0038, 0041
+Depends on: 011-config-format, 022-peers-tofu, 027-core-api, 040-uniffi, 041-desktop-bridge, 042-connection-host, 053-device-security
 Blocks: 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 055-verify-ui
 Human reviewer: Marc Vilardebó · Accepted on: —
 
@@ -20,9 +20,9 @@ The largest risk of the whole model is a user who shares the config by photo or 
 **Create a channel**
 
 - R1 The create form MUST ask for a name, a message lifetime and a server. The name is 1..=64 bytes of UTF-8 with no Cc character, the suggested name of spec 011-config-format R4. The lifetime is one of 1 h, 24 h, 7 days and 30 days, with 24 h preselected, or a custom whole number of minutes whose value in seconds lies in 60..=2 592 000. The server field is prefilled with `settings().default_server_url` and offers as suggestions the distinct `server_url`s of `channels()`, in the order `channels()` returns them. The form MUST refuse, before any core call, a name or lifetime outside those ranges and a server URL over 256 bytes.
-- R2 Before `create_channel`, the client MUST check the server with the probe of spec 027-core-api R12: on the desktop `probe_server` (spec 041-desktop-bridge R14); on Android and iOS `probe_plan` through `Core`, a socket along the route opened by the socket layer of spec 051-android-mvp or 052-ios-mvp, and `probeHello` of its first frame. Only `Supported` (`probeHello` true) leads to `create_channel`. Each other outcome MUST keep the form filled and show its message:
-  - `Unsupported` (false): "This server runs a version of the protocol this app does not speak.";
-  - `Unreachable`, `ProxyRefused` or a failed socket: "The server could not be reached." with a retry action;
+- R2 Before `create_channel`, the client MUST check the server with the probe of spec 027-core-api R12: `probe_server` of the connection host (spec 042-connection-host R11), through the desktop command of the same name (spec 041-desktop-bridge R11) or `Core.probeServer` on Android and iOS (spec 040-uniffi). Only `Supported` leads to `create_channel`. Each other outcome MUST keep the form filled and show its message:
+  - `Unsupported`: "This server runs a version of the protocol this app does not speak.";
+  - `Unreachable` or `ProxyRefused`: "The server could not be reached." with a retry action;
   - `NotYet` (`probe_plan` returned `None`): the settings-reset notice of spec 027-core-api R2, with no probe;
   - `BadConfig`: "This is not a valid server address.", and for a `.onion` host or a `ws://` URL with no loopback proxy, "Onion servers need a SOCKS5 proxy running on this device." (the wording of spec 027-core-api R10) followed, when the proxy set is a host name, by "Use 127.0.0.1, not localhost."
   There is no "create anyway": a channel whose server was never checked is never created (`docs/spec.md` §5).
@@ -59,7 +59,7 @@ The largest risk of the whole model is a user who shares the config by photo or 
   - The camera permission is asked when the scanner first opens, never at start. On Android, the `CAMERA` runtime permission; on iOS, `NSCameraUsageDescription` in the iOS app's `Info.plist` ("To scan invitations and verification codes shown by other members."), which the iOS app needs; spec 041-desktop-bridge R8's rule of no usage description is for the macOS desktop bundle only. When the permission is refused the scanner shows, for `Invite`, "The camera is needed to scan an invitation." and, for `Verify`, "The camera is needed to scan a verification code.", with an action to the system settings.
 - R13 A file MUST be opened with the system picker (Android `ACTION_OPEN_DOCUMENT`, iOS `fileImporter`, the desktop's `choose_chatcfg` of spec 041-desktop-bridge R6), accepting any file; on Android and iOS the client reads at most 1 086 bytes and refuses a file longer than 1 085 bytes with the `BadConfig` message of R16 before asking for the password. The picker's result (a URI, never the bytes) is kept across the return, within spec 053-device-security R8's bounded exception, and is dropped at lock: after an unlock the user picks the file again, since a URI kept across the lock would outlive the Locked state of spec 053-device-security R21. No platform registers a file type or a URL scheme for `.chatcfg`: the file is opened from inside the app. A scanned text reaches the core as bytes, and the client zeroes its copies as R12 and R15 say (spec 040-uniffi R9 on mobile; spec 041-desktop-bridge R6 on the desktop).
 - R14 The password field MUST follow spec 053-device-security R15: on Android `KeyboardType.Password`, `IME_FLAG_NO_PERSONALIZED_LEARNING` set through `InterceptPlatformTextInput` (Compose sets `IME_FLAG_NO_FULLSCREEN` itself, in place of `flagNoExtractUi`), and the field excluded from autofill; on iOS `SecureField` with `textContentType` nil and `autocorrectionDisabled()`; on the desktop `<input type="password" autocomplete="off">`. On submit the text is copied into a `ByteArray`, `Data` or `Uint8Array` and the field is cleared; the field's own `String` is a residual (Security). It accepts at most 1 024 bytes (spec 011-config-format R15), and the core canonicalises what it receives, so the client never trims or lowercases it.
-- R15 An import MUST NOT join before the user confirms it (decided with the human reviewer, `docs/audit-log.md`, "Audit M", M-Q4). The client first calls `preview_qr(text, now)` or `preview_file(bytes, password, now)`, which parse the invitation and commit nothing (R17). The confirmation screen then shows:
+- R15 An import MUST NOT join before the user confirms it (decided with the human reviewer, `docs/audit-log.md`, "Audit M", M-Q4). The client first calls `preview_qr(text)` or `preview_file(bytes, password)` (through the connection host, which passes `now`, spec 042-connection-host R4), which parse the invitation and commit nothing (R17). The confirmation screen then shows:
   - the suggested name, editable, cleaned as spec 022-peers-tofu R6 says;
   - the server's host, and "This server is new to this device" when no channel of `channels()` has it;
   - the message lifetime;
@@ -192,7 +192,7 @@ Two functions and one record are added to the core by R17: `Device::preview_qr`,
 State-owner tests run on each platform against fakes of `Core` or the bridge; the UI test is the "import a config" flow of the architecture skill §7. Each test is named per platform: Kotlin `s054_tTT_rRR_snake_case`, Swift `s054_tTT_rRR_camelCase`, desktop `s054_tTT_rRR_camelCase`, and the core's `s054_tTT_rRR_snake_case`.
 
 - T01 (covers R1): `s054_t01_r01_create_form`: a name of 65 bytes, a custom lifetime of 0 minutes and of 43 201 minutes, and a URL of 257 bytes are refused with no core call; the server is prefilled with the default and the suggestions are the distinct servers of `channels()`.
-- T02 (covers R2): `s054_t02_r02_probe_before_create`: `Supported` then `create_channel` once; each other outcome keeps the form and shows its message, with no `create_channel`; `NotYet` makes no socket.
+- T02 (covers R2): `s054_t02_r02_probe_before_create`: `Supported` then `create_channel` once; each other outcome keeps the form and shows its message, with no `create_channel`; `NotYet` makes no socket (the connection host's `probe_server` returns it before connecting).
 - T03 (covers R3): `s054_t03_r03_card_and_new_channel`: the card has no editable server or lifetime; "Create new channel" prefills name and server and shows the help text.
 - T04 (covers R4): `s054_t04_r04_warning_first`: no `export_qr` before the warning's action; dismissing the warning calls nothing.
 - T05 (covers R5): `s054_t05_r05_draw_and_zero`: each platform renders 011 `config_reference`'s QR text and 014 `qr_reference`'s text with its renderer, and its output equals, modulo pixels, the fixture committed under `clients/fixtures/qr/`; each platform then decodes every renderer's fixture, Android with ZXing's reader and iOS with Vision (the scanner's `AVCaptureMetadataOutput` reads no still image), to the exact text; the client's byte copy is all zeros after drawing.
@@ -221,7 +221,7 @@ The tests of each platform green in the CI jobs of specs 050, 051 and 052, and T
 
 - The verification screens and the `verify:` QR flow, which reuse the scanner of R12 with `Verify` (spec 055-verify-ui).
 - The layout, navigation and styling of each app, and where these screens sit in it (specs 050-desktop-mvp, 051-android-mvp, 052-ios-mvp).
-- The sockets that carry the probe on Android and iOS (specs 051 and 052).
+- The socket that carries the probe (spec 042-connection-host R11).
 - The lock, the keystore, when the app locks and the bounded exception for system screens (spec 053-device-security).
 - The split invitation (a short QR plus dictated words), a v2 option of `docs/spec.md` §12.
 
@@ -236,3 +236,4 @@ None.
 - 2026-09-26 revised after audit M round 2 (`docs/audit-log.md`): the amendment list for 027, 040, 041 and the skills completed; fresh copies per core call and zeroing on every exit; the scanner's accept predicate, three frames and one payload per session; the share file's deletion bounded by age and never at a provider start; rendered fixtures for T05; the confirmation's name check, `is_open`, `needs_proxy` and the failed rename; the iOS folder picker; "I have written them down", "Share again" and the words' screenshot text; the desktop's kept bytes bounded by the lock
 - 2026-09-27 revised after audit M round 3 (`docs/audit-log.md`): the preview ignores `broken` and reports `replaces_broken`; only accepted payloads count, in a 2 000 ms window, and the `Invite` predicate checks the base64url shape; the seven-words hint before opening a file and pasting into the password field allowed; the picked URI dropped at lock; 027 R10's onion wording with the 127.0.0.1 hint; iOS saves never overwrite; `camera-compose`; `autocorrectionDisabled()`; the scanner draws its conflict text itself
 - 2026-09-27 revised after audit M round 4 (`docs/audit-log.md`): the preview carries `broken_reason`, so an `Io` entry shows the retry text rather than a replacement that never comes; the spec reference moved out of R2's quoted text
+- 2026-09-27 amended for ADR 0041 (`docs/audit-log.md`, "Phase 5 drafts", Q8): the probe of R2 is the connection host's `probe_server` on every platform
