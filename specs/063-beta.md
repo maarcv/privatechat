@@ -3,59 +3,83 @@
 Status: draft
 Phase: 6
 Related ADRs: 0017, 0041
-Depends on: 016-fuzz-harness, 034-docker, 035-server-ops, 051-android-mvp, 052-ios-mvp, 050-desktop-mvp, 060-reproducible-builds, 061-threat-review, 062-security-docs
-Blocks: —
+Depends on: 016-fuzz-harness, 034-docker, 035-server-ops, 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 060-reproducible-builds, 061-threat-review, 062-security-docs
+Blocks: 064-public-release
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
 
-The beta is the first time people outside the project use the app. The human reviewer decided on 2026-09-27 that it is closed, by invitation, for 20 to 50 known people, through TestFlight, a closed Google Play track and signed desktop installers sent by private link (`docs/audit-log.md`, "Phase 6 drafts", Q13). This spec fixes when it may start, how testers get it, what they are told, how feedback reaches the project with no telemetry, and when it ends. It is the last spec of the plan: `docs/spec.md` §10 closes phase 6, and the project's v1 plan, with "no spec left in `draft`".
+The beta is the first time people outside the project use the app. The human reviewer decided on 2026-09-27 that it is closed, by invitation, for 20 to 50 known people, through TestFlight on iOS and by private link for the desktop installers (`docs/audit-log.md`, "Phase 6 drafts", Q13), and, during audit O, that Android testers get the owner-signed, reproducible APK by the same private link, Google Play being left to the public release (`docs/audit-log.md`, "Audit O", O-Q1). This spec fixes when the beta may start, how testers get it, what they are told, how feedback reaches the project with no telemetry, what happens when a security problem is found during it, and when it ends. The public release that follows is spec 064-public-release.
 
-**In plain words.** Once every earlier piece is built and tested, the outside review has found no serious problem left open, and the public pages exist, the project invites a few dozen people it knows. They install the app from Apple's and Google's test programmes or from a signed installer, use it for at least four weeks, and follow a short list of things to try. The app sends nothing about them back; they report problems by writing, and the project writes down what it learns without names.
+**In plain words.** Once every earlier piece is built and tested, the outside review has found no serious problem left open, and the public pages exist, the project invites a few dozen people it knows. They install the iPhone app from Apple's test programme, and the Android and computer apps from a private link, each file signed by the owner and checkable against a fingerprint they receive in person or on paper. They use the app for at least four weeks and try a short list of things. The app sends nothing about them back; they are told what Apple sees, what the project's server sees, and how to report problems without sending anyone's messages. If a serious flaw appears, the fix ships at once and the beta pauses until it is confirmed.
 
 ## Requirements
 
+**Starting**
+
 - R1 The beta MUST NOT start until:
-  - every spec of phases 0 to 5 is `implemented`, and every spec of phase 6 other than this one is `implemented`;
-  - spec 061-threat-review R7 holds: no finding of critical or high severity open, and every fix confirmed by the reviewers;
-  - a release has been built, signed and verified as spec 060-reproducible-builds R1–R9 say, and its hashes are on the "Check a download" page (spec 062-security-docs R1);
-  - the open decisions of `docs/spec.md` §12 that a public build needs are closed by the human reviewer: the product name, and the value of `DEFAULT_SERVER_URL` with the server running at that address (spec 000-repo-layout R4), deployed from the reference deployment of spec 034-docker with the logging of spec 035-server-ops;
-  - the store records and tracks of specs 051-android-mvp R10 and 052-ios-mvp R10 accept a build, with the privacy answers of spec 062-security-docs R1, and 052-R10 (export compliance) is answered.
-  `check_s063_t01_r01_gate` in `scripts/doc_lint.py` MUST fail when this spec is marked `implemented` while any of the spec statuses above is not.
-- R2 Testers MUST be invited by name by the human owner, 20 to 50 people, and receive the app only through: a TestFlight group with invitations by email (external testing, after Apple's beta review), a closed testing track of Google Play with a list of testers, and the desktop installers of spec 060-reproducible-builds sent by a private link with their `SHA256SUMS` and signature. No build of the beta is published where anyone can download it, and F-Droid is not used until the public release.
-- R3 Every beta build MUST show "Beta" and its version next to the app name on the Locked and channel-list screens, and its Help (spec 056-chat-screens R18) MUST begin with "This is a test version. Do not rely on it for anything that must stay secret: the design has been reviewed from outside, but the app is new." The text is a string resource in the five languages.
-- R4 Each tester MUST receive, before installing, a letter (`docs/beta/invitation.md`, English source and translations) that says: what the beta is and how long it lasts; that the app sends nothing about them to the project and that only the operating system's own crash reports, which they control, exist; the link to "Promises and limits" and "Accepted limits" (spec 062-security-docs); how to report a problem (R5); and that a security problem goes through `.github/SECURITY.md`, never a public channel.
-- R5 Feedback MUST reach the project only by the testers' own action: a mailbox named in the letter, or a GitHub issue for a tester who wants a public one. The apps add no feedback form, no automatic report and no identifier. The project records, in `docs/beta/log.md`, each reported problem as a row with a date, the platform and version, what happened and what was done, and no name, address, channel name or message content.
-- R6 Each tester MUST be asked to try, and report on, the scenarios of `docs/beta/plan.md`, which covers at least: creating a channel on each platform; inviting by QR in person and by file with the seven words; joining with the confirmation screen; chatting across the three platforms; verifying a peer by the 12 words and, on phones, by QR; locking and unlocking, the device's own lock included; setting a SOCKS5 proxy (Tor or Orbot) on at least one device; leaving a channel; and "Create new channel" after a pretended leak. `docs/beta/plan.md` records, per scenario and platform, how many testers completed it and how many reported a problem, with no names.
-- R7 The beta MUST last at least 28 days from the first install and MUST end only when: no reported problem of the kinds "loses messages", "shows a message to the wrong channel or person", "accepts an unverified key as verified", "leaks content or a key outside the device" or "crashes at unlock" is open; every scenario of R6 was completed on every platform by at least three testers; and the human reviewer records the end in `docs/audit-log.md`, "Beta". A security problem found in the beta goes through `.github/SECURITY.md` and, when it touches a phase 1 spec, a new review under spec 061-threat-review.
-- R8 No build of the beta MUST carry a switch the server or the project can use to disable, update or reconfigure the app remotely; a server that must stop the beta changes its protocol version, which the apps already show as an unsupported server (spec 042-connection-host R10, spec 056-chat-screens R10). Beta builds expire as their store programme sets (TestFlight after 90 days); the desktop installers are replaced by the public release.
+  - every spec of phases 0 to 5 is `implemented`, and specs 060-reproducible-builds (R1–R9; its F-Droid check is spec 064-public-release's), 061-threat-review and 062-security-docs are `implemented`;
+  - spec 061-threat-review R7 holds: no finding of critical or high severity open or disputed without the reviewers' written withdrawal or downgrade, and every fix confirmed by them;
+  - a beta release has been built, signed and verified as spec 060-reproducible-builds says, from a tag of the form `vX.Y.Z-beta.N` (R3);
+  - the open decisions of `docs/spec.md` §12 that a public build needs are closed by the human reviewer: the product name, and the value of `DEFAULT_SERVER_URL` with the server running at that address (spec 000-repo-layout R4), deployed from the reference deployment of spec 034-docker with the logging of spec 035-server-ops. The application and bundle identifiers are `org.privatechat.*`, fixed since phase 5 (specs 051-android-mvp, 052-ios-mvp), and do not change with the product name;
+  - the TestFlight record of spec 052-ios-mvp R10 accepts a build, with the privacy answers of spec 062-security-docs R1, and 052-R10 (export compliance) is answered;
+  - every account the release and the beta depend on (GitHub, the Apple Developer account, the domain registrar, the landing's host) is held by the human owner alone, with a hardware security key as its second factor.
+  The start is recorded as a row "Start" in `docs/audit-log.md`, section "Beta", with its date and tag. `check_s063_t01_r01_gate` in `scripts/doc_lint.py` MUST fail while that row exists and any spec status above does not hold, and when this spec is marked `implemented` without it.
+
+**Getting the app**
+
+- R2 Testers MUST be invited by name by the human owner, 20 to 50 people, and receive the app only through: a TestFlight group with invitations by email (external testing, after Apple's beta review of the first build of each version); and, for Android and the desktop, the owner-signed artefacts of the beta release (spec 060-reproducible-builds R6), sent by a private link. The beta release is a draft GitHub release, never published, so that no beta build can be downloaded by anyone else; the unsigned CI artefacts of spec 060-reproducible-builds R3 stay downloadable by any signed-in GitHub user, which reveals nothing that the public source does not. Each tester MUST receive the release key fingerprints of `docs/release-keys.md` in person or on paper, printed in the letter of R4, never only through the link, and check the files against them as the "Check a download" page says (spec 062-security-docs R1). Google Play is not used in the beta, and F-Droid's inclusion request stays unmerged until the public release (spec 051-android-mvp R10).
+- R3 A beta build MUST be one built from a tag `vX.Y.Z-beta.N`, whose suffix the build reads from the tag and compiles in as the beta flag, an input of the reproducible build (spec 060-reproducible-builds R2); a tag without the suffix builds a release. A beta build MUST show "Beta" and its version next to the app name on the Locked and channel-list screens (spec 056-chat-screens R20), and its Help MUST begin, before its first section (spec 056-chat-screens R18), with "This is a test version. Do not rely on it for anything that must stay secret: the design has been reviewed from outside, but the app is new." The text is a string resource in the five languages.
+
+**What testers are told**
+
+- R4 Each tester MUST receive, before installing, a letter whose English source is `docs/beta/invitation.md` and whose translations live in `landing/src/content/beta/` (AGENTS 11 keeps translated text out of `docs/`), a translation that no speaker has reviewed being sent in English (`docs/audit-log.md`, "Audit O", O-Q3). The letter MUST say:
+  - what the beta is, how long it lasts, and that updates are announced by mail to the invitation address;
+  - that the app sends nothing about them to the project;
+  - what Apple shows the project for a TestFlight tester (their email address and name, device model, operating system version, installs, sessions, crash logs they allow, and the screenshots and comments they send with TestFlight's feedback), and that the project exports none of it;
+  - that the project's server sees each tester's IP address and which connections read the same channel at the same time, so that its operator, who knows every tester by name, could tell who talks with whom; that the operator commits not to correlate this; and that Tor or Orbot hides the address (the "Tor" help of spec 056-chat-screens R18);
+  - never to send the text of a message or a screenshot of a conversation, by mail, in TestFlight's feedback or in a GitHub issue, since it holds other people's words;
+  - the links to "Promises and limits" and "Known residual risks" (spec 062-security-docs);
+  - how to report a problem (R5), and that a security problem goes through `.github/SECURITY.md`, never a public channel;
+  - the release key fingerprints (R2).
+- R5 Feedback MUST reach the project only by the testers' own action: a mailbox named in the letter, TestFlight's feedback, or a GitHub issue for a tester who wants a public one. The apps add no feedback form, no automatic report and no identifier. A screenshot received is read, then deleted, and never enters the repository; the mailbox is kept for the beta's duration and 30 days after, then deleted. The project records each reported problem in `docs/beta/log.md` as a row with the week, the platform family (desktop, Android, iOS), the version, what happened and what was done, and no name, address, device model, channel name or message content. The log stays out of the repository until the beta ends, and is then committed in aggregate. Each beta build, and the week it was sent, is recorded there too.
+- R6 Each tester MUST be asked to try, and report on, the scenarios of `docs/beta/plan.md`, which names for each scenario the platforms it applies to and covers at least: creating a channel on each platform; inviting by QR in person (phones) and by file with the seven words; joining with the confirmation screen; chatting across the three platforms; verifying a peer by the 12 words and, on phones, by QR; locking and unlocking, the device's own lock included; setting a SOCKS5 proxy (Tor or Orbot) on at least one device; leaving a channel; and "Create new channel" after a pretended leak. `plan.md` records, per scenario and per platform it applies to, how many testers completed it and how many reported a problem, with no names.
+
+**During and after**
+
+- R7 A security problem found during the beta MUST go through `.github/SECURITY.md`. Its fix ships at once in a new beta build, recorded in `docs/review/delta.md` (spec 061-threat-review R3). While any finding of critical or high severity is open, the beta pauses: testers are told by mail to stop relying on it, and it cannot end. A fix that changes a format, a derivation or a path of spec 061-threat-review R3 asks the reviewers for a follow-up, and the beta cannot end before they confirm it.
+- R8 The beta MUST last at least 28 days from the "Start" row and MUST end only when: no reported problem of the kinds "loses messages", "shows a message to the wrong channel or person", "accepts an unverified key as verified", "leaks content or a key outside the device" or "crashes at unlock" is open; R7 holds; every scenario of R6 was completed on every platform it applies to by at least three testers; and the human reviewer records the end as a row "End" in `docs/audit-log.md`, "Beta".
+- R9 A build of the beta MUST NOT carry a switch the server or the project can use to disable, update or reconfigure the app remotely; a server that must stop the beta changes its protocol version, which the apps already show as an unsupported server (spec 042-connection-host R10, spec 056-chat-screens R10). The TestFlight builds expire after 90 days; the Android and desktop beta builds are replaced by the public release (spec 064-public-release). Apple's update channel to TestFlight testers is a documented residual: an account that could publish a build could push it to testers, which R1's owner-only accounts with hardware keys guard against.
 
 ## Limits
 
 | Input | Range | Out of range |
 | --- | --- | --- |
 | Testers | 20..=50, invited by name | no more invitations |
-| Duration | ≥ 28 days from the first install | the beta cannot end |
-| Scenario coverage at the end | ≥ 3 testers per scenario and platform | the beta cannot end |
-| Data about testers kept by the project | none but their invitation address, outside the repository | removed |
+| Beta tag | `vX.Y.Z-beta.N` | builds a release, not a beta |
+| Duration | ≥ 28 days from the "Start" row | the beta cannot end |
+| Scenario coverage at the end | ≥ 3 testers per scenario and per platform it applies to | the beta cannot end |
+| Data about testers kept by the project | their invitation address, outside the repository; the mailbox until 30 days after the end; nothing Apple shows is exported | removed |
 
 ## Interface
 
 ```
-docs/beta/invitation.md    R4, English source and translations
-docs/beta/plan.md          R6
-docs/beta/log.md           R5
-docs/audit-log.md, section "Beta"   R7
+docs/beta/invitation.md                       R4, English source
+landing/src/content/beta/                     R4, the letter's translations
+docs/beta/plan.md                             R6
+docs/beta/log.md                              R5, committed only after the end
+docs/audit-log.md, section "Beta"             R1, R8: rows "Start" and "End"
 ```
 
-**PR slices** (AGENTS 14): (a) the gate check and the beta label and text in the three apps (R1, R3); (b) the invitation, the plan and the log (R4–R6); (c) the end record (R7). The distribution of R2 and the rule of R8 need no code of their own.
+**PR slices** (AGENTS 14): (a) the gate check, the beta flag from the tag, and the beta label and text in the three apps (R1, R3); (b) the invitation, the plan and the log (R4–R6); (c) the end record (R7, R8). The distribution of R2 and the rule of R9 need no code of their own.
 
 ## Security
 
-- The beta starts only after the outside review has no serious finding open and the release is reproducible and signed (R1), so testers run what was reviewed and can check it.
-- Testers are known and few (R2), so a serious flaw found in the beta reaches a small group, and they are told plainly not to rely on the app for secrets yet (R3, R4).
-- Nothing is collected about testers (R5): feedback is their own words, and the project's record holds no names or content. Adding telemetry "just for the beta" would contradict §8 "Telemetry" and is not allowed.
-- No remote switch exists (R8): a switch the project could use, an attacker who took the project's server could use too.
+- The beta starts only after the outside review has no serious finding open, the release is reproducible and signed, and every account behind it is the owner's with a hardware key (R1), so testers run what was reviewed and can check it against fingerprints they received in person (R2).
+- Testers are known and few (R2), and told plainly not to rely on the app for secrets yet (R3, R4), what Apple and the project's server can see about them (R4), and never to send anyone's messages (R4, R5).
+- Nothing is collected about testers by the apps (R5): feedback is their own words, the public record holds no names, device models or content, and it is published only in aggregate after the end. Adding telemetry "just for the beta" would contradict §8 "Telemetry" and is not allowed.
+- No remote switch exists (R9): a switch the project could use, an attacker who took the project's server could use too. The store's own update channel stays a documented residual.
+- The project's server can map the testers' conversations by timing and address; the letter says so and recommends Tor (R4). A documented residual of §2, stated for this group.
 
 ## Public API changes
 
@@ -63,14 +87,15 @@ None.
 
 ## Test cases
 
-- T01 (covers R1): `check_s063_t01_r01_gate`: with a spec of phase 5 still `draft`, marking this spec `implemented` fails; the real gate passes only when every listed status holds; non-automatable, the §12 decisions and the store acceptances are recorded in the pull request.
-- T02 (covers R2): non-automatable: the invitations, the TestFlight group and the Play track are listed, without names, in `docs/beta/log.md`'s first row.
-- T03 (covers R3): Compose, XCTest and Vitest checks: a beta build shows "Beta" and the version on the two screens, and Help begins with the text of R3 in each UI language; a release build shows neither.
-- T04 (covers R4): `check_s063_t04_r04_invitation`: `docs/beta/invitation.md` holds each point of R4 and the links.
-- T05 (covers R5): `check_s063_t05_r05_log`: `docs/beta/log.md` rows have the columns of R5 and hold no e-mail address, `@` handle or text in quotes longer than 40 characters.
-- T06 (covers R6): `check_s063_t06_r06_plan`: `docs/beta/plan.md` lists every scenario of R6 with a count per platform.
-- T07 (covers R7): `check_s063_t07_r07_end`: the "Beta" section exists, its end date is at least 28 days after its start, every scenario count is at least 3, and no row of the listed kinds is open.
-- T08 (covers R8): a source check over the three apps and the connection host: no code path reads a remote flag, configuration or update instruction from a server response.
+- T01 (covers R1): `check_s063_t01_r01_gate`: with a "Start" row and a spec of phase 5 still `draft`, the check fails; with no "Start" row, marking this spec `implemented` fails; the real gate passes only when every listed status holds; non-automatable, the §12 decisions, the store acceptance and the accounts' second factors are recorded in the pull request that adds the "Start" row.
+- T02 (covers R2): `check_s063_t02_r02_distribution`: the beta release of the "Start" row's tag is a draft (queried with `gh release view`); `docs/beta/invitation.md` holds the fingerprints of `docs/release-keys.md`; non-automatable, the TestFlight group and the private link are recorded, without names, in the pull request.
+- T03 (covers R3): Compose `s063_t03_r03_beta_label`, Swift `s063_t03_r03_betaLabel` and Vitest `s063_t03_r03_beta_label`: a build with the beta flag shows "Beta" and the version on the two screens and Help begins with the text of R3 in each UI language; a build without it shows neither; `check_s063_t03_r03_flag_from_tag`: the flag is derived from the tag suffix in the build scripts and nowhere else.
+- T04 (covers R4): `check_s063_t04_r04_invitation`: `docs/beta/invitation.md` holds each point of R4, the links and the fingerprints; every translation under `landing/src/content/beta/` records the hash of the English source it was reviewed against, or is absent.
+- T05 (covers R5): `check_s063_t05_r05_log`: `docs/beta/log.md` rows have the columns of R5 and hold no e-mail address, `@` handle, device model name from a fixed list, full date or text in quotes longer than 40 characters; the file is absent before the "End" row.
+- T06 (covers R6): `check_s063_t06_r06_plan`: `docs/beta/plan.md` lists every scenario of R6 with its platforms and a count per platform.
+- T07 (covers R7): `check_s063_t07_r07_pause`: with an open critical or high row in "External review" dated after "Start", an "End" row fails; every security fix in the beta has a row in `docs/review/delta.md`.
+- T08 (covers R8): `check_s063_t08_r08_end`: the "End" row is at least 28 days after "Start", every scenario count is at least 3 on each of its platforms, and no row of the listed kinds is open.
+- T09 (covers R9): `s063_t09_r09_no_remote_switch`, a source check over the three apps and the connection host: no code path reads a remote flag, configuration or update instruction from a server response or a store API.
 
 ## Vectors
 
@@ -78,11 +103,11 @@ None.
 
 ## Acceptance criterion
 
-The checks of T01, T04–T08 green, T03 green in each app's CI. Non-automatable: the testers' invitations sent and the beta held for 28 days; the human reviewer records its end. With this spec `implemented`, phase 6 and the v1 plan close (`docs/spec.md` §10).
+The checks of T01, T02, T04–T09 green, T03 green in each app's CI. Non-automatable: the testers' invitations sent and the beta held for 28 days; the human reviewer records its end.
 
 ## Out of scope
 
-- The public release, its store listings and F-Droid inclusion, which follow the beta.
+- The public release, its store listings, Google Play and F-Droid (spec 064-public-release).
 - Push notifications, attachments and the other v2 items of `docs/spec.md` §12.
 - Running the project's public server beyond the reference deployment (hosting, monitoring, on-call), which is the operator's.
 
@@ -93,3 +118,4 @@ The checks of T01, T04–T08 green, T03 green in each app's CI. Non-automatable:
 ## History
 
 - 2026-09-27 draft (`docs/audit-log.md`, "Phase 6 drafts", Q13)
+- 2026-09-27 revised after audit O round 1 (`docs/audit-log.md`): Android by owner-signed APK and private link, Play left to spec 064 (O-Q1); the beta flag from a `-beta.N` tag; a draft GitHub release; fingerprints given in person; owner-only accounts with hardware keys; what Apple and the server see, stated in the letter; no message text or chat screenshots; a log without dates, devices or names, private until the end; the letter's translations under `landing/` with English fallback (O-Q3); scenarios per platform; security fixes during the beta pause it; a "Start" row checked by the gate; named tests

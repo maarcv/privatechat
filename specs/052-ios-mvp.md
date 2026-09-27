@@ -4,7 +4,7 @@ Status: draft
 Phase: 5
 Related ADRs: 0012, 0037, 0041
 Depends on: 040-uniffi, 042-connection-host, 053-device-security, 054-qr-invite, 055-verify-ui, 056-chat-screens
-Blocks: 060-reproducible-builds, 063-beta
+Blocks: 060-reproducible-builds, 063-beta, 064-public-release
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

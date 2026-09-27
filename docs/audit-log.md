@@ -2,6 +2,47 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit O
+
+**2026-09-27 — Audit O, review of the phase 6 draft specs 060, 061, 062 and 063 before human review, in four independent passes (O-A: coherence and SDD conformance; O-B: adversarial security and supply chain; O-C: technical viability, measured with rustc 1.98.1, Docker 29.8 and buildkit, apksigner from build-tools 36 on JDK 22, OpenSSH 10.3 and git 2.54, and read from tauri-bundler 2.9.4; O-D: end-to-end scenarios).** The human reviewer decided four questions with the recommended option:
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| O-Q1 | Google Play requires an app bundle for a new app and signs what users install with Google's key, so Play testers would run neither the owner-signed nor the reproducible build (O-B3, O-C1, O-D6, O-A5) | In the closed beta, Android is distributed like the desktop: the owner-signed reproducible APK by private link. Google Play is decided for the public release, with Play's signing a documented residual like iOS and Android code transparency signed with the owner's token | Specs 060, 063; spec 064 |
+| O-Q2 | A critical or high review finding the project believes wrong had no way to close, so the beta could never start (O-D20) | It closes only when the reviewers withdraw or downgrade it in writing after reading the project's response, which the published report carries | Spec 061 R6, R7 |
+| O-Q3 | A public page or the beta letter with no reviewer in one of the five languages would block the beta (O-D24) | That language shows the English text until a translation is reviewed; the beta does not wait, and no unreviewed translation is ever shown | Specs 062, 063 |
+| O-Q4 | No spec covered the public release after the beta: the Beta label, the production stores, F-Droid, public download links, the "experimental" line (O-D28) | A short spec 064-public-release in phase 6 | Spec 064; §10 |
+
+Round 1 (about 94 findings, 8 of them blockers, consolidated):
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| O1 | Both CI builds and the verification ran on the same GitHub account and dependencies, so a compromised workflow, action or dependency could build one backdoor twice and get it signed (O-B1) | Blocker | The owner rebuilds locally, outside GitHub, before signing; actions pinned by commit, read-only permissions, no install scripts; a Security line on malicious locked dependencies (spec 060) |
+| O2 | Every trust anchor (the allowed signers, the keys document, the verify script, the verify page) came from the repository an attacker would control (O-B2, O-C8, O-D12, O-A21) | Blocker | Fingerprints published out of band (F-Droid's metadata, the review report, the app's Help, the beta letter); the verify script takes or pins the fingerprint; the tag check reads the previous release's signers (specs 060, 056 R18, 063) |
+| O3 | The CI verification needed the signature that only exists after the owner signs (O-D1, O-A1) | Blocker | A build job writing the unsigned hashes, and a verify job on the published release (spec 060) |
+| O4 | The acceptance tag did not fit the tag grammar, and nothing told a beta build from a release one (O-D2, O-D10, O-A2, O-A10, O-C17, O-C21) | Blocker | `-rc.N` and `-beta.N` suffixes; the beta flag compiled from the tag (specs 060, 063) |
+| O5 | The F-Droid check could never pass before the beta, which the beta's gate needed (O-D7, O-A3) | Blocker | An automated `apksigcopier` check in 060; F-Droid in 064 (specs 060, 064, 051 R10) |
+| O6 | Google Play signs its own build (O-B3, O-C1, O-D6, O-A5) | Blocker | O-Q1 |
+| O7 | The delta after the frozen commit covered a fraction of the reviewed paths, and the beta build was not tied to what was reviewed (O-B9, O-D17, O-D18, O-A18) | High | Every reviewed path, the lock files, `vendor/` and the toolchain; the reviewers confirm the delta; the beta tag is the review tag plus acknowledged rows (spec 061 R3) |
+| O8 | The privacy policy and the beta letter understated what is kept: blob metadata to the TTL, addresses 60 s after a connection, hosting logs, store and platform data, crash logs and TestFlight feedback (O-B11, O-B13, O-C22, O-D23, O-A20) | High | Each corrected, retention sentences taken from specs 032 and 033, the controller named (specs 062, 063) |
+| O9 | A lost token had no safe way out, and one token per key made the owner a single point (O-B5, O-B6, O-D11) | High | A backup token per key, APK v3 rotation, rotation signed by a valid key, a touch for every signature (spec 060) |
+| O10 | The public GitHub release contradicted a closed beta (O-D9, O-A6, O-C12, O-B16) | High | Draft releases for `-beta` tags; artefacts by private link (specs 060, 063) |
+| O11 | One script on one machine could not sign for macOS and Windows, made network requests it denied, and had no iOS step (O-D5, O-A7, O-C10, O-C11, O-C13) | High | A host per step, `osslsigncode` for Authenticode, the allowed endpoints, the iOS signing and upload (spec 060) |
+| O12 | Signed installers and the macOS zip are not "unsigned plus a signature"; a removed Mach-O signature does not restore the file (measured) (O-C2, O-C3, O-B4, O-D29) | High | Installers rebuilt from the signed binaries; comparison after stripping both; an "unchecked" state; the residual stated (spec 060) |
+| O13 | Tauri's `.deb` and AppImage are not deterministic and fetch tools at bundle time (O-C4, O-C5, O-B7, O-D30) | High | A deterministic repack; the tool cache pre-seeded with pinned copies (spec 060) |
+| O14 | Two runners with different images contradict determinism; paths of dependencies and of crates outside the workspace leak into binaries (measured) (O-C6, O-C7) | High | One pinned toolchain, different hosts and paths; the repository root and `CARGO_HOME` remapped by a wrapper (spec 060) |
+| O15 | The apksigner PKCS#11 form fails on JDK 22 (measured) (O-C9) | Medium | The provider configured through `java.security.properties` (spec 060 R5) |
+| O16 | A disputed high finding had no exit; an ADR closed a high finding with no reviewer sign-off (O-D20, O-B10) | High | O-Q2 (spec 061) |
+| O17 | Security fixes during the beta, the re-review rule and the testers' updates were undefined (O-D14–O-D16) | High | Release branches from the reviewed tag; the fix ships and is a delta row; the beta pauses on an open critical or high; updates announced by mail (specs 060, 061, 063) |
+| O18 | No spec covered the public release (O-D28) | High | O-Q4 (spec 064) |
+| O19 | The beta gate was checked only when the beta ended (O-D26) | High | A start row checked by the lint (spec 063) |
+| O20 | The residual lists were tangled across 061 and 062, missed residuals worded otherwise, and could not take review acceptances (O-A16, O-A17, O-D21, O-D22) | Medium | 061 owns `docs/residuals.md`; 032 and 033 reworded; acceptances also written into the spec (specs 061, 062, 032, 033) |
+| O21 | The public pages' checks had nothing to compare (the landing builds from `docs/`), JSON has no comments, one-language forbidden words, and no translation sync (O-A13, O-A14, O-B12, O-D24) | Medium | Pages built from `docs/`, a `source` field per entry, per-language word lists, the English hash in each translation, O-Q3 (spec 062) |
+| O22 | The beta log and the server's view could re-identify a small known group (O-B14, O-B15) | Medium | Week and platform family only, private until the end; the letter names the server's view and recommends Tor (spec 063) |
+| O23 | Scenario counts could never be met; Help's order conflicted with a beta notice; translations under `docs/` break AGENTS 11 (O-A11, O-A12, O-D27) | Medium | Platforms per scenario; 056 R18 amended; the letter's translations under `landing/` (specs 063, 056) |
+| O24 | Build knobs: `SOURCE_DATE_EPOCH` is not read by rustc or cargo; buildkit needs it with `rewrite-timestamp`, no provenance; the zip recipe; libsodium's `optimized` feature is `-march=native`; ssh signing details; Homebrew OpenSSH on macOS; F-Droid metadata fields; Windows code-signing certificate rules (measured or read) (O-C14–O-C16, O-C18–O-C20, O-C23, O-C24) | Medium | Stated (specs 060, 064) |
+| O25 | Wording and references: the four skills' real sentences, the server binary is not static, five keys not four, AGENTS 17, MUST NOT, a job trigger that `review-N` tags would hit, "Accepted limits" against "Accepted limitations", the §11 tree, the landing plan, the review question's ADRs, unnamed tests (O-A4, O-A8, O-A9, O-A15, O-A19, O-A21, O-A22, O-C25, O-C26, O-D3, O-D4, O-D13, O-D19, O-D25, O-B8) | Low | Aligned (specs 060–064, 051, 056; `docs/spec.md` §10, §11) |
+
 ## Phase 6 drafts
 
 **2026-09-27 — Decisions taken before drafting the phase 6 specs 060–063.** Not an audit: the human reviewer decided Q12–Q14 with the recommended option before the specs were written.

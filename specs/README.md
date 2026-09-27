@@ -49,5 +49,6 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 061 | 061-threat-review | 6 | draft |
 | 062 | 062-security-docs | 6 | draft |
 | 063 | 063-beta | 6 | draft |
+| 064 | 064-public-release | 6 | draft |
 
 Phase 0 was bootstrapped with implementation and review in parallel; from spec 010 on, acceptance precedes code.

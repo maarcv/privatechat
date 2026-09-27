@@ -539,7 +539,7 @@ Seven phases; each one closes when its specifications have green tests and a hum
 | 3. Server | 030-ws-protocol, 031-auth-channel-signature, 032-storage-ttl, 033-rate-limit-quotas, 034-docker, 035-server-ops (implemented in the order 032, 031, 030, 033, 035, 034) | Core↔server integration test via `Session`; working `docker compose up`; `deploy/README.md` "Deploy your own server"; log test without identifiers |
 | 4. Bindings | 040-uniffi, 041-desktop-bridge, 042-connection-host | Kotlin and Swift pass the same vectors as Rust; the empty Tauri app opens a channel |
 | 5. Clients | 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 053-device-security, 054-qr-invite, 055-verify-ui, 056-chat-screens | One user on each platform chats in the same channel; all measures of §8 applied; store publication process started |
-| 6. Hardening | 060-reproducible-builds, 061-threat-review, 062-security-docs, 063-beta | Published hashes; external review of the cryptographic and threat model; public documentation of what it promises and does not promise; no spec left in `draft` |
+| 6. Hardening | 060-reproducible-builds, 061-threat-review, 062-security-docs, 063-beta, 064-public-release | Published hashes; external review of the cryptographic and threat model; public documentation of what it promises and does not promise; a closed beta ended; a public release; no spec left in `draft` |
 
 **Template for each spec**: `specs/TEMPLATE.md`. **Index**: `specs/README.md`, checked by the doc lint.
 
@@ -590,7 +590,8 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 ├─ Cargo.toml                ← workspace with [workspace.lints]
 ├─ rust-toolchain.toml · rustfmt.toml · deny.toml · .editorconfig · .gitignore
 ├─ .github/
-│  ├─ workflows/ci.yml
+│  ├─ workflows/ci.yml · release.yml (spec 060)
+│  ├─ allowed_signers        ← the release signing key (spec 060)
 │  ├─ PULL_REQUEST_TEMPLATE.md · dependabot.yml
 │  └─ CONTRIBUTING.md · SECURITY.md · CODEOWNERS
 ├─ docs/
@@ -598,10 +599,14 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 │  ├─ threat-model.md
 │  ├─ audit-log.md           ← findings and changes of every audit (§13 points here)
 │  ├─ assistant.example.md   ← template for personal AI-assistant preferences (copied to git-ignored assistant.md)
+│  ├─ release-keys.md        ← every release key's fingerprint (spec 060)
+│  ├─ residuals.md           ← every documented residual (spec 062)
+│  ├─ review/                ← the external review's package and report (spec 061)
+│  ├─ beta/                  ← the beta's letter, plan and log (spec 063)
 │  └─ adr/README.md (index) · TEMPLATE.md · NNNN-*.md, one per decision
 ├─ specs/                    ← one spec per feature (TEMPLATE.md, README.md index)
 │  └─ vectors/               ← JSON test vectors, produced by the reference script of spec 015 (README.md with the schema)
-├─ scripts/{doc_lint,check_requirements}.{sh,py}, check_fuzz_targets.sh, fuzz_seeds.py
+├─ scripts/{doc_lint,check_requirements}.{sh,py}, check_fuzz_targets.sh, fuzz_seeds.py, {sign,verify}_release.sh (spec 060)
 │  └─ reference/             ← vectors.py, the reference script that produces the vectors (spec 015), never shipped
 ├─ crates/
 │  ├─ core/                  ← Rust crate: crypto, proto, session (no I/O); fuzz/ in phase 1 (own workspace, Cargo.lock committed)
@@ -609,7 +614,8 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 │  └─ server/                ← Rust axum crate (phase 3)
 ├─ bindings/uniffi/          (phase 4)
 ├─ clients/desktop · android · ios   (phase 5)
-├─ deploy/                   ← reference docker-compose.yml, Caddyfile, nginx.conf, torrc (phase 3)
+├─ deploy/                   ← reference docker-compose.yml, Caddyfile, nginx.conf, torrc (phase 3); release/ build container (spec 060)
+├─ vendor/libsodium/         ← the signed libsodium archives for Windows builds (spec 042)
 └─ landing/                  ← static multilingual site (Astro); outside the Cargo workspace, no protocol code
 ```
 
