@@ -4,7 +4,7 @@ Status: draft
 Phase: 3
 Related ADRs: 0010, 0014, 0022, 0038
 Depends on: 010-primitives-wrapper, 011-config-format, 015-test-vectors, 016-fuzz-harness, 027-core-api, 028-session-sans-io
-Blocks: 030-ws-protocol, 033-rate-limit-quotas, 035-server-ops
+Blocks: 030-ws-protocol, 033-rate-limit-quotas, 035-server-ops, 061-threat-review
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

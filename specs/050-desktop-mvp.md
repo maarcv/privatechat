@@ -4,7 +4,7 @@ Status: draft
 Phase: 5
 Related ADRs: 0017, 0037, 0041
 Depends on: 041-desktop-bridge, 042-connection-host, 053-device-security, 054-qr-invite, 055-verify-ui, 056-chat-screens
-Blocks: —
+Blocks: 060-reproducible-builds, 063-beta
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

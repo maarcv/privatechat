@@ -4,7 +4,7 @@ Status: draft
 Phase: 4
 Related ADRs: 0012, 0017, 0020, 0028, 0037, 0038, 0041
 Depends on: 011-config-format, 020-store-files, 027-core-api, 028-session-sans-io, 040-uniffi, 042-connection-host
-Blocks: 050-desktop-mvp, 053-device-security, 054-qr-invite, 055-verify-ui, 056-chat-screens
+Blocks: 050-desktop-mvp, 053-device-security, 054-qr-invite, 055-verify-ui, 056-chat-screens, 060-reproducible-builds
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

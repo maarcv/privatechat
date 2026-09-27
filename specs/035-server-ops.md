@@ -4,7 +4,7 @@ Status: draft
 Phase: 3
 Related ADRs: 0022, 0038
 Depends on: 027-core-api, 030-ws-protocol, 031-auth-channel-signature, 032-storage-ttl, 033-rate-limit-quotas
-Blocks: 034-docker, 041-desktop-bridge, 042-connection-host
+Blocks: 034-docker, 041-desktop-bridge, 042-connection-host, 063-beta
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

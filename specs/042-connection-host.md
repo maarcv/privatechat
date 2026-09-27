@@ -4,7 +4,7 @@ Status: draft
 Phase: 4
 Related ADRs: 0020, 0037, 0038, 0041
 Depends on: 020-store-files, 027-core-api, 028-session-sans-io, 030-ws-protocol, 033-rate-limit-quotas, 035-server-ops
-Blocks: 040-uniffi, 041-desktop-bridge, 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 053-device-security, 054-qr-invite, 056-chat-screens
+Blocks: 040-uniffi, 041-desktop-bridge, 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 053-device-security, 054-qr-invite, 056-chat-screens, 060-reproducible-builds, 061-threat-review
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

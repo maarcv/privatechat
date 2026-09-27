@@ -2,6 +2,16 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Phase 6 drafts
+
+**2026-09-27 — Decisions taken before drafting the phase 6 specs 060–063.** Not an audit: the human reviewer decided Q12–Q14 with the recommended option before the specs were written.
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| Q12 | Who reviews the cryptographic and threat model from outside (§10, phase 6) | A funded review programme for open-source privacy tools (the Open Technology Fund's Red Team Lab or an equivalent), with a package of documents and code the project prepares; the beta waits for its report | Spec 061 |
+| Q13 | Who the beta reaches and how | A closed beta by invitation, of 20 to 50 known people, through TestFlight, a closed Google Play track and signed desktop installers sent by private link | Spec 063 |
+| Q14 | Who holds the keys that sign published releases | The human owner, on hardware tokens; CI builds the artefacts reproducibly and a local machine signs what CI built, after checking its hashes; no signing key is a CI secret | Spec 060; the kotlin, swift and typescript-svelte skills at acceptance |
+
 ## Audit N
 
 **2026-09-27 — Audit N, review of the phase 4 rework (ADR 0041, specs 040, 041 and 042) and the phase 5 platform drafts (specs 050, 051, 052 and 056, with the amendments to 053 and 054) before human review, in four independent passes (N-A: coherence and SDD conformance; N-B: adversarial security and privacy; N-C: technical viability, measured with uniffi 0.32.2 from Swift, tokio, rustls 0.23.45, tokio-tungstenite 0.30, `cargo deny` and the phone targets; N-D: end-to-end scenarios), in rounds.** The human reviewer decided one question with the recommended option:

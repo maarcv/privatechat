@@ -4,7 +4,7 @@ Status: in review
 Phase: 1
 Related ADRs: 0015, 0021, 0023
 Depends on: 010-primitives-wrapper, 015-test-vectors
-Blocks: 011-config-format, 013-wire-message, 016-fuzz-harness, 020-store-files, 028-session-sans-io, 030-ws-protocol
+Blocks: 011-config-format, 013-wire-message, 016-fuzz-harness, 020-store-files, 028-session-sans-io, 030-ws-protocol, 061-threat-review
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

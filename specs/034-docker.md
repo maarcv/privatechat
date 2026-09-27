@@ -4,7 +4,7 @@ Status: draft
 Phase: 3
 Related ADRs: 0017, 0022, 0038
 Depends on: 035-server-ops
-Blocks: —
+Blocks: 060-reproducible-builds, 063-beta
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

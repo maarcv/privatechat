@@ -4,7 +4,7 @@ Status: in review
 Phase: 1
 Related ADRs: 0002, 0005, 0013, 0016, 0018, 0019, 0023, 0027, 0029, 0030, 0032, 0033
 Depends on: 010-primitives-wrapper, 011-config-format, 012-message-keys, 015-test-vectors, 017-record-encoding
-Blocks: 016-fuzz-harness, 021-channel-session, 030-ws-protocol
+Blocks: 016-fuzz-harness, 021-channel-session, 030-ws-protocol, 061-threat-review
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

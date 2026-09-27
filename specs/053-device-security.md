@@ -4,7 +4,7 @@ Status: draft
 Phase: 5
 Related ADRs: 0020, 0021, 0028, 0037, 0041
 Depends on: 020-store-files, 027-core-api, 040-uniffi, 041-desktop-bridge, 042-connection-host
-Blocks: 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 054-qr-invite, 056-chat-screens
+Blocks: 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 054-qr-invite, 056-chat-screens, 061-threat-review, 062-security-docs
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

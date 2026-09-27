@@ -45,5 +45,9 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 054 | 054-qr-invite | 5 | draft |
 | 055 | 055-verify-ui | 5 | draft |
 | 056 | 056-chat-screens | 5 | draft |
+| 060 | 060-reproducible-builds | 6 | draft |
+| 061 | 061-threat-review | 6 | draft |
+| 062 | 062-security-docs | 6 | draft |
+| 063 | 063-beta | 6 | draft |
 
 Phase 0 was bootstrapped with implementation and review in parallel; from spec 010 on, acceptance precedes code.

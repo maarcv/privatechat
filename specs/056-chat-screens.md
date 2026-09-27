@@ -4,7 +4,7 @@ Status: draft
 Phase: 5
 Related ADRs: 0008, 0014, 0019, 0020, 0027, 0034, 0037, 0041
 Depends on: 021-channel-session, 023-ttl-purge, 027-core-api, 028-session-sans-io, 040-uniffi, 041-desktop-bridge, 042-connection-host, 053-device-security, 054-qr-invite, 055-verify-ui
-Blocks: 050-desktop-mvp, 051-android-mvp, 052-ios-mvp
+Blocks: 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 062-security-docs
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
