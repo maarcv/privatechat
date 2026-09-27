@@ -4,7 +4,7 @@ Findings and applied changes of every audit of the specification, newest first; 
 
 ## Audit O
 
-**2026-09-27 — Audit O, review of the phase 6 draft specs 060, 061, 062 and 063 before human review, in four independent passes (O-A: coherence and SDD conformance; O-B: adversarial security and supply chain; O-C: technical viability, measured with rustc 1.98.1, Docker 29.8 and buildkit, apksigner from build-tools 36 on JDK 22, OpenSSH 10.3 and git 2.54, and read from tauri-bundler 2.9.4; O-D: end-to-end scenarios).** The human reviewer decided four questions with the recommended option:
+**2026-09-27 — Audit O, review of the phase 6 draft specs 060, 061, 062 and 063 before human review, in four independent passes (O-A: coherence and SDD conformance; O-B: adversarial security and supply chain; O-C: technical viability, measured with rustc 1.98.1, Docker 29.8 and buildkit, apksigner from build-tools 36 on JDK 22, OpenSSH 10.3 and git 2.54, and read from tauri-bundler 2.9.4; O-D: end-to-end scenarios).** The human reviewer decided six questions with the recommended option (O-Q5 and O-Q6 in round 2):
 
 | # | Question | Decision | Change |
 | --- | --- | --- | --- |
@@ -12,6 +12,8 @@ Findings and applied changes of every audit of the specification, newest first; 
 | O-Q2 | A critical or high review finding the project believes wrong had no way to close, so the beta could never start (O-D20) | It closes only when the reviewers withdraw or downgrade it in writing after reading the project's response, which the published report carries | Spec 061 R6, R7 |
 | O-Q3 | A public page or the beta letter with no reviewer in one of the five languages would block the beta (O-D24) | That language shows the English text until a translation is reviewed; the beta does not wait, and no unreviewed translation is ever shown | Specs 062, 063 |
 | O-Q4 | No spec covered the public release after the beta: the Beta label, the production stores, F-Droid, public download links, the "experimental" line (O-D28) | A short spec 064-public-release in phase 6 | Spec 064; §10 |
+| O-Q5 | Nobody outside GitHub rebuilt the Windows artefacts, so a compromised CI could ship a Windows installer the owner would sign (round 2, O-B B1) | The owner rebuilds them on a Windows virtual machine of his own before signing; until it exists, releases leave Windows out | Spec 060 R6 |
+| O-Q6 | An attacker holding GitHub and the landing host could show one person a forged release (round 2, O-B B4) | The signed manifest of every public release is logged in Sigstore Rekor, and the verify script checks it; beta and rc manifests are not logged | Spec 060 R8; spec 064 |
 
 Round 1 (about 94 findings, 8 of them blockers, consolidated):
 
@@ -42,6 +44,33 @@ Round 1 (about 94 findings, 8 of them blockers, consolidated):
 | O23 | Scenario counts could never be met; Help's order conflicted with a beta notice; translations under `docs/` break AGENTS 11 (O-A11, O-A12, O-D27) | Medium | Platforms per scenario; 056 R18 amended; the letter's translations under `landing/` (specs 063, 056) |
 | O24 | Build knobs: `SOURCE_DATE_EPOCH` is not read by rustc or cargo; buildkit needs it with `rewrite-timestamp`, no provenance; the zip recipe; libsodium's `optimized` feature is `-march=native`; ssh signing details; Homebrew OpenSSH on macOS; F-Droid metadata fields; Windows code-signing certificate rules (measured or read) (O-C14–O-C16, O-C18–O-C20, O-C23, O-C24) | Medium | Stated (specs 060, 064) |
 | O25 | Wording and references: the four skills' real sentences, the server binary is not static, five keys not four, AGENTS 17, MUST NOT, a job trigger that `review-N` tags would hit, "Accepted limits" against "Accepted limitations", the §11 tree, the landing plan, the review question's ADRs, unnamed tests (O-A4, O-A8, O-A9, O-A15, O-A19, O-A21, O-A22, O-C25, O-C26, O-D3, O-D4, O-D13, O-D19, O-D25, O-B8) | Low | Aligned (specs 060–064, 051, 056; `docs/spec.md` §10, §11) |
+
+Round 2 (three passes, O-A, O-B and O-D, about 60 findings, no blocker; O-Q5 and O-Q6 decided):
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| O26 | Windows was rebuilt only on GitHub (O-B B1) | High | O-Q5 (spec 060 R6) |
+| O27 | A third party ran the verify script from the attacker's clone; a first-time user had no anchor the attacker could not change; the report in the repository and the app's own Help are not independent (O-B B2, B4, O-D D13, D23) | High | A plain `ssh-keygen` check first, against a fingerprint printed in the letter and in the report on the reviewers' own site; the clone's commit checked against the manifest; several fingerprints; Rekor for public releases (O-Q6); Help only for later downloads (specs 060, 061, 056 R18, 064) |
+| O28 | The owner ran the tag's own scripts before verifying the tag; tags are mutable; "the previous tag" and a first-key bootstrap were undefined (O-B B3, O-D D2) | High | The tag verified against the owner's own signers file first; protection rulesets; the previous tag defined; the first tag a residual; a new key added by a release the old key signed (spec 060 R1, R6) |
+| O29 | `sign_release.sh` published at once; the verify job cannot run on a draft; drafts are unreadable by testers and second verifiers; the private-link host was unnamed (O-A 2, 3, O-D D6, D7, D18, O-B B9) | High | Always a draft; verify by manual dispatch; a local-folder mode; the file host named, in the letter and the endpoints (specs 060, 063, 064) |
+| O30 | Hotfixes during the beta failed the review-delta rule; a closed delta kept taking rows; tester reports could not pause or close; the pause rows were missing (O-A 4, 8, 9, 10, O-D D10–D12, O-B B10, B11) | High | The delta open until the end, fix rows shipped while paused and confirmed before resuming; every security report a row counted high until downgraded; "Paused" and "Resumed" rows; pauses outside the 28 days (specs 061 R3, R6, R7; 063 R7) |
+| O31 | The Play bundle and its keys did not fit 060; Play's "existing key" option, code transparency's reach and a test that checked nothing (O-A 5, O-D D19, O-B B7) | High | The bundle in 060; the Play keys listed, a Google-generated signing key required, a separate transparency key, the uncovered parts stated, the test on a Play-installed APK (specs 060, 064) |
+| O32 | Versions were never derived from the tag, so testers could not update in place (O-D D4, O-A 6) | High | A version scheme from the tag (spec 060 R2; spec 051 R7) |
+| O33 | The iOS production build and the Play closed test had no place in the sequence (O-D D8, D9) | High | The release build submitted to App Review; the Play test after the beta's end with a letter variant (spec 064) |
+| O34 | A stale translation failed the lint instead of falling back to English; the hash's scope was undefined (O-D D16, D17) | High | English with a reviewed "not translated yet" line; per-page source sections hashed (spec 062) |
+| O35 | Backup tokens without PIN, Android key material left behind, no compromise procedure, v3 rotation missing Android 11–12, certificates cannot have backup tokens (O-B B5, O-D D3, D21, D22) | Medium | Resident keys with verification, PIN always, a live-boot generation recorded as destroyed, a sealed named place, a compromise procedure, rotation from API 28, second certificates, retired keys shown (specs 060, 056 R18) |
+| O36 | `-rc` builds looked like releases and carried production signatures (O-B B8, O-D D5) | Medium | An "RC" flag, its own namespace, no production platform key, no store upload (spec 060) |
+| O37 | The delta and the scope missed lock files, release infrastructure and specs 040 and 041 (O-B B6) | Medium | Added (spec 061 R3, R4) |
+| O38 | The release keys might not exist at the review freeze; the package cannot name a commit it is part of (O-D D1, D15) | Medium | The keys slice before `review-1`; the package committed after the tag (spec 061) |
+| O39 | Accounts left out of the hardening rule; where the letter's fingerprint comes from (O-B B12, B13) | Medium | The full list; derived from the token, on paper, never beside a link (spec 063) |
+| O40 | The privacy policy's server choice, DNS, purge delay, snapshots and live view (O-B B14) | Medium | Corrected (spec 062 R2) |
+| O41 | Old signed betas stay genuine forever (O-B B15) | Medium | A compiled expiry and a channel warning (specs 060, 063) |
+| O42 | Residual sentences grouped or capitalised were not counted; Play's residuals were only in Requirements (O-A 13, 14) | Medium | One sentence per residual, a case-insensitive check, 064 Security (specs 060, 061, 064) |
+| O43 | SECURITY.md wording owned twice; the public release's claim after later changes (O-A 11, O-D D14, O-B B18) | Medium | 061 keeps "experimental until the public release", 064 removes it and names the reviewed commit with the delta (specs 061, 064) |
+| O44 | F-Droid's order, tag pattern and fingerprint field (O-A 7, O-D D20) | Medium | Merge, publish, build; a tag regex; the SSH fingerprint in the description (spec 064) |
+| O45 | Linux beta bytes downloadable from CI run artefacts; the owner's screen shows what malware would swap (O-B B16, B17) | Low | Only the hash list uploaded, one day; the touch count announced and signatures checked on a second machine (spec 060) |
+| O46 | References: Q15–Q18 cited under the wrong section, the residuals owner in §11, 053's store pointer, 063's citations of 056 and 060, 064's of 060, 062's residual citations, the beta letter's content collection (O-A 1, 12, 15–18, O-D D24) | Low | Aligned |
+
 
 ## Phase 6 drafts
 

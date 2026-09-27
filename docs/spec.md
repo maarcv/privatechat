@@ -600,7 +600,7 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 │  ├─ audit-log.md           ← findings and changes of every audit (§13 points here)
 │  ├─ assistant.example.md   ← template for personal AI-assistant preferences (copied to git-ignored assistant.md)
 │  ├─ release-keys.md        ← every release key's fingerprint (spec 060)
-│  ├─ residuals.md           ← every documented residual (spec 062)
+│  ├─ residuals.md           ← every documented residual (spec 061)
 │  ├─ review/                ← the external review's package and report (spec 061)
 │  ├─ beta/                  ← the beta's letter, plan and log (spec 063)
 │  └─ adr/README.md (index) · TEMPLATE.md · NNNN-*.md, one per decision

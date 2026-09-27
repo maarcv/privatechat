@@ -255,7 +255,7 @@ The tests of each platform green in the CI jobs of specs 050, 051 and 052, and t
 
 - The screens that show the lock, the prompts' placement and the `KeyLost` flow's layout (specs 050, 051, 052).
 - Scanning QR codes, the camera permission's use, and the warning a screenshot of a secret shows (spec 054-qr-invite).
-- Reproducible builds, signing and store publication (spec 060-reproducible-builds).
+- Reproducible builds and signing (spec 060-reproducible-builds); store publication (spec 064-public-release).
 - An app password for a desktop with no keychain (`docs/spec.md` §8): not in v1.
 
 ## Open questions
@@ -279,3 +279,4 @@ The tests of each platform green in the CI jobs of specs 050, 051 and 052, and t
 - 2026-09-27 revised after audit N round 2 (`docs/audit-log.md`): `copy_message(channel, kind, id)` copying nothing on an ambiguous match; the desktop's clear and reload after the lock routine, bounded; notifications coalesced into a set, the window started only by a shown one, the focus in an `AtomicBool`; the iOS exception bounded by the granted time, the lock started by a timer, and every lock emptying the view models first; the Android kill and the waiting send as residuals; "Lock after" disabled while newer settings are kept; the stale 041 R7 amendment dropped
 - 2026-09-27 revised after audit N round 3 (`docs/audit-log.md`): a fresh Windows install without Hello checks availability first; a fault `locked` moves `LockController` to locked; `Core` the phones' one generation filter; copy of the focused row and a stable key rule; the reset clears the failed record
 - 2026-09-27 revised after audit N round 4 (`docs/audit-log.md`): the desktop window recreated after every lock and reset in place of the clear and reload (R20, R21); the iOS background task ends when `Core.lock` returns; the Windows first-run test reads no entry and `presence.none` goes at any `Available` check; own rows copied by `client_ref`
+- 2026-09-27 amended after audit O round 2 (`docs/audit-log.md`): store publication points to spec 064-public-release
