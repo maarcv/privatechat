@@ -150,7 +150,19 @@ Round 4, two passes (N-A, N-D), final (about 23 findings, 2 of them blockers):
 | N115 | The Windows first-run test needed a read before verification; `presence.none` outlived a Hello set up later (N-D11) | Low | "Holds no data" alone; the file removed when Hello is available (spec 053 R4) |
 | N116 | Leftovers: `connection_states` missing from the locked-command list, `Sink::locked`'s duties, "the reset outcome", the floor "set" rather than raised, the re-read pacing's clock (N-A6, N-A10, N-A11, N-D12) | Low | Aligned (specs 041, 040, 056 R11) |
 
-**Audit N stops here**, by diminishing returns: about 66, 66, 39 and 23 findings over four rounds, the last ones concentrated in the desktop lock tail, which round 4 simplified rather than patched. Open before implementation: 042-R10 (iOS cellular and VPN routing of native sockets), 052-R10 (export compliance, a legal decision), 056-R11 (the cost of `messages()` on a channel of 10^5 rows), and the measurements that 041 names for slice (a) (Tauri's features, its CLI's working directory, the Windows test manifest).
+**Audit N stops here**, by diminishing returns: about 66, 66, 39 and 23 findings over four rounds, the last ones concentrated in the desktop lock tail, which round 4 simplified rather than patched. Open before implementation: 052-R10 (export compliance, a legal decision), 056-R11 (the cost of `messages()` on a channel of 10^5 rows), and the measurements that 041 names for slice (a) (Tauri's features, its CLI's working directory, the Windows test manifest).
+
+
+Measurement of 042-R10, 2026-09-27, on the reviewer's iPhone 15 Pro Max with iOS 26, with a test app outside the repository (a Rust static library opening a std `TcpStream`, which is the BSD socket the host's `tokio` uses, and `NWConnection` for comparison, both fetching Cloudflare's `/cdn-cgi/trace`, signed with the GLAM SOFTWARE team's wildcard development profile at the reviewer's choice):
+
+| State | Rust socket, first network use of the app | `NWConnection` |
+| --- | --- | --- |
+| Wi-Fi, a full-tunnel VPN on | out through `utun8`, the VPN | the same interface and public address |
+| Wi-Fi, no VPN | out through `en0`, the Wi-Fi | the same |
+| Wi-Fi off, three minutes locked, then unlocked | out through `pdp_ip0`, the cellular data (DNS 205 ms, against 6–14 ms before: the radio woke), the carrier's address | the same |
+| Wi-Fi off, the VPN on | out through `utun7`, the VPN, with the VPN's exit address and not the carrier's | the same |
+
+The unlock itself may wake the network, so the test cannot tell whether the Rust socket alone woke the radio; it shows the case the app lives in, since the app is always opened after an unlock. 042-R10 is closed: spec 052-ios-mvp R4 drops its data-free `NWConnection` fallback, and specs 040 R10 and 042 R3 their exception for it, together with the residual of 042's Security. A per-app VPN and Android were not measured.
 
 
 ## Audit M
