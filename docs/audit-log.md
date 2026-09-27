@@ -28,9 +28,9 @@ Round 1 (about 66 findings, 5 of them blockers, consolidated):
 | N12 | `copy_message(text)` let a script put any text on the clipboard (N-B7) | Medium | `copy_message(channel, key)` (specs 053 R14, 050 R4) |
 | N13 | Pending to Delivered could fall back or outstay its message; re-reads raced events (N-D3) | Medium | The key and times change on `Delivered`; stale re-reads dropped (spec 056 R7, R11) |
 | N14 | `channels()` went stale after create, rename, leave, remove and a named send (N-D4) | Medium | Added re-read triggers (spec 056 R11) |
-| N15 | Results that return after a lock put content back in view models (N-D5) | Medium | An unlock epoch (spec 056) |
+| N15 | Results that return after a lock put content back in view models (N-D5) | Medium | An unlock epoch (spec 056 R21) |
 | N16 | Kotlin's `withContext(NonCancellable)` still drops the result of a cancelled caller (N-D6) | Medium | Calls run in `Core`'s own scope (spec 040 R9) |
-| N17 | Connection states that arrived before a channel was listed were lost (N-D7) | Medium | An app-level map (spec 056 R10) |
+| N17 | Connection states that arrived before a channel was listed were lost (N-D7) | Medium | An app-level map (spec 056 R21) |
 | N18 | The iOS lock could be suspended half-way in the background (N-D9) | Medium | `beginBackgroundTask`; the Android lock in the application scope (spec 053 R8, R9) |
 | N19 | The first network callback and the merged effect of `network_changed` cut fresh connections (N-D12, N-C12) | Medium | The first report a baseline; a new monitor per unlock; close only sockets older than the last merged call (spec 042 R10; specs 051 R4, 052 R4) |
 | N20 | `ProxyRefused` and a stopped Orbot were hard to recover from (N-D13) | Medium | Cleared at `open`; "Try again"; a proxy-specific text (spec 042 R5, R10; spec 056 R10) |
@@ -54,6 +54,58 @@ Round 1 (about 66 findings, 5 of them blockers, consolidated):
 | N38 | `ClientHello` equality needs a fixed random source; `rcgen` defaults pull `aws-lc-rs`; the `user-agent` name goes out lowercase (N-C15, N-C16) | Low | Spec 042 T09, R9 |
 | N39 | Unflushed pongs, unawaited frames, fixed clocks in release, the `Failed` record lost at restart, `ServerFull` always back to `Connected` (N-B9–N-B12, N-D14) | Low | Spec 042 R6, R7, R10; spec 040 R5 |
 | N40 | Returns from Settings and from a vanished channel, the lifetime unit, Android before `Core.create`, a custom lock time, `localeConfig` below API 33 (N-D15–N-D19, N-C17) | Low | Specs 056, 051 |
+
+
+Round 2 (about 66 findings, 2 of them blockers, consolidated; no question for the reviewer):
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| N41 | With `SODIUM_DIST_DIR` set, the build script opens `LATEST.tar.gz` there first on every target, so vendoring the Windows zip alone breaks every build (measured); Cargo reads `[env]` from the working directory, and the build does not rerun when it changes (measured); a pull request could swap the zip, its signature and its hash together (N-B1, N-B2, N-C1, N-C2) | Blocker | Four files with their exact names, `LATEST.tar.gz` byte-identical to the crate's archive, the minisign key and the zip's hash written in the spec and checked independently, a timestamp that never goes back, CODEOWNERS for `vendor/`, the working-directory rule and clean offline builds (spec 042 R15, T15; spec 041 R14) |
+| N42 | `Sink` calls carried no generation, so a late `locked` or old events could wipe or leak into a new unlock (N-A2, N-B4, N-C5, N-D3) | Medium | A generation on every `Sink` call and from `open`; apps drop older ones (specs 042, 040, 041, 056 R21) |
+| N43 | A foreign exception in a callback panics the adapter thread, losing every later event (N-C6) | Medium | Each foreign call guarded (spec 040 R6) |
+| N44 | Joining the adapter thread in `Drop` deadlocks or panics (measured) (N-C7) | Low | The sender taken out, no join (spec 040 R5) |
+| N45 | A cfg on one constructor inside the export block fails to compile; the fixed-clock `Core` twins broke the release library (measured) (N-A3, N-C3, N-C4) | Medium | A separate cfg'd export block; the twins in the test source sets (spec 040 R5, R9) |
+| N46 | Plain `cargo test` could not reach the feature-gated test code (N-A4) | Low | Tests with the features, plus a featureless check (specs 040 R12, 042 R14) |
+| N47 | "Try again" called `network_changed`, which leaves `ProxyRefused` alone, cuts every socket, and does not exist on the desktop (N-A1, N-B7, N-C8, N-D15–N-D17) | Medium | `retry_now()` on the host, `Core` and the desktop (specs 042 R10, 040, 041 R4, R11, 056 R10) |
+| N48 | "Opened before" was undefined and connects in progress escaped the merge (N-C9, N-D23) | Low | The start of the connect; connects in progress aborted (spec 042 R10) |
+| N49 | What a probe aborted by the lock returns (N-A9, N-D25) | Low | `Locked` (spec 042 R11, T11, T12) |
+| N50 | A lock with no device open could emit `locked` again (N-D12) | Low | It calls nothing (spec 042 R12) |
+| N51 | Message bodies crossed three unbounded queues to apps that re-read anyway (N-B8) | Low | `HostEvent::Message` carries no body (specs 042, 040, 041, 056) |
+| N52 | The host emits during `open`, before it returns (N-A7) | Low | "Until the next open begins" (specs 042 R5, 041 R7) |
+| N53 | `rcgen` with `ring` needs a banned-crate wrapper (N-A6) | Low | Committed certificate fixtures (spec 042 T09) |
+| N54 | The key share is set by the key-exchange group, and rustls shuffles extension order per connection (measured) (N-C10, N-C11) | Low | A fixed-share group wrapper; "the same handshake" defined as the same extension set (spec 042 R9, T09, Security) |
+| N55 | The `nm` checks misread, false-matched and ran only on the bindings job's artefacts (measured) (N-B9, N-C12) | Low | `llvm-nm`, the exact symbol, a positive control, also in the app jobs (specs 040 R12, 051 R8, 052 R8) |
+| N56 | Paused clocks need a current-thread runtime (measured) (N-C13) | Low | Stated (spec 042) |
+| N57 | The adapter queue is unbounded (N-C14) | Low | A documented residual (spec 040) |
+| N58 | The iOS fallback connection marks iOS to the server; VPN routing of native sockets unmeasured (N-B6) | Low | A residual; 042-R10 widened (spec 042) |
+| N59 | `copy_message` took an untagged id, reopening N6 for copy (N-A5, N-B3, N-D21) | Medium | `copy_message(channel, kind, id)`, nothing copied when ambiguous (spec 053 R14; spec 041; spec 050 R4) |
+| N60 | Where the desktop page's clear and reload run was unsaid; inside the `Sink` it blocks, outside it can land after the next unlock (N-D6) | Medium | After the host routine, under the lifecycle lock, bounded (spec 041 R17; spec 053 R21) |
+| N61 | A reset's `FileIo` returned to a page its own lock had reloaded (N-D7) | Medium | `take_reset_outcome` (spec 041; spec 050) |
+| N62 | The desktop lacked the commands N47 and D4 need (N-D16, N-D8) | Medium | `retry_now`, `connection_states` (spec 041 R4) |
+| N63 | A Linux dialog left open across a reload made "Unlock" fail silently (N-D9) | Low | `DialogOpen` (spec 041; spec 050 R7) |
+| N64 | Notification coalescing and the focus check were undefined or blocking (N-D19, N-D20) | Low | A set of (channel, peer); an atomic focus flag (spec 041 R7; spec 053 R13) |
+| N65 | The desktop's `.cargo/config.toml` and offline Windows build were unlisted (N-A12, N-A14) | Low | Listed; 041 R14 cites 042 R15 (spec 041) |
+| N66 | iOS grants about 30 s, not 120 s, and a lock started in the expiration handler gets none; a stale 053 R20 clause (N-D13, N-A13) | Medium | The shorter of the two, a timer-started lock, view models dropped first; the clause removed (spec 053 R8, R9, R20) |
+| N67 | Android kills during a lock or a send were undocumented (N-D14) | Low | Residuals (spec 053 Security) |
+| N68 | Under a newer app's settings, "Lock after" re-wrapped for a setting that is never saved (N-D26) | Low | Disabled then (spec 053 R7; spec 056 R15) |
+| N69 | The QR image outlived a channel moved to `broken` (N-D27) | Low | Dropped when it leaves `channels()` (spec 041 R6) |
+| N70 | Audit-log references for N15 and N17 (N-A15) | Low | Fixed |
+| N71 | After a lock, an own row read "Not sent" and offered "Send again" while the server might already hold it (N-D1) | Medium | "Not confirmed yet" until the first `Subscribed` (spec 056 R8) |
+| N72 | `Delivered` could overtake `SentView` (N-D2) | Low | Replace by `client_ref`, apply a seen `Delivered` (spec 056 R7) |
+| N73 | Dropping overtaken re-reads livelocked a busy channel; unthrottled full re-reads at unlock (N-D4, N-D5) | Medium | Keep the read, re-apply later events; one coalesced read in flight (spec 056 R11) |
+| N74 | Apps had no way to tell a late `locked` from a current one (N-B4, N-D3) | Medium | Generation filtering; the lock controller follows its own calls (specs 056 R21, 050–052 R2) |
+| N75 | The Retrying text blamed a local Tor for any proxy fault (N-D18) | Low | A neutral text, "on this device" only for loopback (spec 056 R10) |
+| N76 | The erase escape missed the fault after a successful open, and was offered for transient `Io` (N-A11, N-B5, N-D10, N-D11) | Medium | After a fault lock and for `Internal`, `Corrupt`, `UnsupportedVersion`; `Io` retries; cleared on background; the desktop `KeyLost` screen named (spec 056 R20; spec 050 R6) |
+| N77 | A channel removed another way left its screen open (N-D27) | Low | Any `UnknownChannel` goes back to the list (spec 056) |
+| N78 | A page mounted while unlocked had no connection states and showed Locked (N-D8) | Low | `connection_states()` after unlock and at mount; `status()` at mount (specs 056 R21, 050 R2) |
+| N79 | Copy on position-keyed rows (N-B3) | Low | Hidden (spec 056 R8) |
+| N80 | — | — | `DialogOpen`'s text (spec 050 R7) |
+| N81 | Android ignored a network that came back; the iOS fallback could wait forever, reconnect later outside a proxy, or target channels outside any plan (N-D22, N-D24, N-B6, N-A8) | Low | `onLost` clears; 5 000 ms bound, cancels at lock and proxy change, `!needs_proxy` while no settings reset (specs 051 R4, 052 R4) |
+| N82 | 056's acceptance and T03 missed its last requirements (N-A10) | Low | Fixed (spec 056) |
+| N83 | — | — | See N55 (specs 051 R8, 052 R8) |
+| N84 | — | — | See N61 (spec 050) |
+
+Accepted without a question, recorded here: the Locked screen offers "Erase all data" only after a fault or a failed open whose reason is not transient (N76). A thief reaches it only after the device's own authentication, and erasing is then no more than uninstalling the app or deleting its folder, which that person could do anyway.
 
 ## Audit M
 
