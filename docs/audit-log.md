@@ -4,7 +4,7 @@ Findings and applied changes of every audit of the specification, newest first; 
 
 ## Audit M
 
-**2026-09-26 — Audit M, review of the phase 5 draft specs 053, 054 and 055 before human review, in four independent passes (M-A: coherence and SDD conformance; M-B: adversarial security and privacy; M-C: technical viability, measured with ZXing 3.5.4, the `qrcode` crate, Core Image, Vision, the macOS Keychain, `security-framework`, the `windows` crate and `cargo deny`; M-D: end-to-end scenarios), in rounds.** The human reviewer decided four questions with the recommended option:
+**2026-09-26 — Audit M, review of the phase 5 draft specs 053, 054 and 055 before human review, in four independent passes (M-A: coherence and SDD conformance; M-B: adversarial security and privacy; M-C: technical viability, measured with ZXing 3.5.4, the `qrcode` crate, Core Image, Vision, the macOS Keychain, `security-framework`, the `windows` crate and `cargo deny`; M-D: end-to-end scenarios), in rounds.** The human reviewer decided five questions with the recommended option (M-Q5 in round 3):
 
 | # | Question | Decision | Change |
 | --- | --- | --- | --- |
@@ -12,6 +12,7 @@ Findings and applied changes of every audit of the specification, newest first; 
 | M-Q2 | iOS cannot block a screenshot of the invitation QR or the seven words; it only reports one afterwards (M-B1, M-C13) | A documented residual; on `userDidTakeScreenshotNotification` the app hides the QR or words at once and warns that a screenshot is in Photos and, if it left the phone, to create a new channel | Spec 053 R12; spec 054 R7, R10, Security |
 | M-Q3 | No client ever produces an invitation as text, so a desktop paste has no legitimate source but a third-party decoder or a photo, §12's first risk (M-B12) | The desktop imports by file only; paste is removed on every platform | Spec 054 R11, R13; decision Q6 narrowed |
 | M-Q4 | An import joined and connected at once, so a planted QR led straight to an attacker's server, possibly under a look-alike name (M-B4) | A confirmation screen before an import commits: the suggested name (editable), the server host, the lifetime, a mark for a server new to this device, a warning for a name close to an existing channel's; a frame with more than one QR delivers nothing | Spec 054 R12, R15 |
+| M-Q5 | The clipboard was cleared at lock, and leaving the app locks it, so a copied message could never be pasted in another app (round 3, M-D1) | Leaving the app does not clear it; it is cleared 60 s after the copy (the desktop timer; on Android at the next foreground once older); "Lock now", screen-off and a session lock clear it at once | Spec 053 R14 |
 
 Round 1 (about 90 findings, 9 of them blockers, consolidated):
 
@@ -62,6 +63,22 @@ Round 2 (about 45 findings, no blocker; no question for the reviewer):
 | M38 | Grace edge, invalidated key vs no credential, reset crash, session signals (M-D8, M-D10, M-D11, M-C2, M-A7) | Low | Prompt on `UserNotAuthenticatedException`; `KeyLost` first; a tombstone; 053-R8 closed with the Linux session path (spec 053 R5, R8, R23) |
 | M39 | The share file's deletion, iOS save to a file, the confirmation's name, `is_open` and onion cases, the words flow, desktop focus (M-A10, M-A13, M-D4–M-D7, M-D9, M-D14) | Low | Stated (spec 054 R8–R10, R15, R17) |
 | M40 | Test fixtures, skill and §8/§10 amendment lists, file layout, Blocks, texts (M-A8, M-A9, M-A11, M-A12, M-D13, cosmetic) | Low | Aligned (specs 053–055; 022 and 053 Blocks) |
+
+Round 3 (three passes, about 23 findings, no blocker):
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| M41 | The retire-and-rename offer came from the stranger's claimed name and overwrote the label the user typed (M-B1, a hole M34 opened) | Medium | An explicit question naming both people; the typed label kept without a yes (spec 055 R18, R19) |
+| M42 | The preview ran into `broken` and left the replace flow unreachable (M-A1) | Medium | The preview ignores `broken` and reports `replaces_broken`; the store error arises only after Join (spec 054 R15–R17) |
+| M43 | The two-payload rule counted refused codes and lasted the whole session (M-A2, M-D3) | Medium | Only accepted payloads, in a 2 000 ms window; shape predicates for both purposes; the base64url check for `verify:` (spec 054 R12; 055 R19) |
+| M44 | The Android re-wrap order mixed two paths; the grace before `Core.open` and on a fresh install were undefined (M-A3, M-A5, M-B2) | Medium | Two paths; the stricter grace before the open; 0 for a missing file; 60 at creation (spec 053 R7) |
+| M45 | A copied message could never be pasted elsewhere; native selection bypassed `copy_message` (M-D1, M-D2) | Medium | M-Q5; text not selectable natively, the desktop page routes copy to `copy_message` (spec 053 R14; spec 050 to follow) |
+| M46 | The desktop did not lock during system sleep; late Android screen-off; web storage survived the reload; the clipboard hash outlived the lock (M-B3–M-B6) | Low | Sleep and wall-clock checks; late `SCREEN_OFF` locks; `clear_all_browsing_data()`; a change counter first, forgotten after use (spec 053 R8, R14, R21) |
+| M47 | Importing by file when the words are in another app; pasting into the password field (M-D4) | Low | A hint before the picker; paste allowed in the password field; the URI kept across the return only (spec 054 R11, R13) |
+| M48 | Pre-verification never hinted at the old key; "Verify" undefined (M-D5, M-D6) | Low | A neutral hint on `label_collides`; "Verify" opens the word comparison or a choice with the scan (spec 055 R15, R18) |
+| M49 | The OS unlock prompts ignored the focus rule; Windows notification clicks; iOS folder saves overwrote; the onion text; skill and 041 amendment wording; the dev banner (M-D7–M-D10, M-A6, M-A7, M-B note) | Low | Stated; 053-R13 open; `camera-compose`; `copy_message` a host command (specs 053, 054) |
+
+Handed to spec 050-desktop-mvp: the page routes `copy` and Edit > Copy to `copy_message` and makes message text non-selectable; the Locked page never calls `unlock` without a user action (spec 053 R8, R14).
 
 ## Phase 5 drafts
 
