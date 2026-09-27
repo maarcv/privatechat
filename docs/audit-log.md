@@ -95,7 +95,7 @@ Round 4, two passes (M-A, M-D), final:
 
 ## Phase 5 drafts
 
-**2026-09-26 — Decisions taken before drafting the phase 5 specs.** Not an audit: the human reviewer decided Q1–Q4 with the recommended option before the specs were written, Q5–Q7 once the drafts of 053–055 raised them, and Q8–Q10 before the drafts of 050–052. Drafting choices follow as P rows.
+**2026-09-26 — Decisions taken before drafting the phase 5 specs.** Not an audit: the human reviewer decided Q1–Q4 with the recommended option before the specs were written, Q5–Q7 once the drafts of 053–055 raised them, and Q8–Q11 before the drafts of 050–052. Drafting choices follow as P rows.
 
 | # | Question | Decision | Change |
 | --- | --- | --- | --- |
@@ -109,6 +109,7 @@ Round 4, two passes (M-A, M-D), final:
 | Q8 | Whether Android and iOS open their server connections with the platform stacks (OkHttp, URLSession), as ADR 0040's consequences said, or with the Rust connection host of spec 041 | The Rust host, shared by the three clients through a spec of its own and uniffi: one audited implementation, no revocation fetch outside Tor, one SOCKS5 username per plan, the same headers and TLS fingerprint on every platform | ADR 0041 superseding 0040; new spec 042-connection-host; specs 040 and 041 amended; the kotlin and swift skills at acceptance |
 | Q9 | Whether to draft 050, 051 and 052 one by one or together | Together, after the phase 4 rework of Q8, with one audit N | Specs 050–052 |
 | Q10 | Where the shared host of Q8 takes its trusted roots from, given that iOS lets no app list its trust store and its one API that uses it is the platform verifier ADR 0040 refused | Mozilla's root list, compiled in through `webpki-roots`, on all three platforms: one behaviour, no network request, no root that a user, an employer or a program added; a network that intercepts TLS and a private authority cannot be reached, and a distrusted root stays until the next release | ADR 0041; spec 042 R6; spec 041 R2 and R12 amended |
+| Q11 | Where the rules of the chat screens go, which are the same on the three platforms (channel list, channel screen, composer, connection state, settings, notices, help) | A shared spec, 056-chat-screens, with its own presentation fixture, as 053–055 are; 050, 051 and 052 keep how each platform places and wires them, its build, its CI and its publication | Spec 056; §10 phase 5 row |
 
 Drafting choices, for the review of specs 053–055:
 
@@ -150,6 +151,25 @@ Drafting choices for the phase 4 rework of Q8 and Q10 (ADR 0041), for the review
 | P27 | How to keep the references of spec 053 to 041 R15–R17 | 041 keeps those numbers; R10–R14 now hold the calls through the host, the network commands, no socket of its own, the panic hook and the CI job; R18, the exit test, becomes 042 R13 | Spec 041 |
 | P28 | Whether the phones' boundary is tested beyond the vectors, now that events cross by callback | Kotlin and Swift each send one message through the server and see it delivered through `CoreListener` | Spec 040 R15 |
 | P29 | Native sockets and App Transport Security, and Android's network security configuration | Neither governs them, so 053-R17 closes with no exception on either platform; whether an iOS native connect brings up cellular is 042-R10, to measure before 052 | Spec 053 R17; spec 042 open question |
+
+
+Drafting choices for specs 050, 051, 052 and 056, for audit N:
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| P30 | Whether a URL in a message is a link | No link detection, no preview, no fetch: a tap or a preview reaches the network outside the host and tells a server the message was read | Spec 056 R2 |
+| P31 | Where the user's name in a channel comes from, since the core keeps none globally | Asked at the first send in each channel, with a warning that the same name links channels; changed from the card for the next send | Spec 056 R12 |
+| P32 | What the user does with an own message that expired unsent | "Send again", a new message with the same body; the old row stays "Not sent" | Spec 056 R8 |
+| P33 | How the list shows new messages with no unread state in the core | A mark kept in memory since unlock, dropped at lock | Spec 056 R6 |
+| P34 | Whether the phones confirm a proxy change, which only the desktop's native dialog did | Yes, in the app, naming what the change exposes; a loopback proxy needs none | Spec 056 R16 |
+| P35 | Where "Erase all data" lives | In Settings on every platform, behind a destructive confirmation, through `reset_local_data` or `LockController.reset()` | Spec 056 R17 |
+| P36 | Where the "help" that specs 053 and 041 cite lives | A Help screen with fixed sections, the first being §1's two lists word for word, checked against `docs/spec.md` by a test | Spec 056 R18 |
+| P37 | Navigation without saved state (spec 053 R21) | Android: an in-memory `sealed interface Screen`, no navigation library; iOS: `NavigationStack` over an in-memory route enum, no restoration | Spec 051 R3; spec 052 R3 |
+| P38 | Colours that mark an unknown key | Fixed theme colours at 4.5:1; Android's dynamic colour off, so a wallpaper cannot blur the secondary colour | Spec 051 R5; spec 052 R5; spec 050 R10 |
+| P39 | iPad windows | One scene, so that one lock covers every window | Spec 052 R1 |
+| P40 | When the phones call `networkChanged` | Android's default-network callback (so `ACCESS_NETWORK_STATE`); iOS's `NWPathMonitor`, with a data-free `NWConnection` only if 042-R10 finds that native connects do not bring up cellular, and never while a proxy is set | Spec 051 R4; spec 052 R4; spec 053 R17 |
+| P41 | What "store publication process started" (§10) means | Store texts in the five languages under `fastlane/metadata`, "no data collected" answers, and the requests or accounts started, noted in the accepting pull request; the iOS export-compliance answer left to the human owner (052-R10) | Spec 051 R10; spec 052 R10 |
+| P42 | Search, local deletion of one message, a tray icon, widgets | None in v1: each is one more copy of content or one more surface | Specs 050, 051, 052 and 056, Out of scope |
 
 ## Audit L
 

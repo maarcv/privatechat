@@ -38,8 +38,12 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 040 | 040-uniffi | 4 | draft |
 | 041 | 041-desktop-bridge | 4 | draft |
 | 042 | 042-connection-host | 4 | draft |
+| 050 | 050-desktop-mvp | 5 | draft |
+| 051 | 051-android-mvp | 5 | draft |
+| 052 | 052-ios-mvp | 5 | draft |
 | 053 | 053-device-security | 5 | draft |
 | 054 | 054-qr-invite | 5 | draft |
 | 055 | 055-verify-ui | 5 | draft |
+| 056 | 056-chat-screens | 5 | draft |
 
 Phase 0 was bootstrapped with implementation and review in parallel; from spec 010 on, acceptance precedes code.
