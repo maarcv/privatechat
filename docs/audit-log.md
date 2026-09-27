@@ -107,6 +107,34 @@ Round 2 (about 66 findings, 2 of them blockers, consolidated; no question for th
 
 Accepted without a question, recorded here: the Locked screen offers "Erase all data" only after a fault or a failed open whose reason is not transient (N76). A thief reaches it only after the device's own authentication, and erasing is then no more than uninstalling the app or deleting its folder, which that person could do anyway.
 
+
+Round 3 (three passes, N-A, N-B and N-D, about 39 findings, 4 of them blockers, consolidated; no question for the reviewer):
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| N85 | The generation filter sat in two layers that contradicted each other, and a filter on "the generation `open` returned" let through the queued calls of the generation just locked (N-A1, N-B8, N-D1, N-D2) | Medium | One filter per platform, `Core` and the bridge, dropping every call at or below a floor set when the owner's own lock starts; the host emits only `locked` after its increment (specs 040 R9, 041 R7, 042 R5, R12; 050–052 R2, 056 R21) |
+| N86 | A fault lock left the phones' `LockController` believing it was unlocked, so "Unlock" did nothing (N-B2, N-D3) | Blocker | A current `locked` moves every owner to locked (specs 040 R9, 053 R9, 041 R17) |
+| N87 | A fault lock skipped the desktop clear and reload, and its fault flag never reached the page (N-A3, N-B2, N-D2, N-D4) | Medium | The lock tail runs on a fault lock; `locked { fault }`; the notice kept for the next page (specs 041 R7, R17; 050 R2, R6) |
+| N88 | `take_reset_outcome` returned `Locked` at mount, and could be read before the reset finished (N-A2, N-D7, N-D8) | Blocker | `take_lock_notice()`, allowed while locked and waiting on the lifecycle lock (spec 041 R9, R16, R17; spec 050) |
+| N89 | The bounded reload could be held by a hung clear, an `onbeforeunload` dialog or a busy script, leaving the old page alive (N-B3, N-D6) | Medium | Navigate regardless, script dialogs suppressed, done at the new page's first command, the window recreated on timeout, `ReloadPending` until then; a reset always reloads (spec 041 R17; spec 050) |
+| N90 | One bad frame from a server led straight to "Erase all data" (N-B1) | Medium | After a first fault only "Unlock"; the erase only when the fault recurs or an open fails for good (spec 056 R20) |
+| N91 | A busy channel was re-read in full every second under the device lock (N-D10) | Blocker | Only the channel on screen, at most every max(1 000 ms, twice the last read); open question 056-R11 on a delta read (spec 056 R11, Limits) |
+| N92 | "Not confirmed yet" never cleared when `Subscribed` came before the screen, or never came (N-D11) | Medium | `subscribed` in the app map and in `connection_states()`; channels that cannot subscribe show "Not sent" (specs 042, 040, 056 R8) |
+| N93 | `retry_now` was synchronous against the async-only rule and had no rate bound (N-A4, N-B4, N-D12) | Low | Exempted; one effect per 5 000 ms; the button disabled until the next state (specs 040, 042 R10, 041 R11, 056 R10) |
+| N94 | The Failed record survived an erase and kept a rejoined channel paused (N-D5) | Low | `Host::clear_failed()` at both resets (specs 042, 041 R16, 053 R23) |
+| N95 | A fresh Windows machine without Windows Hello could never create its key (N-D14) | Medium | Availability checked on the first-run row (spec 053 R4) |
+| N96 | The iOS fallback never ran at unlock, the case it exists for, and reached servers the host had stopped contacting (N-D16, N-B5) | Medium | Also at unlock and on entering `Retrying` over cellular; only channels `Connecting` or `Retrying` (spec 052 R4; spec 042 Security) |
+| N97 | The rollback check on the vendored libsodium could be forged or bypassed; the zip hash was a placeholder (N-B6) | Low | The global signature verified; the last timestamp and the hash recorded in the spec; the lint fails with none (spec 042 R15, T15) |
+| N98 | `SODIUM_LIB_DIR` and its siblings could bypass the vendored library (N-B7) | Low | Refused in configs and workflows; unset in the host and desktop legs (spec 042 R15) |
+| N99 | Git for Windows would rewrite the vendored signatures to CRLF (N-D17) | Low | `.gitattributes` with `-text` (spec 042 R15) |
+| N100 | Cargo launched from `pnpm` ran outside the workspace; step order and the bundler's downloads (N-D18) | Low | `cd src-tauri`; ordered steps; no bundler on the offline leg (specs 041 R5, R14, 050 R11) |
+| N101 | `tauri` with no default features drops its runtime (N-D19) | Medium | The default features but `compression`, listed (spec 041 R2) |
+| N102 | Windows test binaries may need an embedded manifest (N-D20) | Medium | Measured when slice (a) lands (spec 041 R14) |
+| N103 | The host's Windows leg would build the server offline (N-D21) | Low | It builds nothing from the root workspace (spec 042 R14) |
+| N104 | Copy by keyboard had no chosen row; position keys could move between rows (N-D13) | Low | The focused row; a stable rule (specs 050 R4, 053 R14) |
+| N105 | Records and texts left over from round 2: `FfiReceived`, `FfiChannelState`, a swallowed Interface line, `Sent` in a test, "four files" beside `SHA256SUMS`, the `Locked` rule for non-`Result` methods, the plaintext sentence (N-A5–N-A10) | Low | Aligned (specs 040, 042) |
+
+
 ## Audit M
 
 **2026-09-26 — Audit M, review of the phase 5 draft specs 053, 054 and 055 before human review, in four independent passes (M-A: coherence and SDD conformance; M-B: adversarial security and privacy; M-C: technical viability, measured with ZXing 3.5.4, the `qrcode` crate, Core Image, Vision, the macOS Keychain, `security-framework`, the `windows` crate and `cargo deny`; M-D: end-to-end scenarios), in rounds.** The human reviewer decided five questions with the recommended option (M-Q5 in round 3):
