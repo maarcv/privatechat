@@ -591,7 +591,7 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 ├─ rust-toolchain.toml · rustfmt.toml · deny.toml · .editorconfig · .gitignore
 ├─ .github/
 │  ├─ workflows/ci.yml · release.yml (spec 060)
-│  ├─ allowed_signers        ← the release signing key (spec 060)
+│  ├─ allowed_signers        ← the release keys and their backups (spec 060)
 │  ├─ PULL_REQUEST_TEMPLATE.md · dependabot.yml
 │  └─ CONTRIBUTING.md · SECURITY.md · CODEOWNERS
 ├─ docs/
@@ -599,14 +599,15 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 │  ├─ threat-model.md
 │  ├─ audit-log.md           ← findings and changes of every audit (§13 points here)
 │  ├─ assistant.example.md   ← template for personal AI-assistant preferences (copied to git-ignored assistant.md)
-│  ├─ release-keys.md        ← every release key's fingerprint (spec 060)
+│  ├─ release-keys.md        ← every signing key and backup, with fingerprints (spec 060)
+│  ├─ fdroid/                ← a copy of the F-Droid recipe for the checks (spec 064)
 │  ├─ residuals.md           ← every documented residual (spec 061)
 │  ├─ review/                ← the external review's package and report (spec 061)
 │  ├─ beta/                  ← the beta's letter, plan and log (spec 063)
 │  └─ adr/README.md (index) · TEMPLATE.md · NNNN-*.md, one per decision
 ├─ specs/                    ← one spec per feature (TEMPLATE.md, README.md index)
 │  └─ vectors/               ← JSON test vectors, produced by the reference script of spec 015 (README.md with the schema)
-├─ scripts/{doc_lint,check_requirements}.{sh,py}, check_fuzz_targets.sh, fuzz_seeds.py, {sign,verify}_release.sh (spec 060)
+├─ scripts/{doc_lint,check_requirements}.{sh,py}, check_fuzz_targets.sh, fuzz_seeds.py, {sign,verify}_release.sh, release_env.sh (spec 060)
 │  └─ reference/             ← vectors.py, the reference script that produces the vectors (spec 015), never shipped
 ├─ crates/
 │  ├─ core/                  ← Rust crate: crypto, proto, session (no I/O); fuzz/ in phase 1 (own workspace, Cargo.lock committed)
@@ -616,7 +617,8 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 ├─ clients/desktop · android · ios   (phase 5)
 ├─ deploy/                   ← reference docker-compose.yml, Caddyfile, nginx.conf, torrc (phase 3); release/ build container (spec 060)
 ├─ vendor/libsodium/         ← the signed libsodium archives for Windows builds (spec 042)
-└─ landing/                  ← static multilingual site (Astro); outside the Cargo workspace, no protocol code
+├─ vendor/bundler/           ← the bundlers' tools with their SHA-256 (spec 060)
+└─ landing/                  ← static multilingual site (Astro); outside the Cargo workspace, no protocol code; src/content/download/ the public links (spec 064)
 ```
 
 **Governance of the specification.** Since the creation of the repository, `docs/spec.md` on the default branch (`mvp` until the first release) is the only canonical version. Claude's living document is a read copy that may lag behind; nothing is edited there. Every change to `docs/spec.md` is made by PR with human review; if it changes a decision of §3–§6, the PR includes a new ADR and a row in `docs/audit-log.md`. The `Version · Updated` header is brought up to date on every change and the doc lint checks it.

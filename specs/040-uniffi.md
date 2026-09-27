@@ -4,7 +4,7 @@ Status: draft
 Phase: 4
 Related ADRs: 0012, 0020, 0028, 0037, 0041
 Depends on: 010-primitives-wrapper, 011-config-format, 014-fingerprint, 015-test-vectors, 020-store-files, 027-core-api, 028-session-sans-io, 042-connection-host
-Blocks: 041-desktop-bridge, 051-android-mvp, 052-ios-mvp, 053-device-security, 054-qr-invite, 055-verify-ui, 056-chat-screens, 060-reproducible-builds
+Blocks: 041-desktop-bridge, 051-android-mvp, 052-ios-mvp, 053-device-security, 054-qr-invite, 055-verify-ui, 056-chat-screens, 060-reproducible-builds, 061-threat-review
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

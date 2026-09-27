@@ -3,7 +3,7 @@
 Status: draft
 Phase: 5
 Related ADRs: 0008, 0014, 0019, 0020, 0027, 0034, 0037, 0041
-Depends on: 021-channel-session, 023-ttl-purge, 027-core-api, 028-session-sans-io, 040-uniffi, 041-desktop-bridge, 042-connection-host, 053-device-security, 054-qr-invite, 055-verify-ui, 060-reproducible-builds
+Depends on: 021-channel-session, 023-ttl-purge, 027-core-api, 028-session-sans-io, 040-uniffi, 041-desktop-bridge, 042-connection-host, 053-device-security, 054-qr-invite, 055-verify-ui
 Blocks: 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 062-security-docs
 Human reviewer: Marc Vilardebó · Accepted on: —
 
@@ -99,7 +99,7 @@ As in spec 055-verify-ui, nothing here decides anything the core knows. Every ru
   - "Backups": "Nothing this app keeps goes into backups. A new phone, a restored backup or a reinstall starts empty: ask a member for a new invitation to each channel.", and on the desktop "Exclude this app's data folder from File History, Time Machine or any other backup tool.";
   - "Tor": "To hide your IP address from servers, run Tor (on Android, Orbot) and set its SOCKS5 proxy in Settings, usually 127.0.0.1:9050. Onion servers work only through such a proxy.";
   - on the desktop only, "Notifications and clipboard": "Notifications say only \"New messages\", and only until the app locks. A copied message stays on the clipboard for one minute. On Linux, screen capture cannot be blocked." (spec 053-device-security R12–R14);
-  - "Release keys": "Every version is signed with these keys. This list helps you check a later download, since this copy of the app was already checked; for a first install, compare with the fingerprints you were given on paper, or published by the reviewers and by F-Droid.", followed by the current and retired release keys of `docs/release-keys.md` with their fingerprints and, for a retired key, its `valid-before` date and the address of its signed rotation statement, compiled in from that file (specs 060-reproducible-builds R5 and R10, 064-public-release R6).
+  - "Release keys": "Every version is signed with these keys. This list helps you check a later download, since this copy of the app was already checked; for a first install, compare with the fingerprints you were given on paper, or published by the reviewers and by F-Droid.", followed by the current and retired release keys of `docs/release-keys.md` with their fingerprints and, for a retired key, its `valid-before` date and the address of its signed rotation statement, compiled in from that file (specs 060-reproducible-builds R5 and R10, 064-public-release R6); this section needs spec 060-reproducible-builds's PR slice (c), which creates `docs/release-keys.md`, and until then is built empty.
 
 **The Locked screen and the app state**
 
@@ -227,3 +227,4 @@ On each platform, the tests of T01–T21 green in CI (Android: `./gradlew test c
 - 2026-09-27 revised after audit N round 4 (`docs/audit-log.md`): own rows copied by `client_ref` whatever their `server_id`; "Try again" disabled for 5 000 ms or until the state changes; the re-read pacing from the measured round trip; a fault count outside the view models, `Fault { recurring }` on the desktop; snapshots of `connection_states()` merged under later events, `subscribed` only rising
 - 2026-09-27 revised after audit O round 1 (`docs/audit-log.md`): the beta notice before Help's first section and a "Release keys" section with the fingerprints (specs 063-beta R3, 064-public-release R6)
 - 2026-09-27 revised after audit O round 2 (`docs/audit-log.md`): Help lists current and retired release keys and says it only checks later downloads; T18 covers the beta notice and the keys; depends on spec 060
+- 2026-09-27 revised after audit O round 3 (`docs/audit-log.md`): no longer depends on spec 060, whose PR slice (c) the release-keys section of R18 names instead

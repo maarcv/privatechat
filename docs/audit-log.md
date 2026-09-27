@@ -71,6 +71,23 @@ Round 2 (three passes, O-A, O-B and O-D, about 60 findings, no blocker; O-Q5 and
 | O45 | Linux beta bytes downloadable from CI run artefacts; the owner's screen shows what malware would swap (O-B B16, B17) | Low | Only the hash list uploaded, one day; the touch count announced and signatures checked on a second machine (spec 060) |
 | O46 | References: Q15–Q18 cited under the wrong section, the residuals owner in §11, 053's store pointer, 063's citations of 056 and 060, 064's of 060, 062's residual citations, the beta letter's content collection (O-A 1, 12, 15–18, O-D D24) | Low | Aligned |
 
+Round 3, two passes (O-A, O-D), final (about 28 findings, 1 blocker):
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| O47 | Rekor's entry was needed before the verify run and the release row, but logged only after the row (O-A 1, O-D 1) | Blocker | `sign_release.sh` logs a public manifest right after signing; the row records the entry; open question 060-R8 on Rekor's SSH namespace (specs 060 R6, R8; 064 R1, R2) |
+| O48 | A manual dispatch cannot receive files, and the job cannot read drafts (O-D 2) | High | A download URL as the input, checked against the signed manifest (spec 060 R9; spec 063) |
+| O49 | The one-line check needed the full public key and did not check the files' hashes (O-D 3) | High | `ssh-keygen -Y check-novalidate` and a comparison of the printed fingerprint, then an exact hash command; the namespace from the tag (specs 060 R8, 062, 063) |
+| O50 | A four-part iOS build number is rejected by Apple (O-A 6, O-D 4) | High | One integer (spec 060 R2) |
+| O51 | Beta tags excluded ordinary changes and the phase 6 app code; the public tag was not tied to the review; human-decided rows were ambiguous; the "experimental" check outlived the public release (O-D 5, 6, O-A 3, 9) | Medium | Unlisted paths allowed; that code implemented before the freeze; the delta open until the public release; the public tag on the last beta or confirmed rows; the rule and the check fixed (specs 061, 064) |
+| O52 | No step signed the Play bundle or the Windows installer and uninstaller (O-A 2, O-D 7, 9) | Medium | Stated with their hosts and touches (spec 060 R6) |
+| O53 | A dependency cycle 056 → 060 → 050–052 → 056, and missing edges for 061 (O-A 4, 5) | Medium | 056 needs only 060's slice (c); 061 depends on 060, 040 and 041 (headers) |
+| O54 | A compromise notice through channels the owner cannot post to; F-Droid merged before its binaries exist and its description in this repository (O-D 11–13) | Low | The owner's channels; publish then merge; the description in fdroiddata (specs 060, 064) |
+| O55 | Scenario counts with a platform left out; builds expiring during a long pause or after the end (O-D 14, 16) | Low | Counted per shipped platform family; a rebuild-only beta tag (spec 063) |
+| O56 | Citations and tests: 063's of 060 R9 and 061 R3, 062's of 033 R8, Help tests expecting the command, the §11 tree, the rc namespace in the verify script, T08's unchecked list (O-A 7, 8, 10–12, O-D 10, 15) | Low | Aligned |
+
+**Audit O stops here**, by diminishing returns: about 94, 60 and 28 findings over three rounds. Open before implementation: 060-R3 (Android baseline profiles), 060-R8 (Rekor and the SSH namespace), 062-R2 (the data controller named by the owner), 063-R1 (the product name and `DEFAULT_SERVER_URL`), 052-R10 (export compliance).
+
 
 ## Phase 6 drafts
 
