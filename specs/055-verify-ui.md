@@ -4,7 +4,7 @@ Status: draft
 Phase: 5
 Related ADRs: 0006, 0007, 0016, 0019, 0025, 0028, 0029, 0034, 0036, 0037
 Depends on: 014-fingerprint, 021-channel-session, 022-peers-tofu, 023-ttl-purge, 024-key-retired, 025-identity-regen, 026-peer-limits, 027-core-api, 040-uniffi, 041-desktop-bridge, 054-qr-invite
-Blocks: 050-desktop-mvp, 051-android-mvp, 052-ios-mvp
+Blocks: 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 056-chat-screens
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context

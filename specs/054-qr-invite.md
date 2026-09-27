@@ -4,7 +4,7 @@ Status: draft
 Phase: 5
 Related ADRs: 0008, 0017, 0022, 0028, 0031, 0038, 0041
 Depends on: 011-config-format, 022-peers-tofu, 027-core-api, 040-uniffi, 041-desktop-bridge, 042-connection-host, 053-device-security
-Blocks: 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 055-verify-ui
+Blocks: 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 055-verify-ui, 056-chat-screens
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
@@ -25,7 +25,7 @@ The largest risk of the whole model is a user who shares the config by photo or 
   - `Unreachable` or `ProxyRefused`: "The server could not be reached." with a retry action;
   - `NotYet` (`probe_plan` returned `None`): the settings-reset notice of spec 027-core-api R2, with no probe;
   - `BadConfig`: "This is not a valid server address.", and for a `.onion` host or a `ws://` URL with no loopback proxy, "Onion servers need a SOCKS5 proxy running on this device." (the wording of spec 027-core-api R10) followed, when the proxy set is a host name, by "Use 127.0.0.1, not localhost."
-  There is no "create anyway": a channel whose server was never checked is never created (`docs/spec.md` §5).
+  There is no "create anyway": a channel whose server was never checked is never created (`docs/spec.md` §5). After `Supported`, a `create_channel` that returns `Store(_)` (a failed save of the settings included, spec 027-core-api R1) MUST keep the form filled and show "The channel could not be saved on this device.", and any other error "Something went wrong. Try again."
 - R3 A created channel MUST open its channel screen, and the channel card MUST show its server and lifetime as read-only values, with no way to edit them (`docs/spec.md` §5, ADR 0008). The card MUST offer "Create new channel", which opens the create form prefilled with this channel's name and server, and shows, under the form, the help text of `docs/spec.md` §7 "Config compromise": "A new channel has a new key. Invite again only the members you have verified, and find out how the old invitation leaked." The old channel is left as it is; leaving it is the ordinary leave action. This spec owns that action for the three platforms.
 
 **Show the invitation QR**
@@ -192,7 +192,7 @@ Two functions and one record are added to the core by R17: `Device::preview_qr`,
 State-owner tests run on each platform against fakes of `Core` or the bridge; the UI test is the "import a config" flow of the architecture skill §7. Each test is named per platform: Kotlin `s054_tTT_rRR_snake_case`, Swift `s054_tTT_rRR_camelCase`, desktop `s054_tTT_rRR_camelCase`, and the core's `s054_tTT_rRR_snake_case`.
 
 - T01 (covers R1): `s054_t01_r01_create_form`: a name of 65 bytes, a custom lifetime of 0 minutes and of 43 201 minutes, and a URL of 257 bytes are refused with no core call; the server is prefilled with the default and the suggestions are the distinct servers of `channels()`.
-- T02 (covers R2): `s054_t02_r02_probe_before_create`: `Supported` then `create_channel` once; each other outcome keeps the form and shows its message, with no `create_channel`; `NotYet` makes no socket (the connection host's `probe_server` returns it before connecting).
+- T02 (covers R2): `s054_t02_r02_probe_before_create`: `Supported` then `create_channel` once; each other outcome keeps the form and shows its message, with no `create_channel`; `NotYet` makes no socket (the connection host's `probe_server` returns it before connecting). After `Supported`, a `create_channel` that returns `Store(Io)` keeps the form and shows the save text.
 - T03 (covers R3): `s054_t03_r03_card_and_new_channel`: the card has no editable server or lifetime; "Create new channel" prefills name and server and shows the help text.
 - T04 (covers R4): `s054_t04_r04_warning_first`: no `export_qr` before the warning's action; dismissing the warning calls nothing.
 - T05 (covers R5): `s054_t05_r05_draw_and_zero`: each platform renders 011 `config_reference`'s QR text and 014 `qr_reference`'s text with its renderer, and its output equals, modulo pixels, the fixture committed under `clients/fixtures/qr/`; each platform then decodes every renderer's fixture, Android with ZXing's reader and iOS with Vision (the scanner's `AVCaptureMetadataOutput` reads no still image), to the exact text; the client's byte copy is all zeros after drawing.
@@ -237,3 +237,4 @@ None.
 - 2026-09-27 revised after audit M round 3 (`docs/audit-log.md`): the preview ignores `broken` and reports `replaces_broken`; only accepted payloads count, in a 2 000 ms window, and the `Invite` predicate checks the base64url shape; the seven-words hint before opening a file and pasting into the password field allowed; the picked URI dropped at lock; 027 R10's onion wording with the 127.0.0.1 hint; iOS saves never overwrite; `camera-compose`; `autocorrectionDisabled()`; the scanner draws its conflict text itself
 - 2026-09-27 revised after audit M round 4 (`docs/audit-log.md`): the preview carries `broken_reason`, so an `Io` entry shows the retry text rather than a replacement that never comes; the spec reference moved out of R2's quoted text
 - 2026-09-27 amended for ADR 0041 (`docs/audit-log.md`, "Phase 5 drafts", Q8): the probe of R2 is the connection host's `probe_server` on every platform
+- 2026-09-27 revised after audit N round 1 (`docs/audit-log.md`): the errors of `create_channel` after a supported probe (N27)

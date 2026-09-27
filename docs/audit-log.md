@@ -2,6 +2,59 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit N
+
+**2026-09-27 — Audit N, review of the phase 4 rework (ADR 0041, specs 040, 041 and 042) and the phase 5 platform drafts (specs 050, 051, 052 and 056, with the amendments to 053 and 054) before human review, in four independent passes (N-A: coherence and SDD conformance; N-B: adversarial security and privacy; N-C: technical viability, measured with uniffi 0.32.2 from Swift, tokio, rustls 0.23.45, tokio-tungstenite 0.30, `cargo deny` and the phone targets; N-D: end-to-end scenarios), in rounds.** The human reviewer decided one question with the recommended option:
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| N-Q1 | On `*-windows-msvc`, `libsodium-sys-stable` 1.24.0 does not build from its bundled archive: it downloads `libsodium-1.0.22-stable-msvc.zip` over plain HTTP and checks its minisign signature (N-C3) | The signed zip and its signature are committed under `vendor/libsodium/`, pinned by SHA-256, and every Windows build points `SODIUM_DIST_DIR` at them, so nothing is fetched; on Windows a binary built by libsodium's author runs, a documented residual for spec 060 | Spec 042 (a new requirement and its R3 amendments to spec 010 and 041); spec 041 R14 |
+
+Round 1 (about 66 findings, 5 of them blockers, consolidated):
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| N1 | The `FfiSink` adapter's hand-off reorders events (measured: about 3 000 inversions in 20 000), so `locked` could precede content and two blocking callbacks could stall the host (N-B1, N-C1, N-D1) | Blocker | One FIFO drained by one dedicated thread, generation-tagged (spec 040 R5, R6, T06; spec 042 R5) |
+| N2 | An own message never appeared after Send (N-D2) | Blocker | `SentView.message` inserted by `client_ref` (spec 056 R7, R12) |
+| N3 | A proxy confirmed before a lock could not be applied at its generation (N-A1) | Blocker | `Host::set_socks5_proxy_in` (spec 042 R10; spec 041 R9, R11, T10) |
+| N4 | `localhost` is a valid proxy for the core, so the expected `BadConfig` never came (N-A2, N-D8) | Blocker | The client refuses `localhost` before any call (spec 056 R16, T16) |
+| N5 | The probe outlived the lock and skipped `before_connect` (N-B2) | Medium | The probe under the generation, aborted by the lock (spec 042 R11, R12) |
+| N6 | A server could make a `server_id` equal to a pending `client_ref` and crash or spoof a list (N-B3) | Medium | Keys tagged by kind; a repeated key never crashes (spec 056 R7) |
+| N7 | Bodies could spoof rows with newlines, reorder marks with bidi controls, or draw over neighbours (N-B4) | Medium | Bidi-isolated, clipped bodies with marks outside (spec 056 R2) |
+| N8 | "Continue" on the phones' settings notice dropped the proxy with no confirmation (N-B5, N-D11) | Medium | The no-proxy confirmation first (spec 056 R4) |
+| N9 | The desktop notification's mute check and `notify-rust` ran inside the `Sink`, under the device lock (N-B6) | Medium | A coalescing signal and a task off the host (spec 053 R13; spec 041 R7) |
+| N10 | A `before_connect` that locks inline deadlocks (N-A7, N-D10) | Medium | It spawns the lock and returns false (specs 041 R7, 042 R9, 053 R8, R20) |
+| N11 | The iOS fallback connection could ask the resolver for an onion host (N-A3, N-B8) | Medium | Only channels in a plan, never onion, never with a proxy (spec 052 R4; specs 040 R10, 042 R3) |
+| N12 | `copy_message(text)` let a script put any text on the clipboard (N-B7) | Medium | `copy_message(channel, key)` (specs 053 R14, 050 R4) |
+| N13 | Pending to Delivered could fall back or outstay its message; re-reads raced events (N-D3) | Medium | The key and times change on `Delivered`; stale re-reads dropped (spec 056 R7, R11) |
+| N14 | `channels()` went stale after create, rename, leave, remove and a named send (N-D4) | Medium | Added re-read triggers (spec 056 R11) |
+| N15 | Results that return after a lock put content back in view models (N-D5) | Medium | An unlock epoch (spec 056) |
+| N16 | Kotlin's `withContext(NonCancellable)` still drops the result of a cancelled caller (N-D6) | Medium | Calls run in `Core`'s own scope (spec 040 R9) |
+| N17 | Connection states that arrived before a channel was listed were lost (N-D7) | Medium | An app-level map (spec 056 R10) |
+| N18 | The iOS lock could be suspended half-way in the background (N-D9) | Medium | `beginBackgroundTask`; the Android lock in the application scope (spec 053 R8, R9) |
+| N19 | The first network callback and the merged effect of `network_changed` cut fresh connections (N-D12, N-C12) | Medium | The first report a baseline; a new monitor per unlock; close only sockets older than the last merged call (spec 042 R10; specs 051 R4, 052 R4) |
+| N20 | `ProxyRefused` and a stopped Orbot were hard to recover from (N-D13) | Medium | Cleared at `open`; "Try again"; a proxy-specific text (spec 042 R5, R10; spec 056 R10) |
+| N21 | `HistoryTruncated` had no mapping (N-A4) | Medium | A banner at once and a re-read (spec 056 R9, R11) |
+| N22 | After the notice, settings from a newer app are kept and nothing said changes were not saved (N-A5) | Medium | A persistent banner with "Replace settings" (spec 056) |
+| N23 | Unlock outcomes were unmapped, and a panic at every unlock left no way out (N-A6) | Medium | A Locked-screen requirement with "Erase all data" after a failed unlock (spec 056; spec 050 R6) |
+| N24 | The Kotlin and Swift vector tests would connect to the vectors' servers (N-A8) | Medium | A refused loopback proxy first (spec 040 R13) |
+| N25 | The Android allowlist could not be satisfied without transitive names (N-A9) | Medium | Transitive dependencies as resolved (spec 051 R7) |
+| N26 | `qrcode` without features has no SVG renderer (N-A10) | Medium | `features = ["svg"]` (spec 041 R6) |
+| N27 | Several calls had no error mapping (N-A11) | Medium | Rows with a generic fallback (spec 056) |
+| N28 | Missing reciprocal `Blocks`; stale references in 027, 041, 042 and 053 (N-A12, N-A13) | Low | Aligned |
+| N29 | 042 R3's amendment list missed §2, §6's and §9's introductions (N-A14) | Low | Added (spec 042 R3, T03) |
+| N30 | Gaps used `presentSender`, which takes a message (N-A15) | Low | `presentPeer` with the stranger fallback (spec 056 R9) |
+| N31 | `BridgeEvent` and the test proxy's arguments were undefined (N-A16) | Low | Named (specs 041 R7, 042 Interface) |
+| N32 | The phone `cargo check` steps need the target toolchains (measured) (N-C2) | Medium | iOS on the macOS leg with Xcode, Android through `cargo ndk` (spec 042 R14) |
+| N33 | Windows libsodium is a downloaded binary (N-C3) | Medium | N-Q1 |
+| N34 | Paused-clock tests cannot use real sockets (measured) (N-C4) | Medium | An in-process transport seam under `test-support` (spec 042) |
+| N35 | uniffi details: the `tokio` runtime attribute is unneeded, `catch_unwind` needs `AssertUnwindSafe`, constructors must be fallible, async methods need a helper in `api_surface.rs`, the runtime must be taken out in `Drop`, and `Core` cannot be its own sink (measured) (N-C5–N-C9, N-C14) | Low | Spec 040 R1, R2, R4, R5, R9 |
+| N36 | The lifecycle order holds for sequential callers only (measured) (N-C11) | Low | Wording (specs 040 R9, 042 R4) |
+| N37 | Tauri's runtime handle is not a tokio handle (N-C13) | Low | `.inner().clone()` (spec 041 R10) |
+| N38 | `ClientHello` equality needs a fixed random source; `rcgen` defaults pull `aws-lc-rs`; the `user-agent` name goes out lowercase (N-C15, N-C16) | Low | Spec 042 T09, R9 |
+| N39 | Unflushed pongs, unawaited frames, fixed clocks in release, the `Failed` record lost at restart, `ServerFull` always back to `Connected` (N-B9–N-B12, N-D14) | Low | Spec 042 R6, R7, R10; spec 040 R5 |
+| N40 | Returns from Settings and from a vanished channel, the lifetime unit, Android before `Core.create`, a custom lock time, `localeConfig` below API 33 (N-D15–N-D19, N-C17) | Low | Specs 056, 051 |
+
 ## Audit M
 
 **2026-09-26 — Audit M, review of the phase 5 draft specs 053, 054 and 055 before human review, in four independent passes (M-A: coherence and SDD conformance; M-B: adversarial security and privacy; M-C: technical viability, measured with ZXing 3.5.4, the `qrcode` crate, Core Image, Vision, the macOS Keychain, `security-framework`, the `windows` crate and `cargo deny`; M-D: end-to-end scenarios), in rounds.** The human reviewer decided five questions with the recommended option (M-Q5 in round 3):
@@ -108,7 +161,7 @@ Round 4, two passes (M-A, M-D), final:
 | Q7 | Whether the phone may send the `.chatcfg` file through the system share sheet | Yes, through a temporary file deleted when the sheet closes, at lock and at the next start; the password is shown apart and never copied | Spec 054 R9 |
 | Q8 | Whether Android and iOS open their server connections with the platform stacks (OkHttp, URLSession), as ADR 0040's consequences said, or with the Rust connection host of spec 041 | The Rust host, shared by the three clients through a spec of its own and uniffi: one audited implementation, no revocation fetch outside Tor, one SOCKS5 username per plan, the same headers and TLS fingerprint on every platform | ADR 0041 superseding 0040; new spec 042-connection-host; specs 040 and 041 amended; the kotlin and swift skills at acceptance |
 | Q9 | Whether to draft 050, 051 and 052 one by one or together | Together, after the phase 4 rework of Q8, with one audit N | Specs 050–052 |
-| Q10 | Where the shared host of Q8 takes its trusted roots from, given that iOS lets no app list its trust store and its one API that uses it is the platform verifier ADR 0040 refused | Mozilla's root list, compiled in through `webpki-roots`, on all three platforms: one behaviour, no network request, no root that a user, an employer or a program added; a network that intercepts TLS and a private authority cannot be reached, and a distrusted root stays until the next release | ADR 0041; spec 042 R6; spec 041 R2 and R12 amended |
+| Q10 | Where the shared host of Q8 takes its trusted roots from, given that iOS lets no app list its trust store and its one API that uses it is the platform verifier ADR 0040 refused | Mozilla's root list, compiled in through `webpki-roots`, on all three platforms: one behaviour, no network request, no root that a user, an employer or a program added; a network that intercepts TLS and a private authority cannot be reached, and a distrusted root stays until the next release | ADR 0041; spec 042 R9; spec 041 R2 and R12 amended |
 | Q11 | Where the rules of the chat screens go, which are the same on the three platforms (channel list, channel screen, composer, connection state, settings, notices, help) | A shared spec, 056-chat-screens, with its own presentation fixture, as 053–055 are; 050, 051 and 052 keep how each platform places and wires them, its build, its CI and its publication | Spec 056; §10 phase 5 row |
 
 Drafting choices, for the review of specs 053–055:

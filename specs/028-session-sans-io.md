@@ -4,7 +4,7 @@ Status: draft
 Phase: 2
 Related ADRs: 0010, 0020, 0022, 0023, 0037
 Depends on: 011-config-format, 015-test-vectors, 016-fuzz-harness, 017-record-encoding, 020-store-files, 021-channel-session, 023-ttl-purge, 024-key-retired, 025-identity-regen
-Blocks: 027-core-api, 030-ws-protocol, 031-auth-channel-signature, 033-rate-limit-quotas, 035-server-ops, 040-uniffi, 041-desktop-bridge
+Blocks: 027-core-api, 030-ws-protocol, 031-auth-channel-signature, 033-rate-limit-quotas, 035-server-ops, 040-uniffi, 041-desktop-bridge, 042-connection-host, 056-chat-screens
 Human reviewer: Marc Vilardebó · Accepted on: —
 
 ## Context
