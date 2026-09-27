@@ -80,6 +80,19 @@ Round 3 (three passes, about 23 findings, no blocker):
 
 Handed to spec 050-desktop-mvp: the page routes `copy` and Edit > Copy to `copy_message` and makes message text non-selectable; the Locked page never calls `unlock` without a user action (spec 053 R8, R14).
 
+Round 4, two passes (M-A, M-D), final:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| M50 | A label typed on one card went to whatever phone was then scanned (M-A3, M-D1) | Medium | A card-bound scan compares the bytes with that peer's `fingerprint(pk).qr` and calls `verify` or nothing (spec 055 R15, R19) |
+| M51 | The replace warning promised a confirmation that an `Io` entry never gives (M-A1) | Medium | `broken_reason: Option<StoreError>` in the preview, a text per reason (spec 054 R15, R17) |
+| M52 | The unlock-time re-wrap only tightened, so a half-finished change never healed (M-A2, M-D3) | Medium | Re-wrapped to the grace file in both directions (spec 053 R7, T07) |
+| M53 | A focused desktop that slept was not locked at wake on macOS and Windows (M-D2) | Medium | A heartbeat tick while unlocked comparing wall and monotonic clocks, checked before reconnecting; a logind delay inhibitor on Linux (spec 053 R8, T08) |
+| M54 | The rename question asked to retire an already retired key; the clipboard's 60 s at quit and in the foreground (M-D4, M-D5) | Low | A plain rename question for a retired key; cleared at quit and by a foreground timer (spec 055 R18; 053 R14) |
+| M55 | Cosmetic: a spec reference inside a UI string, a duplicate Limits row, the short-identifier pairing (M-A) | Low | Fixed (specs 053–055) |
+
+**Audit M stops here**, by diminishing returns: about 90, 45, 23 and 8 findings over four rounds. Open to measure before implementation: 053-R4 (Windows Hello's placement), 053-R13 (a Windows notification click), 053-R14 (the macOS paste alert) and 053-R17 (iOS ATS for `ws://` onion).
+
 ## Phase 5 drafts
 
 **2026-09-26 — Decisions taken before drafting the phase 5 specs.** Not an audit: the human reviewer decided Q1–Q4 with the recommended option before the specs were written, and Q5–Q7 once the drafts of 053–055 raised them. Drafting choices follow as P rows.
