@@ -134,6 +134,24 @@ Round 3 (three passes, N-A, N-B and N-D, about 39 findings, 4 of them blockers, 
 | N104 | Copy by keyboard had no chosen row; position keys could move between rows (N-D13) | Low | The focused row; a stable rule (specs 050 R4, 053 R14) |
 | N105 | Records and texts left over from round 2: `FfiReceived`, `FfiChannelState`, a swallowed Interface line, `Sent` in a test, "four files" beside `SHA256SUMS`, the `Locked` rule for non-`Result` methods, the plaintext sentence (N-A5–N-A10) | Low | Aligned (specs 040, 042) |
 
+Round 4, two passes (N-A, N-D), final (about 23 findings, 2 of them blockers):
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| N106 | The floor set at an owner's own lock dropped that lock's own `locked`, so the page never learnt of a lock and the phones' round trip could not pass (N-A1, N-D1) | Blocker | The owner emits its own `locked` at the start of its lock; the host's copy is dropped at the floor, a fault `locked` passes; the floor only rises (specs 040 R9, R15, 041 R7, R17, 053 R9) |
+| N107 | The desktop's clear, navigate, script-dialog suppression, first-command detection and recreation fallback: destroying the one window quit the app, the recreated window lacked its handlers, an old page could mark the reload done, and WebView2's suppression needs `unsafe` (N-D2–N-D4, N-A5, N-A7) | Blocker | Simplified: the window is destroyed and rebuilt by the start-up builder at every lock and reset, with a `recreating` flag past the quit path; `ReloadPending` until the new page loads (spec 041 R17; spec 053 R20, R21; spec 050) |
+| N108 | `clear_failed` returned `Locked` after the reset's own lock (N-A2, N-D5) | Medium | Allowed while locked (spec 040 R5) |
+| N109 | A recurring fault could not be told from a first one, on the desktop after a reload and on the phones after a lock (N-A3, N-D6) | Medium | `Fault { recurring }`; a count outside the view models, reset only by a reset or a new process (specs 041, 050, 051, 052, 056 R20) |
+| N110 | The iOS fallback's `networkChanged` cut every healthy connection at each unlock and each `Retrying` (N-A4, N-D10) | Medium | `retryNow` after those triggers; the unlock trigger only on cellular; nothing with no target (spec 052 R4) |
+| N111 | Events already in the phone app's queue crossed the lock (N-D7) | Medium | The queue drained and discarded at the end of the lock, then the map cleared (specs 051 R2, 052 R2) |
+| N112 | A `connection_states()` snapshot could overwrite newer events (N-D8) | Medium | Events after the call re-applied; `subscribed` only rises within an unlock (spec 056 R21) |
+| N113 | "Try again" could stay disabled for good (N-A8, N-D9) | Low | 5 000 ms or the next state, whichever first (spec 056 R10) |
+| N114 | Copy on an own row whose `server_id` repeats did nothing (N-A9) | Low | Own rows are always copied by `client_ref` (specs 053 R14, 050 R4, 056 R8) |
+| N115 | The Windows first-run test needed a read before verification; `presence.none` outlived a Hello set up later (N-D11) | Low | "Holds no data" alone; the file removed when Hello is available (spec 053 R4) |
+| N116 | Leftovers: `connection_states` missing from the locked-command list, `Sink::locked`'s duties, "the reset outcome", the floor "set" rather than raised, the re-read pacing's clock (N-A6, N-A10, N-A11, N-D12) | Low | Aligned (specs 041, 040, 056 R11) |
+
+**Audit N stops here**, by diminishing returns: about 66, 66, 39 and 23 findings over four rounds, the last ones concentrated in the desktop lock tail, which round 4 simplified rather than patched. Open before implementation: 042-R10 (iOS cellular and VPN routing of native sockets), 052-R10 (export compliance, a legal decision), 056-R11 (the cost of `messages()` on a channel of 10^5 rows), and the measurements that 041 names for slice (a) (Tauri's features, its CLI's working directory, the Windows test manifest).
+
 
 ## Audit M
 
