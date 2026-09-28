@@ -22,6 +22,10 @@
 #[allow(dead_code, unused_imports)]
 mod crypto;
 
+#[cfg(test)]
+#[allow(dead_code, reason = "accessors used by specs 011–017")]
+mod vectors;
+
 /// Default exchange server of a fresh installation (`docs/spec.md` §8, ADR 0022).
 ///
 /// This is the only server URL in the code. Each fork sets its own; the
