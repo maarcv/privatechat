@@ -298,6 +298,7 @@ TEST_SCHEMA = {
 TEST_MAX_RECORD = 512
 TEST_MAX_VALUE = 64  # of `bytes` and of `text`
 INTEGER_WIDTHS = {"u8": 1, "u32": 4, "u64": 8}
+FIELD_HEADER_LEN = 5  # key and length (017 R1)
 
 
 def record_field(key: int, value: bytes) -> bytes:
@@ -305,48 +306,43 @@ def record_field(key: int, value: bytes) -> bytes:
     return bytes([key]) + struct.pack(">I", len(value)) + value
 
 
-def test_record_values(values: dict) -> dict[str, bytes]:
-    """The value bytes of each field present (R3, R4): integers at their exact width, big-endian,
-    text as UTF-8. They are also the `expected` of a positive vector, where `text` is hex."""
-    encoded = {}
-    for name, (_, kind) in TEST_SCHEMA.items():
-        if name not in values:
-            continue
-        value = values[name]
-        if kind in INTEGER_WIDTHS:
-            encoded[name] = value.to_bytes(INTEGER_WIDTHS[kind], "big")
-            continue
-        value = value.encode("utf-8") if kind == "text" else value
-        require(len(value) == 32 if kind == "bytes32" else len(value) <= TEST_MAX_VALUE, name)
-        encoded[name] = value
-    return encoded
+def schema_value(kind: str, value: object) -> bytes:
+    """The bytes of one value (R3, R4): an integer at its exact width, big-endian, text as UTF-8."""
+    if kind in INTEGER_WIDTHS:
+        return value.to_bytes(INTEGER_WIDTHS[kind], "big")
+    data = value.encode("utf-8") if kind == "text" else value
+    require(len(data) == 32 if kind == "bytes32" else len(data) <= TEST_MAX_VALUE, kind)
+    return data
 
 
 def encode_test_record(values: dict) -> bytes:
     """The canonical encoding (R10): keys in increasing order, no field for an absent key."""
-    encoded = test_record_values(values)
-    record = b"".join(record_field(key, encoded[name])
-                      for name, (key, _) in TEST_SCHEMA.items() if name in encoded)
+    record = b"".join(record_field(key, schema_value(kind, values[name]))
+                      for name, (key, kind) in TEST_SCHEMA.items() if name in values)
     require(len(record) <= TEST_MAX_RECORD, "a test record above its maximum")
     return record
 
 
 def check_s017_t13_r13_section_produces_017_json() -> list[dict]:
-    """The vectors of spec 017: each positive encoded from its values, the extra field of
-    `unknown_key_ignored` appended by hand, each negative built by hand from the rule it
-    breaks."""
-    small = {"small": 42}
-    head = encode_test_record(small)
+    """The vectors of spec 017: each positive encoded from its values, the extra fields of
+    `unknown_key_ignored` and `record_at_limit` appended by hand, each negative built by hand
+    from the rule it breaks, all on the six bytes of `u8_field`."""
+    small = {"small": 0x2a}
+    head = record_field(0, b"\x2a")
 
     def expected(values: dict) -> dict:
-        return {name: values[name] if name != "text" else value
-                for name, value in test_record_values(values).items()}
+        """The decoded fields; `text` is hex like every field outside TEXT_FIELDS (015 R1)."""
+        return {name: value.encode("utf-8") if name == "text" else value
+                for name, value in values.items()}
 
     def raw(name: str, kind: str, origin: str, policy: str, record: bytes, result: dict) -> dict:
         inputs = {"schema": "test", "policy": policy, "record": record}
-        return {"name": name, "kind": kind, "source": "derived", "origin": origin,
-                "inputs": inputs, "expected": result}
+        return {"name": name, "kind": kind, "source": "derived",
+                "origin": f"spec 017 test schema: {origin}", "inputs": inputs, "expected": result}
 
+    everything = {**small, "medium": 0x01020304, "large": U64(0x0102030405060708),
+                  "bytes": bytes(range(TEST_MAX_VALUE)), "bytes32": bytes(range(32)),
+                  "text": "é" * (TEST_MAX_VALUE // 2)}
     positives = [
         ("u8_field", "key 0 alone", small),
         ("u32_field", "key 0 and a key 1 at the u32 maximum", {**small, "medium": MASK32}),
@@ -354,13 +350,22 @@ def check_s017_t13_r13_section_produces_017_json() -> list[dict]:
         ("bytes_field", "key 0 and a key 3 of 5 bytes", {**small, "bytes": bytes(range(5))}),
         ("bytes32_field", "key 0 and a key 4 of 32 bytes", {**small, "bytes32": bytes(range(32))}),
         ("text_field", "key 0 and a key 5 with a two-byte character", {**small, "text": "héllo"}),
+        ("all_fields", "every key, integers whose bytes all differ, bytes and text at 64 bytes",
+         everything),
     ]
+    require(encode_test_record(small) == head, "u8_field is the head of every hand-built vector")
     vectors = [raw(name, "positive", origin, "reject", encode_test_record(values), expected(values))
                for name, origin, values in positives]
-    vectors.append(raw("unknown_key_ignored", "positive", "key 0 and an extra key 9 under ignore",
-                       "ignore", head + record_field(9, b"x"), expected(small)))
+    unknown = record_field(9, b"x")
+    filler = TEST_MAX_RECORD - len(head) - FIELD_HEADER_LEN
+    vectors += [
+        raw("unknown_key_ignored", "positive", "key 0 and an extra key 9 under ignore", "ignore",
+            head + unknown, expected(small)),
+        raw("record_at_limit", "positive", "512 bytes under ignore: key 0 and a key 9 as filler",
+            "ignore", head + record_field(9, bytes(filler)), expected(small)),
+    ]
     key_1 = record_field(1, bytes(4))
-    filler = record_field(9, bytes(TEST_MAX_RECORD + 1 - len(head) - 5))
+    too_long = TEST_MAX_VALUE + 1
     negatives = [
         ("empty_record", "zero bytes: key 0 is missing", "reject", b"", "Missing"),
         ("key_out_of_order", "key 2 before key 1", "reject",
@@ -370,23 +375,24 @@ def check_s017_t13_r13_section_produces_017_json() -> list[dict]:
          "Width"),
         ("bytes32_wrong_width", "a key 4 of 31 bytes", "reject",
          head + record_field(4, bytes(31)), "Width"),
-        ("bytes_too_long", "a key 3 of 65 bytes", "reject", head + record_field(3, bytes(65)),
-         "TooLong"),
-        ("text_too_long", "a key 5 of 65 bytes", "reject", head + record_field(5, b"a" * 65),
-         "TooLong"),
+        ("bytes_too_long", "a key 3 of 65 bytes", "reject",
+         head + record_field(3, bytes(too_long)), "TooLong"),
+        ("text_too_long", "a key 5 of 65 bytes", "reject",
+         head + record_field(5, b"a" * too_long), "TooLong"),
         ("record_too_long", "513 bytes that decode under ignore: key 0 and a key 9 as filler",
-         "ignore", head + filler, "TooLong"),
+         "ignore", head + record_field(9, bytes(filler + 1)), "TooLong"),
         ("truncated_length", "key 0, then 3 bytes of a field header", "reject",
          head + bytes([1, 0, 0]), "Truncated"),
         ("length_beyond_buffer", "a key 1 that declares 4 bytes and carries 3", "reject",
          head + bytes([1, 0, 0, 0, 4]) + bytes(3), "Truncated"),
         ("extra_byte", "key 0 and one byte after it", "reject", head + b"\x00", "Truncated"),
+        ("unknown_key_then_extra_byte", "key 0, an extra key 9 and one byte after it, under "
+         "ignore", "ignore", head + unknown + b"\x00", "Truncated"),
         ("invalid_utf8", "a key 5 holding the byte 0xff", "reject",
          head + record_field(5, b"a\xff"), "Utf8"),
         ("unknown_key_rejected", "key 0 and an extra key 9 under reject", "reject",
-         head + record_field(9, b"x"), "UnknownKey"),
+         head + unknown, "UnknownKey"),
     ]
-    require(len(head + filler) == TEST_MAX_RECORD + 1, "record_too_long is 513 bytes")
     vectors += [raw(name, "negative", origin, policy, record, {"error": error})
                 for name, origin, policy, record, error in negatives]
     return vectors

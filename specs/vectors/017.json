@@ -6,7 +6,7 @@
       "name": "u8_field",
       "kind": "positive",
       "source": "derived",
-      "origin": "key 0 alone",
+      "origin": "spec 017 test schema: key 0 alone",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a",
@@ -20,7 +20,7 @@
       "name": "u32_field",
       "kind": "positive",
       "source": "derived",
-      "origin": "key 0 and a key 1 at the u32 maximum",
+      "origin": "spec 017 test schema: key 0 and a key 1 at the u32 maximum",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a0100000004ffffffff",
@@ -35,7 +35,7 @@
       "name": "u64_field",
       "kind": "positive",
       "source": "derived",
-      "origin": "key 0 and a key 2 at the u64 maximum",
+      "origin": "spec 017 test schema: key 0 and a key 2 at the u64 maximum",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a0200000008ffffffffffffffff",
@@ -50,7 +50,7 @@
       "name": "bytes_field",
       "kind": "positive",
       "source": "derived",
-      "origin": "key 0 and a key 3 of 5 bytes",
+      "origin": "spec 017 test schema: key 0 and a key 3 of 5 bytes",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a03000000050001020304",
@@ -65,7 +65,7 @@
       "name": "bytes32_field",
       "kind": "positive",
       "source": "derived",
-      "origin": "key 0 and a key 4 of 32 bytes",
+      "origin": "spec 017 test schema: key 0 and a key 4 of 32 bytes",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a0400000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
@@ -80,7 +80,7 @@
       "name": "text_field",
       "kind": "positive",
       "source": "derived",
-      "origin": "key 0 and a key 5 with a two-byte character",
+      "origin": "spec 017 test schema: key 0 and a key 5 with a two-byte character",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a050000000668c3a96c6c6f",
@@ -92,10 +92,29 @@
       }
     },
     {
+      "name": "all_fields",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 017 test schema: every key, integers whose bytes all differ, bytes and text at 64 bytes",
+      "inputs": {
+        "policy": "reject",
+        "record": "00000000012a010000000401020304020000000801020304050607080300000040000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f0400000020000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0500000040c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9",
+        "schema": "test"
+      },
+      "expected": {
+        "bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+        "bytes32": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "large": "0102030405060708",
+        "medium": 16909060,
+        "small": 42,
+        "text": "c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9c3a9"
+      }
+    },
+    {
       "name": "unknown_key_ignored",
       "kind": "positive",
       "source": "derived",
-      "origin": "key 0 and an extra key 9 under ignore",
+      "origin": "spec 017 test schema: key 0 and an extra key 9 under ignore",
       "inputs": {
         "policy": "ignore",
         "record": "00000000012a090000000178",
@@ -106,10 +125,24 @@
       }
     },
     {
+      "name": "record_at_limit",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 017 test schema: 512 bytes under ignore: key 0 and a key 9 as filler",
+      "inputs": {
+        "policy": "ignore",
+        "record": "00000000012a09000001f5000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "schema": "test"
+      },
+      "expected": {
+        "small": 42
+      }
+    },
+    {
       "name": "empty_record",
       "kind": "negative",
       "source": "derived",
-      "origin": "zero bytes: key 0 is missing",
+      "origin": "spec 017 test schema: zero bytes: key 0 is missing",
       "inputs": {
         "policy": "reject",
         "record": "",
@@ -123,7 +156,7 @@
       "name": "key_out_of_order",
       "kind": "negative",
       "source": "derived",
-      "origin": "key 2 before key 1",
+      "origin": "spec 017 test schema: key 2 before key 1",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a02000000080000000000000000010000000400000000",
@@ -137,7 +170,7 @@
       "name": "duplicate_key",
       "kind": "negative",
       "source": "derived",
-      "origin": "key 1 twice",
+      "origin": "spec 017 test schema: key 1 twice",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a010000000400000000010000000400000000",
@@ -151,7 +184,7 @@
       "name": "u32_wrong_width",
       "kind": "negative",
       "source": "derived",
-      "origin": "a key 1 of 3 bytes",
+      "origin": "spec 017 test schema: a key 1 of 3 bytes",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a0100000003000000",
@@ -165,7 +198,7 @@
       "name": "bytes32_wrong_width",
       "kind": "negative",
       "source": "derived",
-      "origin": "a key 4 of 31 bytes",
+      "origin": "spec 017 test schema: a key 4 of 31 bytes",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a040000001f00000000000000000000000000000000000000000000000000000000000000",
@@ -179,7 +212,7 @@
       "name": "bytes_too_long",
       "kind": "negative",
       "source": "derived",
-      "origin": "a key 3 of 65 bytes",
+      "origin": "spec 017 test schema: a key 3 of 65 bytes",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a03000000410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
@@ -193,7 +226,7 @@
       "name": "text_too_long",
       "kind": "negative",
       "source": "derived",
-      "origin": "a key 5 of 65 bytes",
+      "origin": "spec 017 test schema: a key 5 of 65 bytes",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a05000000416161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
@@ -207,7 +240,7 @@
       "name": "record_too_long",
       "kind": "negative",
       "source": "derived",
-      "origin": "513 bytes that decode under ignore: key 0 and a key 9 as filler",
+      "origin": "spec 017 test schema: 513 bytes that decode under ignore: key 0 and a key 9 as filler",
       "inputs": {
         "policy": "ignore",
         "record": "00000000012a09000001f600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
@@ -221,7 +254,7 @@
       "name": "truncated_length",
       "kind": "negative",
       "source": "derived",
-      "origin": "key 0, then 3 bytes of a field header",
+      "origin": "spec 017 test schema: key 0, then 3 bytes of a field header",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a010000",
@@ -235,7 +268,7 @@
       "name": "length_beyond_buffer",
       "kind": "negative",
       "source": "derived",
-      "origin": "a key 1 that declares 4 bytes and carries 3",
+      "origin": "spec 017 test schema: a key 1 that declares 4 bytes and carries 3",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a0100000004000000",
@@ -249,7 +282,7 @@
       "name": "extra_byte",
       "kind": "negative",
       "source": "derived",
-      "origin": "key 0 and one byte after it",
+      "origin": "spec 017 test schema: key 0 and one byte after it",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a00",
@@ -260,10 +293,24 @@
       }
     },
     {
+      "name": "unknown_key_then_extra_byte",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 017 test schema: key 0, an extra key 9 and one byte after it, under ignore",
+      "inputs": {
+        "policy": "ignore",
+        "record": "00000000012a09000000017800",
+        "schema": "test"
+      },
+      "expected": {
+        "error": "Truncated"
+      }
+    },
+    {
       "name": "invalid_utf8",
       "kind": "negative",
       "source": "derived",
-      "origin": "a key 5 holding the byte 0xff",
+      "origin": "spec 017 test schema: a key 5 holding the byte 0xff",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a050000000261ff",
@@ -277,7 +324,7 @@
       "name": "unknown_key_rejected",
       "kind": "negative",
       "source": "derived",
-      "origin": "key 0 and an extra key 9 under reject",
+      "origin": "spec 017 test schema: key 0 and an extra key 9 under reject",
       "inputs": {
         "policy": "reject",
         "record": "00000000012a090000000178",

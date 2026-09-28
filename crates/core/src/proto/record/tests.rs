@@ -6,13 +6,16 @@ use proptest::option::of as maybe;
 use proptest::prelude::{any, proptest};
 
 use super::test_schema::{MAX_BYTES, MAX_RECORD, MAX_TEXT, TestRecord};
-use super::{Reader, RecordError, UnknownKeys, Writer};
+use super::{FIELD_HEADER_LEN, Reader, RecordError, UnknownKeys, Writer};
 use crate::vectors::{self, Checker, Kind, Vector};
 
 use RecordError::{KeyOrder, Missing, TooLong, Truncated, UnknownKey, Utf8, Width};
 use UnknownKeys::{Ignore, Reject};
 
 const POLICIES: [UnknownKeys; 2] = [Ignore, Reject];
+
+/// The fields of a hand-built record, in the order the test chooses.
+type Fields<'a> = &'a [(u8, &'a [u8])];
 
 /// One field: key ‖ 4-byte big-endian length ‖ value (R1).
 fn field(key: u8, value: &[u8]) -> Vec<u8> {
@@ -21,7 +24,7 @@ fn field(key: u8, value: &[u8]) -> Vec<u8> {
 }
 
 /// The fields in the order given, which the test chooses.
-fn record(fields: &[(u8, &[u8])]) -> Vec<u8> {
+fn record(fields: Fields) -> Vec<u8> {
     fields
         .iter()
         .flat_map(|(key, value)| field(*key, value))
@@ -29,14 +32,15 @@ fn record(fields: &[(u8, &[u8])]) -> Vec<u8> {
 }
 
 /// The test schema's verdict on `buf`: `None` when it decodes.
-fn error(buf: &[u8], unknown: UnknownKeys) -> Option<RecordError> {
-    TestRecord::decode(buf, unknown).err()
+fn error(buf: &[u8], policy: UnknownKeys) -> Option<RecordError> {
+    TestRecord::decode(buf, policy).err()
 }
 
 /// Reads keys 0 and 5 only, so that a key between them is read past rather
-/// than reached by `end`.
-fn read_0_and_5(buf: &[u8], unknown: UnknownKeys) -> Option<RecordError> {
-    let mut reader = Reader::new(buf, MAX_RECORD, unknown).unwrap();
+/// than reached by `end`: with the full test schema an unknown key is above 5
+/// and never sits between two known ones.
+fn read_0_and_5(buf: &[u8], policy: UnknownKeys) -> Option<RecordError> {
+    let mut reader = Reader::new(buf, MAX_RECORD, policy).unwrap();
     let read = reader.u8(0).and_then(|_| reader.text(5, MAX_TEXT));
     read.and_then(|_| reader.end()).err()
 }
@@ -70,19 +74,26 @@ fn s017_t02_r02_field_check_order() {
         assert_eq!(error(&truncated, policy), Some(Truncated));
         assert_eq!(read_0_and_5(&unknown, policy), Some(KeyOrder));
     }
+    // A schema that asks out of order gets an error, not a silent `None`.
+    let buf = record(&[(0, &[1]), (3, b"ab")]);
+    let mut reader = Reader::new(&buf, MAX_RECORD, Ignore).unwrap();
+    assert_eq!(reader.bytes(3, MAX_BYTES), Ok(Some(&b"ab"[..])));
+    assert_eq!(reader.bytes(3, MAX_BYTES), Err(KeyOrder));
+    assert_eq!(reader.bytes(2, MAX_BYTES), Err(KeyOrder));
 }
 
 /// Spec 017, R3: integers are exactly 1, 4 or 8 bytes, big-endian.
 #[test]
 fn s017_t03_r03_integer_widths() {
-    for fields in [
-        &[(0, &[][..])][..],
+    let cases: [Fields; 6] = [
+        &[(0, &[])],
         &[(0, &[1, 2])],
         &[(0, &[1]), (1, &[0; 3])],
         &[(0, &[1]), (1, &[0; 5])],
         &[(0, &[1]), (2, &[0; 7])],
         &[(0, &[1]), (2, &[0; 9])],
-    ] {
+    ];
+    for fields in cases {
         assert_eq!(error(&record(fields), Reject), Some(Width), "{fields:?}");
     }
     let maxima = record(&[(0, &[0xff]), (1, &[0xff; 4]), (2, &[0xff; 8])]);
@@ -90,6 +101,7 @@ fn s017_t03_r03_integer_widths() {
     assert_eq!(decoded.small, u8::MAX);
     assert_eq!(decoded.medium, Some(u32::MAX));
     assert_eq!(decoded.large, Some(u64::MAX));
+    assert_eq!(decoded.encode().unwrap().as_slice(), maxima);
     let big_endian = record(&[(0, &[0]), (1, &[1, 2, 3, 4])]);
     let decoded = TestRecord::decode(&big_endian, Reject).unwrap();
     assert_eq!(decoded.medium, Some(0x0102_0304));
@@ -105,13 +117,17 @@ fn s017_t04_r04_bytes_and_text_limits() {
     assert_eq!(decoded.bytes, Some(&longest[..]));
     assert_eq!(decoded.text.map(str::len), Some(MAX_TEXT));
     let too_long = vec![b'a'; MAX_BYTES + 1];
-    for (fields, expected) in [
-        (&[(0, &[1][..]), (4, &[0; 31])][..], Width),
+    // Too long and not UTF-8: the length is checked first.
+    let both = vec![0xff; MAX_TEXT + 1];
+    let cases: [(Fields, RecordError); 6] = [
+        (&[(0, &[1]), (4, &[0; 31])], Width),
         (&[(0, &[1]), (4, &[0; 33])], Width),
         (&[(0, &[1]), (3, &too_long)], TooLong),
         (&[(0, &[1]), (5, &too_long)], TooLong),
+        (&[(0, &[1]), (5, &both)], TooLong),
         (&[(0, &[1]), (5, &[b'a', 0xff])], Utf8),
-    ] {
+    ];
+    for (fields, expected) in cases {
         assert_eq!(error(&record(fields), Reject), Some(expected), "{fields:?}");
     }
 }
@@ -122,9 +138,12 @@ fn s017_t05_r05_end_walks_the_rest() {
     let valid = record(&[(0, &[1]), (5, b"hi")]);
     let extra_byte = [&valid[..], &[0]].concat();
     let extra_field = [valid, field(9, b"x")].concat();
+    // `end` keeps walking after a field it skipped.
+    let skipped_then_extra_byte = [&extra_field[..], &[0]].concat();
     for policy in POLICIES {
         assert_eq!(error(&extra_byte, policy), Some(Truncated));
     }
+    assert_eq!(error(&skipped_then_extra_byte, Ignore), Some(Truncated));
     assert_eq!(error(&extra_field, Reject), Some(UnknownKey));
     assert_eq!(error(&extra_field, Ignore), None);
 }
@@ -161,14 +180,21 @@ fn s017_t07_r07_unknown_key_policy() {
         assert_eq!(read_0_and_5(&buf, Ignore), None);
         assert_eq!(read_0_and_5(&buf, Reject), Some(UnknownKey));
     }
+    // The key after a skipped one is still read.
+    let buf = record(&[(0, &[1]), (3, b"x"), (5, b"y")]);
+    let mut reader = Reader::new(&buf, MAX_RECORD, Ignore).unwrap();
+    assert_eq!(reader.u8(0), Ok(Some(1)));
+    assert_eq!(reader.text(5, MAX_TEXT), Ok(Some("y")));
+    assert_eq!(reader.end(), Ok(()));
 }
 
 /// Spec 017, R8: the whole-record limit is checked before any field, so even
 /// bytes that would not frame return `TooLong`.
 #[test]
 fn s017_t08_r08_whole_record_limit() {
-    let head = record(&[(0, &[1]), (3, &[b'a'; MAX_BYTES])]);
-    let filler = vec![0; MAX_RECORD - head.len() - 5];
+    assert_eq!((MAX_RECORD, MAX_BYTES, MAX_TEXT), (512, 64, 64));
+    let head = record(&[(0, &[1])]);
+    let filler = vec![0; MAX_RECORD - head.len() - FIELD_HEADER_LEN];
     let fits = [head, field(6, &filler)].concat();
     assert_eq!(fits.len(), MAX_RECORD);
     assert_eq!(error(&fits, Ignore), None);
@@ -191,7 +217,7 @@ fn s017_t09_r09_test_schema_is_typed() {
         (2, &[0, 0, 0, 0, 0, 0, 0, 3]),
         (3, &nested),
         (4, &[4; 32]),
-        (5, "é".as_bytes()),
+        (5, "é \t".as_bytes()),
     ]);
     let decoded = TestRecord::decode(&buf, Reject).unwrap();
     let expected = TestRecord {
@@ -200,7 +226,7 @@ fn s017_t09_r09_test_schema_is_typed() {
         large: Some(3),
         bytes: Some(&nested),
         bytes32: Some(&[4; 32]),
-        text: Some("é"),
+        text: Some("é \t"),
     };
     assert_eq!(decoded, expected);
 }
@@ -218,6 +244,12 @@ fn s017_t11_r11_writer_never_grows() {
     assert_eq!(writer.text(3, ""), Err(TooLong));
     let buf = writer.finish();
     assert_eq!((buf.len(), buf.capacity()), (20, 20));
+    // Zeroed pages are mapped lazily: this allocates no 4 GiB in practice.
+    #[cfg(target_pointer_width = "64")]
+    {
+        let huge = vec![0u8; 1 << 32];
+        assert_eq!(Writer::with_capacity(16).bytes(1, &huge), Err(TooLong));
+    }
 }
 
 /// Checks one vector of `017.json`: a positive decodes to its values and,
@@ -225,12 +257,11 @@ fn s017_t11_r11_writer_never_grows() {
 fn check_vector(vector: &Vector) {
     assert_eq!(vector.input("schema").text(), "test");
     let policy = match vector.input("policy").text() {
-        "reject" => Reject,
-        policy => {
-            assert_eq!(policy, "ignore");
-            Ignore
-        }
-    };
+        "reject" => Some(Reject),
+        "ignore" => Some(Ignore),
+        _ => None,
+    }
+    .expect("a policy of spec 017");
     let record = vector.input("record").bytes();
     let decoded = TestRecord::decode(record, policy);
     if vector.kind() == Kind::Negative {
@@ -270,7 +301,9 @@ fn s017_vectors_dispatch() {
         "bytes_field",
         "bytes32_field",
         "text_field",
+        "all_fields",
         "unknown_key_ignored",
+        "record_at_limit",
         "key_out_of_order",
         "duplicate_key",
         "u32_wrong_width",
@@ -281,11 +314,11 @@ fn s017_vectors_dispatch() {
         "truncated_length",
         "length_beyond_buffer",
         "extra_byte",
+        "unknown_key_then_extra_byte",
         "invalid_utf8",
         "unknown_key_rejected",
     ];
-    let entries: Vec<(&str, Checker)> = names.map(|name| (name, check_vector as Checker)).to_vec();
-    vectors::check_all("017", &entries);
+    vectors::check_all("017", &names.map(|name| (name, check_vector as Checker)));
 }
 
 proptest! {
@@ -299,7 +332,8 @@ proptest! {
         large in maybe(any::<u64>()),
         bytes in maybe(bytes_of(any::<u8>(), 0..=MAX_BYTES)),
         bytes32 in maybe(any::<[u8; 32]>()),
-        text in maybe("\\PC{0,16}"),
+        // 16 characters of at most 4 UTF-8 bytes each stay within MAX_TEXT.
+        text in maybe("[\\PC\\s]{0,16}"),
         flip in any::<(usize, u8)>(),
     ) {
         let record = TestRecord {
