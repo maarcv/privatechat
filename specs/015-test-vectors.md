@@ -1,6 +1,6 @@
 # 015 — Test vectors: schema, loader, reference script and freeze
 
-Status: accepted
+Status: implemented
 Phase: 1
 Related ADRs: 0012, 0023, 0029
 Depends on: 010-primitives-wrapper
@@ -138,3 +138,4 @@ None. Closed after audit F: the reference script stays in the repository, one se
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): the reference script produces the files and the Rust tests reproduce them; the Rust generator, `SECTIONS`, `generated()`, `generate_all`, the equality test and the `disallowed_methods` allow removed (I1); `pinned` = bytes libsodium produced, transcribed once, `chatcfg_reference` of 011 pinned; the source-scan test and `SOURCES` removed, `one loader` stated in the Interface (I2); `all` no longer read by a generator (I6); the slice requirement and the fixtures removed, schema, source and encoding rules merged into R1, the dispatch test named `sNNN_vectors_dispatch` (I8); requirements and tests renumbered R1–R6, T01–T06
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-09-28 amended after audit Q of slices (a) and (b) (`docs/audit-log.md`): R1 lists every rule the loader enforces and leaves the 64-bit check to `u64_hex`; the script reads `010.json` for its self-tests instead of transcribing it (R4); the script writes the file of every section present, through one encoder, and refuses orphans (R5, T05)
+- 2026-09-28 implemented: slices (a) and (b) with the audit Q fixes, reviewed (Marc Vilardebó)
