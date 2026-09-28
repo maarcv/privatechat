@@ -1,11 +1,11 @@
 # 024 — Key retired: receiving a retirement and retiring a peer by hand
 
-Status: draft
+Status: accepted
 Phase: 2
 Related ADRs: 0016, 0029, 0033
 Depends on: 021-channel-session, 022-peers-tofu
 Blocks: 025-identity-regen, 026-peer-limits, 027-core-api, 028-session-sans-io, 055-verify-ui
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -95,3 +95,4 @@ None.
 - 2026-09-25 revised after audit J round 10 (`docs/audit-log.md`)
 - 2026-09-25 revised after audit J round 13 (`docs/audit-log.md`)
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): dialogs point to spec 055
+- 2026-09-28 accepted (Marc Vilardebó)

@@ -1,11 +1,11 @@
 # 062 — Public security documentation: what it promises and what it does not
 
-Status: draft
+Status: accepted
 Phase: 6
 Related ADRs: 0008, 0017, 0019, 0028, 0041
 Depends on: 053-device-security, 056-chat-screens, 060-reproducible-builds, 061-threat-review
 Blocks: 063-beta, 064-public-release, 066-public-server
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -115,3 +115,4 @@ The documentation lint and the landing build green. Non-automatable: the human r
 - 2026-09-27 revised after audit O round 3 (`docs/audit-log.md`): the verify page's first step is `ssh-keygen -Y check-novalidate` with the tag's namespace and a printed fingerprint compared out of band, followed by the exact hash command; the operator's live view cited from §2's first row
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): R7 the reviewer-and-hash rule over the in-app security warnings of 053–056 and the store texts; R8 the landing as a static site with no third-party asset; the privacy policy names the landing host's access logs; "Run your own server" says no image is published to a registry and that no server list is in the apps (§12); three §2 residuals worded as documented residuals; store screenshots moved to 051 and 052
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): a seventh route, "Requests from authorities" (spec 066 R8), and links to `docs/public-server.md` and the security feed (R1, R2); a Content-Security-Policy on every page and a headless-browser check (R8); 062-R2 coupled with 066-R1; Blocks names 066
+- 2026-09-28 accepted (Marc Vilardebó)

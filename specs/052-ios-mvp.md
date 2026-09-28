@@ -1,11 +1,11 @@
 # 052 — iOS app: the SwiftUI client over `Core`
 
-Status: draft
+Status: accepted
 Phase: 5
 Related ADRs: 0012, 0037, 0041
 Depends on: 040-uniffi, 042-connection-host, 053-device-security, 054-qr-invite, 055-verify-ui, 056-chat-screens
 Blocks: 060-reproducible-builds, 063-beta, 064-public-release
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -138,3 +138,4 @@ The CI job `ios` green. Non-automatable: on an iPhone with iOS 17 and one with t
 - 2026-09-27 042-R10 measured on a device: the host's native sockets bring up cellular and follow an active VPN, so R4's data-free `NWConnection` fallback is removed
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): store screenshots from the UI tests; one export-compliance checklist for every store; the privacy manifest; App Review notes, the answer on user-generated content, age rating and the NAT64 check; Tor on iPhone to measure (052-R12, 052-R13)
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the ANSSI declaration mandatory; why "Data Not Collected" recorded per store; the NAT64 check with an IPv4-literal channel and its residual removed; Tor measured in VPN and SOCKS5 modes, the Help text in 056 R18 alone
+- 2026-09-28 accepted (Marc Vilardebó)

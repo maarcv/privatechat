@@ -1,11 +1,11 @@
 # 065 — Release maintenance
 
-Status: draft
+Status: accepted
 Phase: 6
 Related ADRs: 0041
 Depends on: 042-connection-host, 053-device-security, 060-reproducible-builds, 061-threat-review, 066-public-server
 Blocks: 064-public-release
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -91,3 +91,4 @@ The checks of T01–T07 green. Non-automatable: the first scheduled run of `advi
 
 - 2026-09-28 draft (`docs/audit-log.md`, "Audit P", P-Q2)
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the age notice moves to spec 056 and R3 becomes a release at least every 180 days; depends on 066 and blocks 064, which gates on it; R1 asks for `review-N+1` before a tag that changes the cryptographic core; R2 publishes the advisory once the stores have the fix or after 7 days; R4 drops the TLS row and adds the domain, next-release and GitHub inactivity rows; R5 the owner's Gradle verification commit and no Swift entry; R6 checks out both branches; R7 triggered by R6's advisories
+- 2026-09-28 accepted (Marc Vilardebó)

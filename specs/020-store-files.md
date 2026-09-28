@@ -1,11 +1,11 @@
 # 020 — Store files: encrypted state and log with atomic commit
 
-Status: draft
+Status: accepted
 Phase: 2
 Related ADRs: 0019, 0020, 0021, 0023, 0029, 0034, 0035
 Depends on: 010-primitives-wrapper, 011-config-format, 015-test-vectors, 016-fuzz-harness, 017-record-encoding
 Blocks: 021-channel-session, 023-ttl-purge, 027-core-api, 028-session-sans-io, 040-uniffi, 041-desktop-bridge, 042-connection-host, 053-device-security, 061-threat-review
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -350,3 +350,4 @@ Decided on 2026-09-25: 020-R5, R9 and R18 (log header, generation and offset, ke
 - 2026-09-25 open questions decided with the human reviewer, recommendations accepted (`docs/audit-log.md`)
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): a later version reads and rewrites every earlier version of the files, and three golden version-1 files are committed for it
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the forward-read rule and the golden files move from R8 to their own R31, citing this spec's compaction (R15)
+- 2026-09-28 accepted (Marc Vilardebó)

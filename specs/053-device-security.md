@@ -1,11 +1,11 @@
 # 053 — Device security: the storage key, the app lock and the device measures of §8
 
-Status: draft
+Status: accepted
 Phase: 5
 Related ADRs: 0020, 0021, 0028, 0037, 0041
 Depends on: 020-store-files, 027-core-api, 040-uniffi, 041-desktop-bridge, 042-connection-host
 Blocks: 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 054-qr-invite, 056-chat-screens, 061-threat-review, 062-security-docs, 065-release-maintenance
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -291,3 +291,4 @@ The tests of each platform green in the CI jobs of specs 050, 051 and 052, and t
 - 2026-09-27 amended after audit O round 2 (`docs/audit-log.md`): store publication points to spec 064-public-release
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the screen-lock text recommends a PIN or passcode over biometrics; the §8 amendments gain the desktop app-lock and backup cells and the undetected accessibility services; residuals for the macOS Notification Center, a desktop with no keychain, screen readers, accessibility services and uninstalling; the local commands of R16 and R22 in `.github/CONTRIBUTING.md`
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): blocks spec 065; the security texts of R19 named for the reviewer rule of spec 062-security-docs R7; the logging lint with word-bounded patterns and the desktop's Rust macros; the clipboard-history limit worded as a documented residual
+- 2026-09-28 accepted (Marc Vilardebó)

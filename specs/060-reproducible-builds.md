@@ -1,11 +1,11 @@
 # 060 — Reproducible builds, signing and published hashes
 
-Status: draft
+Status: accepted
 Phase: 6
 Related ADRs: 0017, 0041
 Depends on: 034-docker, 040-uniffi, 041-desktop-bridge, 042-connection-host, 050-desktop-mvp, 051-android-mvp, 052-ios-mvp
 Blocks: 061-threat-review, 062-security-docs, 063-beta, 064-public-release, 065-release-maintenance, 066-public-server
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -169,3 +169,4 @@ The jobs `release` and `verify` (started by the owner) green for a `vX.Y.Z-rc.1`
 - 2026-09-27 revised after audit O round 3 (`docs/audit-log.md`): Rekor logged by `sign_release.sh` before upload; `verify` fed by a download URL; the third-party check with `check-novalidate` and a stated hash step; an integer iOS build number; the Play bundle and the three Windows signatures in the signing steps; compromise notices through the owner's channels; the iOS archive compared on a macOS host; 056 no longer blocked by this spec
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): R12 third-party notices file in every artefact, shown by Help; building libsodium from source on Windows is a v1 residual with no owner; later releases point to spec 065; blocks 065 and 066
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the build time compiled into every app as an explicit input (R2), read by the age notice of spec 056 R22; committed, reviewed licence overrides for components that ship no licence text (R12)
+- 2026-09-28 accepted (Marc Vilardebó)

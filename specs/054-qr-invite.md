@@ -1,11 +1,11 @@
 # 054 — Invitations: create a channel, show, export and import a config
 
-Status: draft
+Status: accepted
 Phase: 5
 Related ADRs: 0008, 0017, 0022, 0028, 0031, 0038, 0041
 Depends on: 011-config-format, 022-peers-tofu, 027-core-api, 040-uniffi, 041-desktop-bridge, 042-connection-host, 053-device-security
 Blocks: 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 055-verify-ui, 056-chat-screens
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -241,3 +241,4 @@ None.
 - 2026-09-27 revised after audit N round 1 (`docs/audit-log.md`): the errors of `create_channel` after a supported probe (N27)
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the QR's 60 s limit is essential under WCAG 2.2.1, showing it again is the extension, and the countdown is announced twice
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the 60 s limit cites WCAG's Understanding note for 2.2.1, with no "extension" wording; the security texts named for the reviewer rule of spec 062-security-docs R7
+- 2026-09-28 accepted (Marc Vilardebó)

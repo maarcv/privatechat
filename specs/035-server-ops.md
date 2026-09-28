@@ -1,11 +1,11 @@
 # 035 — Server operation: configuration, client address, logging, shutdown and the phase 3 exit test
 
-Status: draft
+Status: accepted
 Phase: 3
 Related ADRs: 0022, 0038
 Depends on: 027-core-api, 030-ws-protocol, 031-auth-channel-signature, 032-storage-ttl, 033-rate-limit-quotas
 Blocks: 034-docker, 041-desktop-bridge, 042-connection-host, 063-beta, 066-public-server
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -267,3 +267,4 @@ None.
 - 2026-09-25 revised after audit K round 1 (`docs/audit-log.md`): a library entry point that returns instead of exiting, so the exit and shutdown tests run in process; the log tests in a process of their own; listener ports, not addresses, in the start line; the crash test moved here from spec 032; `vars_os`; the per-listener and per-IP connection variables; spec 100's lint dropped
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the clients' logging points to specs 042 and 053; the port fields of the start line, amended on 2026-09-26 under a spec 041-desktop-bridge R18 that no longer exists, are read by spec 042-connection-host R13
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): Blocks names 066
+- 2026-09-28 accepted (Marc Vilardebó)

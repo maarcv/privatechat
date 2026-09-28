@@ -1,11 +1,11 @@
 # 030 — WebSocket protocol: the server's connections, subscriptions, order and fan-out
 
-Status: draft
+Status: accepted
 Phase: 3
 Related ADRs: 0010, 0014, 0017, 0020, 0022, 0023, 0038
 Depends on: 013-wire-message, 016-fuzz-harness, 027-core-api, 028-session-sans-io, 031-auth-channel-signature, 032-storage-ttl
 Blocks: 033-rate-limit-quotas, 035-server-ops, 041-desktop-bridge, 042-connection-host
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -160,3 +160,4 @@ None.
 - 2026-09-25 revised after audit K round 3 (`docs/audit-log.md`): the permit pool removed, one page of 256 KiB per connection in turn; held pushes before `ok`, so a subscription can end only before it; the backlog's `now` is the wall reading; tests sized for spec 033's limits
 - 2026-09-25 revised after audit K round 2 (`docs/audit-log.md`): one permit per connection, an onion share, a 20 000 ms permit wait and a 30 000 ms page write; ending a subscription stops everything of it under the hub's lock; a full writer queue answered in R11; `Bytes` as the shared buffer; the auth closes tested on a socket
 - 2026-09-25 revised after audit K round 1 (`docs/audit-log.md`): pages bounded by bytes and a server-wide permit pool; a flooded subscription ends alone; `ack`, `error` and pushes through the hub in one order; shared push buffers; `Internal` closes 1011; 016 R8 and R9 amended; tests resized
+- 2026-09-28 accepted (Marc Vilardebó)

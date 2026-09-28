@@ -1,11 +1,11 @@
 # 050 — Desktop app: the Svelte UI over the bridge
 
-Status: draft
+Status: accepted
 Phase: 5
 Related ADRs: 0017, 0037, 0041
 Depends on: 041-desktop-bridge, 042-connection-host, 053-device-security, 054-qr-invite, 055-verify-ui, 056-chat-screens
 Blocks: 060-reproducible-builds, 063-beta
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -142,3 +142,4 @@ None.
 - 2026-09-27 revised after audit N round 4 (`docs/audit-log.md`): the page is gone after `locked`, since the bridge recreates the window; `Fault { recurring }` at mount; own rows copied by `client_ref`
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the supported systems and WebView2 with no download at install time (R13, D4); keyboard and screen-reader use with a "New message" announcement that names nothing (R14)
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): fixed, dated floors (macOS 15, Windows 11, Linux x86-64 only); the WebView2 check its own R15 with the download text corrected; no claim that installing tells Microsoft nothing; the announcement rule is 056 R7's
+- 2026-09-28 accepted (Marc Vilardebó)

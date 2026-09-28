@@ -1,11 +1,11 @@
 # 022 — Peers: trust on first use, labels, verification and name collisions
 
-Status: draft
+Status: accepted
 Phase: 2
 Related ADRs: 0006, 0007, 0019, 0029, 0036
 Depends on: 010-primitives-wrapper, 014-fingerprint, 016-fuzz-harness, 021-channel-session
 Blocks: 023-ttl-purge, 024-key-retired, 026-peer-limits, 027-core-api, 055-verify-ui, 054-qr-invite
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -171,3 +171,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-09-25 revised after audit J round 26 (`docs/audit-log.md`)
 - 2026-09-25 open questions decided with the human reviewer, recommendations accepted (`docs/audit-log.md`)
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): drawing points to spec 055
+- 2026-09-28 accepted (Marc Vilardebó)

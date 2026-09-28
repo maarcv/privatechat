@@ -1,11 +1,11 @@
 # 021 — Channel: identity, sending, receiving and the single commit
 
-Status: draft
+Status: accepted
 Phase: 2
 Related ADRs: 0013, 0016, 0019, 0020, 0027, 0029, 0030, 0033, 0034, 0037
 Depends on: 012-message-keys, 013-wire-message, 016-fuzz-harness, 020-store-files
 Blocks: 022-peers-tofu, 023-ttl-purge, 024-key-retired, 025-identity-regen, 026-peer-limits, 027-core-api, 028-session-sans-io, 055-verify-ui, 056-chat-screens, 061-threat-review
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -278,3 +278,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-09-25 revised after audit J round 33 (`docs/audit-log.md`)
 - 2026-09-25 open questions decided with the human reviewer, recommendations accepted (`docs/audit-log.md`)
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): `clock_off` wording points to spec 055
+- 2026-09-28 accepted (Marc Vilardebó)
