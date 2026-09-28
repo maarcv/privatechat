@@ -7,12 +7,13 @@
 //! here is shorter than a dependency would be (AGENTS 8). Every file is checked
 //! against the schema of `specs/vectors/README.md` as it is read, and a broken
 //! file fails the test that reads it (R1). The reference script of spec 015
-//! writes the files; Rust only reads and checks them.
+//! writes the files of specs 011–017 and `010.json` is transcribed by hand;
+//! Rust only reads and checks them.
 
 use std::collections::HashSet;
 
 /// Every committed file, by spec. A format spec adds its line with its file.
-const FILES: [(&str, &str); 1] = [("010", include_str!("../../../specs/vectors/010.json"))];
+const FILES: &[(&str, &str)] = &[("010", include_str!("../../../specs/vectors/010.json"))];
 
 /// Where a vector's values come from (`specs/vectors/README.md`).
 const SOURCES: [&str; 3] = ["published", "derived", "pinned"];
@@ -31,7 +32,7 @@ pub(crate) enum Kind {
 }
 
 /// A value of `inputs` or `expected`, typed by the encoding rules of R1.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) enum Value {
     Hex(Vec<u8>),
     Number(u32),
@@ -44,8 +45,6 @@ pub(crate) enum Value {
 pub(crate) struct Vector {
     name: String,
     kind: Kind,
-    source: String,
-    origin: String,
     inputs: Vec<(String, Value)>,
     expected: Vec<(String, Value)>,
 }
@@ -91,26 +90,25 @@ pub(crate) fn load(spec: &str, name: &str) -> Vector {
 /// that no vector is checked twice and none is left unchecked (R3).
 pub(crate) fn check_all(spec: &str, entries: &[(&str, Checker)]) {
     let vectors = all(spec);
+    let names: HashSet<&str> = entries.iter().map(|(name, _)| *name).collect();
+    assert_eq!(names.len(), entries.len(), "an entry is listed twice");
     let unchecked: Vec<&str> = vectors
         .iter()
         .map(|vector| vector.name.as_str())
-        .filter(|name| !entries.iter().any(|(entry, _)| entry == name))
+        .filter(|name| !names.contains(name))
         .collect();
-    assert!(
-        unchecked.is_empty(),
-        "vectors of {spec}.json with no entry: {unchecked:?}"
-    );
+    assert!(unchecked.is_empty(), "vectors with no entry: {unchecked:?}");
+    let unknown: Vec<&str> = names
+        .iter()
+        .copied()
+        .filter(|name| !vectors.iter().any(|vector| vector.name == *name))
+        .collect();
+    assert!(unknown.is_empty(), "entries with no vector: {unknown:?}");
     for (name, checker) in entries {
-        let listed = entries.iter().filter(|(other, _)| other == name).count();
-        assert_eq!(listed, 1, "entry {name} is listed {listed} times");
-        let vector = vectors.iter().find(|vector| vector.name == *name);
-        assert!(
-            vector.is_some(),
-            "entry {name} has no vector in {spec}.json"
-        );
-        if let Some(vector) = vector {
-            checker(vector);
-        }
+        vectors
+            .iter()
+            .filter(|vector| vector.name == *name)
+            .for_each(checker);
     }
 }
 
@@ -217,14 +215,15 @@ fn find<'a>(fields: &'a [(String, Value)], field: &str) -> Option<&'a Value> {
 /// Reads a whole file and checks it against R1.
 fn parse(spec: &str, source: &str) -> Result<Vec<Vector>, Broken> {
     let root = Reader::document(source)?;
-    let fields = exact(&root, &["spec", "proto_version", "vectors"], "root")?;
-    if text(field(fields, "spec")?)? != spec {
+    let [file_spec, proto_version, vectors] =
+        exact(&root, ["spec", "proto_version", "vectors"], "root")?;
+    if text(file_spec)? != spec {
         return Err(Broken::Spec);
     }
-    if !matches!(field(fields, "proto_version")?, Json::Number(1)) {
+    if !matches!(proto_version, Json::Number(1)) {
         return Err(Broken::ProtoVersion);
     }
-    let Json::Array(items) = field(fields, "vectors")? else {
+    let Json::Array(items) = vectors else {
         return Err(Broken::Shape("root"));
     };
     let vectors = items.iter().map(vector).collect::<Result<Vec<_>, _>>()?;
@@ -240,27 +239,23 @@ fn parse(spec: &str, source: &str) -> Result<Vec<Vector>, Broken> {
 
 fn vector(json: &Json) -> Result<Vector, Broken> {
     let keys = ["name", "kind", "source", "origin", "inputs", "expected"];
-    let fields = exact(json, &keys, "vector")?;
-    let kind = match text(field(fields, "kind")?)? {
+    let [name, kind, source, origin, inputs, expected] = exact(json, keys, "vector")?;
+    let kind = match text(kind)? {
         "positive" => Kind::Positive,
         "negative" => Kind::Negative,
         _ => return Err(Broken::Kind),
     };
-    let source = text(field(fields, "source")?)?;
-    if !SOURCES.contains(&source) {
+    if !SOURCES.contains(&text(source)?) {
         return Err(Broken::Source);
     }
-    let origin = text(field(fields, "origin")?)?;
-    if origin.trim().is_empty() {
+    if text(origin)?.trim().is_empty() {
         return Err(Broken::Origin);
     }
     Ok(Vector {
-        name: text(field(fields, "name")?)?.to_owned(),
+        name: text(name)?.to_owned(),
         kind,
-        source: source.to_owned(),
-        origin: origin.to_owned(),
-        inputs: values(field(fields, "inputs")?)?,
-        expected: values(field(fields, "expected")?)?,
+        inputs: values(inputs)?,
+        expected: values(expected)?,
     })
 }
 
@@ -290,30 +285,28 @@ fn value(key: &str, json: &Json) -> Result<Value, Broken> {
     }
 }
 
-/// The fields of an object that has exactly these keys, in any order.
-fn exact<'a>(
+/// The values of an object that has exactly these keys, in the order of `keys`.
+fn exact<'a, const N: usize>(
     json: &'a Json,
-    keys: &[&str],
+    keys: [&str; N],
     object: &'static str,
-) -> Result<&'a [(String, Json)], Broken> {
+) -> Result<[&'a Json; N], Broken> {
     let Json::Object(fields) = json else {
         return Err(Broken::Shape(object));
     };
-    let has_keys = fields.len() == keys.len()
-        && keys
-            .iter()
-            .all(|key| fields.iter().any(|(name, _)| name == key));
-    has_keys
-        .then_some(fields.as_slice())
-        .ok_or(Broken::Shape(object))
-}
-
-fn field<'a>(fields: &'a [(String, Json)], key: &'static str) -> Result<&'a Json, Broken> {
-    fields
+    let values: Option<Vec<&Json>> = keys
         .iter()
-        .find(|(name, _)| name == key)
-        .map(|(_, json)| json)
-        .ok_or(Broken::Shape(key))
+        .map(|key| {
+            fields
+                .iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, json)| json)
+        })
+        .collect();
+    values
+        .filter(|_| fields.len() == N)
+        .and_then(|values| values.try_into().ok())
+        .ok_or(Broken::Shape(object))
 }
 
 fn text(json: &Json) -> Result<&str, Broken> {
@@ -331,12 +324,9 @@ fn hex(text: &str) -> Result<Vec<u8>, Broken> {
     if !is_lowercase_hex || !text.len().is_multiple_of(2) {
         return Err(Broken::Hex);
     }
-    text.as_bytes()
-        .chunks(2)
-        .map(|pair| {
-            let digits = core::str::from_utf8(pair).map_err(|_| Broken::Hex)?;
-            u8::from_str_radix(digits, 16).map_err(|_| Broken::Hex)
-        })
+    (0..text.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&text[at..at + 2], 16).map_err(|_| Broken::Hex))
         .collect()
 }
 
@@ -358,12 +348,17 @@ impl Reader<'_> {
     fn document(source: &str) -> Result<Json, Broken> {
         let mut reader = Reader { rest: source };
         let json = reader.value()?;
-        let rest = reader.rest.trim_start();
-        rest.is_empty().then_some(json).ok_or(Broken::Syntax)
+        reader.skip_space();
+        reader.rest.is_empty().then_some(json).ok_or(Broken::Syntax)
+    }
+
+    /// JSON whitespace only, not every Unicode space.
+    fn skip_space(&mut self) {
+        self.rest = self.rest.trim_start_matches([' ', '\t', '\n', '\r']);
     }
 
     fn value(&mut self) -> Result<Json, Broken> {
-        self.rest = self.rest.trim_start();
+        self.skip_space();
         match self.rest.chars().next() {
             Some('{') => self.object(),
             Some('[') => self.array(),
@@ -452,7 +447,7 @@ impl Reader<'_> {
     }
 
     fn eat(&mut self, delimiter: char) -> Result<(), Broken> {
-        self.rest = self.rest.trim_start();
+        self.skip_space();
         self.rest = self.rest.strip_prefix(delimiter).ok_or(Broken::Syntax)?;
         Ok(())
     }

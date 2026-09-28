@@ -20,6 +20,7 @@ writes the first, so a failure writes nothing. Exit code 0 on success.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import struct
@@ -29,19 +30,23 @@ from typing import Callable
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 VECTORS_DIR = ROOT / "specs" / "vectors"
-# The one repository file the script opens, as data for the words of spec 014 (R4).
+# The repository files the script reads, as data (R4): its own source for the import check,
+# the published vectors of spec 010 for its self-tests and the word list of spec 014.
+VECTORS_010 = VECTORS_DIR / "010.json"
 WORD_LIST = ROOT / "crates" / "core" / "src" / "proto" / "bip39_english.txt"
 WORD_LIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"  # 011 R17
 
 PROTO_VERSION = 1
 FORMAT_SPECS = ("011", "012", "013", "014", "017")
+KINDS = ("positive", "negative")
+SOURCES = ("published", "derived", "pinned")
 # The fields whose strings are text; every other string is hexadecimal (R1).
 TEXT_FIELDS = (
     "spec", "name", "kind", "source", "origin", "error", "content", "event", "policy", "schema",
     "words",
 )
 # The modules this file imports, all of the standard library (R4).
-STANDARD_LIBRARY = ("__future__", "hashlib", "json", "struct", "sys", "pathlib", "typing")
+STANDARD_LIBRARY = ("__future__", "ast", "hashlib", "json", "struct", "sys", "pathlib", "typing")
 
 
 class U64(int):
@@ -61,11 +66,12 @@ def blake2b_256(data: bytes, key: bytes = b"") -> bytes:
     return hashlib.blake2b(data, digest_size=32, key=key).digest()
 
 
-def kdf_derive(key: bytes, subkey_id: int, context: bytes, length: int = 32) -> bytes:
-    """`crypto_kdf_derive_from_key`, as libsodium's `crypto_kdf_blake2b_derive_from_key`."""
-    salt = subkey_id.to_bytes(8, "little") + bytes(8)
+def kdf_derive(key: bytes, context: bytes) -> bytes:
+    """`crypto_kdf_derive_from_key` with `subkey_id` = 0, the only id of §4, as libsodium's
+    `crypto_kdf_blake2b_derive_from_key`: the salt is the id's 8 little-endian bytes followed by
+    8 zero bytes, all zero here, and the 32-byte subkey is BLAKE2b of the empty message."""
     person = context + bytes(8)
-    return hashlib.blake2b(b"", digest_size=length, key=key, salt=salt, person=person).digest()
+    return hashlib.blake2b(b"", digest_size=32, key=key, salt=bytes(16), person=person).digest()
 
 
 # --- ChaCha20, HChaCha20 and Poly1305 (RFC 8439 §2.3–2.8, draft-irtf-cfrg-xchacha) ---
@@ -236,8 +242,8 @@ def ed25519_sign(seed: bytes, message: bytes) -> bytes:
 def vector(name: str, kind: str, source: str, origin: str, inputs: dict, expected: dict) -> dict:
     """One vector, its values encoded as R1 fixes: bytes as lowercase hexadecimal, `U64` as
     8 big-endian bytes, `int` as a JSON number of at most 32 bits, text only in text fields."""
-    require(kind in ("positive", "negative"), f"{name}: kind {kind}")
-    require(source in ("published", "derived", "pinned"), f"{name}: source {source}")
+    require(kind in KINDS, f"{name}: kind {kind}")
+    require(source in SOURCES, f"{name}: source {source}")
     require(bool(origin.strip()), f"{name}: empty origin")
     return {
         "name": name, "kind": kind, "source": source, "origin": origin,
@@ -274,20 +280,27 @@ def render(spec: str, vectors: list[dict]) -> str:
     return text
 
 
-# One entry per format spec, added with its section in that spec's pull request (R5):
-# the spec number and the function that returns the spec's vectors.
+# One entry per format spec, added with its section in that spec's pull request (R5): the spec
+# number and the function that returns the spec's vectors, each a dict of the six arguments of
+# `vector` with raw values, so that every value goes through its encoding. A section never
+# builds a list by iterating a set: set order changes between processes, which the in-process
+# check below cannot see.
 SECTIONS: dict[str, Callable[[], list[dict]]] = {}
 
 
 def words() -> list[str]:
-    """The English BIP-39 list, refused unless its SHA-256 is the literal of 011 R17."""
+    """The English BIP-39 list, for the section of spec 014; refused unless its SHA-256 is the
+    literal of 011 R17, before any file is written."""
     data = WORD_LIST.read_bytes()
     require(hashlib.sha256(data).hexdigest() == WORD_LIST_SHA256, f"{WORD_LIST} changed")
     return data.decode("ascii").splitlines()
 
 
 def produce() -> dict[str, str]:
-    return {f"{spec}.json": render(spec, section()) for spec, section in SECTIONS.items()}
+    return {
+        f"{spec}.json": render(spec, [vector(**raw) for raw in section()])
+        for spec, section in SECTIONS.items()
+    }
 
 
 # --- Self-checks ----------------------------------------------------------------
@@ -295,13 +308,15 @@ def produce() -> dict[str, str]:
 
 def check_s015_t04_r04_reference_script_is_independent() -> None:
     """Only standard-library imports, and the primitives reproduce their published vectors."""
-    for name, value in list(globals().items()):
-        if name.startswith("__"):  # the interpreter's own: __loader__, __spec__, ...
+    for node in ast.walk(ast.parse(Path(__file__).read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            modules = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            modules = [node.module or ""]  # a relative import has no module and is refused
+        else:
             continue
-        module = value.__name__ if isinstance(value, type(sys)) else getattr(value, "__module__", "")
-        top = (module or "").split(".")[0]
-        if top not in ("", "__main__", "builtins", "vectors"):
-            require(top in STANDARD_LIBRARY, f"import of {module} outside the allow-list")
+        for module in modules:
+            require(module.split(".")[0] in STANDARD_LIBRARY, f"import of {module!r}")
     stdlib = getattr(sys, "stdlib_module_names", None)  # Python 3.10 and later
     require(stdlib is None or set(STANDARD_LIBRARY) <= set(stdlib), "a non-standard module")
 
@@ -311,22 +326,29 @@ def check_s015_t04_r04_reference_script_is_independent() -> None:
         "7d87c5392aab792dc252d5de4533cc9518d38aa8dbf1925ab92386edd4009923"
     ), "BLAKE2b differs from RFC 7693 Appendix A")
 
-    for number, seed, message, public_key, signature in RFC8032_TESTS:
-        seed_bytes, message_bytes = bytes.fromhex(seed), bytes.fromhex(message)
-        require(ed25519_public_key(seed_bytes).hex() == public_key, f"RFC 8032 TEST {number} pk")
-        signed = ed25519_sign(seed_bytes, message_bytes).hex()
-        require(signed == signature, f"RFC 8032 TEST {number} signature")
-
-    key, nonce, aad, plaintext, sealed = (bytes.fromhex(x) for x in AEAD_010)
-    require(xchacha20poly1305_encrypt(key, nonce, aad, plaintext) == sealed, "010 AEAD vector")
-    key, nonce, buffer, stream = (bytes.fromhex(x) for x in STREAM_010)
-    require(xchacha20_xor(key, nonce, buffer) == stream, "010 XChaCha20 vector")
-    key, context, subkey = (bytes.fromhex(x) for x in KDF_010)
-    require(kdf_derive(key, 0, context) == subkey, "010 kdf_subkey_0 vector")
+    published = json.loads(VECTORS_010.read_text(encoding="utf-8"))["vectors"]
+    by_name = {item["name"]: item for item in published}
+    # Each primitive against its vector of 010.json: the arguments in call order, the output.
+    checks = [
+        ("aead_xchacha20poly1305_ietf", xchacha20poly1305_encrypt,
+         ("key", "nonce", "aad", "plaintext"), "ciphertext"),
+        ("stream_xchacha20", xchacha20_xor, ("key", "nonce", "buf"), "buf"),
+        ("blake2b_256_unkeyed", blake2b_256, ("input",), "hash"),
+        ("blake2b_256_keyed", blake2b_256, ("input", "key"), "hash"),
+        ("kdf_subkey_0", kdf_derive, ("key", "context"), "subkey"),
+    ]
+    for number in (1, 2, 3):  # RFC 8032 §7.1 TEST 1–3
+        name = f"ed25519_rfc8032_test{number}"
+        checks += [(name, ed25519_public_key, ("seed",), "pk"),
+                   (name, ed25519_sign, ("seed", "message"), "signature")]
+    for name, primitive, arguments, output in checks:
+        item = by_name[name]
+        values = [bytes.fromhex(item["inputs"][argument]) for argument in arguments]
+        require(primitive(*values).hex() == item["expected"][output], f"010 {name}: {output}")
 
 
 def check_s015_t05_r05_script_writes_every_file() -> dict[str, str]:
-    """Two runs give identical files, and every committed file of a format spec has a section."""
+    """Two runs give identical files, and every committed file from 011 on has a section."""
     files = produce()
     require(files == produce(), "two runs differ")
     require(set(SECTIONS) <= set(FORMAT_SPECS), f"sections outside {FORMAT_SPECS}")
@@ -336,50 +358,8 @@ def check_s015_t05_r05_script_writes_every_file() -> dict[str, str]:
     return files
 
 
-# RFC 8032 §7.1 TEST 1–3: number, seed, message, public key, signature.
-RFC8032_TESTS = [
-    ("1", "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60", "",
-     "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
-     "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"),
-    ("2", "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb", "72",
-     "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
-     "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"),
-    ("3", "c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7", "af82",
-     "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025",
-     "6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a"),
-]
-# The vectors of `010.json`, transcribed: the script opens no file but the word list (R4).
-# aead_xchacha20poly1305_ietf: key, nonce, aad, plaintext, ciphertext.
-AEAD_010 = (
-    "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
-    "07000000404142434445464748494a4b4c4d4e4f50515253",
-    "50515253c0c1c2c3c4c5c6c7",
-    "4c616469657320616e642047656e746c656d656e206f662074686520636c617373206f66202739393a204966"
-    "204920636f756c64206f6666657220796f75206f6e6c79206f6e652074697020666f72207468652066757475"
-    "72652c2073756e73637265656e20776f756c642062652069742e",
-    "f8ebea4875044066fc162a0604e171feecfb3d20425248563bcfd5a155dcc47bbda70b86e5ab9b55002bd127"
-    "4c02db35321acd7af8b2e2d25015e136b7679458e9f43243bf719d639badb5feac03f80a19a96ef10cb1d153"
-    "33a837b90946ba3854ee74da3f2585efc7e1e170e17e15e563e77601f4f85cafa8e5877614e143e68420",
-)
-# stream_xchacha20: key, nonce, buffer, buffer after the XOR.
-STREAM_010 = (
-    "79c99798ac67300bbb2704c95c341e3245f3dcb21761b98e52ff45b24f304fc4",
-    "b33ffd3096479bcfbc9aee49417688a0a2554f8d95389419",
-    "0000000000000000000000000000000000000000000000000000000000",
-    "c6e9758160083ac604ef90e712ce6e75d7797590744e0cf060f013739c",
-)
-# kdf_subkey_0: key, context, subkey.
-KDF_010 = (
-    "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
-    "4b44462074657374",
-    "c13fcc2e6cd0cd0f82d93b163a5696c5105378f8c629d36baf3ae0239de9c280",
-)
-
-
 def main() -> int:
     check_s015_t04_r04_reference_script_is_independent()
-    if WORD_LIST.exists():
-        words()
     files = check_s015_t05_r05_script_writes_every_file()
     for name, text in files.items():
         (VECTORS_DIR / name).write_bytes(text.encode("utf-8"))

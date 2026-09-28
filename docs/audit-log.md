@@ -2,6 +2,25 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit Q
+
+**2026-09-28 — Audit Q, first code audit: slices (a) and (b) of spec 015-test-vectors (branch `015-loader`), in three independent passes (Q-A: structure and simplicity; Q-B: the local CI run per commit, loader edge cases and mutants of the loader and the reference script; Q-C: conformance with spec 015 and AGENTS).** CI green at both commits; no wire, key or format decision changes. Findings and changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| Q1 | The escape and control-character rules of the loader had no test that failed without them (Q-B) | Medium | Two edits without a quote in `s015_t01_r01_rejects_every_broken_rule` |
+| Q2 | The self-check never called the script's `blake2b_256`; `digest_size` or a dropped `key` survived (Q-B) | Medium | Checked against both BLAKE2b vectors of `010.json`; R4, T04 |
+| Q3 | The import check walked `globals()` and missed an import inside a function (Q-A, Q-C) | Medium | Parses its own source with `ast`; R4 |
+| Q4 | T02 called `load` outside `crypto/tests.rs`, against the Interface (Q-C) | Medium | Loop removed |
+| Q5 | T05 promised every written file loads under R1, but a section could hand `render` raw dicts (Q-C) | Medium | Every value goes through `vector`; R5, T05 |
+| Q6 | `Vector.source` and `origin` stored and never read, hidden by the module's `dead_code` allow (Q-A) | Low | Fields removed; still checked on load |
+| Q7 | Every field looked up twice, with an unreachable error (Q-A) | Low | `exact` returns the values; `field` removed |
+| Q8 | The 010 vectors retyped in the script with nothing checking the copy (Q-C) | Low | The script reads `010.json` for its self-tests; R4 |
+| Q9 | Unicode whitespace accepted between tokens (Q-B) | Low | JSON whitespace only; R1 |
+| Q10 | R1, T01 and the Limits table said less than the loader enforces, and T01 put the 64-bit check in the loader (Q-C) | Low | R1, T01, Limits, `specs/vectors/README.md` |
+| Q11 | R5 required five files the format specs have not written yet (Q-C) | Low | R5 writes the file of every section present; phase 1 exit criterion (§10) requires all five |
+| Q12 | Minor: `check_all` checked its three rules three ways, `FILES` had a fixed size, a KDF `subkey_id` that is always 0, the word-list check skipped silently, a stale comment, `Clone` unused (Q-A, Q-B) | Low | Simplified |
+
 ## Audit P
 
 **2026-09-28 — Audit P, coverage review of the whole plan once every spec of §10 existed, in three independent passes (P-A: every obligation of `docs/spec.md` §1–§12 and `docs/threat-model.md` mapped to the spec that owns it; P-B: every deferral between specs checked against its target; P-C: what a v1 shipped to the stores needs that no spec covers).** No wire, key or format decision changes. The human reviewer decided two questions:

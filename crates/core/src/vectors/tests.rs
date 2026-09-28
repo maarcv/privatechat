@@ -3,7 +3,7 @@
 use std::panic::catch_unwind;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::{Broken, Checker, FILES, Kind, Vector, all, check_all, load, parse};
+use super::{Broken, Checker, FILES, Kind, Vector, all, check_all, parse};
 
 /// One vector that carries every kind of value R1 admits.
 const VECTOR: &str = r#"{
@@ -23,7 +23,7 @@ fn file(vectors: &str) -> String {
 /// Spec 015, R1: every committed file loads under the schema.
 #[test]
 fn s015_t01_r01_every_committed_file_matches_the_schema() {
-    for (spec, source) in FILES {
+    for &(spec, source) in FILES {
         let vectors = parse(spec, source);
         assert!(
             matches!(&vectors, Ok(vectors) if !vectors.is_empty()),
@@ -33,8 +33,9 @@ fn s015_t01_r01_every_committed_file_matches_the_schema() {
     }
 }
 
-/// Spec 015, R1: each value type reads back as what the file wrote, and an
-/// absent optional value is a missing field.
+/// Spec 015, R1: each value type reads back as what the file wrote, an absent
+/// optional value is a missing field, and a 64-bit field that is not 8 bytes
+/// fails the test that reads it.
 #[test]
 fn s015_t01_r01_reads_every_value_type() {
     let vectors = parse("999", &file(VECTOR)).unwrap();
@@ -51,6 +52,7 @@ fn s015_t01_r01_reads_every_value_type() {
     assert_eq!(vector.expected("error").text(), "BadLength");
     assert!(vector.has_input("key") && !vector.has_input("nonce"));
     assert!(vector.has_expected("error") && !vector.has_expected("blob"));
+    assert!(catch_unwind(|| vector.input("key").u64_hex()).is_err());
 }
 
 /// Spec 015, R1: a file that breaks one rule fails to load with that rule,
@@ -90,8 +92,14 @@ fn s015_t01_r01_rejects_every_broken_rule() {
             r#""block": 1024, "block": 1024"#,
             Broken::DuplicateKey,
         ),
-        ("a formula", r#"a \"formula\""#, Broken::Syntax),
+        ("a formula", r"a\nformula", Broken::Syntax),
+        ("a formula", "a\tformula", Broken::Syntax),
         (r#""00ff", "block""#, r#""00ff" "block""#, Broken::Syntax),
+        (
+            r#""00ff", "block""#,
+            "\"00ff\",\u{a0}\"block\"",
+            Broken::Syntax,
+        ),
     ];
     for (from, to, expected) in edits {
         let source = one.replace(from, to);
@@ -110,23 +118,15 @@ fn s015_t01_r01_rejects_every_broken_rule() {
     );
 }
 
-/// Spec 015, R2: `all` returns every vector each committed file lists, and
-/// `load` finds each of them by name.
+/// Spec 015, R2: `all` returns every vector each committed file lists; spec
+/// 010's tests reach the same loader through `load`.
 #[test]
 fn s015_t02_r02_one_loader_serves_every_spec() {
-    for (spec, source) in FILES {
-        let vectors = all(spec);
+    for &(spec, source) in FILES {
         // `origin` is a field of a vector and of nothing else.
-        assert_eq!(
-            vectors.len(),
-            source.matches(r#""origin":"#).count(),
-            "{spec}.json"
-        );
-        for vector in &vectors {
-            assert_eq!(load(spec, vector.name()).name(), vector.name());
-        }
+        let listed = source.matches(r#""origin":"#).count();
+        assert_eq!(all(spec).len(), listed, "{spec}.json");
     }
-    assert_eq!(all("010").len(), 19);
 }
 
 static CALLS: AtomicUsize = AtomicUsize::new(0);
