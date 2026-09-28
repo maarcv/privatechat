@@ -1,11 +1,11 @@
 # 012 — Message keys and encrypted header
 
-Status: in review
+Status: accepted
 Phase: 1
 Related ADRs: 0002, 0013, 0018, 0032
 Depends on: 010-primitives-wrapper, 011-config-format, 015-test-vectors
 Blocks: 013-wire-message, 016-fuzz-harness, 021-channel-session, 061-threat-review
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -142,3 +142,4 @@ None open. The former 012-R11 (the own-key verdict: confirmed on 2026-09-24 in a
 - 2026-09-24 revised after audit H (`docs/audit-log.md`): the own-key echo is decided by the signature (ADR 0029), one's own key has no `max_counter`; the counter tables become unit tables; `header_sealed` recomputed by the reference script; one dispatch test; round 4: the header keystream is 104 bytes and its last 64 mask the signature (ADR 0032); round 5: the echo compares unmasked signatures, `header_sealed` derives its keys from `K_ch`, T18 checks the keystream buffer; round 6: `KEY_RETIRED_COUNTER` and no gap for a `key_retired` (ADR 0033), the margin and `ttl_ms` defined here for 013, `ChannelKeys` fields readable by `header.rs`; round 7: `ChannelKeys` fields `pub(crate)` for the generator; round 9: no signature kept under a retired key; round 10: PR slices, the keystream buffer rule dropped
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): the spec is keys and header only; `check_counter`, `gap`, `next_send_counter`, `own_key_verdict`, `signature_retention_end`, `replay.rs` and the rules for the caller move to spec 021-channel-session, and `KEY_RETIRED_COUNTER`, `EXPIRY_MARGIN_MS` and `ttl_ms` to spec 013-wire-message; one `header_keystream` of 104 bytes replaces `Header::seal`, `Header::open` and `mask_signature`, `Header` is a plain `to_bytes`/`from_bytes`; the reference script produces the vectors and the Rust tests reproduce them, `s012_vectors_dispatch` stated in the Interface; visibility and constructor statements moved from requirements to the Interface and their source-scan tests dropped; one or two PR slices
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the state verdicts described by behaviour, since spec 021's interface names them otherwise; the alerts' UI points to specs 055 and 056
+- 2026-09-28 accepted (Marc Vilardebó)

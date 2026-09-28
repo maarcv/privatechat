@@ -1,11 +1,11 @@
 # 017 — Record encoding
 
-Status: in review
+Status: accepted
 Phase: 1
 Related ADRs: 0015, 0021, 0023
 Depends on: 010-primitives-wrapper, 015-test-vectors
 Blocks: 011-config-format, 013-wire-message, 016-fuzz-harness, 020-store-files, 028-session-sans-io, 030-ws-protocol, 061-threat-review
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -170,3 +170,4 @@ None. Decided in audit F (`docs/audit-log.md`):
 - 2026-09-24 documentation review (audit G, `docs/audit-log.md`): the test schema compiled under `cfg(any(test, fuzzing))` for the fuzz target of spec 016
 - 2026-09-24 revised after audit H (`docs/audit-log.md`): PR slices and the `dead_code` allow; the test schema in its own file; partial reads defined once (R16); negative vectors for `text` and lists; the vector test only dispatches; round 4: the `check-cfg` entry for `cfg(fuzzing)` (R17); round 6 and 7: `decode_test_record` belongs to spec 016, which depends on `core::Error`; round 9: `unknown_key_ignored` excluded from the script by name
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): only the six types phase 1 decodes (`bool`, nested records and `list<T>` leave with their vectors; 020 and 030 add them when needed); no partial-read mode (the in-order reader checks a value as soon as it is read); the reference script of spec 015 produces `017.json` and the Rust tests reproduce it; `#[must_use]` stated in the Interface; the dispatch test is an Interface sentence; the test schema written like production code; requirements and tests renumbered
+- 2026-09-28 accepted (Marc Vilardebó)

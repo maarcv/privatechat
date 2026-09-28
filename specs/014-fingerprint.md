@@ -1,11 +1,11 @@
 # 014 — User fingerprint, verification QR and 12 words
 
-Status: in review
+Status: accepted
 Phase: 1
 Related ADRs: 0005, 0006, 0007, 0025, 0028
 Depends on: 010-primitives-wrapper, 011-config-format, 015-test-vectors
 Blocks: 016-fuzz-harness, 022-peers-tofu, 027-core-api, 040-uniffi, 055-verify-ui, 061-threat-review
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -148,3 +148,4 @@ None. Closed after audit F: the list lives in `core`, owned by spec 011-config-f
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): `Fingerprint` holds `Vec<String>` fields with lengths guaranteed by `presentation`, one type inside `core` and across uniffi; the reference script produces the vectors and the Rust tests reproduce them, `s014_vectors_dispatch` stated in the Interface; the list-and-codec reuse and the "no input of four words" clause moved to the Interface and their source-scan tests dropped; R6–R9 renumbered R6–R8, T06–T09 renumbered T06–T08
 - 2026-09-25 revised after audit J round 12 (`docs/audit-log.md`)
 - 2026-09-26 amended by spec 040-uniffi R14 while drafting phase 4: the vectors use the `channel_id` of 011 `config_reference`, so that the bindings reach them through `Device`
+- 2026-09-28 accepted (Marc Vilardebó)

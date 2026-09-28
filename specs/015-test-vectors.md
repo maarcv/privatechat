@@ -1,11 +1,11 @@
 # 015 — Test vectors: schema, loader, reference script and freeze
 
-Status: in review
+Status: accepted
 Phase: 1
 Related ADRs: 0012, 0023, 0029
 Depends on: 010-primitives-wrapper
 Blocks: 017-record-encoding, 011-config-format, 012-message-keys, 013-wire-message, 014-fingerprint, 016-fuzz-harness, 020-store-files, 028-session-sans-io, 031-auth-channel-signature, 040-uniffi
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -136,3 +136,4 @@ None. Closed after audit F: the reference script stays in the repository, one se
 - 2026-09-24 revised after audit F (`docs/audit-log.md`): framework only, each format spec adds its sections; reference Ed25519 of RFC 8032 and the exact list of what the script covers; one dispatch test per spec as the only loader of its vectors; doc-lint, CI-file, `adr-guard` and key-shape requirements dropped as redundant; open question 015-R12 closed
 - 2026-09-24 revised after audit H (`docs/audit-log.md`): PR slices; typed values for booleans, lists and absent fields; spec 010 keeps `load` and is exempt from the dispatch rule; the reference script recomputes the XChaCha20 compositions and every `derived` value not excluded by name, with each format spec owning its list; vectors travel with the slice that tests them (R13); the CI step is a requirement (R14); round 2: `check_all` in place of a free-form dispatch, `kind()` and `has_expected()`, the `content` text field, the slice rule for tests that span slices; round 3: `spec` is a text field, type aliases for the checker and section tables, R9 in slice (b); round 6: one `SOURCES` list for every source-scan test, checked against git in CI; round 7: `SOURCES` in slice (a) and in `lib.rs`, the git pathspec, T15 as a mechanical check; round 8: T13 implementable, the generator may read `all`, verdict fields left to the Rust tests, `dead_code` allow on `mod vectors`; round 9: T13 ignores rustfmt's line breaks; round 13: slices fix the order, not the number of pull requests
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): the reference script produces the files and the Rust tests reproduce them; the Rust generator, `SECTIONS`, `generated()`, `generate_all`, the equality test and the `disallowed_methods` allow removed (I1); `pinned` = bytes libsodium produced, transcribed once, `chatcfg_reference` of 011 pinned; the source-scan test and `SOURCES` removed, `one loader` stated in the Interface (I2); `all` no longer read by a generator (I6); the slice requirement and the fixtures removed, schema, source and encoding rules merged into R1, the dispatch test named `sNNN_vectors_dispatch` (I8); requirements and tests renumbered R1–R6, T01–T06
+- 2026-09-28 accepted (Marc Vilardebó)

@@ -1,11 +1,11 @@
 # 013 — Wire message: envelope, payload and verification
 
-Status: in review
+Status: accepted
 Phase: 1
 Related ADRs: 0002, 0005, 0013, 0016, 0018, 0019, 0023, 0027, 0029, 0030, 0032, 0033
 Depends on: 010-primitives-wrapper, 011-config-format, 012-message-keys, 015-test-vectors, 017-record-encoding
 Blocks: 016-fuzz-harness, 021-channel-session, 030-ws-protocol, 061-threat-review
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -271,3 +271,4 @@ None. Closed after audit H: the expiry of `Unreadable` messages is spec 023-ttl-
 - 2026-09-24 revised after audit F (docs/audit-log.md)
 - 2026-09-24 revised after audit H (`docs/audit-log.md`): four PR slices with their vectors; the reference script recomputes the header, the AEAD and the signature of every positive vector; the stale pre-read is a partial read and a future `sent_at` is stale (ADR 0030); `SenderKey` and `ChannelCtx::from_config`; `Verified::signature` for the own-key echo (ADR 0029); worked example and T14 corrected; the `seal_*` vectors become the unit table of T11; round 2: three slices, the whole blob and the equation of the strict-check negatives recomputed by the script, `content` field, `sent_at` in `Opened`, the `text_k1` inputs shared with spec 016; round 3: the strict-check negatives go back to the bytes of `010.json`, with no equation check, the stale own-key wording follows ADR 0029, `seal_padded` checks its length, `text_k1` holds the config inputs; round 4: the signature travels masked with the header keystream (ADR 0032), `Verified::signature` returns it unmasked (R20), slice (a) cases for T12 and T13; round 5: `Sealed` carries the unmasked signature, the strict-check negatives are edited before masking and their checkers verify it, no `Display` checked; round 6: the `key_retired` vector at the last counter (ADR 0033), the margin from spec 012, the strict-check negatives carry the values their checkers compare; round 7: the margin constant is spec 012's only; round 9: T07 counts callers outside tests and the generator
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): the two XORs of the header keystream live in `envelope.rs` over `header_keystream` of spec 012 (no `mask_signature`, no `Header::seal`); `EXPIRY_MARGIN_MS`, `ttl_ms` and `KEY_RETIRED_COUNTER` defined here for spec 021; the stale check stated as a point in the in-order walk (no partial read); the five strict Ed25519 negatives dropped (proven once in spec 010); the reference script produces the vectors and the Rust tests reproduce them, `s013_vectors_dispatch` stated in the Interface; source-scan clauses and slice sentences dropped from the tests; the signed range built in one buffer
+- 2026-09-28 accepted (Marc Vilardebó)

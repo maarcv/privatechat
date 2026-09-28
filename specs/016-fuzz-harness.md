@@ -1,11 +1,11 @@
 # 016 — Fuzz harness
 
-Status: in review
+Status: accepted
 Phase: 1
 Related ADRs: 0012, 0023, 0027, 0032
 Depends on: 010-primitives-wrapper, 015-test-vectors, 017-record-encoding, 011-config-format, 012-message-keys, 013-wire-message, 014-fingerprint
 Blocks: 020-store-files, 021-channel-session, 022-peers-tofu, 027-core-api, 028-session-sans-io, 030-ws-protocol, 031-auth-channel-signature, 063-beta
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -131,3 +131,4 @@ None. Closed after audit F: one hour per target, run as a matrix of parallel nig
 - 2026-09-24 revised after audit H (`docs/audit-log.md`): `fuzz_entry` under `cfg(any(test, fuzzing))` with its tests in `core`; exact input layouts and the fixed keys of `text_k1`; a seed script in place of a committed corpus; the set check counts calls through `fuzz_entry`; a dated nightly only in the fuzz workflow; the CI steps as a requirement; PR slices; round 2: `fuzz_entry` returns its verdict in place of the `_outcome` twins, the `text_k1` inputs shared with spec 013, the `record_decode` seed layout and `now = 0` for the config targets, CI step names; round 3: `allow(private_interfaces)` and example signatures, the seed table, the policy byte, two more exclusions; round 4: `pub` entries return `()` and call crate-internal `_verdict` functions, since crate-internal types cannot cross into the fuzz crate; the `check-cfg` entry moves to spec 017; round 5: `record_decode_verdict` returns `core::Error`, T08 checks the shape of the entries; round 6: `record_decode` through `decode_test_record`, the policy byte and the short input tested, T12 counts the path dependency; round 7: this spec owns `decode_test_record`; round 8: the target sources are read through `FUZZ_TARGETS` in `lib.rs`; round 9: the fuzz manifest carries its licence; round 10: the fuzz targets are checked by the script alone (no `FUZZ_TARGETS`), the manifest and `deny.toml` edits that make `cargo deny` pass, `jobserver` allowed as a build-time wrapper by the human reviewer; round 11: the script lands in slice (a) with the checks its tests need; round 11 and 12: R7 finds `pub` items and the exclusion list names the crate-internal ones no target reaches; round 13: no fuzz lockfile committed, the workspace one copied in CI, a `.gitignore` for the fuzz crate; round 14: the lock-copy check moves from T12 to T10, which lands with the workflows
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): no `cargo deny` over the fuzz crate, which reverses H53, H57, H60 and H62: no licence exception, no `jobserver` wrapper, no lockfile copy and no fuzz deny step; the fuzz `Cargo.lock` is committed and the crate has its own `[workspace]` table (I3); the `cfg` gate of `fuzz_entry` and the shape of its entries move to the Interface, the source-scan clauses of the old T02 and T08 dropped (I2); the test schema is the six types phase 1 implements (I4); the reach check of R6 is an operational rule and the nightly installs its toolchain and `cargo-fuzz` (I9); requirements and tests renumbered R1–R12, T01–T12
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the acceptance criterion names where the second person's review of `proto` is recorded
+- 2026-09-28 accepted (Marc Vilardebó)

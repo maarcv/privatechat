@@ -1,11 +1,11 @@
 # 011 — Channel config format
 
-Status: in review
+Status: accepted
 Phase: 1
 Related ADRs: 0001, 0008, 0009, 0010, 0014, 0022, 0023, 0028, 0031, 0038
 Depends on: 010-primitives-wrapper, 015-test-vectors, 017-record-encoding
 Blocks: 012-message-keys, 013-wire-message, 014-fingerprint, 016-fuzz-harness, 020-store-files, 027-core-api, 028-session-sans-io, 031-auth-channel-signature, 040-uniffi, 041-desktop-bridge, 054-qr-invite, 061-threat-review
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -243,3 +243,4 @@ None. Decided in audit F (`docs/audit-log.md`):
 - 2026-09-25 amended by ADR 0038 while drafting phase 3: `ws://` for v3 onion hosts only, port never 80 (R5, R6, T05)
 - 2026-09-26 amended by spec 040-uniffi R14 during audit L round 2 (`docs/audit-log.md`): `channel_id_ttl_60` and `channel_id_ttl_2592000` carry their record
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the camera pointer names spec 054 alone
+- 2026-09-28 accepted (Marc Vilardebó)
