@@ -1,11 +1,11 @@
 # 056 — Chat screens: the channel list, the channel, the composer, settings and help
 
-Status: draft
+Status: accepted
 Phase: 5
 Related ADRs: 0008, 0014, 0019, 0020, 0027, 0034, 0037, 0041
 Depends on: 021-channel-session, 023-ttl-purge, 027-core-api, 028-session-sans-io, 040-uniffi, 041-desktop-bridge, 042-connection-host, 053-device-security, 054-qr-invite, 055-verify-ui
 Blocks: 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 062-security-docs
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -238,3 +238,4 @@ On each platform, the tests of T01–T21 green in CI (Android: `./gradlew test c
 - 2026-09-27 revised after audit O round 3 (`docs/audit-log.md`): no longer depends on spec 060, whose PR slice (c) the release-keys section of R18 names instead
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): `Unreadable` rows use the text of `docs/spec.md` §4; `CounterExhausted` forces "Regenerate my key"; a screen-reader announcement of new messages with no body or name; Help sections "Device time", "Uninstalling", "Updates" and "Licences", and the iPhone Tor sentence; the security texts named for the reviewer rule of spec 062
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the age notice of an old build moves here from spec 065 (R22); the iOS Tor sentence covers a Tor app's VPN mode; uninstalling "may not" delete the data; the notices file is spec 060 R12 and the feed spec 065 R2; the security texts follow spec 062 R7
+- 2026-09-28 accepted (Marc Vilardebó)

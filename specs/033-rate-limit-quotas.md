@@ -1,11 +1,11 @@
 # 033 — Rate limits and quotas on the server
 
-Status: draft
+Status: accepted
 Phase: 3
 Related ADRs: 0008, 0010, 0038
 Depends on: 028-session-sans-io, 030-ws-protocol, 031-auth-channel-signature, 032-storage-ttl
 Blocks: 035-server-ops, 041-desktop-bridge, 042-connection-host
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -162,3 +162,4 @@ None.
 - 2026-09-25 revised after audit K round 2 (`docs/audit-log.md`): per-address and onion ingest budgets; IPv6 also by /48; canonical addresses; `ip_connections` 64; the write deadline from the start of a write; deadlines on the monotonic clock; the NAT and slow-link notes
 - 2026-09-25 revised after audit K round 1 (`docs/audit-log.md`): the ping rule counts write progress and a stuck write drops the connection; per-IP limits count every open connection and key IPv6 by /64; a full table admits under the caps; each listener has its own caps; the Tor-exit case documented
 - 2026-09-27 amended by spec 061-threat-review R2 (`docs/audit-log.md`, "Audit O"): the onion-budget residual worded "documented residual"
+- 2026-09-28 accepted (Marc Vilardebó)

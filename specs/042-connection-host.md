@@ -1,11 +1,11 @@
 # 042 — Connection host: the device and its server connections, for every client
 
-Status: draft
+Status: accepted
 Phase: 4
 Related ADRs: 0020, 0037, 0038, 0041
 Depends on: 020-store-files, 027-core-api, 028-session-sans-io, 030-ws-protocol, 033-rate-limit-quotas, 035-server-ops
 Blocks: 040-uniffi, 041-desktop-bridge, 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 053-device-security, 054-qr-invite, 056-chat-screens, 060-reproducible-builds, 061-threat-review, 065-release-maintenance
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -285,3 +285,4 @@ None. The host calls `Device` in-process, in Rust, so every vector already reach
 - 2026-09-27 042-R10 measured and closed: on an iPhone 15 Pro Max with iOS 26, a std `TcpStream` from native code, as the first network use of an app after three minutes locked with Wi-Fi off, connected over cellular (`pdp_ip0`), and with a full-tunnel VPN active it left through the tunnel over Wi-Fi and over cellular, exactly as `NWConnection` did (`docs/audit-log.md`, "Audit N"); a per-app VPN and Android were not measured
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the Windows libsodium binary is a v1 residual with no owner, not a change spec 060 makes (P-D8)
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): blocks spec 065; on Apple targets every host, an IPv4 literal included, resolved through `getaddrinfo` so that NAT64 synthesis applies (042-R9)
+- 2026-09-28 accepted (Marc Vilardebó)

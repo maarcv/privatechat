@@ -1,11 +1,11 @@
 # 051 — Android app: the Compose client over `Core`
 
-Status: draft
+Status: accepted
 Phase: 5
 Related ADRs: 0012, 0037, 0041
 Depends on: 040-uniffi, 042-connection-host, 053-device-security, 054-qr-invite, 055-verify-ui, 056-chat-screens
 Blocks: 060-reproducible-builds, 063-beta, 064-public-release
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -136,3 +136,4 @@ The CI job `android` green. Non-automatable: on a phone with Android 11 and one 
 - 2026-09-27 amended after audit O round 2 (`docs/audit-log.md`): the `versionCode` and ABI index derived from the tag (spec 060-reproducible-builds R2)
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): store screenshots and feature graphic from the screenshot tests; the export-compliance answer of 052-R10; review notes, the answer on user-generated content and the IARC rating (R11)
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the "Data safety" answer rests on the reasons `docs/release-legal.md` records
+- 2026-09-28 accepted (Marc Vilardebó)

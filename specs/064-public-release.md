@@ -1,11 +1,11 @@
 # 064 — Public release
 
-Status: draft
+Status: accepted
 Phase: 6
 Related ADRs: 0017, 0041
 Depends on: 051-android-mvp, 052-ios-mvp, 060-reproducible-builds, 061-threat-review, 062-security-docs, 063-beta, 065-release-maintenance, 066-public-server
 Blocks: —
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -97,3 +97,4 @@ None.
 - 2026-09-27 revised after audit O round 3 (`docs/audit-log.md`): Rekor logged by `sign_release.sh` before upload and checked by `verify`, so the gate row records it; the release tag tied to the last beta; the Play bundle's signing is spec 060 R6's step, uploaded by hand; F-Droid after publication, its description in `fdroiddata`; the one-line check with `check-novalidate`; rotation notices through the owner's channels; Help checked for the fingerprints only
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): R1 gates on every spec but 064 and 065 `implemented` (no spec left in `draft`), the export-compliance record `docs/release-legal.md` of 052 R10, and the server of spec 066 running the release's image; R2 no image in a registry, its digest in `SHA256SUMS`; later releases to spec 065; store screenshots to 051 and 052; phase 6 closes with 064, 065 and 066; depends on 066, blocks 065
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): depends on 065, which R1 now gates on like every other spec, so its feed and checks run from the first release; R1 and T01 check a "Deployments" row of spec 066 for the release tag and open question 066-R8 closed; phase 6 closes with this spec
+- 2026-09-28 accepted (Marc Vilardebó)

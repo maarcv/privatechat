@@ -1,11 +1,11 @@
 # 061 — External review of the cryptographic and threat model
 
-Status: draft
+Status: accepted
 Phase: 6
 Related ADRs: 0001, 0005, 0010, 0013, 0014, 0018, 0032, 0041
 Depends on: 010-primitives-wrapper, 011-config-format, 012-message-keys, 013-wire-message, 014-fingerprint, 017-record-encoding, 020-store-files, 021-channel-session, 027-core-api, 031-auth-channel-signature, 040-uniffi, 041-desktop-bridge, 042-connection-host, 053-device-security, 060-reproducible-builds (its PR slice (c), the keys)
 Blocks: 062-security-docs, 063-beta, 064-public-release, 065-release-maintenance
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -126,3 +126,4 @@ None.
 - 2026-09-27 revised after audit O round 3 (`docs/audit-log.md`): commits outside the listed paths allowed in any beta tag; the version derivation and the beta label and expiry implemented before the freeze; the delta open until the public release, and the `vX.Y.Z` tag tied to the last beta; human-decided rows outside R4 in the beta formula and exempt from R7's gate; the experimental line checked only until the public release; the reviewers asked to print the one-line check; Depends on 040, 041 and 060's keys slice
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the phrase "documented residual" is the contract of R2 and nothing else is harvested (D3); the server's operation points to spec 066 and later re-reviews to spec 065
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): R3 and T03's tie to the last beta tag hold for the first public `vX.Y.Z` tag only; later tags and their re-reviews follow spec 065-release-maintenance R1
+- 2026-09-28 accepted (Marc Vilardebó)

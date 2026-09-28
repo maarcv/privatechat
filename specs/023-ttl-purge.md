@@ -1,11 +1,11 @@
 # 023 — TTL purge: the message list and compaction
 
-Status: draft
+Status: accepted
 Phase: 2
 Related ADRs: 0009, 0014, 0021, 0029
 Depends on: 020-store-files, 021-channel-session, 022-peers-tofu
 Blocks: 027-core-api, 028-session-sans-io, 055-verify-ui, 056-chat-screens
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -118,3 +118,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-09-25 revised after audit J round 16 (`docs/audit-log.md`)
 - 2026-09-25 open questions decided with the human reviewer, recommendations accepted (`docs/audit-log.md`)
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the `on_tick` timer points to spec 042; the residual of a clock set ahead
+- 2026-09-28 accepted (Marc Vilardebó)

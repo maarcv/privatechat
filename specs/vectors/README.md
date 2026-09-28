@@ -33,6 +33,7 @@ The reference script `scripts/reference/vectors.py` of spec 015-test-vectors pro
 
 - All bytes in lowercase hexadecimal. Integers up to 32 bits are JSON numbers; every 64-bit integer (counters, times) is its big-endian 8 bytes as 16 lowercase hex characters, so that Kotlin, Swift and any JSON parser read it without losing precision.
 - A boolean is JSON `true` or `false`; an absent optional value is a missing field, never `null`; a list is a JSON array whose items follow the same rules.
+- Vector names are unique in a file, no object repeats a key, `spec` is the file's own number, and no string carries an escape or a control character (spec 015 R1).
 - Text appears only in the fields `spec`, `name`, `kind`, `source`, `origin`, `error`, `content` (the outcome of a positive receive vector: `message`, `unreadable` or `stale`), `event` (the outcome of a frame vector of spec 028-session-sans-io: `accepted`, `reconnect` or `unsupported_server`), `policy`, `schema` and `words` (an array of words); every other string is hexadecimal.
 - Every vector declares its provenance in `source`, and `origin` names it precisely:
   - `published` — transcribed from a standards document or from the primitive's

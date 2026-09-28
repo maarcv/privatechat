@@ -1,11 +1,11 @@
 # 040 — uniffi bindings: the connection host for Kotlin and Swift
 
-Status: draft
+Status: accepted
 Phase: 4
 Related ADRs: 0012, 0020, 0028, 0037, 0041
 Depends on: 010-primitives-wrapper, 011-config-format, 014-fingerprint, 015-test-vectors, 020-store-files, 027-core-api, 028-session-sans-io, 042-connection-host
 Blocks: 041-desktop-bridge, 051-android-mvp, 052-ios-mvp, 053-device-security, 054-qr-invite, 055-verify-ui, 056-chat-screens, 060-reproducible-builds, 061-threat-review
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -282,3 +282,4 @@ None. Decided with the human reviewer on 2026-09-26 and 2026-09-27 (`docs/audit-
 - 2026-09-27 revised after audit N round 3 (`docs/audit-log.md`): `Core` the one filter of the phones, with a floor set when its own lock starts and read atomically from the adapter's thread; a current-generation `locked` forwarded with its fault flag and marking `Core` closed; `retry_now` synchronous beside `network_changed`; `FfiChannelState` with `subscribed`, and `connection_states` empty while locked; `clear_failed` for the reset; `FfiReceived` dropped; T09's `FfiSentView`
 - 2026-09-27 revised after audit N round 4 (`docs/audit-log.md`): `Core.lock` delivers its own `locked` at the start of the lock, the host's copy dropped at the floor, and only a fault `locked` passes from the host; the floor only rises; `clear_failed` works while locked
 - 2026-09-27 the exception for an iOS `NWConnection` removed, since 042-R10 measured that none is needed
+- 2026-09-28 accepted (Marc Vilardebó)

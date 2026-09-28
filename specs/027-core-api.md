@@ -1,11 +1,11 @@
 # 027 — Core API: `Device`, the one handle at the boundary
 
-Status: draft
+Status: accepted
 Phase: 2
 Related ADRs: 0012, 0020, 0021, 0022, 0028, 0037, 0038
 Depends on: 011-config-format, 014-fingerprint, 016-fuzz-harness, 020-store-files, 021-channel-session, 022-peers-tofu, 023-ttl-purge, 024-key-retired, 025-identity-regen, 026-peer-limits, 028-session-sans-io
 Blocks: 030-ws-protocol, 031-auth-channel-signature, 032-storage-ttl, 035-server-ops, 040-uniffi, 041-desktop-bridge, 042-connection-host, 053-device-security, 054-qr-invite, 055-verify-ui, 056-chat-screens, 061-threat-review
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -261,3 +261,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-09-25 amended after audit K round 1 (`docs/audit-log.md`): a `ws://` channel is planned only behind a loopback proxy (R10, T10); the `pub` items of `server` and the `relay` items (R16)
 - 2026-09-26 amended by spec 040-uniffi R8 while drafting phase 4: `generate_storage_key` added to the Interface
 - 2026-09-27 revised after audit N round 1 (`docs/audit-log.md`): the probe's wait, the sockets and the tick point to spec 042-connection-host, and the re-read tick to spec 056-chat-screens; `Blocks` gains 042 and 056
+- 2026-09-28 accepted (Marc Vilardebó)

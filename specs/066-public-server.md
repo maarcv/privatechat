@@ -1,11 +1,11 @@
 # 066 — The project's public server
 
-Status: draft
+Status: accepted
 Phase: 6
 Related ADRs: 0014, 0022, 0038
 Depends on: 034-docker, 035-server-ops, 060-reproducible-builds, 062-security-docs
 Blocks: 063-beta, 064-public-release, 065-release-maintenance
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -103,3 +103,4 @@ The checks of T01, T03, T07 and T08, and the CI steps of T02, T05 and T06, green
 
 - 2026-09-28 draft (`docs/audit-log.md`, "Audit P", P-Q1)
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): R2 the image built off the host, checked against fingerprints the host holds and never the repository, and the manifest's commit; R1 the architecture and the measured memory per connection; R3 at most 70 % of memory; R5 tested by its own TLS check; R6 fails under 7 days; R8 a fixed yearly date whose absence is a signal; which image runs is the operator's word and GitHub's 60-day disable are documented residuals; T04 a recorded port scan; T05 and T06 against the compose stack; blocks 065
+- 2026-09-28 accepted (Marc Vilardebó)

@@ -10,19 +10,21 @@ use super::{
     CryptoError, KdfContext, Nonce, PublicKey, SECRET_TYPES, Salt, Secret, Signature, aead_decrypt,
     aead_encrypt, check_password_len, checked_output_len, ct_eq, ffi, hash, init, init_calls,
     kdf_derive, keyed_hash, pad, password_key, random_bytes, secretbox_open, secretbox_seal,
-    sign_detached, sign_keypair, sign_keypair_from_seed, stream_xor, unpad, vectors,
-    verify_detached, version,
+    sign_detached, sign_keypair, sign_keypair_from_seed, stream_xor, unpad, verify_detached,
+    version,
 };
+use crate::vectors::{self, Kind};
 
 /// Every `.rs` file of the crate. `core` does no I/O (AGENTS 10), so the test
 /// cannot walk the directory: a new file is added to this list by hand.
-const SOURCES: [(&str, &str); 6] = [
+const SOURCES: [(&str, &str); 7] = [
     ("lib.rs", include_str!("../lib.rs")),
     ("crypto.rs", include_str!("../crypto.rs")),
     ("crypto/ffi.rs", include_str!("ffi.rs")),
     ("crypto/secret.rs", include_str!("secret.rs")),
     ("crypto/tests.rs", include_str!("tests.rs")),
-    ("crypto/vectors.rs", include_str!("vectors.rs")),
+    ("vectors.rs", include_str!("../vectors.rs")),
+    ("vectors/tests.rs", include_str!("../vectors/tests.rs")),
 ];
 
 /// Spec 010, R1: `crypto/ffi.rs` is the only file that uses the keyword, and
@@ -267,36 +269,18 @@ fn s010_t29_r16_libsodium_version_is_pinned() -> Result<(), CryptoError> {
     Ok(())
 }
 
-/// The vector loader reads the whole file and hands back the bytes the
-/// vectors declare. It covers no requirement of the spec: it is the harness
-/// every vector test below depends on, so it is checked on its own.
-#[test]
-fn vector_loader_reads_every_vector() {
-    assert_eq!(vectors::count(), 19);
-    let aead = vectors::load("aead_xchacha20poly1305_ietf");
-    assert_eq!(aead.kind, "positive");
-    assert_eq!(aead.array::<32>("key").len(), 32);
-    assert_eq!(aead.bytes("plaintext").len(), 114);
-    assert_eq!(aead.expected_bytes("ciphertext").len(), 130);
-    let padding = vectors::load("pad_1024");
-    assert_eq!(padding.number("block"), 1024);
-    let rejected = vectors::load("unpad_all_zero");
-    assert_eq!(rejected.kind, "negative");
-    assert_eq!(rejected.expected_text("error"), "BadPadding");
-}
-
 /// Spec 010, R6: the AEAD reproduces the published vector, in both
 /// directions.
 #[test]
 fn s010_t07_r06_aead_known_answer() -> Result<(), CryptoError> {
-    let vector = vectors::load("aead_xchacha20poly1305_ietf");
-    let key = Secret::<32>::from_bytes(vector.array("key"));
-    let nonce = Nonce(vector.array("nonce"));
-    let aad = vector.bytes("aad");
-    let plaintext = vector.bytes("plaintext");
-    let ciphertext = vector.expected_bytes("ciphertext");
-    assert_eq!(aead_encrypt(&key, &nonce, &aad, &plaintext)?, ciphertext);
-    assert_eq!(aead_decrypt(&key, &nonce, &aad, &ciphertext)?, plaintext);
+    let vector = vectors::load("010", "aead_xchacha20poly1305_ietf");
+    let key = Secret::<32>::from_bytes(vector.input("key").array());
+    let nonce = Nonce(vector.input("nonce").array());
+    let aad = vector.input("aad").bytes();
+    let plaintext = vector.input("plaintext").bytes();
+    let ciphertext = vector.expected("ciphertext").bytes();
+    assert_eq!(aead_encrypt(&key, &nonce, aad, plaintext)?, ciphertext);
+    assert_eq!(aead_decrypt(&key, &nonce, aad, ciphertext)?, plaintext);
     Ok(())
 }
 
@@ -370,25 +354,25 @@ proptest! {
 /// keystream.
 #[test]
 fn s010_t11_r07_stream_known_answer() -> Result<(), CryptoError> {
-    let vector = vectors::load("stream_xchacha20");
-    let key = Secret::<32>::from_bytes(vector.array("key"));
-    let nonce = Nonce(vector.array("nonce"));
-    let mut buffer = vector.bytes("buf");
+    let vector = vectors::load("010", "stream_xchacha20");
+    let key = Secret::<32>::from_bytes(vector.input("key").array());
+    let nonce = Nonce(vector.input("nonce").array());
+    let mut buffer = vector.input("buf").bytes().to_vec();
     stream_xor(&key, &nonce, &mut buffer)?;
-    assert_eq!(buffer, vector.expected_bytes("buf"));
+    assert_eq!(buffer, vector.expected("buf").bytes());
     Ok(())
 }
 
 /// Spec 010, R12: the secret box reproduces the published vector.
 #[test]
 fn s010_t18_r12_secretbox_known_answer() -> Result<(), CryptoError> {
-    let vector = vectors::load("secretbox_easy");
-    let key = Secret::<32>::from_bytes(vector.array("key"));
-    let nonce = Nonce(vector.array("nonce"));
-    let plaintext = vector.bytes("plaintext");
-    let sealed = vector.expected_bytes("sealed");
-    assert_eq!(secretbox_seal(&key, &nonce, &plaintext)?, sealed);
-    assert_eq!(secretbox_open(&key, &nonce, &sealed)?, plaintext);
+    let vector = vectors::load("010", "secretbox_easy");
+    let key = Secret::<32>::from_bytes(vector.input("key").array());
+    let nonce = Nonce(vector.input("nonce").array());
+    let plaintext = vector.input("plaintext").bytes();
+    let sealed = vector.expected("sealed").bytes();
+    assert_eq!(secretbox_seal(&key, &nonce, plaintext)?, sealed);
+    assert_eq!(secretbox_open(&key, &nonce, sealed)?, plaintext);
     Ok(())
 }
 
@@ -458,10 +442,10 @@ fn s010_t22_r14_wrapper_bounds_are_the_primitives() -> Result<(), CryptoError> {
 /// context gives a different subkey.
 #[test]
 fn s010_t12_r08_kdf_known_answer() -> Result<(), CryptoError> {
-    let vector = vectors::load("kdf_subkey_0");
-    let key = Secret::<32>::from_bytes(vector.array("key"));
-    let context = KdfContext::new(vector.array("context"));
-    let expected = Secret::<32>::from_bytes(vector.expected_bytes("subkey").try_into().unwrap());
+    let vector = vectors::load("010", "kdf_subkey_0");
+    let key = Secret::<32>::from_bytes(vector.input("key").array());
+    let context = KdfContext::new(vector.input("context").array());
+    let expected = Secret::<32>::from_bytes(vector.expected("subkey").array());
     assert!(kdf_derive(&key, &context)? == expected);
 
     let other = KdfContext::new(*b"pcother1");
@@ -472,16 +456,16 @@ fn s010_t12_r08_kdf_known_answer() -> Result<(), CryptoError> {
 /// Spec 010, R9: BLAKE2b at 32 bytes, keyed and unkeyed, on their vectors.
 #[test]
 fn s010_t13_r09_hash_known_answer() -> Result<(), CryptoError> {
-    let unkeyed = vectors::load("blake2b_256_unkeyed");
+    let unkeyed = vectors::load("010", "blake2b_256_unkeyed");
     assert_eq!(
-        hash(&unkeyed.bytes("input"))?.to_vec(),
-        unkeyed.expected_bytes("hash")
+        hash(unkeyed.input("input").bytes())?.to_vec(),
+        unkeyed.expected("hash").bytes()
     );
 
-    let keyed = vectors::load("blake2b_256_keyed");
-    let key = Secret::<32>::from_bytes(keyed.array("key"));
-    let expected = Secret::<32>::from_bytes(keyed.expected_bytes("hash").try_into().unwrap());
-    assert!(keyed_hash(&key, &keyed.bytes("input"))? == expected);
+    let keyed = vectors::load("010", "blake2b_256_keyed");
+    let key = Secret::<32>::from_bytes(keyed.input("key").array());
+    let expected = Secret::<32>::from_bytes(keyed.expected("hash").array());
+    assert!(keyed_hash(&key, keyed.input("input").bytes())? == expected);
     Ok(())
 }
 
@@ -494,20 +478,20 @@ fn s010_t14_r10_sign_known_answer() -> Result<(), CryptoError> {
         "ed25519_rfc8032_test2",
         "ed25519_rfc8032_test3",
     ] {
-        let vector = vectors::load(name);
-        let seed = Secret::<32>::from_bytes(vector.array("seed"));
-        let message = vector.bytes("message");
+        let vector = vectors::load("010", name);
+        let seed = Secret::<32>::from_bytes(vector.input("seed").array());
+        let message = vector.input("message").bytes();
         let (public_key, secret_key) = sign_keypair_from_seed(&seed)?;
         assert!(
-            public_key == PublicKey(vector.expected_bytes("pk").try_into().unwrap()),
+            public_key == PublicKey(vector.expected("pk").array()),
             "{name}"
         );
-        let signature = sign_detached(&secret_key, &message)?;
+        let signature = sign_detached(&secret_key, message)?;
         assert!(
-            signature == Signature(vector.expected_bytes("signature").try_into().unwrap()),
+            signature == Signature(vector.expected("signature").array()),
             "{name}"
         );
-        verify_detached(&public_key, &message, &signature)?;
+        verify_detached(&public_key, message, &signature)?;
     }
     Ok(())
 }
@@ -525,13 +509,13 @@ fn s010_t15_r10_verify_rejects_malformed() {
         "wrong_message",
         "wrong_pk",
     ] {
-        let vector = vectors::load(name);
-        assert_eq!(vector.kind, "negative");
-        assert_eq!(vector.expected_text("error"), "Forged", "{name}");
-        let public_key = PublicKey(vector.array("pk"));
-        let signature = Signature(vector.array("signature"));
+        let vector = vectors::load("010", name);
+        assert_eq!(vector.kind(), Kind::Negative);
+        assert_eq!(vector.expected("error").text(), "Forged", "{name}");
+        let public_key = PublicKey(vector.input("pk").array());
+        let signature = Signature(vector.input("signature").array());
         assert_eq!(
-            verify_detached(&public_key, &vector.bytes("message"), &signature),
+            verify_detached(&public_key, vector.input("message").bytes(), &signature),
             Err(CryptoError::Forged),
             "{name}"
         );
@@ -558,17 +542,17 @@ proptest! {
 /// a different salt gives a different key.
 #[test]
 fn s010_t17_r11_password_key_known_answer() -> Result<(), CryptoError> {
-    let vector = vectors::load("argon2id13_interactive");
-    assert_eq!(vector.number("opslimit"), 2);
-    assert_eq!(vector.number("memlimit"), 67_108_864);
-    let password = vector.bytes("password");
-    let salt = Salt(vector.array("salt"));
-    let expected = Secret::<32>::from_bytes(vector.expected_bytes("key").try_into().unwrap());
-    assert!(password_key(&password, &salt)? == expected);
+    let vector = vectors::load("010", "argon2id13_interactive");
+    assert_eq!(vector.input("opslimit").number(), 2);
+    assert_eq!(vector.input("memlimit").number(), 67_108_864);
+    let password = vector.input("password").bytes();
+    let salt = Salt(vector.input("salt").array());
+    let expected = Secret::<32>::from_bytes(vector.expected("key").array());
+    assert!(password_key(password, &salt)? == expected);
 
     let mut other = salt;
     other.0[0] ^= 1;
-    assert!(password_key(&password, &other)? != expected);
+    assert!(password_key(password, &other)? != expected);
     Ok(())
 }
 
@@ -593,18 +577,21 @@ proptest! {
 /// valid padding at all.
 #[test]
 fn s010_t21_r13_unpad_rejects_bad_padding() -> Result<(), CryptoError> {
-    let vector = vectors::load("pad_1024");
-    let block = vector.number("block");
-    let mut buffer = vector.bytes("buf");
+    let vector = vectors::load("010", "pad_1024");
+    let block = usize::try_from(vector.input("block").number()).unwrap();
+    let mut buffer = vector.input("buf").bytes().to_vec();
     let unpadded_len = buffer.len();
     pad(&mut buffer, block)?;
-    assert_eq!(buffer, vector.expected_bytes("padded"));
+    assert_eq!(buffer, vector.expected("padded").bytes());
     assert_eq!(unpad(&buffer, block)?, unpadded_len);
 
-    let zeros = vectors::load("unpad_all_zero");
-    assert_eq!(zeros.expected_text("error"), "BadPadding");
+    let zeros = vectors::load("010", "unpad_all_zero");
+    assert_eq!(zeros.expected("error").text(), "BadPadding");
     assert_eq!(
-        unpad(&zeros.bytes("buf"), zeros.number("block")),
+        unpad(
+            zeros.input("buf").bytes(),
+            usize::try_from(zeros.input("block").number()).unwrap()
+        ),
         Err(CryptoError::BadPadding)
     );
     assert_eq!(unpad(&[0u8; 30], 16), Err(CryptoError::BadPadding));

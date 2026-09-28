@@ -1,11 +1,11 @@
 # 032 — Server storage: one SQLite table, one writer, and the TTL purge
 
-Status: draft
+Status: accepted
 Phase: 3
 Related ADRs: 0009, 0014, 0022
 Depends on: 010-primitives-wrapper, 027-core-api
 Blocks: 030-ws-protocol, 033-rate-limit-quotas, 035-server-ops
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -165,3 +165,4 @@ None.
 - 2026-09-25 revised after audit K round 1 (`docs/audit-log.md`): `last_received_at` kept in `meta`; the batch takes what is waiting, with no 10 ms timer; results with their connection through `on_commit`, no `oneshot`; no `server_id` retry; the quota counts live pages; pages bounded by bytes; a truncating checkpoint after each purge and a test that no purged byte remains; `temp_store = MEMORY`; deadlines checked on a 100 ms wake; the crash test moved to spec 035
 - 2026-09-27 amended by spec 061-threat-review R2 (`docs/audit-log.md`, "Audit O"): the clock-step residual worded "documented residual"
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): a later server upgrades `user_version` in place in one transaction; the power-failure loss worded as a documented residual
+- 2026-09-28 accepted (Marc Vilardebó)

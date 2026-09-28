@@ -1,11 +1,11 @@
 # 041 — Desktop bridge: the Rust side of the Tauri process
 
-Status: draft
+Status: accepted
 Phase: 4
 Related ADRs: 0012, 0017, 0020, 0028, 0037, 0038, 0041
 Depends on: 011-config-format, 020-store-files, 027-core-api, 028-session-sans-io, 040-uniffi, 042-connection-host
 Blocks: 050-desktop-mvp, 053-device-security, 054-qr-invite, 055-verify-ui, 056-chat-screens, 060-reproducible-builds, 061-threat-review
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -317,3 +317,4 @@ None. Decided with the human reviewer on 2026-09-26 (`docs/audit-log.md`, "Phase
 - 2026-09-27 revised after audit N round 3 (`docs/audit-log.md`): the bridge is the desktop's one generation filter, with a floor set at its own lock; `locked { fault }` and a fault lock that runs the lock tail; `take_lock_notice` in place of `take_reset_outcome`, answered while locked and after the reset; the reload started whatever the clear does, script dialogs suppressed, the window recreated after 5 000 ms and `ReloadPending`; `connection_states` with `subscribed`; `retry_now` bounded; the reset clears the failed record and always reloads; the Tauri features listed; the Windows leg without the bundler and with the comctl32 measurement
 - 2026-09-27 revised after audit N round 4 (`docs/audit-log.md`): the bridge emits its own lock's `locked` and drops its slots before the host's routine, the floor only rises; after every lock and reset the window is recreated through the start-up builder with every handler, in place of the clear, the reload and the script-dialog suppression; `ReloadPending` until the new page finishes loading; `Fault { recurring }`; `connection_states` allowed while locked
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the fixed window title checked by T08; the session-wide read of the keychain and files stated as a documented residual (D3); the app password without a keychain is not in v1
+- 2026-09-28 accepted (Marc Vilardebó)

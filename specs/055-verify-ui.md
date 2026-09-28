@@ -1,11 +1,11 @@
 # 055 — Trust UX and verification screens
 
-Status: draft
+Status: accepted
 Phase: 5
 Related ADRs: 0006, 0007, 0016, 0019, 0025, 0028, 0029, 0034, 0036, 0037
 Depends on: 014-fingerprint, 021-channel-session, 022-peers-tofu, 023-ttl-purge, 024-key-retired, 025-identity-regen, 026-peer-limits, 027-core-api, 040-uniffi, 041-desktop-bridge, 054-qr-invite
 Blocks: 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 056-chat-screens
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -176,3 +176,4 @@ None.
 - 2026-09-27 revised after audit M round 4 (`docs/audit-log.md`): a scan started from a card verifies only that card's key, by a byte comparison with its `fingerprint(pk).qr`, and a card's label reaches no other scan; a name reused from an already retired key asks no retirement; the short-collision pairing stated as a mapping over core fields
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the channel screen and "Leave channel" point to spec 056; the texts of R8–R20 named security texts for the reviewer rule of spec 062
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the security texts follow spec 062-security-docs R7
+- 2026-09-28 accepted (Marc Vilardebó)

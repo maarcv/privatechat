@@ -1,11 +1,11 @@
 # 034 — Docker image and reference deployment
 
-Status: draft
+Status: accepted
 Phase: 3
 Related ADRs: 0017, 0022, 0038
 Depends on: 035-server-ops
 Blocks: 060-reproducible-builds, 063-beta, 066-public-server
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -112,3 +112,4 @@ Decided with the human reviewer on 2026-09-25: 034-R3, Caddy's session tickets. 
 - 2026-09-25 open question 034-R3 decided with the human reviewer: the Caddyfile stays, tickets unused and documented
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the `docker` job's commands in the local list of `.github/CONTRIBUTING.md`; the TLS resumption pointer names spec 042
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the session-ticket decision points to spec 042-connection-host R9; Blocks names 066
+- 2026-09-28 accepted (Marc Vilardebó)

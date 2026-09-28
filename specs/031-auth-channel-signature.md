@@ -1,11 +1,11 @@
 # 031 — Subscription authentication with the channel signature
 
-Status: draft
+Status: accepted
 Phase: 3
 Related ADRs: 0010, 0014, 0022, 0038
 Depends on: 010-primitives-wrapper, 011-config-format, 015-test-vectors, 016-fuzz-harness, 027-core-api, 028-session-sans-io
 Blocks: 030-ws-protocol, 033-rate-limit-quotas, 035-server-ops, 061-threat-review
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -162,3 +162,4 @@ None.
 - 2026-09-25 revised after audit K round 3 (`docs/audit-log.md`): the 10 s counts from the first `hello` of the latest nonce
 - 2026-09-25 revised after audit K round 2 (`docs/audit-log.md`): the previous nonce counts only for 10 000 ms after a `hello`
 - 2026-09-25 revised after audit K round 1 (`docs/audit-log.md`): a subscribe signed with the previous nonce gets `nonce_expired`, not `bad_auth`; the server tests run over `AuthState` with no socket; hosts and URLs as hex in the vectors; 016 R8 and R9 amended
+- 2026-09-28 accepted (Marc Vilardebó)

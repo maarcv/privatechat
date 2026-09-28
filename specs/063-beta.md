@@ -1,11 +1,11 @@
 # 063 — Closed beta
 
-Status: draft
+Status: accepted
 Phase: 6
 Related ADRs: 0017, 0041
 Depends on: 016-fuzz-harness, 034-docker, 035-server-ops, 050-desktop-mvp, 051-android-mvp, 052-ios-mvp, 060-reproducible-builds, 061-threat-review, 062-security-docs, 066-public-server
 Blocks: 064-public-release
-Human reviewer: Marc Vilardebó · Accepted on: —
+Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
 
 ## Context
 
@@ -127,3 +127,4 @@ The checks of T01, T02, T04–T09 green, T03 green in each app's CI. Non-automat
 - 2026-09-27 revised after audit O round 3 (`docs/audit-log.md`): the `verify` job fed the download URL, never the draft; the letter's two commands, `check-novalidate` and the hash check; versions as one iOS integer; scenarios counted by platform family among those shipped; rebuild-only beta tags during a pause and after the end; citations of 060 R3 and 061 R7
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the server runs as spec 066-public-server says, which it now depends on; R6 and R8 a measured unlock time with 16 near-full channels on a low-end API 30 phone, at most 10 000 ms at the end
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): R1 cites spec 066's acceptance criterion instead of a gate; Depends in order
+- 2026-09-28 accepted (Marc Vilardebó)

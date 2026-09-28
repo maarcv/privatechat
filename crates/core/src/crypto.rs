@@ -17,8 +17,6 @@ mod ffi;
 mod secret;
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod vectors;
 
 pub(crate) use secret::Secret;
 
