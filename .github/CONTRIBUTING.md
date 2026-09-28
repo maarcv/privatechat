@@ -31,6 +31,7 @@ cargo test --workspace
 cargo deny --all-features check -D checksum-mismatch
 scripts/doc_lint.sh
 scripts/check_requirements.sh
+python3 scripts/reference/vectors.py   # then: no change under specs/vectors/
 ```
 
 All green before every commit.

@@ -51,6 +51,12 @@ jobs:
         run: cargo build --workspace --all-targets
       - name: s000_t02_r02_workspace_tests_pass
         run: cargo test --workspace
+      - name: s015_t06_r06_reference_script
+        # The reference script rewrites specs/vectors/; any difference from the commit fails.
+        run: |
+          python3 scripts/reference/vectors.py
+          changed="$(git status --porcelain -- specs/vectors)"
+          if [ -n "$changed" ]; then echo "$changed"; git diff -- specs/vectors; exit 1; fi
 
   deny:
     name: deny
