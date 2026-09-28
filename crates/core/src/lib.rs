@@ -22,6 +22,9 @@
 #[allow(dead_code, unused_imports)]
 mod crypto;
 
+#[allow(dead_code, reason = "reached through Device, spec 027-core-api")]
+mod proto;
+
 #[cfg(test)]
 #[allow(dead_code, reason = "accessors used by specs 011–017")]
 mod vectors;

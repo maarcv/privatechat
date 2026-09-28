@@ -12,6 +12,8 @@ rust-version = "1.98"
 # This is the single source of the list (docs/spec.md §10, AGENTS.md rule 4).
 [workspace.lints.rust]
 missing_docs = "warn"
+# Spec 017 is the first to write `cfg(fuzzing)` (its test schema); spec 016 relies on it.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
 unsafe_code = "deny" # `forbid` in store and server; `deny` in core, `allow` only in crates/core/src/crypto/ffi.rs (AGENTS 12).
 
 [workspace.lints.clippy]
