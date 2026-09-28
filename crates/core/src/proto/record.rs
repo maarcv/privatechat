@@ -7,6 +7,8 @@
 //! and nothing recurses on input (R9). Which keys a record has, and which error
 //! a failure becomes, belong to the spec that owns the record.
 
+use zeroize::Zeroizing;
+
 #[cfg(test)]
 mod tests;
 
@@ -40,6 +42,66 @@ pub(crate) enum RecordError {
 pub(crate) enum UnknownKeys {
     Ignore,
     Reject,
+}
+
+/// Writes one record in its canonical encoding (R10) into a buffer allocated
+/// once, which never grows (R11).
+pub(crate) struct Writer {
+    buf: Zeroizing<Vec<u8>>,
+    max: usize,
+    last_key: Option<u8>,
+}
+
+impl Writer {
+    /// A writer of at most `max` bytes, all allocated here: a `Vec` that grew
+    /// would free its old copy of a secret without wiping it (R11).
+    pub(crate) fn with_capacity(max: usize) -> Writer {
+        Writer {
+            buf: Zeroizing::new(Vec::with_capacity(max)),
+            max,
+            last_key: None,
+        }
+    }
+
+    pub(crate) fn u8(&mut self, key: u8, value: u8) -> Result<(), RecordError> {
+        self.bytes(key, &value.to_be_bytes())
+    }
+
+    pub(crate) fn u32(&mut self, key: u8, value: u32) -> Result<(), RecordError> {
+        self.bytes(key, &value.to_be_bytes())
+    }
+
+    pub(crate) fn u64(&mut self, key: u8, value: u64) -> Result<(), RecordError> {
+        self.bytes(key, &value.to_be_bytes())
+    }
+
+    /// A `bytes` or `bytesN` value; the schema knows which.
+    pub(crate) fn bytes(&mut self, key: u8, value: &[u8]) -> Result<(), RecordError> {
+        if self.last_key.is_some_and(|last| key <= last) {
+            return Err(RecordError::KeyOrder);
+        }
+        let len = u32::try_from(value.len()).map_err(|_| RecordError::TooLong)?;
+        let end = FIELD_HEADER_LEN
+            .checked_add(value.len())
+            .and_then(|field_len| field_len.checked_add(self.buf.len()))
+            .ok_or(RecordError::TooLong)?;
+        if end > self.max {
+            return Err(RecordError::TooLong);
+        }
+        self.buf.push(key);
+        self.buf.extend_from_slice(&len.to_be_bytes());
+        self.buf.extend_from_slice(value);
+        self.last_key = Some(key);
+        Ok(())
+    }
+
+    pub(crate) fn text(&mut self, key: u8, value: &str) -> Result<(), RecordError> {
+        self.bytes(key, value.as_bytes())
+    }
+
+    pub(crate) fn finish(self) -> Zeroizing<Vec<u8>> {
+        self.buf
+    }
 }
 
 /// One field as it sits in the buffer, framing checked, value not yet typed.

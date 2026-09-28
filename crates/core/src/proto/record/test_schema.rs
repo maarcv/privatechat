@@ -5,7 +5,9 @@
 //! compiles under `cfg(fuzzing)`, where the test relaxations of AGENTS 4 do
 //! not apply.
 
-use super::{Reader, RecordError, UnknownKeys};
+use zeroize::Zeroizing;
+
+use super::{Reader, RecordError, UnknownKeys, Writer};
 
 /// The largest record of the test schema.
 pub(crate) const MAX_RECORD: usize = 512;
@@ -48,5 +50,27 @@ impl<'a> TestRecord<'a> {
         };
         reader.end()?;
         Ok(record)
+    }
+
+    /// Encodes the record by the test schema (R10).
+    pub(crate) fn encode(&self) -> Result<Zeroizing<Vec<u8>>, RecordError> {
+        let mut writer = Writer::with_capacity(MAX_RECORD);
+        writer.u8(0, self.small)?;
+        if let Some(value) = self.medium {
+            writer.u32(1, value)?;
+        }
+        if let Some(value) = self.large {
+            writer.u64(2, value)?;
+        }
+        if let Some(value) = self.bytes {
+            writer.bytes(3, value)?;
+        }
+        if let Some(value) = self.bytes32 {
+            writer.bytes(4, value)?;
+        }
+        if let Some(value) = self.text {
+            writer.text(5, value)?;
+        }
+        Ok(writer.finish())
     }
 }

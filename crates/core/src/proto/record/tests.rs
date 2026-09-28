@@ -2,10 +2,12 @@
 //! one breaks exactly the rule it names.
 
 use proptest::collection::vec as bytes_of;
+use proptest::option::of as maybe;
 use proptest::prelude::{any, proptest};
 
 use super::test_schema::{MAX_BYTES, MAX_RECORD, MAX_TEXT, TestRecord};
-use super::{Reader, RecordError, UnknownKeys};
+use super::{Reader, RecordError, UnknownKeys, Writer};
+use crate::vectors::{self, Checker, Kind, Vector};
 
 use RecordError::{KeyOrder, Missing, TooLong, Truncated, UnknownKey, Utf8, Width};
 use UnknownKeys::{Ignore, Reject};
@@ -37,6 +39,19 @@ fn read_0_and_5(buf: &[u8], unknown: UnknownKeys) -> Option<RecordError> {
     let mut reader = Reader::new(buf, MAX_RECORD, unknown).unwrap();
     let read = reader.u8(0).and_then(|_| reader.text(5, MAX_TEXT));
     read.and_then(|_| reader.end()).err()
+}
+
+/// Spec 017, R1: a field is key ‖ 4-byte big-endian length ‖ value, and a
+/// record of no fields is zero bytes. The same bytes as the vectors
+/// `u8_field` and `empty_record`, which only `s017_vectors_dispatch` loads.
+#[test]
+fn s017_t01_r01_field_framing() {
+    let u8_field = [0x00, 0x00, 0x00, 0x00, 0x01, 0x2a];
+    let decoded = TestRecord::decode(&u8_field, Reject).unwrap();
+    assert_eq!(decoded.small, 0x2a);
+    assert_eq!(decoded.encode().unwrap().as_slice(), u8_field);
+    assert_eq!(Writer::with_capacity(0).finish().as_slice(), []);
+    assert_eq!(error(&[], Reject), Some(Missing));
 }
 
 /// Spec 017, R2: key order is checked after the framing and before the
@@ -190,7 +205,121 @@ fn s017_t09_r09_test_schema_is_typed() {
     assert_eq!(decoded, expected);
 }
 
+/// Spec 017, R11: the writer allocates its capacity once and refuses to grow
+/// or to go back on the key order.
+#[test]
+fn s017_t11_r11_writer_never_grows() {
+    let mut writer = Writer::with_capacity(20);
+    writer.u64(1, u64::MAX).unwrap();
+    assert_eq!(writer.u8(1, 0), Err(KeyOrder));
+    assert_eq!(writer.u8(0, 0), Err(KeyOrder));
+    assert_eq!(writer.bytes(2, &[0; 3]), Err(TooLong));
+    writer.bytes(2, &[0; 2]).unwrap();
+    assert_eq!(writer.text(3, ""), Err(TooLong));
+    let buf = writer.finish();
+    assert_eq!((buf.len(), buf.capacity()), (20, 20));
+}
+
+/// Checks one vector of `017.json`: a positive decodes to its values and,
+/// under `reject`, encodes back to its bytes; a negative returns its error.
+fn check_vector(vector: &Vector) {
+    assert_eq!(vector.input("schema").text(), "test");
+    let policy = match vector.input("policy").text() {
+        "reject" => Reject,
+        policy => {
+            assert_eq!(policy, "ignore");
+            Ignore
+        }
+    };
+    let record = vector.input("record").bytes();
+    let decoded = TestRecord::decode(record, policy);
+    if vector.kind() == Kind::Negative {
+        let error = format!("{:?}", decoded.unwrap_err());
+        assert_eq!(error, vector.expected("error").text(), "{}", vector.name());
+        return;
+    }
+    let optional = |field| vector.has_expected(field).then(|| vector.expected(field));
+    let expected = TestRecord {
+        small: u8::try_from(vector.expected("small").number()).unwrap(),
+        medium: optional("medium").map(|value| value.number()),
+        large: optional("large").map(|value| value.u64_hex()),
+        bytes: optional("bytes").map(|value| value.bytes()),
+        bytes32: optional("bytes32").map(|value| value.bytes().try_into().unwrap()),
+        text: optional("text").map(|value| core::str::from_utf8(value.bytes()).unwrap()),
+    };
+    let decoded = decoded.unwrap();
+    assert_eq!(decoded, expected, "{}", vector.name());
+    if policy == Reject {
+        assert_eq!(
+            decoded.encode().unwrap().as_slice(),
+            record,
+            "{}",
+            vector.name()
+        );
+    }
+}
+
+/// Spec 015, R3: every vector of `017.json` is checked once, by `check_vector`.
+#[test]
+fn s017_vectors_dispatch() {
+    let names = [
+        "empty_record",
+        "u8_field",
+        "u32_field",
+        "u64_field",
+        "bytes_field",
+        "bytes32_field",
+        "text_field",
+        "unknown_key_ignored",
+        "key_out_of_order",
+        "duplicate_key",
+        "u32_wrong_width",
+        "bytes32_wrong_width",
+        "bytes_too_long",
+        "text_too_long",
+        "record_too_long",
+        "truncated_length",
+        "length_beyond_buffer",
+        "extra_byte",
+        "invalid_utf8",
+        "unknown_key_rejected",
+    ];
+    let entries: Vec<(&str, Checker)> = names.map(|name| (name, check_vector as Checker)).to_vec();
+    vectors::check_all("017", &entries);
+}
+
 proptest! {
+    /// Spec 017, R10: decode(encode(x)) = x over the test schema, and a
+    /// one-byte change of an encoding that still decodes under `reject`
+    /// encodes back to the changed bytes.
+    #[test]
+    fn s017_t10_r10_round_trip(
+        small in any::<u8>(),
+        medium in maybe(any::<u32>()),
+        large in maybe(any::<u64>()),
+        bytes in maybe(bytes_of(any::<u8>(), 0..=MAX_BYTES)),
+        bytes32 in maybe(any::<[u8; 32]>()),
+        text in maybe("\\PC{0,16}"),
+        flip in any::<(usize, u8)>(),
+    ) {
+        let record = TestRecord {
+            small,
+            medium,
+            large,
+            bytes: bytes.as_deref(),
+            bytes32: bytes32.as_ref(),
+            text: text.as_deref(),
+        };
+        let encoded = record.encode().unwrap();
+        assert_eq!(TestRecord::decode(&encoded, Reject).unwrap(), record);
+        let mut changed = encoded.to_vec();
+        let at = flip.0 % changed.len();
+        changed[at] ^= flip.1;
+        if let Ok(decoded) = TestRecord::decode(&changed, Reject) {
+            assert_eq!(decoded.encode().unwrap().as_slice(), changed);
+        }
+    }
+
     /// Spec 017, R12: any buffer decodes to a value or a `RecordError`, never
     /// a panic, under both policies.
     #[test]

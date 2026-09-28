@@ -288,6 +288,113 @@ def render(spec: str, vectors: list[dict]) -> str:
 SECTIONS: dict[str, Callable[[], list[dict]]] = {}
 
 
+# --- Spec 017: record encoding ------------------------------------------------------
+
+# The test schema of spec 017, in key order: field → (key, type). Key 0 is mandatory.
+TEST_SCHEMA = {
+    "small": (0, "u8"), "medium": (1, "u32"), "large": (2, "u64"),
+    "bytes": (3, "bytes"), "bytes32": (4, "bytes32"), "text": (5, "text"),
+}
+TEST_MAX_RECORD = 512
+TEST_MAX_VALUE = 64  # of `bytes` and of `text`
+INTEGER_WIDTHS = {"u8": 1, "u32": 4, "u64": 8}
+
+
+def record_field(key: int, value: bytes) -> bytes:
+    """`key` ‖ `len` (4 bytes, big-endian) ‖ `value` (017 R1)."""
+    return bytes([key]) + struct.pack(">I", len(value)) + value
+
+
+def test_record_values(values: dict) -> dict[str, bytes]:
+    """The value bytes of each field present (R3, R4): integers at their exact width, big-endian,
+    text as UTF-8. They are also the `expected` of a positive vector, where `text` is hex."""
+    encoded = {}
+    for name, (_, kind) in TEST_SCHEMA.items():
+        if name not in values:
+            continue
+        value = values[name]
+        if kind in INTEGER_WIDTHS:
+            encoded[name] = value.to_bytes(INTEGER_WIDTHS[kind], "big")
+            continue
+        value = value.encode("utf-8") if kind == "text" else value
+        require(len(value) == 32 if kind == "bytes32" else len(value) <= TEST_MAX_VALUE, name)
+        encoded[name] = value
+    return encoded
+
+
+def encode_test_record(values: dict) -> bytes:
+    """The canonical encoding (R10): keys in increasing order, no field for an absent key."""
+    encoded = test_record_values(values)
+    record = b"".join(record_field(key, encoded[name])
+                      for name, (key, _) in TEST_SCHEMA.items() if name in encoded)
+    require(len(record) <= TEST_MAX_RECORD, "a test record above its maximum")
+    return record
+
+
+def check_s017_t13_r13_section_produces_017_json() -> list[dict]:
+    """The vectors of spec 017: each positive encoded from its values, the extra field of
+    `unknown_key_ignored` appended by hand, each negative built by hand from the rule it
+    breaks."""
+    small = {"small": 42}
+    head = encode_test_record(small)
+
+    def expected(values: dict) -> dict:
+        return {name: values[name] if name != "text" else value
+                for name, value in test_record_values(values).items()}
+
+    def raw(name: str, kind: str, origin: str, policy: str, record: bytes, result: dict) -> dict:
+        inputs = {"schema": "test", "policy": policy, "record": record}
+        return {"name": name, "kind": kind, "source": "derived", "origin": origin,
+                "inputs": inputs, "expected": result}
+
+    positives = [
+        ("u8_field", "key 0 alone", small),
+        ("u32_field", "key 0 and a key 1 at the u32 maximum", {**small, "medium": MASK32}),
+        ("u64_field", "key 0 and a key 2 at the u64 maximum", {**small, "large": U64(2**64 - 1)}),
+        ("bytes_field", "key 0 and a key 3 of 5 bytes", {**small, "bytes": bytes(range(5))}),
+        ("bytes32_field", "key 0 and a key 4 of 32 bytes", {**small, "bytes32": bytes(range(32))}),
+        ("text_field", "key 0 and a key 5 with a two-byte character", {**small, "text": "héllo"}),
+    ]
+    vectors = [raw(name, "positive", origin, "reject", encode_test_record(values), expected(values))
+               for name, origin, values in positives]
+    vectors.append(raw("unknown_key_ignored", "positive", "key 0 and an extra key 9 under ignore",
+                       "ignore", head + record_field(9, b"x"), expected(small)))
+    key_1 = record_field(1, bytes(4))
+    filler = record_field(9, bytes(TEST_MAX_RECORD + 1 - len(head) - 5))
+    negatives = [
+        ("empty_record", "zero bytes: key 0 is missing", "reject", b"", "Missing"),
+        ("key_out_of_order", "key 2 before key 1", "reject",
+         head + record_field(2, bytes(8)) + key_1, "KeyOrder"),
+        ("duplicate_key", "key 1 twice", "reject", head + key_1 + key_1, "KeyOrder"),
+        ("u32_wrong_width", "a key 1 of 3 bytes", "reject", head + record_field(1, bytes(3)),
+         "Width"),
+        ("bytes32_wrong_width", "a key 4 of 31 bytes", "reject",
+         head + record_field(4, bytes(31)), "Width"),
+        ("bytes_too_long", "a key 3 of 65 bytes", "reject", head + record_field(3, bytes(65)),
+         "TooLong"),
+        ("text_too_long", "a key 5 of 65 bytes", "reject", head + record_field(5, b"a" * 65),
+         "TooLong"),
+        ("record_too_long", "513 bytes that decode under ignore: key 0 and a key 9 as filler",
+         "ignore", head + filler, "TooLong"),
+        ("truncated_length", "key 0, then 3 bytes of a field header", "reject",
+         head + bytes([1, 0, 0]), "Truncated"),
+        ("length_beyond_buffer", "a key 1 that declares 4 bytes and carries 3", "reject",
+         head + bytes([1, 0, 0, 0, 4]) + bytes(3), "Truncated"),
+        ("extra_byte", "key 0 and one byte after it", "reject", head + b"\x00", "Truncated"),
+        ("invalid_utf8", "a key 5 holding the byte 0xff", "reject",
+         head + record_field(5, b"a\xff"), "Utf8"),
+        ("unknown_key_rejected", "key 0 and an extra key 9 under reject", "reject",
+         head + record_field(9, b"x"), "UnknownKey"),
+    ]
+    require(len(head + filler) == TEST_MAX_RECORD + 1, "record_too_long is 513 bytes")
+    vectors += [raw(name, "negative", origin, policy, record, {"error": error})
+                for name, origin, policy, record, error in negatives]
+    return vectors
+
+
+SECTIONS["017"] = check_s017_t13_r13_section_produces_017_json
+
+
 def words() -> list[str]:
     """The English BIP-39 list, for the section of spec 014; refused unless its SHA-256 is the
     literal of 011 R17, before any file is written."""
