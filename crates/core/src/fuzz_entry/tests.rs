@@ -14,6 +14,18 @@ use crate::proto::record::test_schema::{TestRecord, decode_test_record};
 
 const ROOT_MANIFEST: &str = include_str!("../../../../Cargo.toml");
 const FUZZ_MANIFEST: &str = include_str!("../../fuzz/Cargo.toml");
+const FUZZ_WORKFLOW: &str = include_str!("../../../../.github/workflows/fuzz.yml");
+
+/// The seven targets of R2.
+const TARGETS: [&str; 7] = [
+    "record_decode",
+    "config_parse",
+    "config_parse_qr",
+    "payload_decode",
+    "receive",
+    "receive_signed",
+    "verify_qr_parse",
+];
 
 /// The blob of `text_k1`, sealed from its inputs.
 fn text_k1_blob() -> Vec<u8> {
@@ -153,6 +165,64 @@ fn s016_t05_r05_receive_signed_layout() {
         receive_signed_verdict(&input),
         Some(Ok(Content::Message(_)))
     ));
+}
+
+/// Spec 016, R8: the seed `fuzz_seeds.py` writes for `text_k1`, the two
+/// times and the blob in the layout of R4, reaches `open` as a `Message`.
+#[test]
+fn s016_t08_r08_text_k1_seed_reaches_open() {
+    let seed = receive_input(text_k1::RECEIVED_AT, text_k1::NOW, &text_k1_blob());
+    assert!(matches!(
+        receive_verdict(&seed),
+        Some(Ok(Content::Message(_)))
+    ));
+}
+
+/// Spec 016, R9: one nightly job per target, each installing the dated
+/// nightly and `cargo-fuzz`, seeding the corpus, building from `crates/core`
+/// and running for an hour; no other workflow and not the toolchain file
+/// names a nightly.
+#[test]
+fn s016_t09_r09_nightly_matrix() {
+    let matrix: Vec<&str> = FUZZ_WORKFLOW
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("- "))
+        .filter(|item| TARGETS.contains(item))
+        .collect();
+    assert_eq!(matrix, TARGETS);
+    let date = FUZZ_WORKFLOW
+        .split("NIGHTLY: nightly-")
+        .nth(1)
+        .and_then(|rest| rest.get(..10))
+        .unwrap();
+    assert!(
+        date.bytes().enumerate().all(|(i, b)| if i == 4 || i == 7 {
+            b == b'-'
+        } else {
+            b.is_ascii_digit()
+        }),
+        "{date}"
+    );
+    for step in [
+        "rustup toolchain install \"$NIGHTLY\" --profile minimal",
+        "cargo install cargo-fuzz",
+        "python3 scripts/fuzz_seeds.py",
+        "working-directory: crates/core",
+        "cargo +\"$NIGHTLY\" fuzz build ${{ matrix.target }}",
+        "-max_total_time=3600",
+        "schedule:",
+    ] {
+        assert!(FUZZ_WORKFLOW.contains(step), "{step}");
+    }
+    let seed_at = FUZZ_WORKFLOW.find("fuzz_seeds.py").unwrap();
+    assert!(seed_at < FUZZ_WORKFLOW.find("fuzz build").unwrap());
+    for other in [
+        include_str!("../../../../.github/workflows/ci.yml"),
+        include_str!("../../../../.github/workflows/landing.yml"),
+        include_str!("../../../../rust-toolchain.toml"),
+    ] {
+        assert!(!other.contains("nightly"));
+    }
 }
 
 /// Spec 016, R11: one dependency besides `core`, not published, its own

@@ -1,0 +1,47 @@
+# The nightly fuzzing of spec 016-fuzz-harness (R9): one job per target, one hour each, seeded
+# from specs/vectors. The only workflow, and the only place in the repository, that uses a
+# nightly toolchain; its date is pinned here.
+name: fuzz
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NIGHTLY: nightly-2026-09-28
+
+jobs:
+  fuzz:
+    name: fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - record_decode
+          - config_parse
+          - config_parse_qr
+          - payload_decode
+          - receive
+          - receive_signed
+          - verify_qr_parse
+    steps:
+      - uses: actions/checkout@v7
+      - name: s016_t09_r09_install_nightly_and_cargo_fuzz
+        run: |
+          rustup toolchain install "$NIGHTLY" --profile minimal
+          cargo install cargo-fuzz --locked
+      - name: s016_t08_r08_seed_the_corpus
+        run: python3 scripts/fuzz_seeds.py
+      - name: s016_t09_r09_build
+        working-directory: crates/core
+        run: cargo +"$NIGHTLY" fuzz build ${{ matrix.target }}
+      - name: s016_t09_r09_run_one_hour
+        # A crash, a timeout, the memory limit or a failed build ends the job in failure.
+        working-directory: crates/core
+        run: cargo +"$NIGHTLY" fuzz run ${{ matrix.target }} fuzz/corpus/${{ matrix.target }} -- -max_total_time=3600
