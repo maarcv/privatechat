@@ -39,6 +39,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2 # s001_t06_r06_cargo_cache
       - name: s001_t02_r02_clippy_denies_warnings
         run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: s016_t12_r12_clippy_under_cfg_fuzzing
+        # `fuzz_entry` compiles only under `--cfg fuzzing` outside tests (spec 016).
+        run: RUSTFLAGS="--cfg fuzzing" cargo clippy -p privatechat-core -- -D warnings
 
   test:
     name: test
@@ -105,6 +108,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: s001_t07_r07_every_requirement_has_a_test
         run: scripts/check_requirements.sh
+      - name: s016_t12_r12_fuzz_targets_reached
+        run: scripts/check_fuzz_targets.sh
 
   adr-guard:
     name: adr-guard

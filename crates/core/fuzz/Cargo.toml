@@ -1,0 +1,68 @@
+# The fuzz targets of spec 016-fuzz-harness. Outside the workspace (R1), with
+# its own `[workspace]` table, so that `libfuzzer-sys` never enters the graph
+# of `core`, `store` or `server`; built only by `cargo fuzz` on a dated nightly.
+[package]
+name = "privatechat-core-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+privatechat-core = { path = ".." }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "record_decode"
+path = "fuzz_targets/record_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config_parse"
+path = "fuzz_targets/config_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config_parse_qr"
+path = "fuzz_targets/config_parse_qr.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "payload_decode"
+path = "fuzz_targets/payload_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "receive"
+path = "fuzz_targets/receive.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "receive_signed"
+path = "fuzz_targets/receive_signed.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "verify_qr_parse"
+path = "fuzz_targets/verify_qr_parse.rs"
+test = false
+doc = false
+bench = false

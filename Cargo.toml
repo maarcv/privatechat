@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["crates/core", "crates/store", "crates/server"]
+# The fuzz crate of spec 016 has its own workspace (R1, R11).
+exclude = ["crates/core/fuzz"]
 
 [workspace.package]
 edition = "2024"

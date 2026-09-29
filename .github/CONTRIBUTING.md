@@ -26,11 +26,13 @@ New dependencies are justified in the pull request and must pass `cargo deny` (A
 export RUSTFLAGS="-D warnings"
 cargo fmt --all --check
 cargo clippy --all-targets --all-features -- -D warnings
+RUSTFLAGS="--cfg fuzzing" cargo clippy -p privatechat-core -- -D warnings
 cargo build --workspace --all-targets
 cargo test --workspace
 cargo deny --all-features check -D checksum-mismatch
 scripts/doc_lint.sh
 scripts/check_requirements.sh
+scripts/check_fuzz_targets.sh
 python3 scripts/reference/vectors.py   # then: no change under specs/vectors/
 ```
 

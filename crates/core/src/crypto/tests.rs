@@ -17,7 +17,7 @@ use crate::vectors::{self, Kind};
 
 /// Every `.rs` file of the crate. `core` does no I/O (AGENTS 10), so the test
 /// cannot walk the directory: a new file is added to this list by hand.
-const SOURCES: [(&str, &str); 28] = [
+const SOURCES: [(&str, &str); 30] = [
     ("lib.rs", include_str!("../lib.rs")),
     ("crypto.rs", include_str!("../crypto.rs")),
     ("crypto/ffi.rs", include_str!("ffi.rs")),
@@ -26,6 +26,11 @@ const SOURCES: [(&str, &str); 28] = [
     ("vectors.rs", include_str!("../vectors.rs")),
     ("vectors/tests.rs", include_str!("../vectors/tests.rs")),
     ("error.rs", include_str!("../error.rs")),
+    ("fuzz_entry.rs", include_str!("../fuzz_entry.rs")),
+    (
+        "fuzz_entry/tests.rs",
+        include_str!("../fuzz_entry/tests.rs"),
+    ),
     ("error/tests.rs", include_str!("../error/tests.rs")),
     ("proto.rs", include_str!("../proto.rs")),
     ("proto/config.rs", include_str!("../proto/config.rs")),
