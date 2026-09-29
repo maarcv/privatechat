@@ -1,13 +1,18 @@
-//! Tests of spec 016 R1, R3–R5 and R11: the isolation of the fuzz crate, and
-//! what the entries of `fuzz_entry` reach.
+//! Tests of spec 016 R1, R3–R5, R8, R9 and R11: the isolation of the fuzz
+//! crate, what the entries of `fuzz_entry` reach, and the nightly workflow.
 
 use proptest::collection::vec as bytes_of;
 use proptest::prelude::{ProptestConfig, any, proptest};
 
-use super::{receive_signed_verdict, receive_verdict, record_decode_verdict};
+use super::{
+    QR_CHANNEL, config_parse_qr_verdict, config_parse_verdict, payload_decode_verdict,
+    receive_signed_verdict, receive_verdict, record_decode_verdict, verify_qr_parse_verdict,
+};
 use crate::Error;
-use crate::crypto::{Nonce, Secret};
-use crate::proto::envelope::{self, Content, SenderKey, text_k1};
+use crate::crypto::{self, Nonce, PublicKey, Secret};
+use crate::proto::config::{ChannelId, Config};
+use crate::proto::envelope::{self, ChannelCtx, Content, SenderKey, text_k1};
+use crate::proto::fingerprint;
 use crate::proto::payload::{Payload, PayloadKind};
 use crate::proto::record::UnknownKeys;
 use crate::proto::record::test_schema::{TestRecord, decode_test_record};
@@ -27,9 +32,23 @@ const TARGETS: [&str; 7] = [
     "verify_qr_parse",
 ];
 
+/// The channel of `text_k1`, built here apart from `fuzz_entry`, so that an
+/// entry sealing or opening in another channel fails the tests.
+fn text_k1_context() -> ChannelCtx {
+    let config = Config::from_parts(
+        Secret::from_bytes(text_k1::K_CH),
+        text_k1::SERVER_URL,
+        text_k1::TTL_SECONDS,
+        text_k1::SUGGESTED_NAME,
+        text_k1::CREATED_AT,
+    )
+    .unwrap();
+    ChannelCtx::from_config(&config).unwrap()
+}
+
 /// The blob of `text_k1`, sealed from its inputs.
 fn text_k1_blob() -> Vec<u8> {
-    let ctx = super::context().unwrap();
+    let ctx = text_k1_context();
     let sender = SenderKey::from_seed(&Secret::from_bytes(text_k1::SENDER_SEED)).unwrap();
     let payload = Payload {
         kind: PayloadKind::Text,
@@ -110,6 +129,15 @@ fn s016_t04_r04_receive_reaches_expired_and_stale() {
         "{message:?}"
     );
     let window = envelope::ttl_ms(text_k1::TTL_SECONDS) + envelope::EXPIRY_MARGIN_MS;
+    let bound = text_k1::RECEIVED_AT + window;
+    assert!(matches!(
+        verdict(text_k1::RECEIVED_AT, bound),
+        Some(Ok(Content::Message(_)))
+    ));
+    assert_eq!(
+        verdict(text_k1::RECEIVED_AT, bound + 1),
+        Some(Err(Error::Expired))
+    );
     let late = text_k1::SENT_AT + 2 * window;
     assert_eq!(verdict(0, late), Some(Err(Error::Expired)));
     assert_eq!(verdict(late, late), Some(Ok(Content::Stale)));
@@ -128,43 +156,75 @@ proptest! {
     ) {
         let input = [header.as_slice(), &plaintext].concat();
         let verdict = receive_signed_verdict(&input).unwrap();
-        assert!(
-            !matches!(verdict, Err(Error::BadLength | Error::WrongChannel | Error::BadSignature)),
-            "{verdict:?}"
-        );
+        assert!(matches!(verdict, Ok(_) | Err(Error::Expired)), "{verdict:?}");
     }
 }
 
-/// Spec 016, R5: 47 bytes are too short, and a signed input at fresh times
-/// reaches `open`, where an empty plaintext is one block of zeros, which
-/// has no padding marker.
-#[test]
-fn s016_t05_r05_receive_signed_layout() {
-    assert_eq!(receive_signed_verdict(&[0; 47]), None);
-    let times = [
-        text_k1::RECEIVED_AT.to_be_bytes(),
-        text_k1::NOW.to_be_bytes(),
-    ]
-    .concat();
-    let input = [&[0; 8][..], &[1; 24], &times].concat();
-    assert_eq!(
-        receive_signed_verdict(&input),
-        Some(Ok(Content::Unreadable))
-    );
-    let mut padded = Payload {
+/// A `text` of `text_k1` whose encoding is `len` bytes.
+fn encoded_text(len: usize) -> Vec<u8> {
+    Payload {
         kind: PayloadKind::Text,
         display_name: None,
         sent_at: text_k1::SENT_AT,
-        body: b"hi".to_vec(),
+        body: vec![b'a'; len - 24],
     }
     .encode()
-    .unwrap();
-    crate::crypto::pad(&mut padded, 1_024).unwrap();
-    let input = [&[0; 8][..], &[1; 24], &times, &padded].concat();
+    .unwrap()
+}
+
+/// The input of `receive_signed` at the times of `text_k1`.
+fn signed_input(counter: u64, plaintext: &[u8]) -> Vec<u8> {
+    let times = [
+        text_k1::RECEIVED_AT.to_be_bytes(),
+        text_k1::NOW.to_be_bytes(),
+    ];
+    [
+        &counter.to_be_bytes()[..],
+        &[1; 24],
+        &times.concat(),
+        plaintext,
+    ]
+    .concat()
+}
+
+/// Spec 016, R5: the layout, the sender and the counter; an empty
+/// plaintext is a block of zeros, with no padding marker; 63 blocks are
+/// kept and what follows them dropped; a record with its marker is filled
+/// with zeros to a whole block.
+#[test]
+fn s016_t05_r05_receive_signed_layout() {
+    assert!(receive_signed_verdict(&[0; 47]).is_none());
+    let opened = receive_signed_verdict(&signed_input(0x0102_0304_0506_0708, &[]))
+        .unwrap()
+        .unwrap();
+    assert_eq!(opened.counter, 0x0102_0304_0506_0708);
+    let sender = SenderKey::from_seed(&Secret::from_bytes(text_k1::SENDER_SEED)).unwrap();
+    assert_eq!(opened.sender_pk.0, sender.public().0);
+    assert_eq!(opened.content, Content::Unreadable);
+    let late = [&[0; 32][..], &0u64.to_be_bytes(), &u64::MAX.to_be_bytes()].concat();
     assert!(matches!(
-        receive_signed_verdict(&input),
-        Some(Ok(Content::Message(_)))
+        receive_signed_verdict(&late),
+        Some(Err(Error::Expired))
     ));
+
+    let mut largest = encoded_text(64_511);
+    crypto::pad(&mut largest, 1_024).unwrap();
+    assert_eq!(largest.len(), 64_512);
+    let marked = [encoded_text(1_500).as_slice(), &[0x80]].concat();
+    for (case, plaintext) in [
+        ("63 blocks", largest.clone()),
+        (
+            "63 blocks and more",
+            [largest.as_slice(), &[7; 3_000]].concat(),
+        ),
+        ("1 501 bytes with the marker", marked),
+    ] {
+        let opened = receive_signed_verdict(&signed_input(1, &plaintext)).unwrap();
+        assert!(
+            matches!(opened, Ok(ref opened) if matches!(opened.content, Content::Message(_))),
+            "{case}"
+        );
+    }
 }
 
 /// Spec 016, R8: the seed `fuzz_seeds.py` writes for `text_k1`, the two
@@ -176,6 +236,43 @@ fn s016_t08_r08_text_k1_seed_reaches_open() {
         receive_verdict(&seed),
         Some(Ok(Content::Message(_)))
     ));
+}
+
+/// Spec 016, R8: the seeds of every row reach past the first checks of
+/// their entry: a config record and its QR text, whose invitation expired
+/// long before the `now = 0` of the entries; the verification QR in the
+/// channel of 011 `config_reference`, which `QR_CHANNEL` is; a payload.
+#[test]
+fn s016_t08_r08_seeds_reach_their_entries() {
+    let k_ch: [u8; 32] = core::array::from_fn(|i| 0x40 + u8::try_from(i).unwrap());
+    let config = Config::from_parts(
+        Secret::from_bytes(k_ch),
+        "wss://chat.example.org:9001",
+        86_400,
+        "Família",
+        1_790_000_000_000,
+    )
+    .unwrap();
+    let invited = config.record(Some(1_790_000_600_000)).unwrap();
+    assert_eq!(config_parse_verdict(&invited), Ok(()));
+    assert_eq!(
+        Config::parse(&invited, 1_790_000_600_001).err(),
+        Some(Error::InviteExpired)
+    );
+    assert_eq!(
+        config_parse_qr_verdict(&config.export_qr(1_790_000_000_000).unwrap()),
+        Ok(())
+    );
+
+    assert_eq!(QR_CHANNEL.0, config.channel_id());
+    let pk = PublicKey([0x55; 32]);
+    let qr = fingerprint::verify_qr(&ChannelId(config.channel_id()), &pk).unwrap();
+    assert_eq!(verify_qr_parse_verdict(&qr), Ok(()));
+    let other = fingerprint::verify_qr(&ChannelId([0x56; 16]), &pk).unwrap();
+    assert_eq!(verify_qr_parse_verdict(&other), Err(Error::WrongChannel));
+
+    assert_eq!(payload_decode_verdict(&encoded_text(40)), Ok(()));
+    assert_eq!(payload_decode_verdict(&[]), Err(Error::BadPayload));
 }
 
 /// Spec 016, R9: one nightly job per target, each installing the dated
@@ -205,11 +302,14 @@ fn s016_t09_r09_nightly_matrix() {
     );
     for step in [
         "rustup toolchain install \"$NIGHTLY\" --profile minimal",
-        "cargo install cargo-fuzz",
+        "cargo +\"$NIGHTLY\" install cargo-fuzz",
         "python3 scripts/fuzz_seeds.py",
         "working-directory: crates/core",
         "cargo +\"$NIGHTLY\" fuzz build ${{ matrix.target }}",
-        "-max_total_time=3600",
+        "cargo +\"$NIGHTLY\" fuzz run ${{ matrix.target }} fuzz/corpus/${{ matrix.target }}",
+        "-max_total_time=3600 -timeout=10",
+        "if: failure()",
+        "path: crates/core/fuzz/artifacts/",
         "schedule:",
     ] {
         assert!(FUZZ_WORKFLOW.contains(step), "{step}");

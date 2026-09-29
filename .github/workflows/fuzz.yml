@@ -35,13 +35,22 @@ jobs:
       - name: s016_t09_r09_install_nightly_and_cargo_fuzz
         run: |
           rustup toolchain install "$NIGHTLY" --profile minimal
-          cargo install cargo-fuzz --locked
+          cargo +"$NIGHTLY" install cargo-fuzz --locked
       - name: s016_t08_r08_seed_the_corpus
         run: python3 scripts/fuzz_seeds.py
       - name: s016_t09_r09_build
         working-directory: crates/core
         run: cargo +"$NIGHTLY" fuzz build ${{ matrix.target }}
       - name: s016_t09_r09_run_one_hour
-        # A crash, a timeout, the memory limit or a failed build ends the job in failure.
+        # A crash, an input slower than 10 s, the memory limit or a failed build ends the job
+        # in failure.
         working-directory: crates/core
-        run: cargo +"$NIGHTLY" fuzz run ${{ matrix.target }} fuzz/corpus/${{ matrix.target }} -- -max_total_time=3600
+        run: cargo +"$NIGHTLY" fuzz run ${{ matrix.target }} fuzz/corpus/${{ matrix.target }} -- -max_total_time=3600 -timeout=10
+      - name: s016_t09_r09_keep_the_crashing_input
+        # A crash becomes a test before it becomes a fix (spec 016, Security): the input it
+        # left in artifacts/ outlives the runner.
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-${{ matrix.target }}
+          path: crates/core/fuzz/artifacts/

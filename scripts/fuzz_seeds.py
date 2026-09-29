@@ -3,16 +3,17 @@
 
 A mutated valid input reaches every step of a parser; a random one stops at the first length
 check. So each target starts from every vector that carries its fields, positive and negative
-alike, in the input layout of its entry in `fuzz_entry.rs`. Standard library only; the corpus
-under `crates/core/fuzz/corpus/` is not committed, and the nightly workflow runs this first.
+alike, in the input layout of its entry in `fuzz_entry.rs`. Standard library only. The corpus
+under `crates/core/fuzz/corpus/` is not committed; the nightly workflow runs this first. The
+seeds are written beside whatever the fuzzer already added, which is never deleted.
 """
 
 from __future__ import annotations
 
 import json
-import shutil
 import sys
 from pathlib import Path
+from typing import Callable
 
 ROOT = Path(__file__).resolve().parent.parent
 VECTORS = ROOT / "specs" / "vectors"
@@ -25,107 +26,117 @@ def load(spec: str) -> list[dict]:
     return json.loads((VECTORS / f"{spec}.json").read_text(encoding="utf-8"))["vectors"]
 
 
-def field(vector: dict, name: str) -> str | None:
-    """A field of the vector's inputs, or else of its expected values."""
-    return vector["inputs"].get(name, vector["expected"].get(name))
-
-
-def u64(hex_value: str) -> bytes:
-    data = bytes.fromhex(hex_value)
-    if len(data) != 8:
-        raise SystemExit(f"fuzz_seeds.py: a u64 of {len(data)} bytes")
-    return data
-
-
-def sodium_pad(data: bytes) -> bytes:
-    marked = data + b"\x80"
-    return marked + bytes(-len(marked) % PAD_BLOCK)
+def field(vector: dict, name: str) -> bytes | None:
+    """A hexadecimal field of the vector's inputs, or else of its expected values."""
+    value = vector["inputs"].get(name, vector["expected"].get(name))
+    return None if value is None else bytes.fromhex(value)
 
 
 def unpad(padded: bytes) -> bytes | None:
-    """The record before the 0x80 marker, or `None` when the padding is broken."""
+    """The record before the 0x80 marker of `sodium_pad`, or `None` for broken padding."""
     marked = padded.rstrip(b"\x00")
     return marked[:-1] if marked.endswith(b"\x80") else None
 
 
-def record_decode() -> dict[str, bytes]:
-    return {v["name"]: POLICY_BYTE[v["inputs"]["policy"]] + bytes.fromhex(v["inputs"]["record"])
-            for v in load("017")}
+def payload_record(v: dict) -> bytes | None:
+    """The payload record of a 013 vector: the one it declares, or its padded one unpadded."""
+    padded = field(v, "padded")
+    return field(v, "payload") if padded is None else unpad(padded)
 
 
-def config_parse() -> dict[str, bytes]:
-    return {v["name"]: bytes.fromhex(v["inputs"]["record"]) for v in load("011")
-            if "record" in v["inputs"]}
+def padded_payload(v: dict) -> bytes:
+    """The padded plaintext of a positive 013 vector."""
+    padded = field(v, "padded")
+    if padded is not None:
+        return padded
+    marked = field(v, "payload") + b"\x80"
+    return marked + bytes(-len(marked) % PAD_BLOCK)
 
 
-def config_parse_qr() -> dict[str, bytes]:
-    return {v["name"]: bytes.fromhex(v["inputs"]["qr"]) for v in load("011") if "qr" in v["inputs"]}
+def times(v: dict) -> bytes:
+    return field(v, "received_at") + field(v, "now")
 
 
-def payload_decode() -> dict[str, bytes]:
-    seeds = {}
-    for v in load("013"):
-        if "payload" in v["expected"]:
-            seeds[v["name"]] = bytes.fromhex(v["expected"]["payload"])
-        elif "padded" in v["inputs"] and unpad(bytes.fromhex(v["inputs"]["padded"])) is not None:
-            seeds[v["name"]] = unpad(bytes.fromhex(v["inputs"]["padded"]))
-    return seeds
-
-
-def receive() -> dict[str, bytes]:
-    return {v["name"]: u64(v["inputs"]["received_at"]) + u64(v["inputs"]["now"])
-            + bytes.fromhex(field(v, "blob")) for v in load("013")}
-
-
-def receive_signed() -> dict[str, bytes]:
-    seeds = {}
-    for v in load("013"):
-        if v["kind"] != "positive":
-            continue
-        inputs = v["inputs"]
-        padded = (bytes.fromhex(inputs["padded"]) if "padded" in inputs
-                  else sodium_pad(bytes.fromhex(v["expected"]["payload"])))
-        seeds[v["name"]] = (u64(inputs["counter"]) + bytes.fromhex(inputs["nonce"])
-                            + u64(inputs["received_at"]) + u64(inputs["now"]) + padded)
-    return seeds
-
-
-def verify_qr_parse() -> dict[str, bytes]:
-    return {v["name"]: bytes.fromhex(field(v, "qr")) for v in load("014") if field(v, "qr")}
-
-
-# R8, one row per target: the seeds, and the vectors of the file that carry the row's fields.
-TARGETS = {
-    "record_decode": (record_decode, "017", lambda v: True),
-    "config_parse": (config_parse, "011", lambda v: "record" in v["inputs"]),
-    "config_parse_qr": (config_parse_qr, "011", lambda v: "qr" in v["inputs"]),
-    "payload_decode": (payload_decode, "013", lambda v: "payload" in v["expected"] or (
-        "padded" in v["inputs"] and unpad(bytes.fromhex(v["inputs"]["padded"])) is not None)),
-    "receive": (receive, "013", lambda v: True),
-    "receive_signed": (receive_signed, "013", lambda v: v["kind"] == "positive"),
-    "verify_qr_parse": (verify_qr_parse, "014", lambda v: field(v, "qr") is not None),
+# R8, one row per target: the vector file, which of its vectors carry the row's fields, and
+# the seed of such a vector in the layout of the target's entry (R3–R5).
+Seed = Callable[[dict], bytes]
+TARGETS: dict[str, tuple[str, Callable[[dict], bool], Seed]] = {
+    "record_decode": ("017", lambda v: True,
+                      lambda v: POLICY_BYTE[v["inputs"]["policy"]] + field(v, "record")),
+    "config_parse": ("011", lambda v: "record" in v["inputs"], lambda v: field(v, "record")),
+    "config_parse_qr": ("011", lambda v: "qr" in v["inputs"], lambda v: field(v, "qr")),
+    "payload_decode": ("013", lambda v: payload_record(v) is not None, payload_record),
+    "receive": ("013", lambda v: True, lambda v: times(v) + field(v, "blob")),
+    "receive_signed": ("013", lambda v: v["kind"] == "positive",
+                       lambda v: field(v, "counter") + field(v, "nonce") + times(v)
+                       + padded_payload(v)),
+    "verify_qr_parse": ("014", lambda v: field(v, "qr") is not None, lambda v: field(v, "qr")),
 }
 
 
+def read_back(target: str, seed: bytes) -> dict[str, bytes]:
+    """The fields a seed holds, cut by the layout of R3–R5 as `fuzz_entry.rs` reads it."""
+    if target == "record_decode":
+        return {"policy": seed[:1], "record": seed[1:]}
+    if target == "receive":
+        return {"received_at": seed[:8], "now": seed[8:16], "blob": seed[16:]}
+    if target == "receive_signed":
+        return {"counter": seed[:8], "nonce": seed[8:32], "received_at": seed[32:40],
+                "now": seed[40:48], "padded": seed[48:]}
+    return {"whole": seed}
+
+
+def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
+    """The fields of a vector that its seed must hold, by the names of `read_back`."""
+    if target == "record_decode":
+        return {"policy": POLICY_BYTE[v["inputs"]["policy"]], "record": field(v, "record")}
+    if target == "receive":
+        return {"received_at": field(v, "received_at"), "now": field(v, "now"),
+                "blob": field(v, "blob")}
+    if target == "receive_signed":
+        return {"counter": field(v, "counter"), "nonce": field(v, "nonce"),
+                "received_at": field(v, "received_at"), "now": field(v, "now"),
+                "padded": field(v, "padded")}
+    whole = {"config_parse": "record", "config_parse_qr": "qr", "payload_decode": "payload",
+             "verify_qr_parse": "qr"}[target]
+    return {"whole": field(v, whole)}
+
+
 def check_s016_t08_r08_corpus_is_seeded() -> None:
-    """Each target's directory holds one file per vector that carries its row's fields."""
-    for target, (_, spec, carries) in TARGETS.items():
-        expected = sorted(v["name"] for v in load(spec) if carries(v))
-        written = sorted(path.name for path in (CORPUS / target).iterdir())
-        if not expected or written != expected:
-            raise SystemExit(f"fuzz_seeds.py: {target}: {written} for {expected}")
+    """Each target's directory holds one file per vector that carries its row's fields, and
+    each file, cut by its layout, gives the vector's own fields back."""
+    for target, (spec, carries, _) in TARGETS.items():
+        vectors = [v for v in load(spec) if carries(v)]
+        if not vectors:
+            raise SystemExit(f"fuzz_seeds.py: {target}: no vector carries its fields")
+        for v in vectors:
+            fields = read_back(target, (CORPUS / target / v["name"]).read_bytes())
+            expected = vector_fields(target, v)
+            for name, value in expected.items():
+                if value is None:
+                    continue  # derived from another field: the padded or unpadded form
+                if fields[name] != value:
+                    raise SystemExit(f"fuzz_seeds.py: {target}/{v['name']}: {name} differs")
+            if target == "payload_decode" and field(v, "payload") is None:
+                if unpad(field(v, "padded")) != fields["whole"]:
+                    raise SystemExit(f"fuzz_seeds.py: {target}/{v['name']}: not the record")
+            if target == "receive_signed" and (len(fields["padded"]) % PAD_BLOCK or (
+                    field(v, "padded") is None
+                    and unpad(fields["padded"]) != field(v, "payload"))):
+                raise SystemExit(f"fuzz_seeds.py: {target}/{v['name']}: not its padded payload")
 
 
 def main() -> int:
-    for target, (seeds, _, _) in TARGETS.items():
+    counts = []
+    for target, (spec, carries, seed) in TARGETS.items():
         directory = CORPUS / target
-        shutil.rmtree(directory, ignore_errors=True)
-        directory.mkdir(parents=True)
-        for name, data in seeds().items():
-            (directory / name).write_bytes(data)
+        directory.mkdir(parents=True, exist_ok=True)
+        vectors = [v for v in load(spec) if carries(v)]
+        for v in vectors:
+            (directory / v["name"]).write_bytes(seed(v))
+        counts.append(f"{target} {len(vectors)}")
     check_s016_t08_r08_corpus_is_seeded()
-    counts = ", ".join(f"{target} {len(list((CORPUS / target).iterdir()))}" for target in TARGETS)
-    print(f"fuzz_seeds.py: ok, {counts}")
+    print(f"fuzz_seeds.py: ok, {', '.join(counts)}")
     return 0
 
 

@@ -1,5 +1,6 @@
 # The functions of AGENTS 21 that no fuzz target reaches, one `name # reason` per line
-# (spec 016-fuzz-harness R6). The check reads it; a line without a reason fails it.
-open_encrypted # spec 011: not fuzzed past Argon2id; a mutated file almost never passes the secretbox tag, and the round-trip test of 011 R24 covers it
+# (spec 016-fuzz-harness R6), `T::name` for a method. A line without a reason, or naming no
+# function of core, fails the check.
+Config::open_encrypted # spec 011: not fuzzed past Argon2id; a mutated file almost never passes the secretbox tag, and the round-trip test of 011 R24 covers it
 parse_file_header # spec 011, crate-internal: reached only through open_encrypted; the R24 round trip and 011 T13 cover it
-open_file_with_key # spec 011, crate-internal: checks the header with parse_file_header; the R24 round trip and 011 T13 cover it
+Config::open_file_with_key # spec 011, crate-internal: checks the header with parse_file_header; the R24 round trip and 011 T13 cover it
