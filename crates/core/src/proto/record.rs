@@ -1,0 +1,290 @@
+//! The record encoding of `docs/spec.md` §4 (ADR 0023, spec 017-record-encoding).
+//!
+//! A record is a sequence of fields `key` (1 byte) ‖ `len` (4 bytes, big-endian)
+//! ‖ `value`, in strictly increasing key order. The decoder is typed: each
+//! schema reads its keys in order through a [`Reader`] and checks every value
+//! against the type the schema gives it, so there is no generic tree of values
+//! and nothing recurses on input (R9). Which keys a record has, and which error
+//! a failure becomes, belong to the spec that owns the record.
+
+use core::cmp::Ordering;
+
+use zeroize::Zeroizing;
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(any(test, fuzzing))]
+pub(crate) mod test_schema;
+
+/// Bytes of a field before its value: the key and the length (R1).
+const FIELD_HEADER_LEN: usize = 5;
+
+/// Why a record was rejected, one variant per rule of spec 017.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecordError {
+    /// Fewer bytes than a field header, or a length beyond the buffer (R2, R5).
+    Truncated,
+    /// A key not greater than the previous one, duplicates included (R2), or
+    /// a schema that writes or asks for its keys out of order (R11, Interface).
+    KeyOrder,
+    /// An integer or `bytesN` value of the wrong length (R3, R4).
+    Width,
+    /// A `text` value that is not UTF-8 (R4).
+    Utf8,
+    /// A mandatory key that is absent (R6).
+    Missing,
+    /// A key the schema does not name, under [`UnknownKeys::Reject`] (R7).
+    UnknownKey,
+    /// A record, value or writer output above its maximum (R4, R8, R11).
+    TooLong,
+}
+
+/// What a reader does with a key the schema does not name (R7).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum UnknownKeys {
+    Ignore,
+    Reject,
+}
+
+/// Writes one record in its canonical encoding (R10) into a buffer allocated
+/// once, which never grows (R11).
+pub(crate) struct Writer {
+    buf: Zeroizing<Vec<u8>>,
+    max: usize,
+    last_key: Option<u8>,
+}
+
+impl Writer {
+    /// A writer of at most `max` bytes, all allocated here: a `Vec` that grew
+    /// would free its old copy of a secret without wiping it (R11). `max` is a
+    /// constant of the schema, never input.
+    pub(crate) fn with_capacity(max: usize) -> Writer {
+        Writer {
+            buf: Zeroizing::new(Vec::with_capacity(max)),
+            max,
+            last_key: None,
+        }
+    }
+
+    /// A `u8` value, 1 byte (R3). Errors as [`Writer::bytes`].
+    pub(crate) fn u8(&mut self, key: u8, value: u8) -> Result<(), RecordError> {
+        self.bytes(key, &value.to_be_bytes())
+    }
+
+    /// A `u32` value, 4 bytes big-endian (R3). Errors as [`Writer::bytes`].
+    pub(crate) fn u32(&mut self, key: u8, value: u32) -> Result<(), RecordError> {
+        self.bytes(key, &value.to_be_bytes())
+    }
+
+    /// A `u64` value, 8 bytes big-endian (R3). Errors as [`Writer::bytes`].
+    pub(crate) fn u64(&mut self, key: u8, value: u64) -> Result<(), RecordError> {
+        self.bytes(key, &value.to_be_bytes())
+    }
+
+    /// A `bytes` or `bytesN` value; the schema knows which.
+    ///
+    /// # Errors
+    ///
+    /// `KeyOrder` for a key not greater than the last one written, `TooLong`
+    /// for a field past the capacity or a value above 2^32 − 1 bytes (R11). A
+    /// failed write leaves the writer as it was.
+    pub(crate) fn bytes(&mut self, key: u8, value: &[u8]) -> Result<(), RecordError> {
+        if self.last_key.is_some_and(|last| key <= last) {
+            return Err(RecordError::KeyOrder);
+        }
+        let len = u32::try_from(value.len()).map_err(|_| RecordError::TooLong)?;
+        let end = FIELD_HEADER_LEN
+            .checked_add(value.len())
+            .and_then(|field_len| field_len.checked_add(self.buf.len()))
+            .ok_or(RecordError::TooLong)?;
+        if end > self.max {
+            return Err(RecordError::TooLong);
+        }
+        self.buf.push(key);
+        self.buf.extend_from_slice(&len.to_be_bytes());
+        self.buf.extend_from_slice(value);
+        self.last_key = Some(key);
+        Ok(())
+    }
+
+    /// A `text` value, its UTF-8 bytes. Errors as [`Writer::bytes`].
+    pub(crate) fn text(&mut self, key: u8, value: &str) -> Result<(), RecordError> {
+        self.bytes(key, value.as_bytes())
+    }
+
+    /// The record written so far.
+    pub(crate) fn finish(self) -> Zeroizing<Vec<u8>> {
+        self.buf
+    }
+}
+
+/// One field as it sits in the buffer, framing checked, value not yet typed.
+struct Field<'a> {
+    key: u8,
+    value: &'a [u8],
+}
+
+/// Reads one record by its schema: keys in increasing order, each getter
+/// returning `None` for an absent key and borrowing the value from the buffer.
+///
+/// A getter frames fields only until it meets its key or a greater one, so a
+/// schema can check a value before the next field is looked at (specs 011 R3,
+/// 013 R12), and an absent key is decided by the first greater key or the end.
+#[must_use]
+pub(crate) struct Reader<'a> {
+    rest: &'a [u8],
+    last_key: Option<u8>,
+    /// The key last asked for; a schema that asks out of order gets
+    /// `KeyOrder` instead of a silent `None`.
+    last_asked: Option<u8>,
+    /// A field already framed whose key is above the one last asked for.
+    pending: Option<Field<'a>>,
+    unknown: UnknownKeys,
+}
+
+impl<'a> Reader<'a> {
+    /// A reader over `buf`, which must be at most `max_len` bytes (R8).
+    ///
+    /// # Errors
+    ///
+    /// `TooLong` for a longer buffer, before any field is framed.
+    pub(crate) fn new(
+        buf: &'a [u8],
+        max_len: usize,
+        unknown: UnknownKeys,
+    ) -> Result<Reader<'a>, RecordError> {
+        if buf.len() > max_len {
+            return Err(RecordError::TooLong);
+        }
+        Ok(Reader {
+            rest: buf,
+            last_key: None,
+            last_asked: None,
+            pending: None,
+            unknown,
+        })
+    }
+
+    /// A `u8` value, exactly 1 byte (R3). Errors as [`Reader::bytes_n`].
+    pub(crate) fn u8(&mut self, key: u8) -> Result<Option<u8>, RecordError> {
+        Ok(self.bytes_n(key)?.copied().map(u8::from_be_bytes))
+    }
+
+    /// A `u32` value, exactly 4 bytes big-endian (R3). Errors as
+    /// [`Reader::bytes_n`].
+    pub(crate) fn u32(&mut self, key: u8) -> Result<Option<u32>, RecordError> {
+        Ok(self.bytes_n(key)?.copied().map(u32::from_be_bytes))
+    }
+
+    /// A `u64` value, exactly 8 bytes big-endian (R3). Errors as
+    /// [`Reader::bytes_n`].
+    pub(crate) fn u64(&mut self, key: u8) -> Result<Option<u64>, RecordError> {
+        Ok(self.bytes_n(key)?.copied().map(u64::from_be_bytes))
+    }
+
+    /// A value of any length up to `max` (R4).
+    ///
+    /// # Errors
+    ///
+    /// The framing errors of R2 for this field or any skipped before it
+    /// (`Truncated`, `KeyOrder`, `UnknownKey` under `Reject`), `KeyOrder` for a
+    /// key not greater than the one last asked for, then `TooLong` above `max`.
+    pub(crate) fn bytes(&mut self, key: u8, max: usize) -> Result<Option<&'a [u8]>, RecordError> {
+        match self.field(key)? {
+            Some(value) if value.len() > max => Err(RecordError::TooLong),
+            value => Ok(value),
+        }
+    }
+
+    /// A value of exactly `N` bytes (R4).
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`Reader::bytes`] before the value, then `Width`.
+    pub(crate) fn bytes_n<const N: usize>(
+        &mut self,
+        key: u8,
+    ) -> Result<Option<&'a [u8; N]>, RecordError> {
+        self.field(key)?
+            .map(|value| value.try_into().map_err(|_| RecordError::Width))
+            .transpose()
+    }
+
+    /// UTF-8 of at most `max` bytes (R4).
+    ///
+    /// # Errors
+    ///
+    /// The errors of [`Reader::bytes`], then `Utf8`: the length comes first, so
+    /// an oversized value is never walked.
+    pub(crate) fn text(&mut self, key: u8, max: usize) -> Result<Option<&'a str>, RecordError> {
+        self.bytes(key, max)?
+            .map(|value| core::str::from_utf8(value).map_err(|_| RecordError::Utf8))
+            .transpose()
+    }
+
+    /// Walks every field left, so that no record can hide trailing bytes or,
+    /// under `Reject`, a key the schema never asked for (R5).
+    ///
+    /// # Errors
+    ///
+    /// The framing errors of R2 for any field left, and `UnknownKey` for any
+    /// of them under `Reject`.
+    pub(crate) fn end(mut self) -> Result<(), RecordError> {
+        while self.next_field()?.is_some() {
+            self.unknown_key()?;
+        }
+        Ok(())
+    }
+
+    /// The value of `key`, skipping the unknown keys below it by the policy.
+    fn field(&mut self, key: u8) -> Result<Option<&'a [u8]>, RecordError> {
+        if self.last_asked.is_some_and(|last| key <= last) {
+            return Err(RecordError::KeyOrder);
+        }
+        self.last_asked = Some(key);
+        while let Some(field) = self.next_field()? {
+            match field.key.cmp(&key) {
+                Ordering::Less => self.unknown_key()?,
+                Ordering::Equal => return Ok(Some(field.value)),
+                Ordering::Greater => {
+                    self.pending = Some(field);
+                    return Ok(None);
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Frames the next field with the checks of R2, in their order: header,
+    /// length against the bytes present, then key order.
+    fn next_field(&mut self) -> Result<Option<Field<'a>>, RecordError> {
+        if let Some(field) = self.pending.take() {
+            return Ok(Some(field));
+        }
+        if self.rest.is_empty() {
+            return Ok(None);
+        }
+        let (header, rest) = self
+            .rest
+            .split_first_chunk::<FIELD_HEADER_LEN>()
+            .ok_or(RecordError::Truncated)?;
+        let [key, len @ ..] = *header;
+        let len = usize::try_from(u32::from_be_bytes(len)).map_err(|_| RecordError::Truncated)?;
+        let (value, rest) = rest.split_at_checked(len).ok_or(RecordError::Truncated)?;
+        if self.last_key.is_some_and(|last| key <= last) {
+            return Err(RecordError::KeyOrder);
+        }
+        self.last_key = Some(key);
+        self.rest = rest;
+        Ok(Some(Field { key, value }))
+    }
+
+    /// The policy's verdict on a key the schema does not name (R7).
+    fn unknown_key(&self) -> Result<(), RecordError> {
+        match self.unknown {
+            UnknownKeys::Ignore => Ok(()),
+            UnknownKeys::Reject => Err(RecordError::UnknownKey),
+        }
+    }
+}

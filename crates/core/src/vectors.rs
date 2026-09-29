@@ -13,7 +13,10 @@
 use std::collections::HashSet;
 
 /// Every committed file, by spec. A format spec adds its line with its file.
-const FILES: &[(&str, &str)] = &[("010", include_str!("../../../specs/vectors/010.json"))];
+const FILES: &[(&str, &str)] = &[
+    ("010", include_str!("../../../specs/vectors/010.json")),
+    ("017", include_str!("../../../specs/vectors/017.json")),
+];
 
 /// Where a vector's values come from (`specs/vectors/README.md`).
 const SOURCES: [&str; 3] = ["published", "derived", "pinned"];

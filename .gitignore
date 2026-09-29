@@ -8,6 +8,8 @@ Thumbs.db
 # Rust
 /target
 **/*.rs.bk
+# Cases a failing proptest saves; a green run writes none.
+proptest-regressions/
 
 # Node / Tauri
 node_modules/

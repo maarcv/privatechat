@@ -2,6 +2,26 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit R
+
+**2026-09-28 — Audit R, code audit of slices (a) and (b) of spec 017-record-encoding (branch `017-record-encoding`), in three independent passes (R-A: structure and simplicity; R-B: the local CI run, 63 mutants of the codec and the test schema, mutants of the reference-script section, edge-case probes; R-C: conformance with spec 017, `docs/spec.md` §4 and the specs that consume the codec).** CI green; no correctness defect in the codec; no wire, key or format decision changes. Findings (numbered AR, so that they do not read as requirements) and changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AR1 | `end()` walking a single field survived every test: no test or vector had a skipped field followed by trailing bytes (R-B) | Medium | T05 case and vector `unknown_key_then_extra_byte` |
+| AR2 | The vectors did not pin the integer byte order: every integer vector was a palindrome in bytes, so a little-endian reader in another language would pass (R-B) | Medium | Vector `all_fields`, with integers whose bytes all differ; it is also the six-field seed spec 016 T03 asks for (R-C) |
+| AR3 | The limits 512 and 64 were tested only against the constants under test; `MAX_RECORD = 511`, `MAX_TEXT = 63` and a writer capacity of 150 in `encode` survived (R-B) | Medium | Literals pinned in T08; vector `record_at_limit`; `all_fields` carries `bytes` and `text` at 64 bytes and re-encodes 203 bytes |
+| AR4 | A getter asked for a key below the last one returned a silent `None`, so a schema decoder with its keys out of order would read a present key as absent (R-B) | Medium | `KeyOrder` from the getter; Interface; T02 |
+| AR5 | T07 checked only the error, never the value read after a skipped key (R-B) | Low | T07 reads key 5 after a skipped key 3 |
+| AR6 | R4 did not fix which error a `text` both too long and not UTF-8 returns (R-B, R-C) | Low | Length first, in R4; T04 |
+| AR7 | When the reader decides an absent key was not stated, though specs 011 R3 and 013 R12 depend on it (R-C) | Low | Interface sentence |
+| AR8 | T01 contradicted the Interface and spec 015 R3 on who loads `017.json`; the code took the Interface's reading (R-C) | Low | T01 reworded |
+| AR9 | The vector fields other than `schema` and `policy` were not named, though spec 016 R8 and the other platforms read them (R-C) | Low | Vectors paragraph |
+| AR10 | T03 did not re-encode the maxima; R11's value above 2^32 − 1 had no test (R-A, R-B, R-C) | Low | T03 round trip; T11 on 64-bit targets, where zeroed pages are mapped lazily |
+| AR11 | Missing `# Errors` docs, a module doc calling the envelope a record, `skip_unknown` that skips nothing, a `fixed` helper, table and policy idioms unlike the surrounding code, the Python `expected` that encoded and discarded, bare `5` and `65`, origins that named no document (R-A, R-C) | Low | Docs; `unknown_key`; `fixed` removed; `Fields` alias; `schema_value`, `FIELD_HEADER_LEN`, origins prefixed with "spec 017 test schema" |
+
+Not changed: slice (a) is 463 net lines against the 400 of AGENTS 14 (R-A, R-C); R-A found about 15 lines of trim that keep every case the spec names, so the excess is stated in the commit and left to the human reviewer. A failing proptest writes `proptest-regressions/`, which `.gitignore` does not list (R-B); a green run writes nothing, and whether to commit such files is left open.
+
 ## Audit Q
 
 **2026-09-28 — Audit Q, first code audit: slices (a) and (b) of spec 015-test-vectors (branch `015-loader`), in three independent passes (Q-A: structure and simplicity; Q-B: the local CI run per commit, loader edge cases and mutants of the loader and the reference script; Q-C: conformance with spec 015 and AGENTS).** CI green at both commits; no wire, key or format decision changes. Findings and changes applied:

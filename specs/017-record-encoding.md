@@ -24,7 +24,7 @@ This spec fixes the codec. Which keys each record has, and which error a failure
 - R1 A record MUST be a sequence of zero or more fields, and a field MUST be `key` (1 byte) ‖ `len` (4 bytes, big-endian unsigned) ‖ `value` (`len` bytes), with nothing between fields.
 - R2 The decoder MUST check each field in this order, and return the first failure: at least 5 bytes left for `key` and `len`, else `RecordError::Truncated`; `len` no larger than the bytes left, else `RecordError::Truncated`, before anything is allocated or copied; `key` strictly greater than the previous key, else `RecordError::KeyOrder`, which covers duplicates; a key the schema does not name is skipped under `UnknownKeys::Ignore` and returns `RecordError::UnknownKey` under `UnknownKeys::Reject`; and only then the type rules of R3 and R4.
 - R3 An integer value MUST be exactly 1 byte for `u8`, 4 for `u32` and 8 for `u64`, big-endian; any other length MUST return `RecordError::Width`.
-- R4 A `bytesN` value MUST be exactly `N` bytes (else `RecordError::Width`), a `bytes` value any length up to the maximum the caller gives for that key (else `RecordError::TooLong`), and a `text` value valid UTF-8 up to the caller's maximum (else `RecordError::Utf8` or `RecordError::TooLong`).
+- R4 A `bytesN` value MUST be exactly `N` bytes (else `RecordError::Width`), a `bytes` value any length up to the maximum the caller gives for that key (else `RecordError::TooLong`), and a `text` value valid UTF-8 up to the caller's maximum (else `RecordError::TooLong`, checked first, or `RecordError::Utf8`).
 - R5 `Reader::end` MUST walk every field left with the loop of R2, so that bytes that do not complete a field return `RecordError::Truncated` and an unknown key returns `RecordError::UnknownKey` under `Reject`; every schema decoder MUST call `end()` on its reader.
 - R6 A mandatory key that is absent MUST return `RecordError::Missing`. An optional key that is absent reads as `None`; there is no null marker.
 - R7 A `Reader` MUST be built with a policy, `UnknownKeys::Ignore` or `UnknownKeys::Reject`, and MUST apply it to every field it walks, including the ones `end()` walks.
@@ -33,7 +33,7 @@ This spec fixes the codec. Which keys each record has, and which error a failure
 - R10 The writer MUST produce the canonical encoding: keys in increasing order, each integer at its exact width, and no field for an absent optional key. Decoding what the writer produced MUST give back the same values, and, for a reader under `Reject` or a record with no unknown keys, encoding what the decoder accepted MUST give back the same bytes. Under `Ignore` a skipped key is not re-encoded; `docs/spec.md` §4 forbids a later key from changing what the known keys mean.
 - R11 `Writer::with_capacity(max)` MUST allocate `max` bytes once, hold them in `zeroize::Zeroizing<Vec<u8>>`, and return `RecordError::TooLong` instead of growing, so that no reallocation leaves an unwiped copy of a secret. It MUST also return `RecordError::KeyOrder` for a key not greater than the previous one, and `RecordError::TooLong` for a value longer than 2^32 − 1 bytes.
 - R12 The codec MUST NOT panic, overflow or read out of bounds on any input: every offset and length uses `checked_*` arithmetic and every failure is a `RecordError`.
-- R13 This spec MUST add its section to `scripts/reference/vectors.py`, which produces `017.json`: the section encodes the bytes of every positive vector from its values by R1, R3, R4 and R10, appends the extra field of `unknown_key_ignored` by hand (the writer never emits an unknown key, R10), and builds the bytes of every negative vector by hand from the rule it breaks; every vector of this spec is `derived`.
+- R13 This spec MUST add its section to `scripts/reference/vectors.py`, which produces `017.json`: the section encodes the bytes of every positive vector from its values by R1, R3, R4 and R10, appends the extra field of `unknown_key_ignored` and `record_at_limit` by hand (the writer never emits an unknown key, R10), and builds the bytes of every negative vector by hand from the rule it breaks, on the six bytes of `u8_field`; every vector of this spec is `derived`.
 
 ## Limits
 
@@ -77,7 +77,7 @@ impl Writer {
 }
 
 #[must_use]
-pub(crate) struct Reader<'a> { /* the buffer, the position, the last key, the policy */ }
+pub(crate) struct Reader<'a> { /* the bytes left, the last key framed, the last key asked for, a field framed ahead, the policy */ }
 impl<'a> Reader<'a> {
     pub(crate) fn new(buf: &'a [u8], max_len: usize, unknown: UnknownKeys) -> Result<Reader<'a>, RecordError>;
     pub(crate) fn u8(&mut self, key: u8) -> Result<Option<u8>, RecordError>;
@@ -90,7 +90,7 @@ impl<'a> Reader<'a> {
 }
 ```
 
-Keys are read in increasing order. Each getter returns `None` when the key is absent, and the caller turns a `None` for a mandatory key into `RecordError::Missing`. Every getter borrows from the input buffer, so decoding copies nothing: a secret is copied once, by its owner, straight into its `Secret<N>` with `Secret::copy_from` (spec 011-config-format R19). `Reader` carries `#[must_use]`, so a reader that is built and never read or ended is a compiler warning, which the CI turns into an error.
+Keys are read in increasing order, and a getter asked for a key not greater than the one asked for before returns `RecordError::KeyOrder`, so that a schema decoder with its keys out of order fails its tests instead of reading a present key as absent. Each getter returns `None` when the key is absent, and the caller turns a `None` for a mandatory key into `RecordError::Missing`. A getter frames fields only until it meets its key or a greater one: an absent key is decided by the first greater key or the end of the buffer, nothing past the key returned is framed, and failures are reported in the order the reader meets them. Every getter borrows from the input buffer, so decoding copies nothing: a secret is copied once, by its owner, straight into its `Secret<N>` with `Secret::copy_from` (spec 011-config-format R19). `Reader` carries `#[must_use]`, so a reader that is built and never read or ended is a compiler warning, which the CI turns into an error.
 
 A schema decoder reads its keys in order and may check a value as soon as it is read, before the next key: spec 011-config-format R3 checks the versions after key 1 and spec 013-wire-message R12 checks staleness after key 2, each with the same `Reader` that then reads the rest and calls `end()`.
 
@@ -113,23 +113,23 @@ None. The codec is `pub(crate)`.
 
 ## Test cases
 
-- T01 (covers R1): `s017_t01_r01_field_framing`: the vector `u8_field` encodes and decodes to the exact bytes, and `empty_record` is zero bytes and decodes to `Missing`.
-- T02 (covers R2): `s017_t02_r02_field_check_order`: a key lower than the previous one and a repeated key → `KeyOrder`; a field that is both out of order and truncated → `Truncated`; an unknown key out of order → `KeyOrder` under both policies.
+- T01 (covers R1): `s017_t01_r01_field_framing`: the six bytes of the vector `u8_field`, written by hand in the test (only `s017_vectors_dispatch` loads `017.json`, Interface; spec 015-test-vectors R3), decode to key 0 = 42 and encode back to the same bytes; a writer given no field returns zero bytes, and zero bytes (`empty_record`) decode to `Missing`.
+- T02 (covers R2): `s017_t02_r02_field_check_order`: a key lower than the previous one and a repeated key → `KeyOrder`; a field that is both out of order and truncated → `Truncated`; an unknown key out of order, read by a decoder of keys 0 and 5 only, → `KeyOrder` under both policies; a getter asked again for the same key, or for a lower one, → `KeyOrder`.
 - T03 (covers R3): `s017_t03_r03_integer_widths`: a `u32` of 3 and 5 bytes and a `u64` of 7 bytes → `Width`; the maxima of each type round-trip.
-- T04 (covers R4): `s017_t04_r04_bytes_and_text_limits`: `bytes32` of 31 and 33 bytes → `Width`; `bytes` and `text` of the maximum accepted and of the maximum plus one → `TooLong`; `text` with the byte 0xff → `Utf8`.
-- T05 (covers R5): `s017_t05_r05_end_walks_the_rest`: a valid record plus one byte → `Truncated`; a valid record plus one unknown field → `UnknownKey` under `Reject` and accepted under `Ignore`.
+- T04 (covers R4): `s017_t04_r04_bytes_and_text_limits`: `bytes32` of 31 and 33 bytes → `Width`; `bytes` and `text` of the maximum accepted and of the maximum plus one → `TooLong`; `text` with the byte 0xff → `Utf8`; a `text` both too long and not UTF-8 → `TooLong`.
+- T05 (covers R5): `s017_t05_r05_end_walks_the_rest`: a valid record plus one byte → `Truncated`; a valid record plus one unknown field → `UnknownKey` under `Reject` and accepted under `Ignore`; that record plus one byte → `Truncated` under `Ignore`.
 - T06 (covers R6): `s017_t06_r06_missing_and_optional`: an absent optional key gives `None`; an absent key 0 of the test schema → `Missing`.
-- T07 (covers R7): `s017_t07_r07_unknown_key_policy`: the same record with an extra key is accepted under `Ignore` and returns `UnknownKey` under `Reject`, whether the extra key is read past or reached by `end()`.
+- T07 (covers R7): `s017_t07_r07_unknown_key_policy`: the same record with an extra key is accepted under `Ignore` and returns `UnknownKey` under `Reject`, whether the extra key is read past or reached by `end()`, and the key after a skipped one is still read.
 - T08 (covers R8): `s017_t08_r08_whole_record_limit`: a record of 513 bytes against a maximum of 512 → `TooLong` before any field is read; 512 accepted.
 - T09 (covers R9): `s017_t09_r09_test_schema_is_typed`: the test schema decodes into its own struct with one field per key; a key 3 whose value happens to be shaped like a record comes back as those bytes, not as a deeper decode.
 - T10 (covers R10): `s017_t10_r10_round_trip` proptest over records of the test schema: decode(encode(x)) = x, and encode(decode(b)) = b for every b accepted under `Reject`.
-- T11 (covers R11): `s017_t11_r11_writer_never_grows`: `finish` returns `Zeroizing<Vec<u8>>` whose capacity equals the one given; a write past it → `TooLong`; a key not greater than the previous → `KeyOrder`.
+- T11 (covers R11): `s017_t11_r11_writer_never_grows`: `finish` returns `Zeroizing<Vec<u8>>` whose capacity equals the one given; a write past it → `TooLong`; a key not greater than the previous → `KeyOrder`; on a 64-bit target, a value of 2^32 bytes → `TooLong`.
 - T12 (covers R12): `s017_t12_r12_arbitrary_bytes_never_panic` proptest over arbitrary buffers of up to 4 096 bytes decoded by the test schema under both policies: every call returns `Ok` or a `RecordError`.
 - T13 (covers R13): the section is the function `check_s017_t13_r13_section_produces_017_json` of `scripts/reference/vectors.py`; the CI step of spec 015-test-vectors R6 runs the script and fails when its output differs from the committed `017.json`.
 
 ## Vectors
 
-`specs/vectors/017.json`, schema of `specs/vectors/README.md`, `proto_version = 1`, produced by the reference script of spec 015-test-vectors (R13). Every vector is `derived`: it follows from R1 to R8 and can be checked by hand. Every vector carries the inputs `schema` (always `"test"`, the test schema above) and `policy` (`"reject"` or `"ignore"`), so that a reader in any language knows how to decode it.
+`specs/vectors/017.json`, schema of `specs/vectors/README.md`, `proto_version = 1`, produced by the reference script of spec 015-test-vectors (R13). Every vector is `derived`: it follows from R1 to R8 and can be checked by hand. Every vector carries the inputs `schema` (always `"test"`, the test schema above), `policy` (`"reject"` or `"ignore"`) and `record` (the bytes decoded), so that a reader in any language knows how to decode it. A positive vector's `expected` holds one field per key present, named `small`, `medium`, `large`, `bytes`, `bytes32` and `text` after the test schema (`large` as a 64-bit integer, `text` as the hex of its UTF-8, since `text` is not a text field of `specs/vectors/README.md`); a negative's holds `error`, the name of the `RecordError` variant.
 
 | name | kind | source | origin |
 | --- | --- | --- | --- |
@@ -137,11 +137,13 @@ None. The codec is `pub(crate)`.
 | `u8_field` | positive | derived | key 0 alone |
 | `u32_field`, `u64_field` | positive | derived | key 0 plus one field of each type, at its maximum |
 | `bytes_field`, `bytes32_field`, `text_field` | positive | derived | key 0 plus one field of each byte type |
+| `all_fields` | positive | derived | every key, integers whose bytes all differ (so that the byte order shows), `bytes` and `text` at 64 bytes; the seed of spec 016 that carries all six fields |
 | `unknown_key_ignored` | positive | derived | an extra key 9 under `ignore`, accepted |
+| `record_at_limit` | positive | derived | 512 bytes under `ignore`: key 0 and a key 9 as filler |
 | `key_out_of_order`, `duplicate_key` | negative | derived | → `KeyOrder` |
 | `u32_wrong_width`, `bytes32_wrong_width` | negative | derived | → `Width` |
 | `bytes_too_long`, `text_too_long`, `record_too_long` | negative | derived | a `bytes` of 65 bytes; a `text` of 65 bytes; a record of 513 bytes → `TooLong` |
-| `truncated_length`, `length_beyond_buffer`, `extra_byte` | negative | derived | → `Truncated` |
+| `truncated_length`, `length_beyond_buffer`, `extra_byte`, `unknown_key_then_extra_byte` | negative | derived | → `Truncated`; the last one is an extra key 9 and one byte after it under `ignore` |
 | `invalid_utf8` | negative | derived | → `Utf8` |
 | `unknown_key_rejected` | negative | derived | an extra key 9 under `reject` → `UnknownKey` |
 
@@ -171,3 +173,4 @@ None. Decided in audit F (`docs/audit-log.md`):
 - 2026-09-24 revised after audit H (`docs/audit-log.md`): PR slices and the `dead_code` allow; the test schema in its own file; partial reads defined once (R16); negative vectors for `text` and lists; the vector test only dispatches; round 4: the `check-cfg` entry for `cfg(fuzzing)` (R17); round 6 and 7: `decode_test_record` belongs to spec 016, which depends on `core::Error`; round 9: `unknown_key_ignored` excluded from the script by name
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): only the six types phase 1 decodes (`bool`, nested records and `list<T>` leave with their vectors; 020 and 030 add them when needed); no partial-read mode (the in-order reader checks a value as soon as it is read); the reference script of spec 015 produces `017.json` and the Rust tests reproduce it; `#[must_use]` stated in the Interface; the dispatch test is an Interface sentence; the test schema written like production code; requirements and tests renumbered
 - 2026-09-28 accepted (Marc Vilardebó)
+- 2026-09-28 revised after audit R (`docs/audit-log.md`), the code audit of both slices: text length checked before UTF-8 (R4); a getter asked out of order returns `KeyOrder` and when an absent key is decided (Interface); vector fields named; vectors `all_fields`, `record_at_limit` and `unknown_key_then_extra_byte`; T01 reads `u8_field` by hand; T02, T04, T05, T07 and T11 extended
