@@ -24,20 +24,13 @@ const ONION_PORT: u16 = 80;
 const ONION_LABEL_LEN: usize = 56;
 const ONION_SUFFIX: &str = ".onion";
 
-/// The parts of a `server_url` that matches the grammar.
-pub(crate) struct Parts<'a> {
-    /// The host without the scheme or the port (R6).
-    pub(crate) host: &'a str,
-    /// The port, when the URL writes one.
-    pub(crate) port: Option<u16>,
-}
-
-/// Splits `url` by the grammar of R5.
+/// The host of a `server_url` that matches the grammar of R5, without the
+/// scheme or the port (R6).
 ///
 /// # Errors
 ///
 /// `BadConfig` for any text outside the grammar.
-pub(crate) fn parse(url: &str) -> Result<Parts<'_>, Error> {
+pub(crate) fn parse(url: &str) -> Result<&str, Error> {
     if url.len() > MAX_URL {
         return Err(Error::BadConfig);
     }
@@ -56,7 +49,7 @@ pub(crate) fn parse(url: &str) -> Result<Parts<'_>, Error> {
     if !is_host(host) || port == Some(implied_port) {
         return Err(Error::BadConfig);
     }
-    Ok(Parts { host, port })
+    Ok(host)
 }
 
 /// At least one byte of `a-z`, `0-9`, `-` and `.`.

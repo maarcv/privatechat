@@ -43,7 +43,9 @@ pub enum Error {
     InviteExpired,
     /// A config for a channel already open with another server.
     ConfigMismatch,
-    /// libsodium failed to initialise or to allocate, or an expiry overflowed.
+    /// A failure the input cannot cause: libsodium failed (to initialise, to
+    /// allocate the 64 MiB of Argon2id, or otherwise), an expiry overflowed,
+    /// or a bug.
     Internal,
 }
 

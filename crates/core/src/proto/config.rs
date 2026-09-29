@@ -11,7 +11,7 @@ use core::ops::{Range, RangeInclusive};
 use zeroize::Zeroizing;
 
 use super::record::{Reader, RecordError, UnknownKeys, Writer};
-use super::{base64url, wordlist};
+use super::wordlist;
 use crate::Error;
 use crate::crypto::{self, CryptoError, KdfContext, Nonce, PublicKey, Salt, Secret};
 
@@ -29,7 +29,7 @@ pub(crate) const CHANNEL_AUTH_CONTEXT: KdfContext = KdfContext::new(*b"chauth__"
 const VERSION: u8 = 1;
 
 /// The largest encoded record (R7).
-pub(crate) const MAX_RECORD: usize = 512;
+const MAX_RECORD: usize = 512;
 
 /// The largest `suggested_name`, in bytes of UTF-8 (R4).
 const MAX_NAME: usize = 64;
@@ -43,9 +43,8 @@ const QR_INVITE_MS: u64 = 600_000;
 /// The magic of a `.chatcfg` file, which identifies the app (R13).
 const FILE_MAGIC: &[u8; 4] = b"PCFG";
 
-/// The regions of a file (R13): the magic and version, the salt, the nonce,
-/// and the sealed record from `SEALED_AT` to the end.
-const FILE_HEADER_LEN: usize = 5;
+/// The regions of a file (R13) after the magic and the version byte: the
+/// salt, the nonce, and the sealed record from `SEALED_AT` to the end.
 const SALT_RANGE: Range<usize> = 5..21;
 const NONCE_RANGE: Range<usize> = 21..45;
 const SEALED_AT: usize = 45;
@@ -124,13 +123,8 @@ impl Config {
         suggested_name: &str,
         now: u64,
     ) -> Result<Config, Error> {
-        Config::from_parts(
-            Secret::random()?,
-            server_url,
-            ttl_seconds,
-            suggested_name,
-            now,
-        )
+        let k_ch = Secret::random()?;
+        Config::from_parts(k_ch, server_url, ttl_seconds, suggested_name, now)
     }
 
     /// The config encoded in `bytes`, the record itself (R1–R4, R7, R10).
@@ -147,7 +141,7 @@ impl Config {
         if fields.invite_expires_at.is_some_and(|expiry| expiry < now) {
             return Err(Error::InviteExpired);
         }
-        Config::build(
+        Config::from_checked(
             Secret::copy_from(fields.k_ch),
             fields.server_url,
             fields.ttl_seconds,
@@ -167,7 +161,10 @@ impl Config {
         if text.len() > MAX_QR {
             return Err(Error::BadConfig);
         }
-        let record = base64url::decode(text).ok_or(Error::BadConfig)?;
+        let record = crypto::base64url_decode(text).map_err(|error| match error {
+            CryptoError::BadEncoding => Error::BadConfig,
+            other => Error::from(other),
+        })?;
         Config::parse(&record, now)
     }
 
@@ -177,11 +174,12 @@ impl Config {
     ///
     /// # Errors
     ///
-    /// `Internal` when `now` leaves no room for the expiry.
+    /// `Internal` when `now` leaves no room for the expiry or libsodium
+    /// fails.
     pub fn export_qr(&self, now: u64) -> Result<Vec<u8>, Error> {
         let expiry = now.checked_add(QR_INVITE_MS).ok_or(Error::Internal)?;
         let record = self.record(Some(expiry))?;
-        let mut text = base64url::encode(&record).ok_or(Error::Internal)?;
+        let mut text = crypto::base64url_encode(&record)?;
         // Moved out, not copied, so no unwiped copy is left behind (R19).
         Ok(core::mem::take(&mut *text))
     }
@@ -213,6 +211,9 @@ impl Config {
     /// `Internal` when `now` leaves no room for the expiry or libsodium
     /// fails.
     pub fn export_encrypted(&self, now: u64) -> Result<(Vec<u8>, Vec<u8>), Error> {
+        // Checked before the draw, so that no Argon2id runs for a file that
+        // `padded_record` would refuse.
+        now.checked_add(FILE_INVITE_MS).ok_or(Error::Internal)?;
         let mut password = draw_password()?;
         let salt = Salt(crypto::random_bytes()?);
         let nonce = Nonce(crypto::random_bytes()?);
@@ -242,6 +243,10 @@ impl Config {
     }
 
     /// A config from fixed inputs, which the tests and `create` share.
+    ///
+    /// # Errors
+    ///
+    /// As [`Config::create`].
     pub(crate) fn from_parts(
         k_ch: Secret<32>,
         server_url: &str,
@@ -250,10 +255,16 @@ impl Config {
         created_at: u64,
     ) -> Result<Config, Error> {
         check_ranges(server_url, ttl_seconds, suggested_name)?;
-        Config::build(k_ch, server_url, ttl_seconds, suggested_name, created_at)
+        Config::from_checked(k_ch, server_url, ttl_seconds, suggested_name, created_at)
     }
 
-    /// The file of R13 under the key Argon2id derives from `password`.
+    /// The file of R13 under the key Argon2id derives from `password`, which
+    /// is taken as canonical bytes (R15) and not canonicalised: the only
+    /// caller outside the tests passes `draw_password()`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Config::export_encrypted`].
     pub(crate) fn seal_file(
         &self,
         password: &[u8],
@@ -267,6 +278,10 @@ impl Config {
 
     /// The one place a file is built (R18): header, salt, nonce and the
     /// sealed padded record, 1 085 bytes.
+    ///
+    /// # Errors
+    ///
+    /// As [`Config::export_encrypted`].
     pub(crate) fn seal_file_with_key(
         &self,
         key: &Secret<32>,
@@ -286,20 +301,28 @@ impl Config {
 
     /// Opens a file under a key already derived: the box, the padding, then
     /// the record by R3 (R13, R14).
+    ///
+    /// # Errors
+    ///
+    /// `BadConfig` for a header R13 rejects or a box with no valid padding,
+    /// `UnsupportedVersion` for a version byte other than 1, `BadPassword`
+    /// for a box the key does not open, then the errors of [`Config::parse`].
     pub(crate) fn open_file_with_key(
         bytes: &[u8],
         key: &Secret<32>,
         now: u64,
     ) -> Result<Config, Error> {
+        // Checked again because the tests and the fuzz target of spec 016
+        // enter here without `open_encrypted`.
         parse_file_header(bytes)?;
         let nonce = Nonce(region(bytes, NONCE_RANGE)?);
         let sealed = bytes.get(SEALED_AT..).ok_or(Error::BadConfig)?;
         // R14: a wrong password and a corrupted file are one error.
-        let padded = crypto::secretbox_open(key, &nonce, sealed).map_err(|error| match error {
+        let opened = crypto::secretbox_open(key, &nonce, sealed).map_err(|error| match error {
             CryptoError::Forged => Error::BadPassword,
             other => Error::from(other),
-        });
-        let padded = Zeroizing::new(padded?);
+        })?;
+        let padded = Zeroizing::new(opened);
         let len = crypto::unpad(&padded, FILE_PAD_BLOCK).map_err(|error| match error {
             CryptoError::BadPadding => Error::BadConfig,
             other => Error::from(other),
@@ -309,6 +332,11 @@ impl Config {
 
     /// The record a file seals, with its 24-hour expiry, padded to one
     /// block in a buffer allocated once at that block (R19).
+    ///
+    /// # Errors
+    ///
+    /// `Internal` when `now` leaves no room for the expiry or libsodium
+    /// fails.
     pub(crate) fn padded_record(&self, now: u64) -> Result<Zeroizing<Vec<u8>>, Error> {
         let expiry = now.checked_add(FILE_INVITE_MS).ok_or(Error::Internal)?;
         let record = self.record(Some(expiry))?;
@@ -319,7 +347,11 @@ impl Config {
     }
 
     /// The canonical record, with `invite_expires_at` when an export writes it.
-    /// Every field was checked on the way in, so a writer error is a bug.
+    ///
+    /// # Errors
+    ///
+    /// `Internal` for a writer error, which only a bug can cause: every
+    /// field was checked on the way in.
     pub(crate) fn record(
         &self,
         invite_expires_at: Option<u64>,
@@ -333,7 +365,7 @@ impl Config {
     /// The host of `server_url`, the string the subscription signature
     /// covers (R6, spec 031). The URL was checked when the config was built.
     pub(crate) fn host(&self) -> &str {
-        url::parse(&self.server_url).map_or("", |parts| parts.host)
+        url::parse(&self.server_url).unwrap_or_default()
     }
 
     /// `K_ch`, for the derivations of specs 012 and 013 (R6).
@@ -347,8 +379,12 @@ impl Config {
     }
 
     /// `(pk_ch, sk_ch)`, the Ed25519 key pair every member holds (R8).
+    ///
+    /// # Errors
+    ///
+    /// `Internal` when libsodium fails.
     pub(crate) fn channel_keypair(&self) -> Result<(PublicKey, Secret<64>), Error> {
-        channel_keypair(&self.k_ch)
+        derive_channel_keypair(&self.k_ch)
     }
 
     /// The fields of §5 in key order (R1).
@@ -365,15 +401,16 @@ impl Config {
         writer.text(KEY_SUGGESTED_NAME, &self.suggested_name)
     }
 
-    /// Derives the identity of fields already checked (R3: derivation last).
-    fn build(
+    /// A config of fields already checked, deriving its identity (R3:
+    /// derivation last).
+    fn from_checked(
         k_ch: Secret<32>,
         server_url: &str,
         ttl_seconds: u32,
         suggested_name: &str,
         created_at: u64,
     ) -> Result<Config, Error> {
-        let id = channel_id(&k_ch, ttl_seconds)?;
+        let id = derive_channel_id(&k_ch, ttl_seconds)?;
         Ok(Config {
             k_ch,
             server_url: server_url.to_owned(),
@@ -387,11 +424,23 @@ impl Config {
 
 /// Seven words of the list joined by single spaces, drawn with
 /// `random_bytes` (R16).
+///
+/// # Errors
+///
+/// `Internal` when libsodium fails.
 pub(crate) fn draw_password() -> Result<Zeroizing<Vec<u8>>, Error> {
     let draws = Zeroizing::new(crypto::random_bytes::<PASSWORD_DRAW_LEN>()?);
+    password_of(&draws)
+}
+
+/// The password of 14 drawn bytes: each pair, big-endian, masked to its low
+/// 11 bits, is the index of one word. Kept apart from the draw so that its
+/// known answers can be tested.
+fn password_of(draws: &[u8; PASSWORD_DRAW_LEN]) -> Result<Zeroizing<Vec<u8>>, Error> {
     let mut password = Zeroizing::new(Vec::with_capacity(MAX_DRAWN_PASSWORD));
-    for (high, low) in draws.iter().step_by(2).zip(draws.iter().skip(1).step_by(2)) {
-        let index = u16::from_be_bytes([*high, *low]) & WORD_INDEX_MASK;
+    let (pairs, _) = draws.as_chunks::<2>();
+    for pair in pairs {
+        let index = u16::from_be_bytes(*pair) & WORD_INDEX_MASK;
         let word = wordlist::word(index).ok_or(Error::Internal)?;
         if !password.is_empty() {
             password.push(b' ');
@@ -401,18 +450,20 @@ pub(crate) fn draw_password() -> Result<Zeroizing<Vec<u8>>, Error> {
     Ok(password)
 }
 
-/// The checks of R13 that need no password and no key: the size of the
-/// header, the magic, the version byte, then the exact length.
+/// The checks of R13 that need no password and no key: at least the magic
+/// and the version byte, the magic, the version byte, then the exact length.
+///
+/// # Errors
+///
+/// `BadConfig` for fewer than 5 bytes, a wrong magic or a length other than
+/// 1 085 bytes; `UnsupportedVersion` for a version byte other than 1.
 pub(crate) fn parse_file_header(bytes: &[u8]) -> Result<(), Error> {
-    let (header, _) = bytes
-        .split_first_chunk::<FILE_HEADER_LEN>()
-        .ok_or(Error::BadConfig)?;
-    let (magic, version) = header.split_last_chunk::<1>().ok_or(Error::BadConfig)?;
-    let magic: &[u8; 4] = magic.try_into().map_err(|_| Error::BadConfig)?;
+    let (magic, rest) = bytes.split_first_chunk().ok_or(Error::BadConfig)?;
+    let version = *rest.first().ok_or(Error::BadConfig)?;
     if !crypto::ct_eq(magic, FILE_MAGIC) {
         return Err(Error::BadConfig);
     }
-    if *version != [VERSION] {
+    if version != VERSION {
         return Err(Error::UnsupportedVersion);
     }
     if bytes.len() != FILE_LEN {
@@ -486,15 +537,15 @@ fn check_ranges(server_url: &str, ttl_seconds: u32, suggested_name: &str) -> Res
 }
 
 /// `sign_keypair_from_seed(kdf_derive(K_ch, "chauth__"))` (R8).
-fn channel_keypair(k_ch: &Secret<32>) -> Result<(PublicKey, Secret<64>), Error> {
+fn derive_channel_keypair(k_ch: &Secret<32>) -> Result<(PublicKey, Secret<64>), Error> {
     let seed = crypto::kdf_derive(k_ch, &CHANNEL_AUTH_CONTEXT)?;
     Ok(crypto::sign_keypair_from_seed(&seed)?)
 }
 
 /// The first 16 bytes of `BLAKE2b(CHANNEL_ID_TAG ‖ pk_ch ‖ BE32(ttl_seconds))`
 /// (R8): self-certifying, and bound to the TTL (ADR 0014).
-fn channel_id(k_ch: &Secret<32>, ttl_seconds: u32) -> Result<ChannelId, Error> {
-    let (pk_ch, _) = channel_keypair(k_ch)?;
+fn derive_channel_id(k_ch: &Secret<32>, ttl_seconds: u32) -> Result<ChannelId, Error> {
+    let (pk_ch, _) = derive_channel_keypair(k_ch)?;
     let input = [
         CHANNEL_ID_TAG.as_slice(),
         &pk_ch.0,

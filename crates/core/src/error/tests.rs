@@ -1,3 +1,6 @@
+//! Tests of spec 011 R20: the variants of `core::Error` and the mapping
+//! from `CryptoError`.
+
 use super::Error;
 use crate::crypto::CryptoError;
 
