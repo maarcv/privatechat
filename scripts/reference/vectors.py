@@ -717,6 +717,89 @@ def chatcfg_vectors(record: bytes, opened_record: bytes, now: U64) -> list[dict]
 SECTIONS["011"] = check_s011_t22_r22_section_produces_011_json
 
 
+# --- Spec 012: message keys and encrypted header ------------------------------------
+
+CONTEXT_MESSAGE = b"msgkey__"  # 012 R1, R7
+CONTEXT_HEADER = b"chhdr___"
+ENC_HDR_LEN = 40  # 012 R4: sender_pk ‖ BE64(counter), also the input of mk (R2)
+HEADER_STREAM_LEN = 104  # 40 for the header, 64 for the signature mask (ADR 0032)
+SIGNATURE_LEN = 64
+U64_MAX = 2**64 - 1
+
+
+def header_bytes(pk_u: bytes, counter: int) -> bytes:
+    """`pk_u ‖ BE64(counter)`: the plaintext header (012 R4) and the input of `mk` (R2)."""
+    data = pk_u + struct.pack(">Q", counter)
+    require(len(data) == ENC_HDR_LEN, "a header is 40 bytes")
+    return data
+
+
+def message_key(k_msg: bytes, pk_u: bytes, counter: int) -> bytes:
+    """`mk = keyed_hash(K_msg, pk_u ‖ BE64(counter))` (012 R2)."""
+    return blake2b_256(header_bytes(pk_u, counter), key=k_msg)
+
+
+def header_keystream(k_hdr: bytes, nonce: bytes) -> bytes:
+    """`stream_xor(K_hdr, nonce)` over 104 zero bytes: 0..40 for the header, 40..104 for the
+    signature (012 R4)."""
+    return xchacha20_xor(k_hdr, nonce, bytes(HEADER_STREAM_LEN))
+
+
+def xor(data: bytes, mask: bytes) -> bytes:
+    require(len(data) == len(mask), "a mask as long as its data")
+    return bytes(a ^ b for a, b in zip(data, mask))
+
+
+def check_s012_t10_r08_section_produces_012_json() -> list[dict]:
+    """The vectors of spec 012: the two master keys of one `K_ch`, message keys at the ends of
+    the counter and for a second sender, and one header sealed with its keystream."""
+    k_ch = bytes(range(0x60, 0x80))
+    k_msg = kdf_derive(k_ch, CONTEXT_MESSAGE)
+    k_hdr = kdf_derive(k_ch, CONTEXT_HEADER)
+    pk_u = ed25519_public_key(bytes(range(0x80, 0xa0)))
+    other_pk = ed25519_public_key(bytes(range(0xa0, 0xc0)))
+    require(other_pk != pk_u, "message_key_other_sender has another sender")
+
+    def raw(name: str, origin: str, inputs: dict, expected: dict) -> dict:
+        return {"name": name, "kind": "positive", "source": "derived",
+                "origin": f"spec 012: {origin}", "inputs": inputs, "expected": expected}
+
+    vectors = [raw("master_keys", "K_ch to K_msg and K_hdr through the KDF of §4", {"k_ch": k_ch},
+                   {"k_msg": k_msg, "k_hdr": k_hdr})]
+    message_keys = [
+        ("message_key_c0", "counter 0", pk_u, 0),
+        ("message_key_c1", "counter 1, the same sender", pk_u, 1),
+        ("message_key_max", "counter 2^64 - 1, the same sender", pk_u, U64_MAX),
+        ("message_key_other_sender", "counter 1, another sender", other_pk, 1),
+    ]
+    vectors += [raw(name, f"mk at {origin}", {"k_ch": k_ch, "pk_u": pk, "counter": U64(counter)},
+                    {"mk": message_key(k_msg, pk, counter)})
+                for name, origin, pk, counter in message_keys]
+    require(len({vector["expected"]["mk"] for vector in vectors[1:]}) == 4, "the keys differ")
+    require(dict((name, counter) for name, _, _, counter in message_keys)["message_key_max"]
+            == U64_MAX, "message_key_max is at the largest counter")
+    counter = 0x0102030405060708
+    require(len(set(struct.pack(">Q", counter))) == 8, "every byte of the counter differs")
+    nonce = bytes(range(0xc0, 0xd8))
+    signature = bytes(range(0x00, 0x80, 2))
+    require(len(signature) == SIGNATURE_LEN == HEADER_STREAM_LEN - ENC_HDR_LEN,
+            "the signature is the last 64 bytes of the keystream")
+    header = header_bytes(pk_u, counter)
+    keystream = header_keystream(k_hdr, nonce)
+    vectors.append(raw("header_sealed", "the K_ch of master_keys, a sender, a counter whose bytes "
+                                        "all differ, a signature and a nonce, sealed with the "
+                                        "keystream of K_hdr",
+                       {"k_ch": k_ch, "sender_pk": pk_u, "counter": U64(counter),
+                        "signature": signature, "nonce": nonce},
+                       {"k_hdr": k_hdr, "header": header, "keystream": keystream,
+                        "enc_hdr": xor(header, keystream[:ENC_HDR_LEN]),
+                        "masked_signature": xor(signature, keystream[ENC_HDR_LEN:])}))
+    return vectors
+
+
+SECTIONS["012"] = check_s012_t10_r08_section_produces_012_json
+
+
 def words() -> list[str]:
     """The English BIP-39 list, for the sections of specs 011 and 014; refused unless its SHA-256
     is the literal of 011 R17, before any file is written."""
