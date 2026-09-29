@@ -1,9 +1,12 @@
 use proptest::collection::vec as bytes_of;
-use proptest::prelude::{any, proptest};
+use proptest::prelude::{any, prop_assume, prop_oneof, proptest};
 
-use super::{CHANNEL_AUTH_CONTEXT, CHANNEL_ID_TAG, Config, MAX_QR, MAX_RECORD, base64url, url};
+use super::{
+    CHANNEL_AUTH_CONTEXT, CHANNEL_ID_TAG, Config, FILE_LEN, FILE_PAD_BLOCK, MAX_QR, MAX_RECORD,
+    SEALED_AT, base64url, canonical_password, parse_file_header, url, wordlist,
+};
 use crate::Error;
-use crate::crypto::{self, SECRET_TYPES, Secret, ct_eq};
+use crate::crypto::{self, Nonce, SECRET_TYPES, Salt, Secret, TAG_LEN, ct_eq};
 use crate::vectors::{self, Checker, Kind, Vector};
 
 const K_CH: [u8; 32] = [0xa5; 32];
@@ -168,6 +171,43 @@ fn bad_qr_texts() -> Vec<Vec<u8>> {
     ]
 }
 
+const PASSWORD: &[u8] = b"able about above";
+const SALT: Salt = Salt([0x11; 16]);
+const NONCE: Nonce = Nonce([0x22; 24]);
+
+/// The key of the files whose tests do not need Argon2id.
+fn file_key() -> Secret<32> {
+    Secret::from_bytes([0x33; 32])
+}
+
+/// A file of the reference config under `file_key()`.
+fn keyed_file() -> Vec<u8> {
+    let file = reference().seal_file_with_key(&file_key(), &SALT, &NONCE, NOW);
+    file.unwrap()
+}
+
+/// A file whose box holds `content` under `file_key()`, built by hand.
+fn file_around(content: &[u8]) -> Vec<u8> {
+    let sealed = crypto::secretbox_seal(&file_key(), &NONCE, content).unwrap();
+    [&b"PCFG\x01"[..], &SALT.0, &NONCE.0, &sealed].concat()
+}
+
+/// Typed passwords R15 rejects before any key is derived.
+fn bad_passwords() -> Vec<Vec<u8>> {
+    vec![
+        Vec::new(),
+        b" \t ".to_vec(),
+        vec![0xff],
+        vec![b'a'; 1_025],
+        [&b"able"[..], &[b' '; 1_021]].concat(),
+        vec![b'a'; 257],
+    ]
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 /// Spec 011, R1: the keys of §5, key 6 optional and every other mandatory.
 #[test]
 fn s011_t01_r01_parses_the_reference_config() {
@@ -310,9 +350,15 @@ fn s011_t09_r09_literals_and_lengths() {
 }
 
 /// Spec 011, R10: an expired invitation is refused; one that expires at
-/// `now` is accepted and forgotten. `open_encrypted` joins with slice (e).
+/// `now` is accepted and forgotten, on each of the three paths.
 #[test]
 fn s011_t10_r10_expired_invitation_on_every_path() {
+    let file = reference().seal_file(PASSWORD, &SALT, &NONCE, NOW).unwrap();
+    let late = NOW + 86_400_001;
+    let opened = Config::open_encrypted(&file, PASSWORD, late);
+    assert_eq!(opened.err(), Some(Error::InviteExpired));
+    let opened = Config::open_encrypted(&file, PASSWORD, late - 1).unwrap();
+    assert_eq!(opened.record(None).unwrap().as_slice(), encode(&fields()));
     let expired = with(6, &(NOW - 1).to_be_bytes());
     assert_eq!(rejection(&expired), Some(Error::InviteExpired));
     let qr = base64url::encode(&expired).unwrap();
@@ -372,10 +418,23 @@ fn s011_t12_r12_base64url_rejects_alone() {
 }
 
 /// Spec 011, R19: `copy_from` holds the bytes it copied, the codec's outputs
-/// are allocated at their exact size, and no secret type was added. The
-/// file's buffers join with slice (e).
+/// are allocated at their exact size, the padded record at one block and the
+/// canonical password at the typed length, and no secret type was added.
 #[test]
 fn s011_t19_r19_no_lingering_secret() {
+    let padded = reference().padded_record(NOW).unwrap();
+    assert_eq!(
+        (padded.len(), padded.capacity()),
+        (FILE_PAD_BLOCK, FILE_PAD_BLOCK)
+    );
+    let typed = [
+        &b" Able\tABOUT above "[..],
+        &[b'a'; 256],
+        "\u{3000}x".as_bytes(),
+    ];
+    for typed in typed {
+        assert_eq!(canonical_password(typed).unwrap().capacity(), typed.len());
+    }
     for len in 0..=MAX_RECORD {
         let text = base64url::encode(&vec![0x5a; len]).unwrap();
         assert_eq!(text.capacity(), text.len(), "encode {len}");
@@ -386,7 +445,8 @@ fn s011_t19_r19_no_lingering_secret() {
     assert_eq!(SECRET_TYPES, ["Secret<32>", "Secret<64>"]);
 }
 
-/// Spec 011, R21: no rejection carries a byte of `K_ch`.
+/// Spec 011, R21: no rejection carries a byte of `K_ch` or of the password:
+/// every error is a bare variant name.
 #[test]
 fn s011_t21_r21_a_rejected_config_leaves_nothing() {
     let urls = bad_urls()
@@ -395,8 +455,27 @@ fn s011_t21_r21_a_rejected_config_leaves_nothing() {
         .collect();
     let records = [malformed(), unsupported(), out_of_range(), urls].concat();
     let expired = with(6, &(NOW - 1).to_be_bytes());
-    for record in records.iter().chain([&oversized(), &expired]) {
-        let debug = format!("{:?}", rejection(record).unwrap());
+    let mut errors: Vec<Error> = records
+        .iter()
+        .chain([&oversized(), &expired])
+        .map(|record| rejection(record).unwrap())
+        .collect();
+    let qr = bad_qr_texts();
+    errors.extend(
+        qr.iter()
+            .map(|text| Config::parse_qr(text, NOW).err().unwrap()),
+    );
+    let file = keyed_file();
+    let passwords = bad_passwords();
+    errors.extend(
+        passwords
+            .iter()
+            .map(|typed| Config::open_encrypted(&file, typed, NOW).err().unwrap()),
+    );
+    let wrong_key = Config::open_file_with_key(&file, &Secret::from_bytes(K_CH), NOW);
+    errors.push(wrong_key.err().unwrap());
+    for error in errors {
+        let debug = format!("{error:?}");
         assert!(
             debug.bytes().all(|byte| byte.is_ascii_alphabetic()),
             "{debug}"
@@ -428,6 +507,206 @@ fn s011_t23_r23_create() {
     ] {
         let created = Config::create(server_url, ttl, name, NOW);
         assert_eq!(created.err(), Some(Error::BadConfig));
+    }
+}
+
+/// Spec 011, R13: the header before the password, the password before the
+/// key, the box, the padding, then the record by R3.
+#[test]
+fn s011_t13_r13_file_order() {
+    assert_eq!(SEALED_AT + TAG_LEN + FILE_PAD_BLOCK, FILE_LEN);
+    let file = keyed_file();
+    assert_eq!(file.len(), FILE_LEN);
+    assert_eq!(parse_file_header(&file), Ok(()));
+    let mut magic = file.clone();
+    magic[0] ^= 1;
+    let mut version = file.clone();
+    version[4] = 2;
+    let longer = [file.as_slice(), &[0]].concat();
+    for (at, bytes) in [&file[..4], &magic, &file[..FILE_LEN - 1], &longer]
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(parse_file_header(bytes), Err(Error::BadConfig), "case {at}");
+    }
+    assert_eq!(parse_file_header(&version), Err(Error::UnsupportedVersion));
+    let opened = Config::open_encrypted(&file[..4], &[b'a'; 1_025], NOW);
+    assert_eq!(opened.err(), Some(Error::BadConfig));
+    let unpadded = file_around(&[0; FILE_PAD_BLOCK]);
+    let opened = Config::open_file_with_key(&unpadded, &file_key(), NOW);
+    assert_eq!(opened.err(), Some(Error::BadConfig));
+    let mut version_2 = with(0, &[2]);
+    crypto::pad(&mut version_2, FILE_PAD_BLOCK).unwrap();
+    let opened = Config::open_file_with_key(&file_around(&version_2), &file_key(), NOW);
+    assert_eq!(opened.err(), Some(Error::UnsupportedVersion));
+}
+
+/// Spec 011, R14: a wrong password and a corrupted file are one error.
+#[test]
+fn s011_t14_r14_wrong_password_and_corruption_are_one_error() {
+    let file = reference().seal_file(PASSWORD, &SALT, &NONCE, NOW).unwrap();
+    let opened = Config::open_encrypted(&file, b"able about absent", NOW);
+    assert_eq!(opened.err(), Some(Error::BadPassword));
+    for at in [5, 20, 21, 44, SEALED_AT, SEALED_AT + TAG_LEN, FILE_LEN - 1] {
+        let mut corrupted = file.clone();
+        corrupted[at] ^= 0x80;
+        let opened = Config::open_encrypted(&corrupted, PASSWORD, NOW);
+        assert_eq!(opened.err(), Some(Error::BadPassword), "byte {at}");
+    }
+}
+
+/// Spec 011, R15: the typed password is bounded, then canonicalised.
+#[test]
+fn s011_t15_r15_password_canonical_form() {
+    let file = reference().seal_file(PASSWORD, &SALT, &NONCE, NOW).unwrap();
+    let typed = " Able\tABOUT\u{a0}\u{3000}above ";
+    assert!(Config::open_encrypted(&file, typed.as_bytes(), NOW).is_ok());
+    for (at, typed) in bad_passwords().iter().enumerate() {
+        let opened = Config::open_encrypted(&file, typed, NOW);
+        assert_eq!(opened.err(), Some(Error::BadPassword), "case {at}");
+    }
+    assert!(canonical_password(&[b'a'; 256]).is_ok());
+    assert_eq!(
+        canonical_password(&[b'a'; 257]).err(),
+        Some(Error::BadPassword)
+    );
+    let spaced = [&b"able"[..], &[b' '; 1_020]].concat();
+    assert_eq!(canonical_password(&spaced).unwrap().as_slice(), b"able");
+    let spaced = [spaced.as_slice(), b" "].concat();
+    assert_eq!(canonical_password(&spaced).err(), Some(Error::BadPassword));
+}
+
+proptest! {
+    /// Spec 011, R15: canonicalising is idempotent and leaves no uppercase
+    /// ASCII letter and no whitespace but single inner spaces.
+    #[test]
+    fn s011_t15_r15_canonical_form_is_stable(typed in "(?s).{0,256}") {
+        prop_assume!(typed.len() <= 1_024);
+        if let Ok(canonical) = canonical_password(typed.as_bytes()) {
+            assert_eq!(canonical_password(&canonical).unwrap().as_slice(), canonical.as_slice());
+            let text = core::str::from_utf8(&canonical).unwrap();
+            assert!(!text.bytes().any(|byte| byte.is_ascii_uppercase()));
+            assert!(!text.starts_with(' ') && !text.ends_with(' ') && !text.contains("  "));
+            assert!(text.chars().all(|c| c == ' ' || !c.is_whitespace()));
+        }
+    }
+}
+
+/// Spec 011, R16: the export draws 7 list words that open its file.
+#[test]
+fn s011_t16_r16_export_draws_the_password() {
+    let config = reference();
+    let (file, password) = config.export_encrypted(NOW).unwrap();
+    let text = core::str::from_utf8(&password).unwrap();
+    let words: Vec<&str> = text.split(' ').collect();
+    assert_eq!(words.len(), 7);
+    assert!(
+        words
+            .iter()
+            .all(|word| wordlist::WORDS.lines().any(|listed| listed == *word))
+    );
+    assert!(password.len() <= 62);
+    assert_eq!(
+        canonical_password(&password).unwrap().as_slice(),
+        password.as_slice()
+    );
+    assert!(Config::open_encrypted(&file, &password, NOW).is_ok());
+    let (other_file, other_password) = config.export_encrypted(NOW).unwrap();
+    assert!(other_file != file && other_password != password);
+    // Each index has 11 bits: 280 words all in the first half of the list
+    // would happen with probability 2^-280.
+    let upper_half: Vec<&str> = wordlist::WORDS.lines().skip(1_024).collect();
+    let drawn: Vec<_> = (0..40).map(|_| super::draw_password().unwrap()).collect();
+    let words = drawn
+        .iter()
+        .flat_map(|password| password.split(|byte| *byte == b' '));
+    assert!(
+        words
+            .map(|word| core::str::from_utf8(word).unwrap())
+            .any(|word| upper_half.contains(&word))
+    );
+}
+
+/// Spec 011, R17: the list is the English BIP-39 list, pinned by its digest.
+#[test]
+fn s011_t17_r17_word_list_is_pinned() {
+    let words: Vec<&str> = wordlist::WORDS.lines().collect();
+    assert_eq!(words.len(), usize::from(wordlist::WORD_COUNT));
+    assert!(
+        words.windows(2).all(|pair| pair[0] < pair[1]),
+        "sorted and unique"
+    );
+    assert!(wordlist::WORDS.ends_with('\n') && !wordlist::WORDS.contains('\r'));
+    let digest = crypto::hash(wordlist::WORDS.as_bytes()).unwrap();
+    assert_eq!(
+        hex(&digest),
+        "6fefd6b6e47ee66e6bbf8ee322305deebeefb1bd9b24e8618bf126d870175bb7"
+    );
+    assert_eq!(wordlist::word(0), Some("abandon"));
+    assert_eq!(wordlist::word(2_047), Some("zoo"));
+    assert_eq!(wordlist::word(2_048), None);
+}
+
+/// Spec 011, R18: each form writes its fixed expiry, and one that does not
+/// fit is `Internal`. The pinned file is checked by the vector dispatch.
+#[test]
+fn s011_t18_r18_fixed_invitation_expiry() {
+    let config = reference();
+    let qr = base64url::decode(&config.export_qr(NOW).unwrap()).unwrap();
+    assert_eq!(
+        qr.as_slice(),
+        config.record(Some(NOW + 600_000)).unwrap().as_slice()
+    );
+    let mut padded = config.record(Some(NOW + 86_400_000)).unwrap().to_vec();
+    crypto::pad(&mut padded, FILE_PAD_BLOCK).unwrap();
+    assert_eq!(config.padded_record(NOW).unwrap().as_slice(), padded);
+    let file = keyed_file();
+    assert!(Config::open_file_with_key(&file, &file_key(), NOW + 86_400_000).is_ok());
+    assert_eq!(config.export_qr(u64::MAX).err(), Some(Error::Internal));
+    let sealed = config.seal_file_with_key(&file_key(), &SALT, &NONCE, u64::MAX);
+    assert_eq!(sealed.err(), Some(Error::Internal));
+    assert_eq!(
+        config.export_encrypted(u64::MAX).err(),
+        Some(Error::Internal)
+    );
+}
+
+/// Spec 011, R20: `Forged` from the secret box is `BadPassword`.
+#[test]
+fn s011_t20_r20_forged_box_is_bad_password() {
+    let opened = Config::open_file_with_key(&keyed_file(), &Secret::from_bytes(K_CH), NOW);
+    assert_eq!(opened.err(), Some(Error::BadPassword));
+}
+
+/// Any URL of the grammar of R5, up to 9 999 as a port.
+fn server_urls() -> impl proptest::strategy::Strategy<Value = String> {
+    prop_oneof![
+        "wss://[a-z0-9.-]{1,40}(:[1-9][0-9]{0,3})?",
+        "ws://[a-z2-7]{56}\\.onion(:[1-9][0-9]{0,3})?",
+    ]
+}
+
+proptest! {
+    /// Spec 011, R24: the record, the QR and the file each give back the
+    /// config they encode.
+    #[test]
+    fn s011_t24_r24_round_trips(
+        k_ch in any::<[u8; 32]>(),
+        server_url in server_urls(),
+        ttl_seconds in 60u32..=2_592_000,
+        name in "[^\\p{Cc}]{0,16}",
+        created_at in 0u64..=u64::MAX / 2,
+    ) {
+        prop_assume!(url::parse(&server_url).is_ok());
+        let config = Config::from_parts(Secret::copy_from(&k_ch), &server_url, ttl_seconds, &name, created_at).unwrap();
+        let record = config.record(None).unwrap();
+        let parsed = Config::parse(&record, created_at).unwrap();
+        assert_eq!(parsed.record(None).unwrap().as_slice(), record.as_slice());
+        let scanned = Config::parse_qr(&config.export_qr(created_at).unwrap(), created_at).unwrap();
+        assert_eq!(scanned.record(None).unwrap().as_slice(), record.as_slice());
+        let file = config.seal_file_with_key(&file_key(), &SALT, &NONCE, created_at).unwrap();
+        let opened = Config::open_file_with_key(&file, &file_key(), created_at).unwrap();
+        assert_eq!(opened.record(None).unwrap().as_slice(), record.as_slice());
     }
 }
 
@@ -465,6 +744,37 @@ fn check_positive(vector: &Vector) {
         let scanned = Config::parse_qr(qr, vector.input("now").u64_hex()).expect(name);
         assert_eq!(scanned.record(expiry).unwrap().as_slice(), record, "{name}");
     }
+}
+
+/// The pinned file: `seal_file` of the vector's inputs gives its bytes, and
+/// they open to the record with the 24-hour expiry (R18, R22). Compared as
+/// hexadecimal so that a missing or stale literal fails with the value to
+/// paste into the script.
+fn check_chatcfg(vector: &Vector) {
+    let now = vector.input("now").u64_hex();
+    let config = Config::parse(vector.input("record").bytes(), now).unwrap();
+    let password = vector.input("password").bytes();
+    let salt = Salt(vector.input("salt").array());
+    let nonce = Nonce(vector.input("nonce").array());
+    let file = config.seal_file(password, &salt, &nonce, now).unwrap();
+    assert_eq!(
+        hex(&file),
+        hex(vector.expected("file").bytes()),
+        "{}",
+        vector.name()
+    );
+    let opened = Config::open_encrypted(&file, password, now).unwrap();
+    let record = opened.record(Some(now + 86_400_000)).unwrap();
+    assert_eq!(record.as_slice(), vector.expected("opened_record").bytes());
+}
+
+fn check_negative_file(vector: &Vector) {
+    let name = vector.name();
+    let file = vector.input("file").bytes();
+    let password = vector.input("password").bytes();
+    let error = Config::open_encrypted(file, password, vector.input("now").u64_hex()).err();
+    let error = format!("{:?}", error.expect(name));
+    assert_eq!(error, vector.expected("error").text(), "{name}");
 }
 
 fn check_negative_qr(vector: &Vector) {
@@ -514,6 +824,14 @@ fn s011_vectors_dispatch() {
         "invite_expired",
     ];
     let qr = ["qr_padding", "qr_nonzero_bits", "qr_length_mod_4"];
+    let file = [
+        "mutate_magic",
+        "mutate_version",
+        "mutate_salt",
+        "mutate_nonce",
+        "mutate_sealed",
+        "password_too_long",
+    ];
     let entries = [
         positive
             .map(|name| (name, check_positive as Checker))
@@ -523,6 +841,9 @@ fn s011_vectors_dispatch() {
             .as_slice(),
         qr.map(|name| (name, check_negative_qr as Checker))
             .as_slice(),
+        file.map(|name| (name, check_negative_file as Checker))
+            .as_slice(),
+        &[("chatcfg_reference", check_chatcfg as Checker)],
     ]
     .concat();
     vectors::check_all("011", &entries);

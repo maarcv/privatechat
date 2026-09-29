@@ -5,3 +5,4 @@
 pub(crate) mod base64url;
 pub(crate) mod config;
 pub(crate) mod record;
+pub(crate) mod wordlist;

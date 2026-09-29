@@ -414,6 +414,39 @@ CONFIG_MAX_RECORD = 512  # 011 R7
 CHANNEL_ID_TAG = b"privatechat/chid/v1"  # 011 R9
 CHANNEL_AUTH_CONTEXT = b"chauth__"
 CHANNEL_ID_LEN = 16
+FILE_INVITE_MS = 86_400_000  # 011 R18
+# The fixed inputs of `chatcfg_reference`, and its bytes: `pinned`, produced once by the Rust
+# test T18 under libsodium 1.0.22 (011 R22), since Argon2id and XSalsa20 are not transcribed here.
+CHATCFG_PASSWORD = b"abandon ability able about above absent absorb"
+CHATCFG_SALT = bytes(range(0x10, 0x20))
+CHATCFG_NONCE = bytes(range(0x20, 0x38))
+CHATCFG_REFERENCE = bytes.fromhex(
+    "5043464701101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f30313233343536"
+    "373782ccd6a107b0fc57f565f8c8ceb1f29c3adc7e1653dfd80f065d6f35c4808bfe1275ca2a0835f7da9c33"
+    "ac44dd5920c915e069ae6113993de0073b0bffd78f72b81ce51f7fe6b2734753db67259b86dd59c73cd88a19"
+    "b54de35fe1400492f14feb4d7aebb563857c5a68e4ef01c66e1df1d8a28ac75da134b6bf026b8dbb312d6467"
+    "723f630c4c6fd390b6f1c9e98353798771a8bc4beffbacc55d9c9d554c8a4b9c4faf2bd42c13740e7cd87cdb"
+    "e2a7fa0db97b90e6da0fe274f8f45aa9a9efdb87107e59f45441dbe58fadc8189b76c461e1a70135d232bcf8"
+    "716fec04a7cbb3589589854345b6d68d8f79a97b9a111b4cc977ca87890362d8871013029b71fb1f0a4dadb2"
+    "07c37aec09bb6194a4361b4bd4fd61bf182d41b18c763681aaca52124f1c968b553c33379a0746070ba66990"
+    "0266a381e0b86f0f84d460ff06c92b8b19389f3c5acda3e72c13c2747ab1517ed26e8e424d4c1323ed7ee961"
+    "eff1c8318cdac29c03a06ff7ceaec82812b77a508a377a860c81839f64fba98dd6a5d8aea3fd8f87999b3fca"
+    "65c8590f6ea4ed8683df60c68919abf567035719cf128e9625ae511393a7c533803d5b389104c9363a75b896"
+    "5695e70aa8ca431c9ef7fa41185b12a53381f86e076a191cac2d688307da4901bb25e014104f0878732a7372"
+    "b6460e22dd60e0686254d43d3fe9f31fcc4ca556789bc8e74382e14dce3a7e0884a7262fe6d4b379bfcc3094"
+    "ff6c1e44b0b647137549a8382d0e46294eee7ec54cf89d435fcf1116d9cc6687d9abf6c557cd0bfa782358ed"
+    "dbb509321574a9396539f40a3c4efb7ca77858ca2b717bd63ce33c0df06a3c16ff51f09b756eee547bc10767"
+    "923c74fafce0d2a74413b1c4859c31dfdcaa81af5e316f53aa13468bfae9d0be80fa89cdb48d635e8b0f20ed"
+    "fd8d90a2f63ad4105c579ea1c703f9f1dc5c8d7ec4fd5531ea2915dadf317d445c6642341cad6b75180795aa"
+    "fa91b222c196145d8b257c5d7b675dbeeb7e72c0839a039009201841b6ddef490520d2469312b591fbd4cb9c"
+    "cef8184f4c60bf4a860e47b708e914fbecaa181dc1bd8accef1b686eaa399e274fbaaddebe12b8fabefa9a05"
+    "c40984c3431d2687b316cc0b1ccff8a59c8a73fb50910f2f62e877695f107df28cf1c0e50772e62575f72807"
+    "79fc0115e11deefe74ec7f9a9e3de51be129a845b28884aab44c74d9b174e8320e20a1bb78311f0af2d3e98b"
+    "b06f407bddbba2a1f0657c79e22afd2d725de295c803be9193da847508b0c4f51ac09193bc6863c50cfcedc3"
+    "32ed070adc9aa07d405db11240a1f0712349374158ef1d6d3a4a70cd2307fe194acf6cb13b6204fdee201c31"
+    "728df43f077adb5e9b249d0177f170cf73423dd34c82e7c20c900bf06b149b8f1767c5354400fedcf86af33d"
+    "aa0ab00afec82ee2e1de977cfe14cf9e4a11a6dd72b9273177dd6f6eae"
+)
 # A v3 onion host of 56 base32 characters (011 R5, ADR 0038).
 ONION_HOST = ("abcdefghijklmnopqrstuvwxyz234567" * 2)[:56] + ".onion"
 
@@ -549,6 +582,53 @@ def check_s011_t22_r22_section_produces_011_json() -> list[dict]:
     vectors += [{"name": name, "kind": "negative", "source": "derived",
                  "origin": f"spec 011: {origin}", "inputs": {"qr": qr, "now": now},
                  "expected": {"error": "BadConfig"}} for name, origin, qr in qr_negatives]
+    vectors += chatcfg_vectors(base, config_record({**no_invite, "invite_expires_at":
+                                                    U64(created_at + FILE_INVITE_MS)}),
+                               U64(created_at))
+    return vectors
+
+
+def chatcfg_vectors(record: bytes, opened_record: bytes, now: U64) -> list[dict]:
+    """The pinned file of config_no_invite exported at its creation, and its mutations: one
+    byte of each region of the literal, and a typed password one byte over the bound (R13)."""
+    listed = words()  # refuses a changed word list before anything is written (R17, 015 R4)
+    require(all(word in listed for word in CHATCFG_PASSWORD.decode("ascii").split(" ")),
+            "the fixed password is 7 list words")
+    inputs = {"record": record, "password": CHATCFG_PASSWORD, "salt": CHATCFG_SALT,
+              "nonce": CHATCFG_NONCE, "now": now}
+    vectors = [{"name": "chatcfg_reference", "kind": "positive", "source": "pinned",
+                "origin": "spec 011: the PCFG file of config_no_invite exported at its creation, "
+                          "produced once by T18 under libsodium 1.0.22",
+                "inputs": inputs,
+                "expected": {"file": CHATCFG_REFERENCE, "opened_record": opened_record}}]
+    if not CHATCFG_REFERENCE:  # the first run, before T18 has printed the bytes to paste
+        return vectors
+    require(len(CHATCFG_REFERENCE) == 1_085, "a .chatcfg file is 1 085 bytes")
+
+    def flipped(at: int, value: int | None = None) -> bytes:
+        data = bytearray(CHATCFG_REFERENCE)
+        data[at] = data[at] ^ 0x01 if value is None else value
+        return bytes(data)
+
+    mutations = [
+        ("mutate_magic", "the first byte of the magic", flipped(0), CHATCFG_PASSWORD,
+         "BadConfig"),
+        ("mutate_version", "the version byte set to 2", flipped(4, 2), CHATCFG_PASSWORD,
+         "UnsupportedVersion"),
+        ("mutate_salt", "the first byte of the salt", flipped(5), CHATCFG_PASSWORD,
+         "BadPassword"),
+        ("mutate_nonce", "the first byte of the nonce", flipped(21), CHATCFG_PASSWORD,
+         "BadPassword"),
+        ("mutate_sealed", "the last byte of the sealed record", flipped(1_084),
+         CHATCFG_PASSWORD, "BadPassword"),
+        ("password_too_long", "the file with a typed password of 1 025 bytes",
+         CHATCFG_REFERENCE, b"a" * 1_025, "BadPassword"),
+    ]
+    vectors += [{"name": name, "kind": "negative", "source": "derived",
+                 "origin": f"spec 011: chatcfg_reference, {origin}",
+                 "inputs": {"file": file, "password": password, "now": now},
+                 "expected": {"error": error}}
+                for name, origin, file, password, error in mutations]
     return vectors
 
 
