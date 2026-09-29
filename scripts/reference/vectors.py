@@ -1024,6 +1024,9 @@ def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
         opened("stale_sent_at", "sent_at more than ttl_ms + 360 000 ms before received_at",
                "stale", padded(TYPE_TEXT, stale, body), stale),
         opened("stale_unknown_type", "stale, and type 9", "stale", padded(9, stale, body), stale),
+        opened("stale_missing_type", "stale, and no key 0", "stale",
+               sodium_pad(record_field(2, struct.pack(">Q", stale)) + record_field(3, body),
+                          PAD_BLOCK), stale),
         opened("stale_trailing_garbage", "stale, then two bytes that frame no field", "stale",
                sodium_pad(payload_record(TYPE_TEXT, stale, body)[:-len(body) - 5] + b"\x03\x00",
                           PAD_BLOCK), stale),
@@ -1032,6 +1035,7 @@ def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
     ]
     # The records of the vectors whose point is their shape keep that shape.
     shapes = {"unknown_payload_key": ([0, 2, 3, 9], b""), "missing_sent_at": ([0, 3], b""),
+              "stale_missing_type": ([2, 3], b""),
               "stale_trailing_garbage": ([0, 2], b"\x03\x00")}
     for item in vectors:
         if item["name"] in shapes:

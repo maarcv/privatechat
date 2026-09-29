@@ -521,7 +521,7 @@ fn s013_t16_r12_open_outcomes() {
     let sent_at_field = |sent_at: u64| [&[2, 0, 0, 0, 8][..], &sent_at.to_be_bytes()].concat();
     let body_field: &[u8] = &[3, 0, 0, 0, 1, b'x'];
     let stale = 1_000_000_000;
-    let cases: [(&str, Vec<u8>, Option<u64>, Content); 9] = [
+    let cases: [(&str, Vec<u8>, Option<u64>, Content); 11] = [
         ("broken padding", no_marker, None, Content::Unreadable),
         (
             "broken record",
@@ -569,6 +569,18 @@ fn s013_t16_r12_open_outcomes() {
         (
             "stale, then a partial field",
             fields(&[type_field, &sent_at_field(stale), &[3, 0]]),
+            Some(stale),
+            Content::Stale,
+        ),
+        (
+            "no key 0",
+            fields(&[&sent_at_field(SENT_AT), body_field]),
+            Some(SENT_AT),
+            Content::Unreadable,
+        ),
+        (
+            "stale, no key 0",
+            fields(&[&sent_at_field(stale), body_field]),
             Some(stale),
             Content::Stale,
         ),
@@ -1003,6 +1015,7 @@ fn s013_vectors_dispatch() {
         "display_name_in_key_retired",
         "stale_sent_at",
         "stale_unknown_type",
+        "stale_missing_type",
         "stale_trailing_garbage",
         "future_sent_at",
     ];
