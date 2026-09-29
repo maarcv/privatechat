@@ -63,7 +63,8 @@ impl Header {
 ///
 /// # Errors
 ///
-/// `Internal` when libsodium fails to initialise (R5).
+/// `Internal` when libsodium fails to initialise; the fixed lengths make its
+/// other failures unreachable (R5).
 pub(crate) fn header_keystream(
     keys: &ChannelKeys,
     nonce: &Nonce,

@@ -33,7 +33,8 @@ impl ChannelKeys {
     ///
     /// # Errors
     ///
-    /// `Internal` when libsodium fails (R6).
+    /// `Internal` when libsodium fails to initialise; the fixed lengths make
+    /// its other failures unreachable (R5, R6).
     pub(crate) fn derive(channel_key: &Secret<32>) -> Result<ChannelKeys, Error> {
         Ok(ChannelKeys {
             msg: crypto::kdf_derive(channel_key, &CONTEXT_MESSAGE)?,
@@ -48,16 +49,14 @@ impl ChannelKeys {
 ///
 /// # Errors
 ///
-/// `Internal` when libsodium fails (R6).
+/// `Internal` when libsodium fails to initialise; the fixed lengths make its
+/// other failures unreachable (R5, R6).
 pub(crate) fn message_key(
     keys: &ChannelKeys,
     sender_pk: &PublicKey,
     counter: u64,
 ) -> Result<Secret<32>, Error> {
-    let counter = counter.to_be_bytes();
-    let mut input = [0u8; 40];
-    for (slot, byte) in input.iter_mut().zip(sender_pk.0.iter().chain(&counter)) {
-        *slot = *byte;
-    }
+    // Public data: the 40 bytes need no wiping.
+    let input = [sender_pk.0.as_slice(), &counter.to_be_bytes()].concat();
     Ok(crypto::keyed_hash(&keys.msg, &input)?)
 }

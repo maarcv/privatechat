@@ -75,7 +75,7 @@
       "name": "header_sealed",
       "kind": "positive",
       "source": "derived",
-      "origin": "spec 012: the K_ch of master_keys, a header, a signature and a nonce, sealed with the keystream of K_hdr",
+      "origin": "spec 012: the K_ch of master_keys, a sender, a counter whose bytes all differ, a signature and a nonce, sealed with the keystream of K_hdr",
       "inputs": {
         "counter": "0102030405060708",
         "k_ch": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
