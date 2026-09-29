@@ -17,6 +17,7 @@ use crate::proto::keys::{ChannelKeys, message_key};
 use crate::proto::payload::{
     MAX_BLOCKS, MAX_DISPLAY_NAME, MAX_PAYLOAD, PAD_BLOCK, Payload, PayloadKind,
 };
+use crate::vectors::{self, Checker, Vector};
 
 fn config(k_ch: [u8; 32]) -> Config {
     Config::from_parts(
@@ -388,4 +389,123 @@ fn s013_t20_r16_seal_padded_checks_its_length() {
     for len in [PAD_BLOCK, PAD_BLOCK * MAX_BLOCKS] {
         assert!(seal_padded(&ctx(), &key, COUNTER, &Nonce(NONCE), &vec![0; len]).is_ok());
     }
+}
+
+/// Every vector's channel is `text_k1`'s (spec 013, "Vectors").
+fn check_channel(vector: &Vector) {
+    assert_eq!(vector.input("k_ch").array(), K_CH, "{}", vector.name());
+    assert_eq!(vector.input("ttl_seconds").number(), TTL_SECONDS);
+    assert_eq!(
+        vector.input("channel_id").array(),
+        config(K_CH).channel_id()
+    );
+}
+
+/// The sender of a vector whose signature is valid, from its seed.
+fn check_sender(vector: &Vector) -> SenderKey {
+    let key = sender(vector.input("sender_seed").array());
+    assert_eq!(
+        key.public().0,
+        vector.input("pk_u").array(),
+        "{}",
+        vector.name()
+    );
+    key
+}
+
+/// A positive vector built with `seal`: the payload, `mk`, `enc_hdr`, the
+/// signature and the whole blob, which `verify` accepts (R1, R4, R16).
+fn check_sealed(vector: &Vector) {
+    check_channel(vector);
+    let key = check_sender(vector);
+    let counter = vector.input("counter").u64_hex();
+    let nonce = Nonce(vector.input("nonce").array());
+    if vector.name() == "text_k1" {
+        assert_eq!(vector.input("sender_seed").array(), SENDER_SEED);
+        assert_eq!((counter, nonce.0), (COUNTER, NONCE));
+        assert_eq!(vector.input("sent_at").u64_hex(), SENT_AT);
+        assert_eq!(vector.input("body").bytes(), BODY);
+        assert_eq!(vector.input("received_at").u64_hex(), RECEIVED_AT);
+        assert_eq!(vector.input("now").u64_hex(), NOW);
+    }
+    let kind = match vector.input("type").number() {
+        0 => PayloadKind::Text,
+        1 => PayloadKind::KeyRetired,
+        other => PayloadKind::Unknown(u8::try_from(other).unwrap()),
+    };
+    let payload = Payload {
+        kind,
+        display_name: None,
+        sent_at: vector.input("sent_at").u64_hex(),
+        body: vector.input("body").bytes().to_vec(),
+    };
+    assert_eq!(
+        payload.encode().unwrap(),
+        vector.expected("payload").bytes()
+    );
+    let ctx = ctx();
+    let mk = message_key(&ctx.keys, key.public(), counter).unwrap();
+    assert_eq!(mk.expose(), &vector.expected("mk").array());
+    let Sealed { blob, signature } = seal(&ctx, &key, counter, &nonce, &payload).unwrap();
+    assert_eq!(blob, vector.expected("blob").bytes(), "{}", vector.name());
+    assert_eq!(blob[17..57], *vector.expected("enc_hdr").bytes());
+    assert_eq!(signature, vector.expected("signature").array());
+    let received_at = vector.input("received_at").u64_hex();
+    let verified = verify(&blob, &ctx, received_at, vector.input("now").u64_hex()).unwrap();
+    assert_eq!(verified.signature(), &signature);
+}
+
+/// A negative vector: `verify` returns its error; when it carries a signer,
+/// the unmasked signature verifies over the range the vector names.
+fn check_rejected(vector: &Vector) {
+    check_channel(vector);
+    let blob = vector.input("blob").bytes();
+    let ctx = ctx();
+    let received_at = vector.input("received_at").u64_hex();
+    let verdict = verify(blob, &ctx, received_at, vector.input("now").u64_hex());
+    let error = format!("{:?}", verdict.err().expect("a rejected blob"));
+    assert_eq!(error, vector.expected("error").text(), "{}", vector.name());
+    if vector.has_input("pk_u") {
+        let key = check_sender(vector);
+        let stream = header_keystream(&ctx.keys, &Nonce(blob[57..81].try_into().unwrap())).unwrap();
+        let (signed, masked) = blob.split_at(blob.len() - 64);
+        let signature = xor(masked.try_into().unwrap(), stream[40..].try_into().unwrap());
+        let start = if vector.name() == "signed_ciphertext_only" {
+            HEADER_LEN
+        } else {
+            0
+        };
+        let message = [MSG_SIGNATURE_TAG.as_slice(), &signed[start..]].concat();
+        let signature = crypto::Signature(signature);
+        assert!(crypto::verify_detached(key.public(), &message, &signature).is_ok());
+    }
+}
+
+/// Spec 015, R3: every vector of `013.json` is checked once.
+#[test]
+fn s013_vectors_dispatch() {
+    let sealed = ["text_k1", "text_k63", "key_retired"];
+    let rejected = [
+        "expired_received_at",
+        "mutate_version",
+        "mutate_channel_id",
+        "mutate_enc_hdr",
+        "mutate_nonce",
+        "mutate_ciphertext",
+        "mutate_signature",
+        "signed_ciphertext_only",
+        "short_blob",
+        "long_blob",
+        "unaligned_blob",
+    ];
+    let entries = [
+        sealed
+            .map(|name| (name, check_sealed as Checker))
+            .as_slice(),
+        rejected
+            .map(|name| (name, check_rejected as Checker))
+            .as_slice(),
+    ]
+    .concat();
+    vectors::check_all("013", &entries);
 }

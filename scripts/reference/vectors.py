@@ -800,6 +800,155 @@ def check_s012_t10_r08_section_produces_012_json() -> list[dict]:
 SECTIONS["012"] = check_s012_t10_r08_section_produces_012_json
 
 
+# --- Spec 013: wire message ----------------------------------------------------------
+
+PROTO_V1 = 0x01  # 013 R2, R15
+MSG_SIGNATURE_TAG = b"privatechat/msg/v1"  # 013 R4
+HEADER_LEN = 81  # 013 R1: version, channel_id, enc_hdr and nonce, the AEAD's associated data (R3)
+BLOB_OVERHEAD = 161
+PAD_BLOCK = 1_024  # 013 R10
+MAX_BLOCKS = 63
+MAX_PAYLOAD = 64_511  # 013 R7
+PAYLOAD_FIXED_LEN = 24  # type (5 + 1), sent_at (5 + 8) and the header of body (5)
+TYPE_TEXT, TYPE_KEY_RETIRED = 0, 1  # 013 R6
+EXPIRY_MARGIN_MS = 360_000  # 013 R13
+# The inputs of `text_k1`, a copy of those of `crates/core/src/proto/envelope/text_k1.rs` that
+# change a byte of a blob, which the dispatch of `013.json` compares with this file's values.
+TEXT_K1 = {
+    "k_ch": bytes(range(0x20, 0x40)), "ttl_seconds": 3_600, "sender_seed": bytes(range(0x40, 0x60)),
+    "counter": 42, "nonce": bytes(range(0x60, 0x78)), "sent_at": 1_790_000_040_000,
+    "body": b"Hello, channel.", "received_at": 1_790_000_041_500, "now": 1_790_000_042_000,
+}
+
+
+def payload_record(kind: int, sent_at: int, body: bytes, display_name: bytes | None = None,
+                   extra: tuple = ()) -> bytes:
+    """The payload record of 013 R6, keys in order, with `extra` fields after key 3."""
+    fields = [(0, bytes([kind]))]
+    if display_name is not None:
+        fields.append((1, display_name))
+    fields += [(2, struct.pack(">Q", sent_at)), (3, body), *extra]
+    require([key for key, _ in fields] == sorted({key for key, _ in fields}), "keys in order")
+    return b"".join(record_field(key, value) for key, value in fields)
+
+
+def sodium_pad(data: bytes, block: int) -> bytes:
+    """`sodium_pad`: a 0x80 marker, then zeros up to the next multiple of `block`."""
+    marked = data + b"\x80"
+    return marked + bytes(-len(marked) % block)
+
+
+def seal_blob(seed: bytes, counter: int, nonce: bytes, padded: bytes,
+              signed_range: slice | None = None) -> dict:
+    """Every part of the blob of 013 R16 in the channel of `text_k1`: the header hidden with
+    bytes 0..40 of the keystream, the AEAD over `blob[0..81]`, the RFC 8032 signature over
+    the tag and `signed_range` of `blob[0..81 + n]` (all of it by default), masked with
+    bytes 40..104 of the same keystream."""
+    require(len(padded) % PAD_BLOCK == 0 and 1 <= len(padded) // PAD_BLOCK <= MAX_BLOCKS,
+            "a padded payload is 1 024·k bytes, k in 1..=63")
+    k_ch = TEXT_K1["k_ch"]
+    k_msg, k_hdr = kdf_derive(k_ch, CONTEXT_MESSAGE), kdf_derive(k_ch, CONTEXT_HEADER)
+    _, channel_id = channel_identity(k_ch, TEXT_K1["ttl_seconds"])
+    pk_u = ed25519_public_key(seed)
+    stream = header_keystream(k_hdr, nonce)
+    enc_hdr = xor(header_bytes(pk_u, counter), stream[:ENC_HDR_LEN])
+    aad = bytes([PROTO_V1]) + channel_id + enc_hdr + nonce
+    require(len(aad) == HEADER_LEN, "the associated data is the 81 bytes of the header")
+    mk = message_key(k_msg, pk_u, counter)
+    ciphertext = xchacha20poly1305_encrypt(mk, nonce, aad, padded)
+    signature = ed25519_sign(seed, MSG_SIGNATURE_TAG + (aad + ciphertext)[signed_range or slice(None)])
+    blob = aad + ciphertext + xor(signature, stream[ENC_HDR_LEN:])
+    require(len(blob) == BLOB_OVERHEAD + len(padded), "a blob is 161 + 1 024·k bytes")
+    return {"channel_id": channel_id, "pk_u": pk_u, "padded": padded, "mk": mk,
+            "enc_hdr": enc_hdr, "ciphertext": ciphertext, "signature": signature, "blob": blob}
+
+
+def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
+    """The vectors of spec 013 in the channel of `text_k1`: blobs sealed from payloads, each
+    part computed here, and blobs a one-rule edit of them."""
+    k1 = TEXT_K1
+    seed = k1["sender_seed"]
+    _, channel_id = channel_identity(k1["k_ch"], k1["ttl_seconds"])
+    receive = {"k_ch": k1["k_ch"], "ttl_seconds": k1["ttl_seconds"], "channel_id": channel_id,
+               "received_at": U64(k1["received_at"]), "now": U64(k1["now"])}
+    vectors = []
+
+    def raw(name: str, kind: str, origin: str, inputs: dict, expected: dict) -> dict:
+        return {"name": name, "kind": kind, "source": "derived", "origin": f"spec 013: {origin}",
+                "inputs": {**receive, **inputs}, "expected": expected}
+
+    def positive(name: str, origin: str, content: str, kind: int, body: bytes,
+                 counter: int = k1["counter"], nonce: bytes = k1["nonce"]) -> dict:
+        record = payload_record(kind, k1["sent_at"], body)
+        sealed = seal_blob(seed, counter, nonce, sodium_pad(record, PAD_BLOCK))
+        inputs = {"sender_seed": seed, "pk_u": sealed.pop("pk_u"), "counter": U64(counter),
+                  "nonce": nonce, "type": kind, "sent_at": U64(k1["sent_at"]), "body": body}
+        require(sealed.pop("channel_id") == channel_id, f"{name}: the channel of text_k1")
+        # The padded payload and the ciphertext are computed above and checked inside `blob`.
+        require(sealed.pop("padded") == sodium_pad(record, PAD_BLOCK), f"{name}: padded")
+        require(sealed["blob"][HEADER_LEN:-SIGNATURE_LEN] == sealed.pop("ciphertext"),
+                f"{name}: the ciphertext at offset 81")
+        return raw(name, "positive", origin, inputs,
+                   {"payload": record, **sealed, "content": content})
+
+    def negative(name: str, origin: str, blob: bytes, error: str, signer: bool = False,
+                 **times: int) -> dict:
+        inputs = {"blob": blob, **{field: U64(value) for field, value in times.items()}}
+        if signer:
+            inputs |= {"sender_seed": seed, "pk_u": ed25519_public_key(seed)}
+        return raw(name, "negative", origin, inputs, {"error": error})
+
+    text_k1 = positive("text_k1", "a text of one block", "message", TYPE_TEXT, k1["body"])
+    body_k63 = (b"0123456789abcdef" * 4_096)[:MAX_PAYLOAD - PAYLOAD_FIXED_LEN]
+    text_k63 = positive("text_k63", "the largest text, 64 511 encoded bytes", "message",
+                        TYPE_TEXT, body_k63, counter=43, nonce=bytes(range(0x78, 0x90)))
+    require(len(text_k63["expected"]["payload"]) == MAX_PAYLOAD, "text_k63 is the largest")
+    require(len(text_k63["expected"]["blob"]) == BLOB_OVERHEAD + MAX_BLOCKS * PAD_BLOCK,
+            "in 63 blocks")
+    vectors += [text_k1, text_k63, positive(
+        "key_retired", "a key_retired sealed with counter 2^64 - 1 (ADR 0033)", "message",
+        TYPE_KEY_RETIRED, b"", counter=U64_MAX, nonce=bytes(range(0x90, 0xa8)))]
+
+    blob = text_k1["expected"]["blob"]
+    ttl_ms = k1["ttl_seconds"] * 1_000
+    received_at = k1["now"] - ttl_ms - EXPIRY_MARGIN_MS - 1
+    vectors.append(negative("expired_received_at", "text_k1 received ttl_ms + 360 001 ms "
+                            "before now", blob, "Expired", signer=True, received_at=received_at))
+    require(received_at + ttl_ms + EXPIRY_MARGIN_MS < k1["now"], "expired by one millisecond")
+
+    def flip(offset: int, value: int | None = None) -> bytes:
+        edited = bytearray(blob)
+        edited[offset] = edited[offset] ^ 0x01 if value is None else value
+        return bytes(edited)
+
+    last = len(blob) - 1
+    for region, offset, error in (("version", 0, "UnsupportedVersion"),
+                                  ("channel_id", 9, "WrongChannel"), ("enc_hdr", 30, "BadSignature"),
+                                  ("nonce", 70, "BadSignature"), ("ciphertext", 600, "BadSignature"),
+                                  ("signature", last - 10, "BadSignature")):
+        edited = flip(0, 0x02) if region == "version" else flip(offset)
+        vectors.append(negative(f"mutate_{region}", f"text_k1 with byte {offset} flipped",
+                                edited, error))
+    ciphertext_only = seal_blob(seed, k1["counter"], k1["nonce"],
+                         sodium_pad(text_k1["expected"]["payload"], PAD_BLOCK),
+                         signed_range=slice(HEADER_LEN, None))["blob"]
+    counter_bit = bytearray(ciphertext_only)
+    counter_bit[HEADER_LEN - len(k1["nonce"]) - 1] ^= 0x01
+    vectors.append(negative("signed_ciphertext_only", "text_k1 signed over the tag and the "
+                            "ciphertext only, then the lowest counter bit flipped",
+                            bytes(counter_bit), "BadSignature", signer=True))
+    long_blob = text_k63["expected"]["blob"] + b"\x00"
+    for name, edited in (("short_blob", blob[:-1]), ("long_blob", long_blob),
+                         ("unaligned_blob", blob + b"\x00")):
+        vectors.append(negative(name, f"a blob of {len(edited)} bytes", edited, "BadLength"))
+    require([len(v["inputs"]["blob"]) for v in vectors[-3:]] == [1_184, 64_674, 1_186],
+            "the lengths of R2")
+    return vectors
+
+
+SECTIONS["013"] = check_s013_t23_r18_section_produces_013_json
+
+
 def words() -> list[str]:
     """The English BIP-39 list, for the sections of specs 011 and 014; refused unless its SHA-256
     is the literal of 011 R17, before any file is written."""
