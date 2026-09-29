@@ -10,13 +10,14 @@ use crate::Error;
 use crate::crypto::{self, PublicKey, Secret};
 use crate::proto::config::{ChannelId, Config};
 use crate::proto::wordlist;
-use crate::vectors::{self, Checker, Vector};
+use crate::vectors::{self, Checker, Kind, Vector};
 
 const CHANNEL: ChannelId = ChannelId([0x31; 16]);
 const PK: PublicKey = PublicKey([0x32; 32]);
 
-/// The `channel_id` of 011 `config_reference`, which every vector but the
-/// other-channel ones uses (spec 040-uniffi R14).
+/// The `channel_id` of 011 `config_reference`, which every vector but
+/// `fingerprint_other_channel` uses (spec 040-uniffi R14). Only `K_ch` and
+/// the TTL derive it; the other fields are there because a config needs them.
 fn reference_channel_id() -> [u8; 16] {
     let k_ch: [u8; 32] = core::array::from_fn(|i| 0x40 + u8::try_from(i).unwrap());
     let config = Config::from_parts(
@@ -82,23 +83,29 @@ proptest! {
     }
 }
 
-/// Spec 014, R4: each malformed QR is `BadPayload`, and one of another
-/// channel is `WrongChannel`.
+/// Spec 014, R4: each malformed QR is `BadPayload`, the prefix before the
+/// channel, and one of another channel is `WrongChannel`.
 #[test]
 fn s014_t04_r04_rejects_a_foreign_qr() {
     let qr = verify_qr(&CHANNEL, &PK).unwrap();
-    let body = &qr[10..];
+    let other = ChannelId([0x33; 16]);
+    let foreign = verify_qr(&other, &PK).unwrap();
     let edit = |at: usize, byte: u8| {
         let mut edited = qr.clone();
         edited[at] = byte;
         edited
     };
     for (case, bytes) in [
-        ("prefix v2", [b"verify:v2:".as_slice(), body].concat()),
+        ("prefix v2", [b"verify:v2:".as_slice(), &qr[10..]].concat()),
+        (
+            "prefix v2, another channel",
+            [b"verify:v2:".as_slice(), &foreign[10..]].concat(),
+        ),
         ("63 characters", qr[..73].to_vec()),
         ("65 characters", [qr.as_slice(), b"A"].concat()),
         ("a +", edit(40, b'+')),
         ("a /", edit(40, b'/')),
+        ("a space", edit(40, b' ')),
         ("a trailing =", edit(73, b'=')),
         ("empty", Vec::new()),
     ] {
@@ -108,25 +115,28 @@ fn s014_t04_r04_rejects_a_foreign_qr() {
             "{case}"
         );
     }
-    let other = ChannelId([0x33; 16]);
-    assert_eq!(parse_verify_qr(&qr, &other), Err(Error::WrongChannel));
+    for (at, byte) in qr.iter().enumerate().take(QR_PREFIX.len()) {
+        let bytes = edit(at, byte ^ 0x01);
+        assert_eq!(
+            parse_verify_qr(&bytes, &CHANNEL),
+            Err(Error::BadPayload),
+            "prefix byte {at}"
+        );
+    }
+    assert_eq!(
+        parse_verify_qr(&foreign, &CHANNEL),
+        Err(Error::WrongChannel)
+    );
 }
 
-/// Spec 014, R5: 11 bits per word from the most significant bit; zeros are
-/// 12 × `abandon`, ones 12 × `zoo`, and bit 131 is the last one read. The
-/// dispatch checks the `words_*` vectors.
+/// Spec 014, R5: 11 bits per word, read from the most significant bit, as
+/// many words as the list has 11-bit indices. The dispatch checks the
+/// `words_*` vectors: zeros, ones and the boundary at bit 131.
 #[test]
 fn s014_t05_r05_words_known_answer() {
-    assert_eq!(words(&[0; 32]).unwrap(), ["abandon"; WORD_COUNT]);
-    assert_eq!(words(&[0xff; 32]).unwrap(), ["zoo"; WORD_COUNT]);
-    let mut fp = [0xff; 32];
-    fp[..16].fill(0);
-    fp[16] = 0x17;
-    let expected: [&str; WORD_COUNT] =
-        core::array::from_fn(|i| if i == 11 { "ability" } else { "abandon" });
-    assert_eq!(words(&fp).unwrap(), expected);
-    // `fp[0] = 0b0000_0000`, `fp[1] = 0b0010_0000`: the first word is index
-    // 1, `ability`, and the second begins at bit 11.
+    assert_eq!(1usize << 11, usize::from(wordlist::WORD_COUNT));
+    // `fp[1] = 0b0010_0000`: bits 0..11 are index 1, `ability`, and the
+    // second word begins at bit 11.
     let mut fp = [0; 32];
     fp[1] = 0b0010_0000;
     assert_eq!(words(&fp).unwrap()[..2], ["ability", "abandon"]);
@@ -156,52 +166,79 @@ fn s014_t08_r08_presentation_matches_its_parts() {
     );
 }
 
-/// `fingerprint_*`: `fp` of a channel and a key (R1, R2).
-fn check_fingerprint(vector: &Vector) {
+/// The key of `fingerprint_reference` and `qr_reference`, the Ed25519 key
+/// of the script's seed `0xc0..0xe0`.
+fn reference_pk() -> PublicKey {
+    let seed: [u8; 32] = core::array::from_fn(|i| 0xc0 + u8::try_from(i).unwrap());
+    crypto::sign_keypair_from_seed(&Secret::from_bytes(seed))
+        .unwrap()
+        .0
+}
+
+/// `fingerprint_reference`: `fp` of the reference key in the reference
+/// channel (R1).
+fn check_fingerprint_reference(vector: &Vector) {
     let channel = ChannelId(vector.input("channel_id").array());
-    if vector.name() == "fingerprint_reference" {
-        assert_eq!(channel.0, reference_channel_id());
-    }
+    assert_eq!(channel.0, reference_channel_id());
     let pk = PublicKey(vector.input("pk_u").array());
+    assert_eq!(pk.0, reference_pk().0);
     assert_eq!(
         fingerprint(&channel, &pk).unwrap(),
         vector.expected("fp").array()
     );
 }
 
-/// `words_*`: the indices and the words of a fingerprint (R5).
+/// `fingerprint_other_channel`: the same key in another channel (R2).
+fn check_fingerprint_other_channel(vector: &Vector) {
+    let channel = ChannelId(vector.input("channel_id").array());
+    assert_ne!(channel.0, reference_channel_id());
+    let pk = PublicKey(vector.input("pk_u").array());
+    assert_eq!(pk.0, reference_pk().0);
+    assert_eq!(
+        fingerprint(&channel, &pk).unwrap(),
+        vector.expected("fp").array()
+    );
+}
+
+/// `words_*`: the 12 indices and words of a fingerprint (R5); those of
+/// `words_reference` are of `fingerprint_reference` (spec 040-uniffi R14).
 fn check_words(vector: &Vector) {
     let fp = vector.input("fp").array();
+    if vector.name() == "words_reference" {
+        let channel = ChannelId(reference_channel_id());
+        assert_eq!(fp, fingerprint(&channel, &reference_pk()).unwrap());
+    }
+    let words = words(&fp).unwrap();
     let expected: Vec<&str> = vector
         .expected("words")
         .list()
         .iter()
         .map(|word| word.text())
         .collect();
-    assert_eq!(
-        words(&fp).unwrap().as_slice(),
-        expected,
-        "{}",
-        vector.name()
-    );
-    for (index, word) in vector.expected("indices").list().iter().zip(&expected) {
+    assert_eq!(words.as_slice(), expected, "{}", vector.name());
+    let indices = vector.expected("indices").list();
+    assert_eq!(indices.len(), WORD_COUNT, "{}", vector.name());
+    for (index, word) in indices.iter().zip(words) {
         let index = u16::try_from(index.number()).unwrap();
-        assert_eq!(wordlist::word(index), Some(*word));
+        assert_eq!(wordlist::word(index), Some(word), "{}", vector.name());
     }
 }
 
-/// `qr_reference`: the QR bytes, which parse back to the key (R3, R4).
+/// `qr_reference`: the QR of the reference key, which parses back to it (R3,
+/// R4).
 fn check_qr(vector: &Vector) {
     let channel = ChannelId(vector.input("channel_id").array());
     assert_eq!(channel.0, reference_channel_id());
     let pk = PublicKey(vector.input("pk_u").array());
+    assert_eq!(pk.0, reference_pk().0);
     let qr = verify_qr(&channel, &pk).unwrap();
     assert_eq!(qr, vector.expected("qr").bytes());
     assert_eq!(parse_verify_qr(&qr, &channel).unwrap().0, pk.0);
 }
 
-/// `qr_*` negatives: the error of R4 in the reference channel.
+/// `qr_*` negatives: the error of R4, scanned in the reference channel.
 fn check_bad_qr(vector: &Vector) {
+    assert_eq!(vector.kind(), Kind::Negative);
     let channel = ChannelId(vector.input("channel_id").array());
     assert_eq!(channel.0, reference_channel_id());
     let error = parse_verify_qr(vector.input("qr").bytes(), &channel).expect_err(vector.name());
@@ -216,7 +253,6 @@ fn check_bad_qr(vector: &Vector) {
 /// Spec 015, R3: every vector of `014.json` is checked once.
 #[test]
 fn s014_vectors_dispatch() {
-    let fingerprints = ["fingerprint_reference", "fingerprint_other_channel"];
     let words = [
         "words_reference",
         "words_zero",
@@ -231,9 +267,13 @@ fn s014_vectors_dispatch() {
         "qr_other_channel",
     ];
     let entries = [
-        fingerprints
-            .map(|name| (name, check_fingerprint as Checker))
-            .as_slice(),
+        &[
+            (
+                "fingerprint_reference",
+                check_fingerprint_reference as Checker,
+            ),
+            ("fingerprint_other_channel", check_fingerprint_other_channel),
+        ],
         words.map(|name| (name, check_words as Checker)).as_slice(),
         &[("qr_reference", check_qr as Checker)],
         bad_qrs

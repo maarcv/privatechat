@@ -7,6 +7,8 @@
 //! 022-peers-tofu. The word list is spec 011's and the base64url codec spec
 //! 010's; neither is copied here.
 
+use core::fmt;
+
 use super::config::ChannelId;
 use super::wordlist;
 use crate::Error;
@@ -21,22 +23,25 @@ pub(crate) const FP_TAG: &[u8; 17] = b"privatechat/fp/v1";
 /// The prefix of a verification QR (R3).
 pub(crate) const QR_PREFIX: &[u8; 10] = b"verify:v1:";
 
-/// Words of a fingerprint, and of its short identifier (R5, R6).
+/// Words of a fingerprint (R5).
 pub(crate) const WORD_COUNT: usize = 12;
+
+/// Words of the short identifier (R6).
 pub(crate) const SHORT_WORD_COUNT: usize = 4;
 
 /// Each word is an 11-bit index into the 2 048 words of the list (R5).
 const BITS_PER_WORD: usize = 11;
-const WORD_MASK: u32 = 0x07ff;
 
 /// A QR is the prefix and the 64 characters of the 48 bytes
 /// `channel_id ‖ pk_u` (R3).
-const QR_LEN: usize = 74;
+const QR_LEN: usize = QR_PREFIX.len() + 64;
 
 /// The three presentations of one fingerprint, the `Record` of the core
-/// boundary (`docs/spec.md` §9). Built only by [`presentation`], which
-/// guarantees 12 `words` and 4 `short` (R8).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// boundary (`docs/spec.md` §9). Inside `core` only `presentation` builds
+/// one, which guarantees 12 `words` and 4 `short` (R8). Public data, but its
+/// `Debug` shows the short identifier alone: the QR holds the whole
+/// `channel_id` and `pk_u`, which no log may carry (AGENTS 19).
+#[derive(Clone, PartialEq, Eq)]
 pub struct Fingerprint {
     /// The 12 words to read aloud (R5).
     pub words: Vec<String>,
@@ -44,6 +49,14 @@ pub struct Fingerprint {
     pub short: Vec<String>,
     /// The verification QR, as bytes (R3).
     pub qr: Vec<u8>,
+}
+
+impl fmt::Debug for Fingerprint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Fingerprint")
+            .field("short", &self.short)
+            .finish_non_exhaustive()
+    }
 }
 
 /// `hash("privatechat/fp/v1" ‖ channel_id ‖ pk_u)`, over 65 bytes (R1).
@@ -64,23 +77,15 @@ pub(crate) fn fingerprint(channel_id: &ChannelId, pk_u: &PublicKey) -> Result<[u
 /// `Internal` for an index outside the list, which 11 bits make impossible.
 pub(crate) fn words(fp: &[u8; 32]) -> Result<[&'static str; WORD_COUNT], Error> {
     let mut words = [""; WORD_COUNT];
-    for (position, slot) in words.iter_mut().enumerate() {
-        // The 11 bits at `offset` lie within the 3 bytes from `offset / 8`.
-        let offset = position.checked_mul(BITS_PER_WORD).ok_or(Error::Internal)?;
-        let start = offset.checked_div(8).ok_or(Error::Internal)?;
-        let skipped = offset.checked_rem(8).ok_or(Error::Internal)?;
+    for (slot, offset) in words.iter_mut().zip((0..).step_by(BITS_PER_WORD)) {
+        // The 11 bits at `offset` lie within the 3 bytes from `offset / 8`:
+        // shifted to the top of a `u32`, the index is its highest 11 bits.
         let [a, b, c] = *fp
-            .get(start..)
+            .get(offset / 8..)
             .and_then(<[u8]>::first_chunk::<3>)
             .ok_or(Error::Internal)?;
-        let shift = (24 - BITS_PER_WORD)
-            .checked_sub(skipped)
-            .and_then(|shift| u32::try_from(shift).ok())
-            .ok_or(Error::Internal)?;
-        let bits = u32::from_be_bytes([0, a, b, c])
-            .checked_shr(shift)
-            .ok_or(Error::Internal)?;
-        let index = u16::try_from(bits & WORD_MASK).map_err(|_| Error::Internal)?;
+        let window = u32::from_be_bytes([a, b, c, 0]) << (offset % 8);
+        let index = u16::try_from(window >> (32 - BITS_PER_WORD)).map_err(|_| Error::Internal)?;
         *slot = wordlist::word(index).ok_or(Error::Internal)?;
     }
     Ok(words)

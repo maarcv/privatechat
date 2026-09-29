@@ -1057,7 +1057,7 @@ SECTIONS["013"] = check_s013_t23_r18_section_produces_013_json
 FP_TAG = b"privatechat/fp/v1"  # 014 R1
 VERIFY_QR_PREFIX = b"verify:v1:"  # 014 R3
 WORD_COUNT, BITS_PER_WORD = 12, 11  # 014 R5
-REFERENCE_PK_SEED = bytes(range(0xc0, 0xe0))
+FP_PK_SEED = bytes(range(0xc0, 0xe0))  # the key of fingerprint_reference and qr_reference
 
 
 def fingerprint(channel_id: bytes, pk_u: bytes) -> bytes:
@@ -1069,8 +1069,9 @@ def fingerprint(channel_id: bytes, pk_u: bytes) -> bytes:
 
 def word_indices(fp: bytes) -> list[int]:
     """The first 132 bits of `fp` as 12 indices of 11 bits, most significant bit first (R5)."""
-    value = int.from_bytes(fp, "big")
-    return [(value >> (256 - BITS_PER_WORD * (i + 1))) & 0x7ff for i in range(WORD_COUNT)]
+    value, width = int.from_bytes(fp, "big"), 8 * len(fp)
+    mask = (1 << BITS_PER_WORD) - 1
+    return [(value >> (width - BITS_PER_WORD * (i + 1))) & mask for i in range(WORD_COUNT)]
 
 
 def verify_qr(channel_id: bytes, pk_u: bytes) -> bytes:
@@ -1086,7 +1087,7 @@ def check_s014_t07_r07_section_produces_014_json() -> list[dict]:
     _, channel_id = channel_identity(bytes(range(0x40, 0x60)), 86_400)
     _, other_channel = channel_identity(bytes(range(0x41, 0x61)), 86_400)
     require(other_channel != channel_id, "another channel")
-    pk_u = ed25519_public_key(REFERENCE_PK_SEED)
+    pk_u = ed25519_public_key(FP_PK_SEED)
     word_list = words()
 
     def raw(name: str, kind: str, origin: str, inputs: dict, expected: dict) -> dict:
@@ -1100,35 +1101,43 @@ def check_s014_t07_r07_section_produces_014_json() -> list[dict]:
         raw("fingerprint_other_channel", "positive", "the same key in another channel",
             {"channel_id": other_channel, "pk_u": pk_u}, {"fp": fingerprint(other_channel, pk_u)}),
     ]
-    require(vectors[0]["expected"]["fp"] != vectors[1]["expected"]["fp"], "R2")
+    require(vectors[0]["expected"]["fp"] != vectors[1]["expected"]["fp"],
+            "one key has another fingerprint in another channel (R2)")
     bit_131 = bytes(16) + bytes([0x17]) + b"\xff" * 15
-    require(bit_131[16] >> 4 & 1 == 1 and bit_131[16] >> 3 & 1 == 0,
-            "bit 131 set and bit 132 clear, counted from the most significant bit")
+    require(bit_131[:16] == bytes(16) and bit_131[16] == 0b0001_0111 and set(bit_131[17:]) == {0xff},
+            "bits 0..131 clear, bit 131 set, bit 132 clear and every bit after it set")
+    expected_indices = {"words_zero": [0] * WORD_COUNT, "words_ones": [2_047] * WORD_COUNT,
+                        "words_bit_131": [0] * (WORD_COUNT - 1) + [1]}
     for name, origin, fp in (("words_reference", "fingerprint_reference", reference_fp),
                              ("words_zero", "a fingerprint of zeros", bytes(32)),
                              ("words_ones", "a fingerprint of ones", b"\xff" * 32),
                              ("words_bit_131", "bit 131 set, bit 132 clear and the rest after "
                                                "it set", bit_131)):
         indices = word_indices(fp)
+        require(len(indices) == WORD_COUNT, f"{name}: 12 indices")
+        require(expected_indices.get(name, indices) == indices, f"{name}: its indices")
         vectors.append(raw(name, "positive", f"the 12 words of {origin}", {"fp": fp},
                            {"indices": indices, "words": [word_list[i] for i in indices]}))
-    require(vectors[3]["expected"]["words"] == ["abandon"] * 12, "zeros are 12 × abandon")
-    require(vectors[4]["expected"]["words"] == ["zoo"] * 12, "ones are 12 × zoo")
-    require(vectors[5]["expected"]["indices"] == [0] * 11 + [1], "only bit 131 counts")
+    require(word_list[0] == "abandon" and word_list[2_047] == "zoo", "the ends of the list")
 
     qr = verify_qr(channel_id, pk_u)
     vectors.append(raw("qr_reference", "positive", "channel_id ‖ pk_u of fingerprint_reference",
                        {"channel_id": channel_id, "pk_u": pk_u}, {"qr": qr}))
     body = qr[len(VERIFY_QR_PREFIX):]
     for name, origin, edited, error in (
-            ("qr_wrong_prefix", "the prefix verify:v2:", b"verify:v2:" + body, "BadPayload"),
-            ("qr_wrong_length", "63 characters", qr[:-1], "BadPayload"),
-            ("qr_standard_base64", "a + of standard base64", qr[:-1] + b"+", "BadPayload"),
-            ("qr_padding", "a trailing =", qr[:-1] + b"=", "BadPayload"),
-            ("qr_other_channel", "the QR of the same key in another channel",
-             verify_qr(other_channel, pk_u), "WrongChannel")):
-        vectors.append(raw(name, "negative", f"qr_reference with {origin}",
-                           {"qr": edited, "channel_id": channel_id}, {"error": error}))
+            ("qr_wrong_prefix", "qr_reference with the prefix verify:v2:",
+             b"verify:v2:" + body, "BadPayload"),
+            ("qr_wrong_length", "qr_reference with 63 characters", qr[:-1], "BadPayload"),
+            ("qr_standard_base64", "qr_reference with a + of standard base64", qr[:-1] + b"+",
+             "BadPayload"),
+            ("qr_padding", "qr_reference with a trailing =", qr[:-1] + b"=", "BadPayload"),
+            ("qr_other_channel", "the QR of the same key in another channel, scanned in the "
+                                 "reference channel", verify_qr(other_channel, pk_u),
+             "WrongChannel")):
+        require((len(edited) == len(qr)) != (name == "qr_wrong_length"),
+                f"{name}: only qr_wrong_length changes the length")
+        vectors.append(raw(name, "negative", origin, {"qr": edited, "channel_id": channel_id},
+                           {"error": error}))
     return vectors
 
 

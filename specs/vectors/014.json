@@ -253,7 +253,7 @@
       "name": "qr_other_channel",
       "kind": "negative",
       "source": "derived",
-      "origin": "spec 014: qr_reference with the QR of the same key in another channel",
+      "origin": "spec 014: the QR of the same key in another channel, scanned in the reference channel",
       "inputs": {
         "channel_id": "26b06631aa61cb8f91c3498b1c59c2c7",
         "qr": "7665726966793a76313a707a566e776a366d6c655f646b4c423156556e766674336a764d374838365a714552583058584950546345317736353854694c636f345f624876317153565f34"
