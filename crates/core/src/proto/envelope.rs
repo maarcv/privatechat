@@ -12,7 +12,7 @@ use core::ops::Range;
 use super::config::{ChannelId, Config};
 use super::header::{ENC_HDR_LEN, Header, header_keystream};
 use super::keys::{ChannelKeys, message_key};
-use super::payload::{MAX_BLOCKS, PAD_BLOCK, Payload};
+use super::payload::{MAX_BLOCKS, PAD_BLOCK, Payload, PayloadHead};
 use crate::Error;
 use crate::crypto::{self, CryptoError, Nonce, PublicKey, Secret, Signature};
 
@@ -246,6 +246,85 @@ impl Verified<'_> {
     pub(crate) fn signature(&self) -> &[u8; SIGNATURE_LEN] {
         &self.signature
     }
+
+    /// Step 7, with the times `verify` received (R12): the AEAD, after which
+    /// the message is consumed whatever it holds; then the padding; then the
+    /// record up to `sent_at`, the stale check, and only then the rest of
+    /// the record, the `type` and `validate`.
+    ///
+    /// # Errors
+    ///
+    /// `BadSignature` when the AEAD does not open, which a valid signature
+    /// and the right `K_ch` make impossible, and `Internal` when libsodium
+    /// fails. Every other outcome is a `Content`.
+    pub(crate) fn open(self) -> Result<Opened, Error> {
+        let mk = message_key(&self.ctx.keys, &self.header.sender_pk, self.header.counter)?;
+        let envelope = &self.envelope;
+        let padded = crypto::aead_decrypt(&mk, &envelope.nonce, envelope.aad, envelope.ciphertext)
+            .map_err(|error| match error {
+                CryptoError::Forged => Error::BadSignature,
+                other => Error::from(other),
+            })?;
+        drop(mk);
+        let (sent_at, content) = self.read(&padded)?;
+        Ok(Opened {
+            sender_pk: self.header.sender_pk,
+            counter: self.header.counter,
+            sent_at,
+            content,
+        })
+    }
+
+    /// The padded payload of a consumed message, and `sent_at` when key 2
+    /// was read (R12).
+    fn read(&self, padded: &[u8]) -> Result<(Option<u64>, Content), Error> {
+        let len = match crypto::unpad(padded, PAD_BLOCK) {
+            Ok(len) => len,
+            Err(CryptoError::BadPadding) => return Ok((None, Content::Unreadable)),
+            Err(other) => return Err(Error::from(other)),
+        };
+        let record = padded.get(..len).ok_or(Error::Internal)?;
+        let Ok(head) = PayloadHead::read(record) else {
+            return Ok((None, Content::Unreadable));
+        };
+        let sent_at = head.sent_at;
+        if self.is_stale(sent_at) {
+            return Ok((Some(sent_at), Content::Stale));
+        }
+        let payload = head
+            .finish()
+            .and_then(|payload| payload.validate().map(|()| payload));
+        let content = payload.map_or(Content::Unreadable, Content::Message);
+        Ok((Some(sent_at), content))
+    }
+
+    /// Kept past its TTL, minted old, or dated more than one TTL ahead (ADR
+    /// 0027, 0030), with saturating arithmetic so that no time overflows
+    /// (R13).
+    fn is_stale(&self, sent_at: u64) -> bool {
+        let window = ttl_ms(self.ctx.ttl_seconds).saturating_add(EXPIRY_MARGIN_MS);
+        let received = self.received_at.min(self.now);
+        sent_at.saturating_add(window) < received || self.now.saturating_add(window) < sent_at
+    }
+}
+
+/// What `open` made of a consumed message. `sent_at` is `None` when it could
+/// not be read; spec 021 needs it for the own-key rule (ADR 0029).
+#[derive(Debug)]
+pub(crate) struct Opened {
+    pub(crate) sender_pk: PublicKey,
+    pub(crate) counter: u64,
+    pub(crate) sent_at: Option<u64>,
+    pub(crate) content: Content,
+}
+
+/// A readable message, one kept as `Unreadable`, or a stale one, which
+/// spec 021 discards as `Expired` (R12).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Content {
+    Message(Payload),
+    Unreadable,
+    Stale,
 }
 
 /// The fields of a blob that passed step 1, borrowed from it; the offsets

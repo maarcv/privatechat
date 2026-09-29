@@ -1,17 +1,20 @@
-//! Tests of spec 013 R1–R5, R11, R15, R19 and R20 over the inputs of
-//! `text_k1`, and the mutation table.
+//! Tests of spec 013 over the inputs of `text_k1`: the envelope, the order
+//! of `verify`, `open`, the mutation table and its property, the blob-level
+//! halves of T12–T14, and the dispatch of `013.json`.
+
+use proptest::prelude::{ProptestConfig, any, proptest};
 
 use super::text_k1::{
     BODY, COUNTER, CREATED_AT, K_CH, NONCE, NOW, RECEIVED_AT, SENDER_SEED, SENT_AT, SERVER_URL,
     SUGGESTED_NAME, TTL_SECONDS,
 };
 use super::{
-    BLOB_OVERHEAD, ChannelCtx, EXPIRY_MARGIN_MS, HEADER_LEN, KEY_RETIRED_COUNTER,
-    MSG_SIGNATURE_TAG, PROTO_V1, Sealed, SenderKey, seal, seal_padded, ttl_ms, verify, xor,
+    BLOB_OVERHEAD, ChannelCtx, Content, EXPIRY_MARGIN_MS, HEADER_LEN, KEY_RETIRED_COUNTER,
+    MSG_SIGNATURE_TAG, Opened, PROTO_V1, Sealed, SenderKey, seal, seal_padded, ttl_ms, verify, xor,
 };
 use crate::Error::{self, BadLength, BadSignature, Expired, UnsupportedVersion, WrongChannel};
 use crate::crypto::{self, Nonce, Secret, TAG_LEN};
-use crate::proto::config::Config;
+use crate::proto::config::{ChannelId, Config};
 use crate::proto::header::{Header, header_keystream};
 use crate::proto::keys::{ChannelKeys, message_key};
 use crate::proto::payload::{
@@ -391,6 +394,361 @@ fn s013_t20_r16_seal_padded_checks_its_length() {
     }
 }
 
+/// `payload` encoded and padded with no validation, as a non-conforming
+/// sender could.
+fn padded(payload: &Payload) -> Vec<u8> {
+    let mut padded = payload.encode().unwrap();
+    crypto::pad(&mut padded, PAD_BLOCK).unwrap();
+    padded
+}
+
+/// `padded` sealed by the sender of `text_k1`, then verified and opened at
+/// the times given.
+fn open_padded(padded: &[u8], received_at: u64, now: u64) -> Result<Opened, Error> {
+    let ctx = ctx();
+    let key = sender(SENDER_SEED);
+    let blob = seal_padded(&ctx, &key, COUNTER, &Nonce(NONCE), padded)?.blob;
+    verify(&blob, &ctx, received_at, now)?.open()
+}
+
+fn text(sent_at: u64, body: &[u8]) -> Payload {
+    Payload {
+        kind: PayloadKind::Text,
+        display_name: None,
+        sent_at,
+        body: body.to_vec(),
+    }
+}
+
+/// `payload` sealed with `seal`, verified and opened at `received_at = now`.
+fn round_trip(payload: &Payload, now: u64) -> Result<Opened, Error> {
+    let ctx = ctx();
+    let blob = seal(&ctx, &sender(SENDER_SEED), COUNTER, &Nonce(NONCE), payload)?.blob;
+    verify(&blob, &ctx, now, now)?.open()
+}
+
+/// Spec 013, R8: a `sent_at` off the minute fails `seal` and, sealed anyway,
+/// opens as `Unreadable` with its `sent_at` read.
+#[test]
+fn s013_t12_r08_sent_at_off_the_minute_on_the_wire() {
+    let payload = text(60_001, BODY);
+    assert!(matches!(
+        round_trip(&payload, 61_000),
+        Err(Error::BadPayload)
+    ));
+    let opened = open_padded(&padded(&payload), 61_000, 61_000).unwrap();
+    assert_eq!(
+        (opened.sent_at, opened.content),
+        (Some(60_001), Content::Unreadable)
+    );
+}
+
+/// Spec 013, R9: the four bad names, authentic, open as a `Message` with no
+/// name.
+#[test]
+fn s013_t13_r09_bad_display_name_opens_without_it() {
+    let names: [&[u8]; 4] = [&[b'a'; MAX_DISPLAY_NAME + 1], b"a\tb", b"a\xff", b"Ana"];
+    for (index, name) in names.into_iter().enumerate() {
+        let (kind, body) = if index == 3 { (1, &b""[..]) } else { (0, BODY) };
+        let record = [
+            &[0, 0, 0, 0, 1, kind, 1, 0, 0, 0][..],
+            &[u8::try_from(name.len()).unwrap()],
+            name,
+            &[2, 0, 0, 0, 8],
+            &SENT_AT.to_be_bytes(),
+            &[3, 0, 0, 0, u8::try_from(body.len()).unwrap()],
+            body,
+        ]
+        .concat();
+        let mut padded = record;
+        crypto::pad(&mut padded, PAD_BLOCK).unwrap();
+        let expected = Payload {
+            kind: if kind == 0 {
+                PayloadKind::Text
+            } else {
+                PayloadKind::KeyRetired
+            },
+            ..text(SENT_AT, body)
+        };
+        let opened = open_padded(&padded, RECEIVED_AT, NOW).unwrap();
+        assert_eq!(opened.content, Content::Message(expected), "{index}");
+    }
+}
+
+/// Spec 013, R10: each padded size gives a blob of 161 + 1 024·k bytes, and
+/// 64 512 encoded bytes do not seal.
+#[test]
+fn s013_t14_r10_blob_sizes() {
+    for (encoded, blocks) in [(24, 1), (1_023, 1), (1_024, 2), (MAX_PAYLOAD, MAX_BLOCKS)] {
+        let payload = text(SENT_AT, &vec![b'a'; encoded - 24]);
+        let blob = seal(
+            &ctx(),
+            &sender(SENDER_SEED),
+            COUNTER,
+            &Nonce(NONCE),
+            &payload,
+        )
+        .unwrap()
+        .blob;
+        assert_eq!(blob.len(), BLOB_OVERHEAD + PAD_BLOCK * blocks, "{encoded}");
+    }
+    let too_long = text(SENT_AT, &vec![b'a'; MAX_PAYLOAD + 1 - 24]);
+    assert!(matches!(
+        round_trip(&too_long, SENT_AT),
+        Err(Error::BadPayload)
+    ));
+}
+
+/// Spec 013, R12: the outcomes of `open`, the stale check before anything
+/// after key 2, and `sent_at` exactly when key 2 was read.
+#[test]
+fn s013_t16_r12_open_outcomes() {
+    let unknown = Payload {
+        kind: PayloadKind::Unknown(9),
+        ..text(SENT_AT, BODY)
+    };
+    let record = padded(&text(SENT_AT, BODY));
+    let mut no_marker = text(SENT_AT, BODY).encode().unwrap();
+    no_marker.resize(PAD_BLOCK, 0);
+    let fields = |fields: &[&[u8]]| {
+        let mut padded = fields.concat();
+        crypto::pad(&mut padded, PAD_BLOCK).unwrap();
+        padded
+    };
+    let type_field: &[u8] = &[0, 0, 0, 0, 1, 0];
+    let sent_at_field = |sent_at: u64| [&[2, 0, 0, 0, 8][..], &sent_at.to_be_bytes()].concat();
+    let body_field: &[u8] = &[3, 0, 0, 0, 1, b'x'];
+    let stale = 1_000_000_000;
+    let cases: [(&str, Vec<u8>, Option<u64>, Content); 8] = [
+        ("broken padding", no_marker, None, Content::Unreadable),
+        (
+            "broken record",
+            fields(&[type_field, &sent_at_field(SENT_AT), body_field, body_field]),
+            Some(SENT_AT),
+            Content::Unreadable,
+        ),
+        (
+            "unknown type",
+            padded(&unknown),
+            Some(SENT_AT),
+            Content::Unreadable,
+        ),
+        (
+            "no key 2",
+            fields(&[type_field, body_field]),
+            None,
+            Content::Unreadable,
+        ),
+        (
+            "key 2 of 7 bytes",
+            fields(&[
+                type_field,
+                &[2, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0],
+                body_field,
+            ]),
+            None,
+            Content::Unreadable,
+        ),
+        (
+            "stale, unknown type",
+            padded(&Payload {
+                sent_at: stale,
+                ..unknown
+            }),
+            Some(stale),
+            Content::Stale,
+        ),
+        (
+            "stale, off the minute",
+            padded(&text(stale + 1, BODY)),
+            Some(stale + 1),
+            Content::Stale,
+        ),
+        (
+            "stale, then a partial field",
+            fields(&[type_field, &sent_at_field(stale), &[3, 0]]),
+            Some(stale),
+            Content::Stale,
+        ),
+    ];
+    for (case, padded, sent_at, content) in cases {
+        let opened = open_padded(&padded, RECEIVED_AT, NOW).unwrap();
+        assert_eq!(
+            (opened.sent_at, opened.content),
+            (sent_at, content),
+            "{case}"
+        );
+    }
+    let opened = open_padded(&record, RECEIVED_AT, NOW).unwrap();
+    assert_eq!(opened.sent_at, Some(SENT_AT));
+    assert_eq!(opened.content, Content::Message(text(SENT_AT, BODY)));
+    assert_eq!(
+        (opened.sender_pk.0, opened.counter),
+        (sender(SENDER_SEED).public().0, COUNTER)
+    );
+
+    // The worked example, sealed with `seal` at received_at = now.
+    for (now, sent_at, is_stale) in [
+        (10_000_000_000, 6_000_000_000, true),
+        (10_000_000_000, 9_996_060_000, false),
+        (9_999_960_000, 10_003_920_000, false),
+        (9_999_960_000, 10_003_980_000, true),
+    ] {
+        let opened = round_trip(&text(sent_at, BODY), now).unwrap();
+        let expected = if is_stale {
+            Content::Stale
+        } else {
+            Content::Message(text(sent_at, BODY))
+        };
+        assert_eq!(
+            (opened.sent_at, opened.content),
+            (Some(sent_at), expected),
+            "{sent_at}"
+        );
+    }
+
+    // The bounds exactly, and `min(received_at, now)` on either side: with
+    // `window = ttl_ms + 360 000`, fresh while `sent_at + window` is not
+    // below the earlier of the two times.
+    let window = ttl_ms(TTL_SECONDS) + EXPIRY_MARGIN_MS;
+    let sent_at = 9_996_000_000;
+    let bound = sent_at + window;
+    for (received_at, now, is_stale) in [
+        (bound, bound, false),
+        (bound + 1, bound + 1, true),
+        (bound, bound + 1_000, false),
+        (bound + 1_000, bound, false),
+        (bound + 1, bound + 1_000, true),
+    ] {
+        let payload = text(sent_at, BODY);
+        let ctx = ctx();
+        let blob = seal(&ctx, &sender(SENDER_SEED), COUNTER, &Nonce(NONCE), &payload)
+            .unwrap()
+            .blob;
+        let opened = verify(&blob, &ctx, received_at, now)
+            .unwrap()
+            .open()
+            .unwrap();
+        let expected = if is_stale {
+            Content::Stale
+        } else {
+            Content::Message(payload)
+        };
+        assert_eq!(opened.content, expected, "{received_at} {now}");
+    }
+
+    // A failure before key 2 is `Unreadable` even when the message is stale.
+    let wide_type = [
+        &[0, 0, 0, 0, 2, 0, 0][..],
+        &sent_at_field(stale),
+        body_field,
+    ]
+    .concat();
+    let opened = open_padded(&fields(&[&wide_type]), RECEIVED_AT, NOW).unwrap();
+    assert_eq!(
+        (opened.sent_at, opened.content),
+        (None, Content::Unreadable)
+    );
+
+    // A ciphertext under another `K_msg`, validly signed: the AEAD fails.
+    let real = ctx();
+    let forged = ChannelCtx {
+        id: ChannelId(real.id.0),
+        keys: ChannelKeys {
+            msg: Secret::from_bytes([0x97; 32]),
+            hdr: Secret::from_bytes(*real.keys.hdr.expose()),
+        },
+        ttl_seconds: TTL_SECONDS,
+    };
+    let blob = seal(
+        &forged,
+        &sender(SENDER_SEED),
+        COUNTER,
+        &Nonce(NONCE),
+        &text(SENT_AT, BODY),
+    )
+    .unwrap()
+    .blob;
+    let verified = verify(&blob, &real, RECEIVED_AT, NOW).unwrap();
+    assert!(matches!(verified.open(), Err(Error::BadSignature)));
+}
+
+/// Spec 013, R13: the extremes of every time give a verdict and no panic.
+#[test]
+fn s013_t17_r13_time_arithmetic_saturates() {
+    let extremes = [0, u64::MAX];
+    for sent_at in extremes {
+        let padded = padded(&text(sent_at, BODY));
+        for received_at in extremes {
+            for now in extremes {
+                let verdict = open_padded(&padded, received_at, now);
+                assert!(
+                    matches!(verdict, Err(Error::Expired) | Ok(_)),
+                    "{sent_at} {received_at} {now}"
+                );
+            }
+        }
+    }
+    assert_eq!(ttl_ms(u32::MAX), 4_294_967_295_000);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    /// Spec 013, R16: over every k, both types and names of 0..=64 bytes,
+    /// `seal`, `verify` and `open` give the payload back; the same inputs
+    /// give the same bytes; `seal` is `seal_padded` over the padded
+    /// encoding.
+    #[test]
+    fn s013_t20_r16_seal_round_trip(
+        is_text in any::<bool>(),
+        blocks in 1..=MAX_BLOCKS,
+        fill in 0..PAD_BLOCK,
+        name_len in 0..=MAX_DISPLAY_NAME,
+    ) {
+        let payload = if is_text {
+            let name = "n".repeat(name_len);
+            let overhead = 24 + 5 + name_len;
+            let target = (PAD_BLOCK * (blocks - 1) + fill).clamp(overhead, MAX_PAYLOAD);
+            Payload { display_name: Some(name), ..text(SENT_AT, &vec![b'b'; target - overhead]) }
+        } else {
+            Payload { kind: PayloadKind::KeyRetired, ..text(SENT_AT, b"") }
+        };
+        let ctx = ctx();
+        let key = sender(SENDER_SEED);
+        let sealed = seal(&ctx, &key, KEY_RETIRED_COUNTER, &Nonce(NONCE), &payload).unwrap();
+        let again = seal(&ctx, &key, KEY_RETIRED_COUNTER, &Nonce(NONCE), &payload).unwrap();
+        assert_eq!(&sealed.blob, &again.blob);
+        let direct = seal_padded(&ctx, &key, KEY_RETIRED_COUNTER, &Nonce(NONCE), &padded(&payload));
+        assert_eq!(&sealed.blob, &direct.unwrap().blob);
+        let opened = verify(&sealed.blob, &ctx, RECEIVED_AT, NOW).unwrap().open().unwrap();
+        assert_eq!(opened.content, Content::Message(payload));
+    }
+
+    /// Spec 013, R17: for any blob, any byte and any non-zero mask, `verify`
+    /// refuses with the error of the byte's region, so `open` is never
+    /// reached.
+    #[test]
+    fn s013_t21_r17_every_flipped_byte_is_rejected_by_verify(
+        body_len in 0..3_000usize,
+        offset in any::<usize>(),
+        mask in 1..=u8::MAX,
+    ) {
+        let blob = seal(&ctx(), &sender(SENDER_SEED), COUNTER, &Nonce(NONCE), &text(SENT_AT, &vec![b'c'; body_len]))
+            .unwrap()
+            .blob;
+        let offset = offset % blob.len();
+        let mut mutated = blob;
+        mutated[offset] ^= mask;
+        let expected = match offset {
+            0 => UnsupportedVersion,
+            1..17 => WrongChannel,
+            _ => BadSignature,
+        };
+        assert_eq!(verdict(&mutated), Err(expected), "{offset}");
+    }
+}
+
 /// Every vector's channel is `text_k1`'s (spec 013, "Vectors").
 fn check_channel(vector: &Vector) {
     assert_eq!(vector.input("k_ch").array(), K_CH, "{}", vector.name());
@@ -453,6 +811,75 @@ fn check_sealed(vector: &Vector) {
     let received_at = vector.input("received_at").u64_hex();
     let verified = verify(&blob, &ctx, received_at, vector.input("now").u64_hex()).unwrap();
     assert_eq!(verified.signature(), &signature);
+    assert_eq!(vector.expected("content").text(), "message");
+    let opened = verified.open().unwrap();
+    assert_eq!(opened.sent_at, Some(payload.sent_at));
+    assert_eq!(opened.content, Content::Message(payload));
+}
+
+/// A positive vector built with `seal_padded`: the blob, and what `open`
+/// makes of it (R12).
+fn check_opened(vector: &Vector) {
+    check_channel(vector);
+    let key = check_sender(vector);
+    let ctx = ctx();
+    let counter = vector.input("counter").u64_hex();
+    let nonce = Nonce(vector.input("nonce").array());
+    let mk = message_key(&ctx.keys, key.public(), counter).unwrap();
+    assert_eq!(mk.expose(), &vector.expected("mk").array());
+    let padded = vector.input("padded").bytes();
+    let Sealed { blob, signature } = seal_padded(&ctx, &key, counter, &nonce, padded).unwrap();
+    assert_eq!(blob, vector.expected("blob").bytes(), "{}", vector.name());
+    assert_eq!(blob[17..57], *vector.expected("enc_hdr").bytes());
+    assert_eq!(signature, vector.expected("signature").array());
+    let received_at = vector.input("received_at").u64_hex();
+    let now = vector.input("now").u64_hex();
+    let opened = verify(&blob, &ctx, received_at, now)
+        .unwrap()
+        .open()
+        .unwrap();
+    let sent_at = vector
+        .has_expected("sent_at")
+        .then(|| vector.expected("sent_at").u64_hex());
+    assert_eq!(opened.sent_at, sent_at, "{}", vector.name());
+    let content = match &opened.content {
+        Content::Message(payload) => {
+            let kind = u8::try_from(vector.expected("type").number()).unwrap();
+            let expected = Payload {
+                kind: if kind == 0 {
+                    PayloadKind::Text
+                } else {
+                    PayloadKind::KeyRetired
+                },
+                display_name: None,
+                sent_at: sent_at.unwrap(),
+                body: vector.expected("body").bytes().to_vec(),
+            };
+            assert_eq!(payload, &expected, "{}", vector.name());
+            "message"
+        }
+        Content::Unreadable => "unreadable",
+        Content::Stale => "stale",
+    };
+    assert_eq!(
+        content,
+        vector.expected("content").text(),
+        "{}",
+        vector.name()
+    );
+}
+
+/// `aead_forged_signed`: `verify` accepts the signature and `open` refuses
+/// the ciphertext (R12).
+fn check_forged(vector: &Vector) {
+    check_channel(vector);
+    check_sender(vector);
+    let ctx = ctx();
+    let blob = vector.input("blob").bytes();
+    let received_at = vector.input("received_at").u64_hex();
+    let verified = verify(blob, &ctx, received_at, vector.input("now").u64_hex()).unwrap();
+    let error = format!("{:?}", verified.open().expect_err("a forged ciphertext"));
+    assert_eq!(error, vector.expected("error").text());
 }
 
 /// A negative vector: `verify` returns its error; when it carries a signer,
@@ -498,6 +925,22 @@ fn s013_vectors_dispatch() {
         "long_blob",
         "unaligned_blob",
     ];
+    let opened = [
+        "unknown_payload_key",
+        "unknown_type",
+        "bad_padding",
+        "bad_payload_record",
+        "missing_sent_at",
+        "sent_at_not_a_minute",
+        "display_name_too_long",
+        "display_name_control",
+        "display_name_not_utf8",
+        "display_name_in_key_retired",
+        "stale_sent_at",
+        "stale_unknown_type",
+        "stale_trailing_garbage",
+        "future_sent_at",
+    ];
     let entries = [
         sealed
             .map(|name| (name, check_sealed as Checker))
@@ -505,6 +948,10 @@ fn s013_vectors_dispatch() {
         rejected
             .map(|name| (name, check_rejected as Checker))
             .as_slice(),
+        opened
+            .map(|name| (name, check_opened as Checker))
+            .as_slice(),
+        &[("aead_forged_signed", check_forged as Checker)],
     ]
     .concat();
     vectors::check_all("013", &entries);

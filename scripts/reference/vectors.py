@@ -839,15 +839,17 @@ def sodium_pad(data: bytes, block: int) -> bytes:
 
 
 def seal_blob(seed: bytes, counter: int, nonce: bytes, padded: bytes,
-              signed_range: slice | None = None) -> dict:
+              signed_range: slice | None = None, k_msg: bytes | None = None) -> dict:
     """Every part of the blob of 013 R16 in the channel of `text_k1`: the header hidden with
-    bytes 0..40 of the keystream, the AEAD over `blob[0..81]`, the RFC 8032 signature over
-    the tag and `signed_range` of `blob[0..81 + n]` (all of it by default), masked with
-    bytes 40..104 of the same keystream."""
+    bytes 0..40 of the keystream, the AEAD over `blob[0..81]` under the `mk` of `k_msg` (the
+    channel's by default), the RFC 8032 signature over the tag and `signed_range` of
+    `blob[0..81 + n]` (all of it by default), masked with bytes 40..104 of the same
+    keystream."""
     require(len(padded) % PAD_BLOCK == 0 and 1 <= len(padded) // PAD_BLOCK <= MAX_BLOCKS,
             "a padded payload is 1 024·k bytes, k in 1..=63")
     k_ch = TEXT_K1["k_ch"]
-    k_msg, k_hdr = kdf_derive(k_ch, CONTEXT_MESSAGE), kdf_derive(k_ch, CONTEXT_HEADER)
+    k_msg = k_msg or kdf_derive(k_ch, CONTEXT_MESSAGE)
+    k_hdr = kdf_derive(k_ch, CONTEXT_HEADER)
     _, channel_id = channel_identity(k_ch, TEXT_K1["ttl_seconds"])
     pk_u = ed25519_public_key(seed)
     stream = header_keystream(k_hdr, nonce)
@@ -943,6 +945,81 @@ def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
         vectors.append(negative(name, f"a blob of {len(edited)} bytes", edited, "BadLength"))
     require([len(v["inputs"]["blob"]) for v in vectors[-3:]] == [1_184, 64_674, 1_186],
             "the lengths of R2")
+
+    def opened(name: str, origin: str, content: str, padded: bytes, sent_at: int | None = None,
+               message: dict | None = None, **times: int) -> dict:
+        """A blob sealed over `padded` with no validation (`seal_padded`), each under its own
+        nonce, and what `open` makes of it: `sent_at` when key 2 was read, and for a message
+        the payload it decodes to."""
+        nonce = blake2b_256(b"nonce of " + name.encode())[:24]
+        sealed = seal_blob(seed, k1["counter"], nonce, padded)
+        inputs = {"sender_seed": seed, "pk_u": sealed["pk_u"], "counter": U64(k1["counter"]),
+                  "nonce": nonce, "padded": padded,
+                  **{field: U64(value) for field, value in times.items()}}
+        expected = {field: sealed[field] for field in ("mk", "enc_hdr", "signature", "blob")}
+        expected["content"] = content
+        if sent_at is not None:
+            expected["sent_at"] = U64(sent_at)
+        return raw(name, "positive", origin, inputs, {**expected, **(message or {})})
+
+    def padded(kind: int, sent_at: int, body: bytes = b"", **options) -> bytes:
+        return sodium_pad(payload_record(kind, sent_at, body, **options), PAD_BLOCK)
+
+    sent_at, body = k1["sent_at"], k1["body"]
+    text = {"type": TYPE_TEXT, "body": body}
+    field = record_field
+    records = {
+        "bad_payload_record": field(0, b"\x00") + field(2, struct.pack(">Q", sent_at))
+        + field(1, b"Ana") + field(3, body),
+        "missing_sent_at": field(0, b"\x00") + field(3, body),
+    }
+    record = payload_record(TYPE_TEXT, sent_at, body)
+    vectors += [
+        opened("unknown_payload_key", "a text with key 9, which is ignored", "message",
+               padded(TYPE_TEXT, sent_at, body, extra=((9, b"v1.x"),)), sent_at, text),
+        opened("unknown_type", "type 9, authentic and fresh", "unreadable", padded(9, sent_at, body),
+               sent_at),
+        opened("bad_padding", "a text padded with zeros and no 0x80 marker", "unreadable",
+               record + bytes(PAD_BLOCK - len(record))),
+        opened("bad_payload_record", "key 1 after key 2", "unreadable",
+               sodium_pad(records["bad_payload_record"], PAD_BLOCK), sent_at),
+        opened("missing_sent_at", "no key 2", "unreadable",
+               sodium_pad(records["missing_sent_at"], PAD_BLOCK)),
+        opened("sent_at_not_a_minute", "sent_at 60 001, received 999 ms later", "unreadable",
+               padded(TYPE_TEXT, 60_001, body), 60_001, received_at=61_000, now=61_000),
+    ]
+    for name, display_name, origin in (
+            ("display_name_too_long", b"a" * 65, "of 65 bytes"),
+            ("display_name_control", b"a\tb", "with U+0009, a Cc character"),
+            ("display_name_not_utf8", b"a\xff", "that is not UTF-8")):
+        vectors.append(opened(name, f"a text with a name {origin}", "message",
+                              padded(TYPE_TEXT, sent_at, body, display_name=display_name),
+                              sent_at, text))
+    vectors.append(opened("display_name_in_key_retired", "a key_retired with a name", "message",
+                          padded(TYPE_KEY_RETIRED, sent_at, display_name=b"Ana"), sent_at,
+                          {"type": TYPE_KEY_RETIRED, "body": b""}))
+
+    margin = k1["ttl_seconds"] * 1_000 + EXPIRY_MARGIN_MS
+    received = min(k1["received_at"], k1["now"])
+    stale = (received - margin - 1) // 60_000 * 60_000
+    future = (k1["now"] + margin) // 60_000 * 60_000 + 60_000
+    require(stale + margin < received and k1["now"] + margin < future, "both are stale")
+    require(stale + 60_000 + margin >= received, "the latest stale minute")
+    vectors += [
+        opened("stale_sent_at", "sent_at more than ttl_ms + 360 000 ms before received_at",
+               "stale", padded(TYPE_TEXT, stale, body), stale),
+        opened("stale_unknown_type", "stale, and type 9", "stale", padded(9, stale, body), stale),
+        opened("stale_trailing_garbage", "stale, then two bytes that frame no field", "stale",
+               sodium_pad(payload_record(TYPE_TEXT, stale, body)[:-len(body) - 5] + b"\x03\x00",
+                          PAD_BLOCK), stale),
+        opened("future_sent_at", "sent_at more than ttl_ms + 360 000 ms after now", "stale",
+               padded(TYPE_TEXT, future, body), future),
+    ]
+    wrong_k_msg = blake2b_256(b"not the K_msg of text_k1")
+    forged = seal_blob(seed, k1["counter"], k1["nonce"], sodium_pad(record, PAD_BLOCK),
+                       k_msg=wrong_k_msg)["blob"]
+    vectors.append(negative("aead_forged_signed", "the payload of text_k1 sealed under another "
+                            "K_msg and validly signed", forged, "BadSignature", signer=True))
     return vectors
 
 
