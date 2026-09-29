@@ -1,0 +1,95 @@
+{
+  "spec": "012",
+  "proto_version": 1,
+  "vectors": [
+    {
+      "name": "master_keys",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 012: K_ch to K_msg and K_hdr through the KDF of §4",
+      "inputs": {
+        "k_ch": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f"
+      },
+      "expected": {
+        "k_hdr": "0e5f73cbeb3a11601f6fe24a96c54b323a7a3c7bdb4d57a97f0ee954818b889c",
+        "k_msg": "44848bef6999c5a15e6ff2200fce219d844b4e720c79985f079e5afb24c765ba"
+      }
+    },
+    {
+      "name": "message_key_c0",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 012: mk at counter 0",
+      "inputs": {
+        "counter": "0000000000000000",
+        "k_ch": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "pk_u": "cd14b37f956e953194ff7fb73b3d81dcc561d61a7538094b7c3e1a643ee5f3aa"
+      },
+      "expected": {
+        "mk": "ecf2b0f1a6ce111b0562a015d1f6495729f94175815911a4dfb6ce4a372ab419"
+      }
+    },
+    {
+      "name": "message_key_c1",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 012: mk at counter 1, the same sender",
+      "inputs": {
+        "counter": "0000000000000001",
+        "k_ch": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "pk_u": "cd14b37f956e953194ff7fb73b3d81dcc561d61a7538094b7c3e1a643ee5f3aa"
+      },
+      "expected": {
+        "mk": "a4cc4347c55173eda9d18cc85622911036235a7ac3953a99f9d46185931765dd"
+      }
+    },
+    {
+      "name": "message_key_max",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 012: mk at counter 2^64 - 1, the same sender",
+      "inputs": {
+        "counter": "ffffffffffffffff",
+        "k_ch": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "pk_u": "cd14b37f956e953194ff7fb73b3d81dcc561d61a7538094b7c3e1a643ee5f3aa"
+      },
+      "expected": {
+        "mk": "baefc5b715a75b423abe94ab3b2465878a44accfccf56c410da0f019b11e7cb0"
+      }
+    },
+    {
+      "name": "message_key_other_sender",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 012: mk at counter 1, another sender",
+      "inputs": {
+        "counter": "0000000000000001",
+        "k_ch": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "pk_u": "4fd099ccd47d7893dfe9ec24414ecb0d9b5420232aad30d91c465be33cbe65c4"
+      },
+      "expected": {
+        "mk": "61d53c7f92afe703f5f5ff8f04fe5a0901cec3890dca9e18feaf009a2d0075de"
+      }
+    },
+    {
+      "name": "header_sealed",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 012: the K_ch of master_keys, a header, a signature and a nonce, sealed with the keystream of K_hdr",
+      "inputs": {
+        "counter": "0102030405060708",
+        "k_ch": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "nonce": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7",
+        "sender_pk": "cd14b37f956e953194ff7fb73b3d81dcc561d61a7538094b7c3e1a643ee5f3aa",
+        "signature": "00020406080a0c0e10121416181a1c1e20222426282a2c2e30323436383a3c3e40424446484a4c4e50525456585a5c5e60626466686a6c6e70727476787a7c7e"
+      },
+      "expected": {
+        "enc_hdr": "fc1d5b9aea79fc2ec6f267e2dcd6bcc3cdaa74e18cf620d3ef559fe2023c35172fd9bfbb5fac873e",
+        "header": "cd14b37f956e953194ff7fb73b3d81dcc561d61a7538094b7c3e1a643ee5f3aa0102030405060708",
+        "k_hdr": "0e5f73cbeb3a11601f6fe24a96c54b323a7a3c7bdb4d57a97f0ee954818b889c",
+        "keystream": "3109e8e57f17691f520d1855e7eb3d1f08cba2fbf9ce2998936b85863cd9c6bd2edbbcbf5aaa803660aa6bcbc917cb640ac9a9835ec4d29992ac553844e0f6fe90081fd3030c2bf2b7c74111963b590794f87c09ecdc426b382ea00e364603b1813246a12d22c6ae",
+        "masked_signature": "60a86fcdc11dc76a1adbbd9546dece87b28e711e6ccadad0a03a2be53b3617ccf7850557de711549c4aa285fb4861e35584cc4685e2c6fdff14032d75558bad0"
+      }
+    }
+  ]
+}

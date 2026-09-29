@@ -17,7 +17,7 @@ use crate::vectors::{self, Kind};
 
 /// Every `.rs` file of the crate. `core` does no I/O (AGENTS 10), so the test
 /// cannot walk the directory: a new file is added to this list by hand.
-const SOURCES: [(&str, &str); 17] = [
+const SOURCES: [(&str, &str); 21] = [
     ("lib.rs", include_str!("../lib.rs")),
     ("crypto.rs", include_str!("../crypto.rs")),
     ("crypto/ffi.rs", include_str!("ffi.rs")),
@@ -47,6 +47,16 @@ const SOURCES: [(&str, &str); 17] = [
         include_str!("../proto/record/tests.rs"),
     ),
     ("proto/wordlist.rs", include_str!("../proto/wordlist.rs")),
+    ("proto/keys.rs", include_str!("../proto/keys.rs")),
+    (
+        "proto/keys/tests.rs",
+        include_str!("../proto/keys/tests.rs"),
+    ),
+    ("proto/header.rs", include_str!("../proto/header.rs")),
+    (
+        "proto/header/tests.rs",
+        include_str!("../proto/header/tests.rs"),
+    ),
 ];
 
 /// Spec 010, R1: `crypto/ffi.rs` is the only file that uses the keyword, and

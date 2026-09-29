@@ -3,5 +3,7 @@
 //! it and the envelope, which is a fixed layout and not a record.
 
 pub(crate) mod config;
+pub(crate) mod header;
+pub(crate) mod keys;
 pub(crate) mod record;
 pub(crate) mod wordlist;
