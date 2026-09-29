@@ -413,6 +413,8 @@ CONFIG_MAX_RECORD = 512  # 011 R7
 CHANNEL_ID_TAG = b"privatechat/chid/v1"  # 011 R9
 CHANNEL_AUTH_CONTEXT = b"chauth__"
 CHANNEL_ID_LEN = 16
+# A v3 onion host of 56 base32 characters (011 R5, ADR 0038).
+ONION_HOST = ("abcdefghijklmnopqrstuvwxyz234567" * 2)[:56] + ".onion"
 
 
 def config_record(values: dict) -> bytes:
@@ -471,6 +473,8 @@ def check_s011_t22_r22_section_produces_011_json() -> list[dict]:
         positive("config_reference", "every key, the invitation expiring 10 min after creation",
                  reference),
         positive("config_no_invite", "config_reference without key 6", no_invite),
+        positive("config_onion_ws", "config_no_invite on ws:// and a 56-character onion host",
+                 {**no_invite, "server_url": f"ws://{ONION_HOST}"}),
         positive("channel_id_ttl_60", "config_no_invite at the lowest TTL",
                  {**no_invite, "ttl_seconds": 60}),
         positive("channel_id_ttl_2592000", "config_no_invite at the highest TTL",
@@ -507,6 +511,16 @@ def check_s011_t22_r22_section_produces_011_json() -> list[dict]:
          config_record({**no_invite, "suggested_name": "a" * 65}), "BadConfig"),
         ("name_control", "a suggested name holding U+0085, a C1 control",
          config_record({**no_invite, "suggested_name": "a\u0085b"}), "BadConfig"),
+        ("url_path", "a server_url with a path",
+         config_record({**no_invite, "server_url": "wss://chat.example.org/path"}), "BadConfig"),
+        ("url_uppercase", "a host with a capital letter",
+         config_record({**no_invite, "server_url": "wss://Chat.example.org"}), "BadConfig"),
+        ("url_port_443", "the port wss:// implies, written out",
+         config_record({**no_invite, "server_url": "wss://chat.example.org:443"}), "BadConfig"),
+        ("url_ws_not_onion", "ws:// with a host that is not an onion",
+         config_record({**no_invite, "server_url": "ws://chat.example.org"}), "BadConfig"),
+        ("url_ws_onion_port_80", "the port ws:// implies, written out",
+         config_record({**no_invite, "server_url": f"ws://{ONION_HOST}:80"}), "BadConfig"),
         ("invite_expired", "an invitation that expired 1 ms before now",
          config_record({**reference, "invite_expires_at": U64(now - 1)}), "InviteExpired"),
     ]

@@ -1,4 +1,4 @@
-use super::{CHANNEL_AUTH_CONTEXT, CHANNEL_ID_TAG, Config, MAX_RECORD};
+use super::{CHANNEL_AUTH_CONTEXT, CHANNEL_ID_TAG, Config, MAX_RECORD, url};
 use crate::Error;
 use crate::crypto::{self, SECRET_TYPES, Secret, ct_eq};
 use crate::vectors::{self, Checker, Kind, Vector};
@@ -96,6 +96,42 @@ fn out_of_range() -> Vec<Vec<u8>> {
     ]
 }
 
+/// A v3 onion host: 56 characters of `a-z` and `2-7`, then `.onion`.
+fn onion(label_len: usize, character: char) -> String {
+    format!("{}.onion", character.to_string().repeat(label_len))
+}
+
+/// Server URLs outside the grammar of R5.
+fn bad_urls() -> Vec<String> {
+    let mut urls: Vec<String> = [
+        "",
+        "wss://",
+        "ws://host",
+        "wss://host/path",
+        "wss://host/",
+        "wss://host?q",
+        "wss://HOST",
+        "wss://host:",
+        "wss://host:0",
+        "wss://host:065",
+        "wss://host:443",
+        "wss://host:65536",
+        "wss://host:9001:1",
+        "wss://host:+9001",
+        "wss://user@host",
+        "wss://[::1]",
+        "https://host",
+    ]
+    .map(String::from)
+    .to_vec();
+    urls.push(format!("ws://{}", onion(55, 'a')));
+    urls.push(format!("ws://{}.onion", "a".repeat(55) + "1"));
+    urls.push(format!("ws://{}", "a".repeat(56)));
+    urls.push(format!("ws://{}:80", onion(56, 'a')));
+    urls.push(format!("wss://{}", "a".repeat(251)));
+    urls
+}
+
 /// 513 bytes whose key 0 alone would say `UnsupportedVersion` (R7).
 fn oversized() -> Vec<u8> {
     let head = [field(0, &[2]), field(1, &[1])].concat();
@@ -162,6 +198,54 @@ fn s011_t04_r04_ttl_and_name_ranges() {
     }
 }
 
+/// Spec 011, R5: the URL grammar, alone and through `parse` and `create`.
+#[test]
+fn s011_t05_r05_url_grammar() {
+    let good = [
+        "wss://host".to_owned(),
+        "wss://host:9001".to_owned(),
+        "wss://1.2.3.4".to_owned(),
+        "wss://host:65535".to_owned(),
+        format!("wss://{}", onion(56, '7')),
+        format!("wss://{}", "a".repeat(250)),
+        format!("ws://{}", onion(56, 'z')),
+        format!("ws://{}:9001", onion(56, '2')),
+    ];
+    for server_url in &good {
+        assert!(url::parse(server_url).is_ok(), "{server_url}");
+        assert!(Config::parse(&with(3, server_url.as_bytes()), NOW).is_ok());
+    }
+    assert_eq!(good[5].len(), 256);
+    for server_url in bad_urls() {
+        assert_eq!(
+            url::parse(&server_url).err(),
+            Some(Error::BadConfig),
+            "{server_url}"
+        );
+        assert_eq!(
+            rejection(&with(3, server_url.as_bytes())),
+            Some(Error::BadConfig)
+        );
+        let created = Config::create(&server_url, 86_400, "name", NOW);
+        assert_eq!(created.err(), Some(Error::BadConfig), "{server_url}");
+    }
+}
+
+/// Spec 011, R6: the accessors, and `host()` without scheme or port.
+#[test]
+fn s011_t06_r06_accessors_and_host() {
+    let config = Config::parse(&with(3, b"wss://host:9001"), NOW).unwrap();
+    assert_eq!(config.server_url(), "wss://host:9001");
+    assert_eq!(config.host(), "host");
+    assert_eq!(config.ttl_seconds(), 86_400);
+    assert_eq!(config.suggested_name(), "name");
+    assert!(*config.channel_key() == Secret::from_bytes(K_CH));
+    let onion_url = format!("ws://{}:9001", onion(56, 'a'));
+    let config = Config::parse(&with(3, onion_url.as_bytes()), NOW).unwrap();
+    assert_eq!(config.host(), onion(56, 'a'));
+    assert_eq!(reference().host(), "host");
+}
+
 /// Spec 011, R7: the size is checked before the first byte is decoded.
 #[test]
 fn s011_t07_r07_rejects_a_record_above_the_limit() {
@@ -218,7 +302,11 @@ fn s011_t19_r19_no_lingering_secret() {
 /// Spec 011, R21: no rejection carries a byte of `K_ch`.
 #[test]
 fn s011_t21_r21_a_rejected_config_leaves_nothing() {
-    let records = [malformed(), unsupported(), out_of_range()].concat();
+    let urls = bad_urls()
+        .iter()
+        .map(|url| with(3, url.as_bytes()))
+        .collect();
+    let records = [malformed(), unsupported(), out_of_range(), urls].concat();
     let expired = with(6, &(NOW - 1).to_be_bytes());
     for record in records.iter().chain([&oversized(), &expired]) {
         let debug = format!("{:?}", rejection(record).unwrap());
@@ -245,8 +333,13 @@ fn s011_t23_r23_create() {
         let with_k_ch = with(2, config.k_ch.expose());
         assert_eq!(record.as_slice(), with_k_ch, "no key 6");
     }
-    for (ttl, name) in [(59, "name"), (86_400, &"a".repeat(65))] {
-        let created = Config::create("wss://host", ttl, name, NOW);
+    let long_name = "a".repeat(65);
+    for (server_url, ttl, name) in [
+        ("wss://host", 59, "name"),
+        ("wss://host", 86_400, long_name.as_str()),
+        ("ws://host", 86_400, "name"),
+    ] {
+        let created = Config::create(server_url, ttl, name, NOW);
         assert_eq!(created.err(), Some(Error::BadConfig));
     }
 }
@@ -295,6 +388,7 @@ fn s011_vectors_dispatch() {
     let positive = [
         "config_reference",
         "config_no_invite",
+        "config_onion_ws",
         "channel_id_ttl_60",
         "channel_id_ttl_2592000",
     ];
@@ -310,6 +404,11 @@ fn s011_vectors_dispatch() {
         "ttl_2592001",
         "name_65_bytes",
         "name_control",
+        "url_path",
+        "url_uppercase",
+        "url_port_443",
+        "url_ws_not_onion",
+        "url_ws_onion_port_80",
         "invite_expired",
     ];
     let entries = [

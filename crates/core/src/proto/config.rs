@@ -16,6 +16,7 @@ use crate::crypto::{self, KdfContext, PublicKey, Secret};
 
 #[cfg(test)]
 mod tests;
+mod url;
 
 /// Domain tag of the `channel_id` hash (`docs/spec.md` §4, R9).
 pub(crate) const CHANNEL_ID_TAG: &[u8; 19] = b"privatechat/chid/v1";
@@ -28,9 +29,6 @@ const VERSION: u8 = 1;
 
 /// The largest encoded record (R7).
 pub(crate) const MAX_RECORD: usize = 512;
-
-/// The largest `server_url` (R5).
-const MAX_SERVER_URL: usize = 256;
 
 /// The largest `suggested_name`, in bytes of UTF-8 (R4).
 const MAX_NAME: usize = 64;
@@ -165,6 +163,17 @@ impl Config {
         Ok(writer.finish())
     }
 
+    /// The host of `server_url`, the string the subscription signature
+    /// covers (R6, spec 031). The URL was checked when the config was built.
+    pub(crate) fn host(&self) -> &str {
+        url::parse(&self.server_url).map_or("", |parts| parts.host)
+    }
+
+    /// `K_ch`, for the derivations of specs 012 and 013 (R6).
+    pub(crate) fn channel_key(&self) -> &Secret<32> {
+        &self.k_ch
+    }
+
     /// The channel's identifier, for the specs that compare it.
     pub(crate) fn id(&self) -> &ChannelId {
         &self.id
@@ -220,7 +229,7 @@ fn decode(bytes: &[u8]) -> Result<Fields<'_>, Error> {
     }
     let fields = Fields {
         k_ch: required(reader.bytes_n::<32>(KEY_K_CH))?,
-        server_url: required(reader.text(KEY_SERVER_URL, MAX_SERVER_URL))?,
+        server_url: required(reader.text(KEY_SERVER_URL, url::MAX_URL))?,
         ttl_seconds: required(reader.u32(KEY_TTL_SECONDS))?,
         created_at: required(reader.u64(KEY_CREATED_AT))?,
         invite_expires_at: reader.u64(KEY_INVITE_EXPIRES_AT).map_err(bad_config)?,
@@ -234,7 +243,7 @@ fn decode(bytes: &[u8]) -> Result<Fields<'_>, Error> {
 fn check_ranges(server_url: &str, ttl_seconds: u32, suggested_name: &str) -> Result<(), Error> {
     // `char::is_control` is exactly the general category Cc.
     let name_ok = suggested_name.len() <= MAX_NAME && !suggested_name.chars().any(char::is_control);
-    let url_ok = !server_url.is_empty() && server_url.len() <= MAX_SERVER_URL;
+    let url_ok = url::parse(server_url).is_ok();
     if TTL_SECONDS.contains(&ttl_seconds) && name_ok && url_ok {
         Ok(())
     } else {

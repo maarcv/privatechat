@@ -46,6 +46,27 @@
       }
     },
     {
+      "name": "config_onion_ws",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 011: config_no_invite on ws:// and a 56-character onion host",
+      "inputs": {
+        "now": "000001a0c4515660",
+        "record": "0000000001010100000001010200000020404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f030000004377733a2f2f6162636465666768696a6b6c6d6e6f707172737475767778797a3233343536376162636465666768696a6b6c6d6e6f7071727374757677782e6f6e696f6e0400000004000151800500000008000001a0c4506c00070000000846616dc3ad6c6961"
+      },
+      "expected": {
+        "channel_id": "26b06631aa61cb8f91c3498b1c59c2c7",
+        "config_version": 1,
+        "created_at": "000001a0c4506c00",
+        "k_ch": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "pk_ch": "0a6c289b8a8f670bd999f12566391866c6687a0c527cb8b2f63ee3a41b9fcee4",
+        "proto_version": 1,
+        "server_url": "77733a2f2f6162636465666768696a6b6c6d6e6f707172737475767778797a3233343536376162636465666768696a6b6c6d6e6f7071727374757677782e6f6e696f6e",
+        "suggested_name": "46616dc3ad6c6961",
+        "ttl_seconds": 86400
+      }
+    },
+    {
       "name": "channel_id_ttl_60",
       "kind": "positive",
       "source": "derived",
@@ -225,6 +246,71 @@
       "inputs": {
         "now": "000001a0c4515660",
         "record": "0000000001010100000001010200000020404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f030000001b7773733a2f2f636861742e6578616d706c652e6f72673a393030310400000004000151800500000008000001a0c4506c00070000000461c28562"
+      },
+      "expected": {
+        "error": "BadConfig"
+      }
+    },
+    {
+      "name": "url_path",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 011: a server_url with a path",
+      "inputs": {
+        "now": "000001a0c4515660",
+        "record": "0000000001010100000001010200000020404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f030000001b7773733a2f2f636861742e6578616d706c652e6f72672f706174680400000004000151800500000008000001a0c4506c00070000000846616dc3ad6c6961"
+      },
+      "expected": {
+        "error": "BadConfig"
+      }
+    },
+    {
+      "name": "url_uppercase",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 011: a host with a capital letter",
+      "inputs": {
+        "now": "000001a0c4515660",
+        "record": "0000000001010100000001010200000020404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f03000000167773733a2f2f436861742e6578616d706c652e6f72670400000004000151800500000008000001a0c4506c00070000000846616dc3ad6c6961"
+      },
+      "expected": {
+        "error": "BadConfig"
+      }
+    },
+    {
+      "name": "url_port_443",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 011: the port wss:// implies, written out",
+      "inputs": {
+        "now": "000001a0c4515660",
+        "record": "0000000001010100000001010200000020404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f030000001a7773733a2f2f636861742e6578616d706c652e6f72673a3434330400000004000151800500000008000001a0c4506c00070000000846616dc3ad6c6961"
+      },
+      "expected": {
+        "error": "BadConfig"
+      }
+    },
+    {
+      "name": "url_ws_not_onion",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 011: ws:// with a host that is not an onion",
+      "inputs": {
+        "now": "000001a0c4515660",
+        "record": "0000000001010100000001010200000020404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f030000001577733a2f2f636861742e6578616d706c652e6f72670400000004000151800500000008000001a0c4506c00070000000846616dc3ad6c6961"
+      },
+      "expected": {
+        "error": "BadConfig"
+      }
+    },
+    {
+      "name": "url_ws_onion_port_80",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 011: the port ws:// implies, written out",
+      "inputs": {
+        "now": "000001a0c4515660",
+        "record": "0000000001010100000001010200000020404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f030000004677733a2f2f6162636465666768696a6b6c6d6e6f707172737475767778797a3233343536376162636465666768696a6b6c6d6e6f7071727374757677782e6f6e696f6e3a38300400000004000151800500000008000001a0c4506c00070000000846616dc3ad6c6961"
       },
       "expected": {
         "error": "BadConfig"
