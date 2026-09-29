@@ -2,6 +2,26 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit V
+
+**2026-09-29 — Audit V, code audit of spec 014-fingerprint (branch `014-fingerprint`, one slice), in three independent passes (V-A: structure and simplicity; V-B: the local CI run, 63 mutants of the Rust code and 40 of the reference-script section; V-C: conformance with spec 014, `docs/spec.md` §4, §7, §9, ADR 0025, 0028, specs 010, 011, 015 and the specs that consume 014, and an independent recomputation of the 15 vectors).** CI green; no defect in the code. The reviewer read the first three words of `words_reference` against the list by hand (lines 1153, 1087 and 864: `mosquito`, `march`, `hip`), the acceptance criterion's non-automatable step. Findings (numbered AV) and changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AV1 | The derived `Debug` of `Fingerprint` printed the QR, which holds the whole `channel_id` and `pk_u`, against AGENTS 19 (V-A1) | Medium | A `Debug` by hand that shows `short` alone, T08 pins it; the reviewer kept `Clone`, `PartialEq` and `Eq` |
+| AV2 | A prefix edited at a byte other than 8 passed, and nothing fixed that the prefix is checked before the channel (V-B #64, #51, V-A9) | Low | T04 edits each prefix byte, a malformed QR of another channel, a space; R4 states the order |
+| AV3 | Vectors that could lose their point with every test green: `words_reference` from another fingerprint, too few indices, `qr_reference` of another key, a negative grown to 75 bytes, the bits after 132 cleared (V-B #17–#34) | Low | The checkers pin the reference key and fingerprint and the 12 indices; the script requires each edit's shape |
+| AV4 | The bit extraction took five error sites where three suffice; `QR_LEN`, the prefix length and the mask were bare; shared doc comments; a rustdoc link to a private item; T05 retyped three vectors (V-A2–VA8, VA10–VA12) | Low | Simpler `words`, derived constants, docs, T05 keeps what no vector covers; script style |
+| AV5 | R3 and R4 named spec 011's decoder, R7 called the fifth negative an edit, the Interface omitted the derives, the re-export and the uniffi mirror, T01, T03, T05 and T08 said "on the vector" for what the dispatch checks, and 014 and 040 R14 said `qr_other_channel` uses another channel (V-C1–VC12) | Low | Specs 014 and 040; the vector's origin; 055 R18 cites `docs/spec.md` §4 for the rule that all 12 words must match, which 014 never held |
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AV-Q1 | May the public `Fingerprint` be cloned, compared and printed, and be public from `core` now? (V-C D1, D2) | Yes, with a `Debug` that shows the 4 words only (AV1) | Interface of spec 014 |
+| AV-Q2 | Correct the text on which channel `qr_other_channel` uses, and its origin in `014.json` (V-C D3) | Correct | Specs 014 and 040, `014.json` |
+| AV-Q3 | One slice of 488 net lines against the 400 of AGENTS 14 (V-A13, V-C14) | Accept, most of it is tests | History of spec 014 |
+
+Not changed: the equivalent mutants — the length check (a QR of any other length fails the decoded length), the unreachable split and word-lookup errors, `ct_eq` against `!=` (constant time cannot be seen by a test; review holds R4's `ct_eq` on the prefix), and script inputs replaced by other valid ones. `WORD_COUNT` keeps the name the Interface gives it, though `wordlist::WORD_COUNT` means 2 048 (V-A5); `#[non_exhaustive]` on `Fingerprint` is left to spec 027-core-api, since the bindings have their own mirror (V-A decision 2).
+
 ## Audit U
 
 **2026-09-29 — Audit U, code audit of spec 013-wire-message (branch `013-wire-message`, slices (a)–(c)), in three independent passes (U-A: structure and simplicity; U-B: the local CI run, 81 mutants of the Rust code and 30 of the reference-script section; U-C: conformance with spec 013, `docs/spec.md` §4, ADR 0005, 0018, 0023, 0027, 0029, 0030, 0032, 0033, and an independent checker of the 29 vectors).** CI green; no defect in the code. U-C is the second reading the acceptance criterion asks for: the offsets of R1 and the order of R11 and R12 match `docs/spec.md` §4 byte for byte, and every vector has the outcome its row gives. Findings (numbered AU) and changes applied:
