@@ -30,11 +30,11 @@ In plain words: the fingerprint is a hash of "this key, in this channel". Two pe
 
 - R1 The fingerprint MUST be `fp = hash("privatechat/fp/v1" ‖ channel_id ‖ pk_u)`: 32 bytes over exactly 65 bytes of input, which are the 17 ASCII bytes of the tag, the 16 bytes of `channel_id` and the 32 bytes of `pk_u`, with no separator (`docs/spec.md` §4).
 - R2 The fingerprint MUST bind the channel: the same `pk_u` in two channels MUST give two different fingerprints.
-- R3 The verification QR MUST be the ASCII bytes `verify:v1:` followed by the base64url of `channel_id ‖ pk_u`, encoded with the codec of spec 010-primitives-wrapper R19 (`crypto::base64url_encode`, whose `BadEncoding` on decoding becomes `Error::BadPayload`): 48 bytes that encode to 64 characters, 74 bytes in total, with no padding and no name of any kind. It MUST cross the boundary as bytes in both directions, never as a `String`, like the config QR (ADR 0028).
-- R4 Parsing a verification QR MUST return `Error::BadPayload` when the prefix, compared with `ct_eq`, is not `verify:v1:` or the body is not exactly 64 characters accepted by the strict decoder of spec 011-config-format, and MUST return `Error::WrongChannel` when the decoded `channel_id` is not the open channel's.
+- R3 The verification QR MUST be the ASCII bytes `verify:v1:` followed by the base64url of `channel_id ‖ pk_u`, encoded with `crypto::base64url_encode` and decoded with `crypto::base64url_decode`, the codec of spec 010-primitives-wrapper R19, whose `BadEncoding` becomes `Error::BadPayload`: 48 bytes that encode to 64 characters, 74 bytes in total, with no padding and no name of any kind. It MUST cross the boundary as bytes in both directions, never as a `String`, like the config QR (ADR 0028).
+- R4 Parsing a verification QR MUST return `Error::BadPayload` when the prefix, compared with `ct_eq`, is not `verify:v1:` or the body is not exactly 64 characters accepted by the strict decoder of spec 010-primitives-wrapper R19 (`crypto::base64url_decode`), and MUST return `Error::WrongChannel` when the decoded `channel_id` is not the open channel's; the prefix and the body are checked before the channel, so a malformed QR is `BadPayload` whichever channel its body names.
 - R5 The 12 words MUST be `words[i] = list[bits(fp, 11·i, 11)]` for `i` in 0..12, where `bits(fp, o, 11)` is the 11-bit big-endian integer starting at bit `o` of `fp`, counted from the most significant bit of `fp[0]`. They use the first 132 bits of `fp`, carry no checksum and MUST NOT be described as a BIP-39 mnemonic (ADR 0025).
 - R6 The short identifier MUST be the first 4 of the 12 words (44 bits) and MUST be output only: no function of `core` takes it as input.
-- R7 This spec MUST add its section to `scripts/reference/vectors.py` of spec 015-test-vectors, which produces `specs/vectors/014.json` from fixed inputs written in the script: `fp` (BLAKE2b through `hashlib`), the 12 word indices, the 12 words looked up in the English BIP-39 list and the verification QR bytes, and the five negative QR vectors as edits of `qr_reference`.
+- R7 This spec MUST add its section to `scripts/reference/vectors.py` of spec 015-test-vectors, which produces `specs/vectors/014.json` from fixed inputs written in the script: `fp` (BLAKE2b through `hashlib`), the 12 word indices, the 12 words looked up in the English BIP-39 list and the verification QR bytes, and the five negative QR vectors: four edits of `qr_reference`, and the QR of the same key in another channel.
 - R8 `presentation(channel_id, pk_u)` MUST return the `Fingerprint` record whose `words`, `short` and `qr` are exactly `words`, `short_identifier` and `verify_qr` of the same inputs, so `words` always holds 12 entries and `short` 4: the lengths of the two `Vec<String>` are guaranteed by `presentation`, the only function that builds a `Fingerprint`.
 
 ## Limits
@@ -63,6 +63,7 @@ pub(crate) const QR_PREFIX: &[u8; 10] = b"verify:v1:";
 pub(crate) const WORD_COUNT: usize = 12;
 pub(crate) const SHORT_WORD_COUNT: usize = 4;
 
+#[derive(Clone, PartialEq, Eq)]   // and a `Debug` by hand that shows `short` alone
 pub struct Fingerprint { pub words: Vec<String>, pub short: Vec<String>, pub qr: Vec<u8> }   // 12 and 4 entries, by R8
 
 pub(crate) fn fingerprint(channel_id: &ChannelId, pk_u: &PublicKey) -> Result<[u8; 32], Error>;
@@ -75,7 +76,7 @@ pub(crate) fn presentation(channel_id: &ChannelId, pk_u: &PublicKey) -> Result<F
 
 `fingerprint` returns `Error::Internal` only when libsodium fails (`CryptoError::InitFailed`); hashing a fixed-size input has no other failure.
 
-The functions are `pub(crate)`; `Fingerprint` is `pub` with public fields and is built only by `presentation`. It is the `Record` of the core boundary (`docs/spec.md` §9) and reaches the UI through `Channel::fingerprint` and the verification screen's call, both of which spec 022-peers-tofu defines and spec 027-core-api exposes; the same type crosses the uniffi boundary, which has no fixed-size arrays, so its fields are `Vec<String>` with the lengths R8 guarantees. No client re-implements any of the three presentations. No function of `core` takes four words as input (R6).
+The functions are `pub(crate)`; `Fingerprint` is `pub` with public fields, re-exported from `lib.rs` for spec 027-core-api, and `presentation` is the only function of `core` that builds one. It holds public data only, so it may be cloned and compared (spec 022-peers-tofu compares it); its `Debug` prints the short identifier and nothing else, because the QR carries the whole `channel_id` and `pk_u`, which no log may hold (AGENTS 19). It is the `Record` of the core boundary (`docs/spec.md` §9) and reaches the UI through `Channel::fingerprint` and the verification screen's call, both of which spec 022-peers-tofu defines and spec 027-core-api exposes; its uniffi mirror `FfiFingerprint` (spec 040-uniffi) has the same fields, and since uniffi has no fixed-size arrays they are `Vec<String>` with the lengths R8 guarantees. No client re-implements any of the three presentations. No function of `core` takes four words as input (R6).
 
 The word list is the one of spec 011-config-format, `crates/core/src/proto/wordlist.rs`, whose BLAKE2b-256 digest `6fefd6b6e47ee66e6bbf8ee322305deebeefb1bd9b24e8618bf126d870175bb7` that spec pins, and the base64url codec is `crypto::base64url_encode` and `crypto::base64url_decode` of spec 010-primitives-wrapper R19; this module embeds neither a second copy of the list nor a second codec.
 
@@ -99,14 +100,14 @@ The word list is the one of spec 011-config-format, `crates/core/src/proto/wordl
 
 ## Test cases
 
-- T01 (covers R1): `s014_t01_r01_fingerprint_known_answer` on the vector, and `FP_TAG.len()` is 17 and the hashed input is 65 bytes.
+- T01 (covers R1): `s014_t01_r01_fingerprint_known_answer`: `fingerprint` is the hash of the tag, the channel and the key, the dispatch compares it with `fingerprint_reference`, and `FP_TAG.len()` is 17 and the hashed input is 65 bytes.
 - T02 (covers R2): `s014_t02_r02_fingerprint_binds_the_channel`: the same `pk_u` in two channels gives two fingerprints.
-- T03 (covers R3): `s014_t03_r03_qr_known_answer` on the vector: the prefix, 64 characters, no `=`, 74 bytes in total; and a proptest over any `channel_id` and `pk_u`: `parse_verify_qr(verify_qr(id, pk), id)` returns the same `pk_u` (AGENTS 21).
+- T03 (covers R3): `s014_t03_r03_qr_known_answer`, with `qr_reference` through the dispatch: the prefix, 64 characters, no `=`, 74 bytes in total; and a proptest over any `channel_id` and `pk_u`: `parse_verify_qr(verify_qr(id, pk), id)` returns the same `pk_u` (AGENTS 21).
 - T04 (covers R4): `s014_t04_r04_rejects_a_foreign_qr` over a table: a `verify:v2:` prefix, 63 and 65 characters, a `+` and a `/` of standard base64 and a trailing `=` → `BadPayload`; a QR of another channel → `WrongChannel`.
-- T05 (covers R5): `s014_t05_r05_words_known_answer` on the vectors, including a fingerprint of all zeros (12 × `abandon`), one of all ones (12 × `zoo`), and one whose bit 131 is set and bit 132 clear, so the boundary of the 132 bits is pinned.
+- T05 (covers R5): `s014_t05_r05_words_known_answer`: 11 bits per word from the most significant bit, and through the dispatch the `words_*` vectors, including a fingerprint of all zeros (12 × `abandon`), one of all ones (12 × `zoo`), and one whose bit 131 is set and bit 132 clear, so the boundary of the 132 bits is pinned.
 - T06 (covers R6): `s014_t06_r06_short_identifier_is_the_first_four`: it equals words 0 to 3.
 - T07 (covers R7): `check_s014_t07_r07_section_produces_014_json`, the self-check of this spec's section in `scripts/reference/vectors.py`, run by the CI step of spec 015-test-vectors R6: the section writes `014.json` and the file equals the committed one; `cargo test -p privatechat-core s014_` then reproduces every vector through the checkers of the tests above.
-- T08 (covers R8): `s014_t08_r08_presentation_matches_its_parts`: for the reference inputs, each field of `presentation` equals the function it comes from, `words.len()` is 12 and `short.len()` is 4.
+- T08 (covers R8): `s014_t08_r08_presentation_matches_its_parts`: for fixed inputs, each field of `presentation` equals the function it comes from, `words.len()` is 12 and `short.len()` is 4.
 
 ## Vectors
 
@@ -121,7 +122,7 @@ The word list is the one of spec 011-config-format, `crates/core/src/proto/wordl
 | `qr_wrong_prefix`, `qr_wrong_length`, `qr_standard_base64`, `qr_padding` | negative | derived | each → `BadPayload` |
 | `qr_other_channel` | negative | derived | → `WrongChannel` |
 
-All of these are `derived`: each value follows from the formulas of `docs/spec.md` §4 and the BLAKE2b of spec 010-primitives-wrapper, so the reference script writes every one of them with the Python standard library. The word indices and the words are JSON arrays (`specs/vectors/README.md`). Every vector that carries a `channel_id`, except `fingerprint_other_channel` and `qr_other_channel`, uses the `channel_id` of 011 `config_reference`; `qr_reference` carries the `pk_u` of `fingerprint_reference`, and `words_reference` holds that fingerprint's words, so that Kotlin and Swift reach them through `Device` (spec 040-uniffi R13, R14). No vector tests non-zero final bits: 48 bytes encode to exactly 64 characters with no bits left over, so every accepted 64-character body is canonical by construction.
+All of these are `derived`: each value follows from the formulas of `docs/spec.md` §4 and the BLAKE2b of spec 010-primitives-wrapper, so the reference script writes every one of them with the Python standard library. The word indices and the words are JSON arrays (`specs/vectors/README.md`). Every vector that carries a `channel_id`, except `fingerprint_other_channel`, uses the `channel_id` of 011 `config_reference`; `qr_other_channel` carries that `channel_id` and the QR of another channel, which is why it is `WrongChannel`; `qr_reference` carries the `pk_u` of `fingerprint_reference`, and `words_reference` holds that fingerprint's words, so that Kotlin and Swift reach them through `Device` (spec 040-uniffi R13, R14). No vector tests non-zero final bits: 48 bytes encode to exactly 64 characters with no bits left over, so every accepted 64-character body is canonical by construction.
 
 ## Acceptance criterion
 
@@ -149,4 +150,5 @@ None. Closed after audit F: the list lives in `core`, owned by spec 011-config-f
 - 2026-09-25 revised after audit J round 12 (`docs/audit-log.md`)
 - 2026-09-26 amended by spec 040-uniffi R14 while drafting phase 4: the vectors use the `channel_id` of 011 `config_reference`, so that the bindings reach them through `Device`
 - 2026-09-28 accepted (Marc Vilardebó)
+- 2026-09-29 revised after audit V (`docs/audit-log.md`): the codec of spec 010 R19 named in R3 and R4, the prefix checked before the channel (R4), R7's fifth negative is not an edit, the derives and the redacted `Debug` of `Fingerprint`, its re-export and its uniffi mirror in the Interface, T01, T03, T05 and T08 say what the dispatch checks, `qr_other_channel` carries the reference channel; one slice of 488 net lines against the 400 of AGENTS 14, most of it tests, accepted by the reviewer; the acceptance criterion's reading by hand done by the reviewer on `words_reference`
 - 2026-09-29 amended by audit S of spec 011-config-format (`docs/audit-log.md`, AS-Q1): the base64url codec is libsodium's, spec 010-primitives-wrapper R19, not `proto/base64url.rs`; its `BadEncoding` becomes `BadPayload` here, and `verify_qr` returns a `Result`, since the codec may fail to initialise; no requirement of this spec changes

@@ -1,0 +1,266 @@
+{
+  "spec": "014",
+  "proto_version": 1,
+  "vectors": [
+    {
+      "name": "fingerprint_reference",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 014: the channel_id of 011 config_reference and a key",
+      "inputs": {
+        "channel_id": "26b06631aa61cb8f91c3498b1c59c2c7",
+        "pk_u": "dde3bccec7f3a66a1115f45d720f4dc135c3ae7c4e22dca38fdb1efd6a495ff8"
+      },
+      "expected": {
+        "fp": "9010f9af89d74cd1295364ed718af7a5f74140013855d48f21e30f9c80f6ddcb"
+      }
+    },
+    {
+      "name": "fingerprint_other_channel",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 014: the same key in another channel",
+      "inputs": {
+        "channel_id": "a73567c23ea695efdd90b0755549ef7e",
+        "pk_u": "dde3bccec7f3a66a1115f45d720f4dc135c3ae7c4e22dca38fdb1efd6a495ff8"
+      },
+      "expected": {
+        "fp": "6ff84d98972d7cba099fde0c5f8ab26cfc391647c443dacd68d0b2fc3813d98e"
+      }
+    },
+    {
+      "name": "words_reference",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 014: the 12 words of fingerprint_reference",
+      "inputs": {
+        "fp": "9010f9af89d74cd1295364ed718af7a5f74140013855d48f21e30f9c80f6ddcb"
+      },
+      "expected": {
+        "indices": [
+          1152,
+          1086,
+          863,
+          157,
+          934,
+          836,
+          1322,
+          868,
+          1899,
+          1122,
+          1519,
+          607
+        ],
+        "words": [
+          "mosquito",
+          "march",
+          "hip",
+          "beauty",
+          "inquiry",
+          "hammer",
+          "pipe",
+          "hold",
+          "uniform",
+          "middle",
+          "sadness",
+          "episode"
+        ]
+      }
+    },
+    {
+      "name": "words_zero",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 014: the 12 words of a fingerprint of zeros",
+      "inputs": {
+        "fp": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected": {
+        "indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "words": [
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon"
+        ]
+      }
+    },
+    {
+      "name": "words_ones",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 014: the 12 words of a fingerprint of ones",
+      "inputs": {
+        "fp": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": {
+        "indices": [
+          2047,
+          2047,
+          2047,
+          2047,
+          2047,
+          2047,
+          2047,
+          2047,
+          2047,
+          2047,
+          2047,
+          2047
+        ],
+        "words": [
+          "zoo",
+          "zoo",
+          "zoo",
+          "zoo",
+          "zoo",
+          "zoo",
+          "zoo",
+          "zoo",
+          "zoo",
+          "zoo",
+          "zoo",
+          "zoo"
+        ]
+      }
+    },
+    {
+      "name": "words_bit_131",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 014: the 12 words of bit 131 set, bit 132 clear and the rest after it set",
+      "inputs": {
+        "fp": "0000000000000000000000000000000017ffffffffffffffffffffffffffffff"
+      },
+      "expected": {
+        "indices": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ],
+        "words": [
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "abandon",
+          "ability"
+        ]
+      }
+    },
+    {
+      "name": "qr_reference",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 014: channel_id ‖ pk_u of fingerprint_reference",
+      "inputs": {
+        "channel_id": "26b06631aa61cb8f91c3498b1c59c2c7",
+        "pk_u": "dde3bccec7f3a66a1115f45d720f4dc135c3ae7c4e22dca38fdb1efd6a495ff8"
+      },
+      "expected": {
+        "qr": "7665726966793a76313a4a72426d4d61706879342d5277306d4c48466e437839336a764d374838365a714552583058584950546345317736353854694c636f345f624876317153565f34"
+      }
+    },
+    {
+      "name": "qr_wrong_prefix",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 014: qr_reference with the prefix verify:v2:",
+      "inputs": {
+        "channel_id": "26b06631aa61cb8f91c3498b1c59c2c7",
+        "qr": "7665726966793a76323a4a72426d4d61706879342d5277306d4c48466e437839336a764d374838365a714552583058584950546345317736353854694c636f345f624876317153565f34"
+      },
+      "expected": {
+        "error": "BadPayload"
+      }
+    },
+    {
+      "name": "qr_wrong_length",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 014: qr_reference with 63 characters",
+      "inputs": {
+        "channel_id": "26b06631aa61cb8f91c3498b1c59c2c7",
+        "qr": "7665726966793a76313a4a72426d4d61706879342d5277306d4c48466e437839336a764d374838365a714552583058584950546345317736353854694c636f345f624876317153565f"
+      },
+      "expected": {
+        "error": "BadPayload"
+      }
+    },
+    {
+      "name": "qr_standard_base64",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 014: qr_reference with a + of standard base64",
+      "inputs": {
+        "channel_id": "26b06631aa61cb8f91c3498b1c59c2c7",
+        "qr": "7665726966793a76313a4a72426d4d61706879342d5277306d4c48466e437839336a764d374838365a714552583058584950546345317736353854694c636f345f624876317153565f2b"
+      },
+      "expected": {
+        "error": "BadPayload"
+      }
+    },
+    {
+      "name": "qr_padding",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 014: qr_reference with a trailing =",
+      "inputs": {
+        "channel_id": "26b06631aa61cb8f91c3498b1c59c2c7",
+        "qr": "7665726966793a76313a4a72426d4d61706879342d5277306d4c48466e437839336a764d374838365a714552583058584950546345317736353854694c636f345f624876317153565f3d"
+      },
+      "expected": {
+        "error": "BadPayload"
+      }
+    },
+    {
+      "name": "qr_other_channel",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 014: the QR of the same key in another channel, scanned in the reference channel",
+      "inputs": {
+        "channel_id": "26b06631aa61cb8f91c3498b1c59c2c7",
+        "qr": "7665726966793a76313a707a566e776a366d6c655f646b4c423156556e766674336a764d374838365a714552583058584950546345317736353854694c636f345f624876317153565f34"
+      },
+      "expected": {
+        "error": "WrongChannel"
+      }
+    }
+  ]
+}
