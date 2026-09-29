@@ -21,6 +21,7 @@ writes the first, so a failure writes nothing. Exit code 0 on success.
 from __future__ import annotations
 
 import ast
+import base64
 import hashlib
 import json
 import struct
@@ -46,7 +47,9 @@ TEXT_FIELDS = (
     "words",
 )
 # The modules this file imports, all of the standard library (R4).
-STANDARD_LIBRARY = ("__future__", "ast", "hashlib", "json", "struct", "sys", "pathlib", "typing")
+STANDARD_LIBRARY = (
+    "__future__", "ast", "base64", "hashlib", "json", "struct", "sys", "pathlib", "typing",
+)
 
 
 class U64(int):
@@ -306,12 +309,20 @@ def record_field(key: int, value: bytes) -> bytes:
     return bytes([key]) + struct.pack(">I", len(value)) + value
 
 
-def schema_value(kind: str, value: object) -> bytes:
-    """The bytes of one value (R3, R4): an integer at its exact width, big-endian, text as UTF-8."""
+def encode_value(kind: str, value: object) -> bytes:
+    """The bytes of one value (017 R3, R4): an integer at its exact width, big-endian, text as
+    UTF-8 (or as given in bytes, for a negative that is not UTF-8), bytes as they are. No bound,
+    since the negatives of each spec need values out of it."""
     if kind in INTEGER_WIDTHS:
         return value.to_bytes(INTEGER_WIDTHS[kind], "big")
-    data = value.encode("utf-8") if kind == "text" else value
-    require(len(data) == 32 if kind == "bytes32" else len(data) <= TEST_MAX_VALUE, kind)
+    return value.encode("utf-8") if kind == "text" and isinstance(value, str) else value
+
+
+def schema_value(kind: str, value: object) -> bytes:
+    """The bytes of one value of the test schema, within its bounds."""
+    data = encode_value(kind, value)
+    if kind not in INTEGER_WIDTHS:
+        require(len(data) == 32 if kind == "bytes32" else len(data) <= TEST_MAX_VALUE, kind)
     return data
 
 
@@ -401,9 +412,314 @@ def check_s017_t13_r13_section_produces_017_json() -> list[dict]:
 SECTIONS["017"] = check_s017_t13_r13_section_produces_017_json
 
 
+# --- Spec 011: channel config -------------------------------------------------------
+
+# The config record of `docs/spec.md` §5, in key order: field → (key, type). Key 6 is optional.
+CONFIG_SCHEMA = {
+    "config_version": (0, "u8"), "proto_version": (1, "u8"), "k_ch": (2, "bytes32"),
+    "server_url": (3, "text"), "ttl_seconds": (4, "u32"), "created_at": (5, "u64"),
+    "invite_expires_at": (6, "u64"), "suggested_name": (7, "text"),
+}
+CONFIG_MAX_RECORD = 512  # 011 R7
+QR_MAX_LEN = 683  # 011 R11, the text of a 512-byte record
+CHANNEL_ID_TAG = b"privatechat/chid/v1"  # 011 R9
+CHANNEL_AUTH_CONTEXT = b"chauth__"
+CHANNEL_ID_LEN = 16
+QR_INVITE_MS = 600_000  # 011 R18
+FILE_INVITE_MS = 86_400_000
+CHATCFG_LEN = 1_085  # 011 R13
+# Unicode White_Space, the set Rust's `char::is_whitespace` uses and 011 R15 names. Written out,
+# because Python's `str.isspace` also counts U+001C..=U+001F, which R15 does not.
+WHITE_SPACE = frozenset(
+    [*range(0x09, 0x0E), 0x20, 0x85, 0xA0, 0x1680, *range(0x2000, 0x200B), 0x2028, 0x2029,
+     0x202F, 0x205F, 0x3000])
+# The fixed inputs of `chatcfg_reference`, and its bytes: `pinned`, produced once by the checker
+# of that vector in the Rust dispatch test under libsodium 1.0.22 (011 R22), since Argon2id and
+# XSalsa20 are not transcribed here.
+CHATCFG_PASSWORD = b"abandon ability able about above absent absorb"
+CHATCFG_SALT = bytes(range(0x10, 0x20))
+CHATCFG_NONCE = bytes(range(0x20, 0x38))
+CHATCFG_REFERENCE = bytes.fromhex(
+    "5043464701101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f30313233343536"
+    "373782ccd6a107b0fc57f565f8c8ceb1f29c3adc7e1653dfd80f065d6f35c4808bfe1275ca2a0835f7da9c33"
+    "ac44dd5920c915e069ae6113993de0073b0bffd78f72b81ce51f7fe6b2734753db67259b86dd59c73cd88a19"
+    "b54de35fe1400492f14feb4d7aebb563857c5a68e4ef01c66e1df1d8a28ac75da134b6bf026b8dbb312d6467"
+    "723f630c4c6fd390b6f1c9e98353798771a8bc4beffbacc55d9c9d554c8a4b9c4faf2bd42c13740e7cd87cdb"
+    "e2a7fa0db97b90e6da0fe274f8f45aa9a9efdb87107e59f45441dbe58fadc8189b76c461e1a70135d232bcf8"
+    "716fec04a7cbb3589589854345b6d68d8f79a97b9a111b4cc977ca87890362d8871013029b71fb1f0a4dadb2"
+    "07c37aec09bb6194a4361b4bd4fd61bf182d41b18c763681aaca52124f1c968b553c33379a0746070ba66990"
+    "0266a381e0b86f0f84d460ff06c92b8b19389f3c5acda3e72c13c2747ab1517ed26e8e424d4c1323ed7ee961"
+    "eff1c8318cdac29c03a06ff7ceaec82812b77a508a377a860c81839f64fba98dd6a5d8aea3fd8f87999b3fca"
+    "65c8590f6ea4ed8683df60c68919abf567035719cf128e9625ae511393a7c533803d5b389104c9363a75b896"
+    "5695e70aa8ca431c9ef7fa41185b12a53381f86e076a191cac2d688307da4901bb25e014104f0878732a7372"
+    "b6460e22dd60e0686254d43d3fe9f31fcc4ca556789bc8e74382e14dce3a7e0884a7262fe6d4b379bfcc3094"
+    "ff6c1e44b0b647137549a8382d0e46294eee7ec54cf89d435fcf1116d9cc6687d9abf6c557cd0bfa782358ed"
+    "dbb509321574a9396539f40a3c4efb7ca77858ca2b717bd63ce33c0df06a3c16ff51f09b756eee547bc10767"
+    "923c74fafce0d2a74413b1c4859c31dfdcaa81af5e316f53aa13468bfae9d0be80fa89cdb48d635e8b0f20ed"
+    "fd8d90a2f63ad4105c579ea1c703f9f1dc5c8d7ec4fd5531ea2915dadf317d445c6642341cad6b75180795aa"
+    "fa91b222c196145d8b257c5d7b675dbeeb7e72c0839a039009201841b6ddef490520d2469312b591fbd4cb9c"
+    "cef8184f4c60bf4a860e47b708e914fbecaa181dc1bd8accef1b686eaa399e274fbaaddebe12b8fabefa9a05"
+    "c40984c3431d2687b316cc0b1ccff8a59c8a73fb50910f2f62e877695f107df28cf1c0e50772e62575f72807"
+    "79fc0115e11deefe74ec7f9a9e3de51be129a845b28884aab44c74d9b174e8320e20a1bb78311f0af2d3e98b"
+    "b06f407bddbba2a1f0657c79e22afd2d725de295c803be9193da847508b0c4f51ac09193bc6863c50cfcedc3"
+    "32ed070adc9aa07d405db11240a1f0712349374158ef1d6d3a4a70cd2307fe194acf6cb13b6204fdee201c31"
+    "728df43f077adb5e9b249d0177f170cf73423dd34c82e7c20c900bf06b149b8f1767c5354400fedcf86af33d"
+    "aa0ab00afec82ee2e1de977cfe14cf9e4a11a6dd72b9273177dd6f6eae"
+)
+# A v3 onion host of 56 base32 characters (011 R5, ADR 0038).
+ONION_HOST = ("abcdefghijklmnopqrstuvwxyz234567" * 2)[:56] + ".onion"
+
+
+def config_record(values: dict) -> bytes:
+    """The canonical record (017 R10) of `values`, which may hold values out of their ranges,
+    since the negatives need them."""
+    return b"".join(record_field(key, encode_value(kind, values[field]))
+                    for field, (key, kind) in CONFIG_SCHEMA.items() if field in values)
+
+
+def qr_text(record: bytes) -> bytes:
+    """The QR form of 011 R11: base64url of the record, padding removed."""
+    return base64.urlsafe_b64encode(record).rstrip(b"=")
+
+
+def canonical_password(typed: str) -> bytes:
+    """011 R15: ASCII letters lowercased, every run of White_Space one U+0020, none at either
+    end."""
+    words, word = [], []
+    for character in typed + " ":
+        if ord(character) in WHITE_SPACE:
+            if word:
+                words.append("".join(word))
+            word = []
+        else:
+            word.append(character.lower() if character.isascii() else character)
+    return " ".join(words).encode("utf-8")
+
+
+def channel_identity(k_ch: bytes, ttl_seconds: int) -> tuple[bytes, bytes]:
+    """`pk_ch` from `KDF(K_ch, "chauth__")` through RFC 8032, and `channel_id`, the first
+    16 bytes of `BLAKE2b(tag ‖ pk_ch ‖ BE32(ttl_seconds))` (011 R8)."""
+    pk_ch = ed25519_public_key(kdf_derive(k_ch, CHANNEL_AUTH_CONTEXT))
+    digest = blake2b_256(CHANNEL_ID_TAG + pk_ch + struct.pack(">I", ttl_seconds))
+    return pk_ch, digest[:CHANNEL_ID_LEN]
+
+
+def raw_011(name: str, kind: str, origin: str, inputs: dict, expected: dict,
+            source: str = "derived") -> dict:
+    """One vector of spec 011, with raw values for `vector`."""
+    return {"name": name, "kind": kind, "source": source, "origin": f"spec 011: {origin}",
+            "inputs": inputs, "expected": expected}
+
+
+def check_s011_t22_r22_section_produces_011_json() -> list[dict]:
+    """The vectors of spec 011: each positive with its record, its QR text and the fields and
+    identity it decodes to; each negative a one-rule edit of `config_no_invite` or
+    `config_reference`, of its QR text or of the pinned file."""
+    created_at = 1_790_000_000_000
+    now = U64(created_at + 60_000)
+    reference = {
+        "config_version": 1, "proto_version": 1, "k_ch": bytes(range(0x40, 0x60)),
+        "server_url": "wss://chat.example.org:9001", "ttl_seconds": 86_400,
+        "created_at": U64(created_at), "invite_expires_at": U64(created_at + QR_INVITE_MS),
+        "suggested_name": "Família",
+    }
+    no_invite = {field: value for field, value in reference.items()
+                 if field != "invite_expires_at"}
+
+    def positive(name: str, origin: str, values: dict) -> dict:
+        pk_ch, channel_id = channel_identity(values["k_ch"], values["ttl_seconds"])
+        expected = {field: value.encode("utf-8") if isinstance(value, str) else value
+                    for field, value in values.items()}
+        record = config_record(values)
+        require(len(record) <= CONFIG_MAX_RECORD, f"{name}: above the record limit")
+        return raw_011(name, "positive", origin,
+                       {"record": record, "qr": qr_text(record), "now": now},
+                       {**expected, "pk_ch": pk_ch, "channel_id": channel_id})
+
+    def negative(name: str, origin: str, record: bytes, error: str) -> dict:
+        """A record negative, also carried as its QR text, which gives the same error."""
+        return raw_011(name, "negative", origin,
+                       {"record": record, "qr": qr_text(record), "now": now}, {"error": error})
+
+    vectors = [
+        positive("config_reference", "every key, the invitation expiring 10 min after creation",
+                 reference),
+        positive("config_no_invite", "config_reference without key 6", no_invite),
+        positive("config_onion_ws", "config_no_invite on ws:// and a 56-character onion host",
+                 {**no_invite, "server_url": f"ws://{ONION_HOST}"}),
+        positive("channel_id_ttl_60", "config_no_invite at the lowest TTL",
+                 {**no_invite, "ttl_seconds": 60}),
+        positive("channel_id_ttl_2592000", "config_no_invite at the highest TTL",
+                 {**no_invite, "ttl_seconds": 2_592_000}),
+    ]
+    base = config_record(no_invite)
+    key_0_1 = config_record({"config_version": 1, "proto_version": 1})
+    swapped = {field: no_invite[field] for field in ("config_version", "proto_version", "k_ch")}
+    out_of_order = (config_record(swapped)
+                    + config_record({"ttl_seconds": no_invite["ttl_seconds"]})
+                    + config_record({"server_url": no_invite["server_url"]})
+                    + config_record({field: no_invite[field]
+                                     for field in ("created_at", "suggested_name")}))
+    without_k_ch = {field: value for field, value in no_invite.items() if field != "k_ch"}
+    without_key_1 = {field: value for field, value in no_invite.items()
+                     if field != "proto_version"}
+    record_513 = key_0_1 + record_field(9, bytes(CONFIG_MAX_RECORD + 1 - len(key_0_1)
+                                                 - FIELD_HEADER_LEN))
+    require(len(record_513) == CONFIG_MAX_RECORD + 1, "record_513_bytes is 513 bytes")
+    negatives = [
+        ("record_key_order", "key 4 before key 3", out_of_order, "BadConfig"),
+        ("record_repeated_key", "config_no_invite with key 7 twice",
+         base + record_field(7, b"x"), "BadConfig"),
+        ("record_unknown_key", "config_no_invite and an extra key 8",
+         base + record_field(8, b"x"), "BadConfig"),
+        ("record_missing_key", "config_no_invite without key 2", config_record(without_k_ch),
+         "BadConfig"),
+        ("record_missing_key_1", "config_no_invite without key 1, before the versions are read",
+         config_record(without_key_1), "BadConfig"),
+        ("record_extra_byte", "config_no_invite and one byte after it", base + b"\x00",
+         "BadConfig"),
+        ("record_kch_31_bytes", "a K_ch of 31 bytes",
+         config_record({**no_invite, "k_ch": bytes(31)}), "BadConfig"),
+        ("record_non_utf8", "a suggested name holding the byte 0xff",
+         config_record({**no_invite, "suggested_name": b"\xff"}), "BadConfig"),
+        ("record_version_2", "config_version 2",
+         config_record({**no_invite, "config_version": 2}), "UnsupportedVersion"),
+        ("record_proto_version_2", "proto_version 2",
+         config_record({**no_invite, "proto_version": 2}), "UnsupportedVersion"),
+        ("record_513_bytes", "513 bytes: keys 0 and 1, then a key 9 as filler", record_513,
+         "BadConfig"),
+        ("ttl_59", "a TTL one below the range", config_record({**no_invite, "ttl_seconds": 59}),
+         "BadConfig"),
+        ("ttl_2592001", "a TTL one above the range",
+         config_record({**no_invite, "ttl_seconds": 2_592_001}), "BadConfig"),
+        ("name_65_bytes", "a suggested name of 65 bytes",
+         config_record({**no_invite, "suggested_name": "a" * 65}), "BadConfig"),
+        ("name_control", "a suggested name holding U+0085, a C1 control",
+         config_record({**no_invite, "suggested_name": "a\u0085b"}), "BadConfig"),
+        ("url_path", "a server_url with a path",
+         config_record({**no_invite, "server_url": "wss://chat.example.org/path"}), "BadConfig"),
+        ("url_uppercase", "a host with a capital letter",
+         config_record({**no_invite, "server_url": "wss://Chat.example.org"}), "BadConfig"),
+        ("url_port_443", "the port wss:// implies, written out",
+         config_record({**no_invite, "server_url": "wss://chat.example.org:443"}), "BadConfig"),
+        ("url_ws_not_onion", "ws:// with a host that is not an onion",
+         config_record({**no_invite, "server_url": "ws://chat.example.org"}), "BadConfig"),
+        ("url_ws_onion_port_80", "the port ws:// implies, written out",
+         config_record({**no_invite, "server_url": f"ws://{ONION_HOST}:80"}), "BadConfig"),
+        ("invite_expired", "an invitation that expired 1 ms before now",
+         config_record({**reference, "invite_expires_at": U64(now - 1)}), "InviteExpired"),
+    ]
+    vectors += [negative(*item) for item in negatives]
+
+    padded = base64.urlsafe_b64encode(base)
+    unpadded = qr_text(base)
+    require(padded.endswith(b"=") and len(unpadded) % 4 == 3, "config_no_invite needs padding")
+    alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    low_bit = alphabet[alphabet.index(unpadded[-1]) | 1]  # a final sextet with a bit past the data
+    one_over = qr_text(config_record(reference)) + b"A"
+    too_long = b"A" * (QR_MAX_LEN + 1)
+    require(len(too_long) == 684, "qr_684_bytes is one above the bound of R11")
+    require(len(one_over) % 4 == 1, "qr_length_mod_4 leaves one character over")
+    qr_negatives = [
+        ("qr_padding", "the QR text of config_no_invite with its = padding", padded),
+        ("qr_nonzero_bits", "the QR text of config_no_invite with a non-zero final bit",
+         unpadded[:-1] + bytes([low_bit])),
+        ("qr_length_mod_4", "the QR text of config_reference and one more character", one_over),
+        ("qr_plus", "the QR text of config_no_invite with a + of standard base64",
+         b"+" + unpadded[1:]),
+        ("qr_slash", "the QR text of config_no_invite with a / of standard base64",
+         b"/" + unpadded[1:]),
+        ("qr_684_bytes", "684 characters, one above the text of a 512-byte record",
+         too_long),
+    ]
+    vectors += [raw_011(name, "negative", origin, {"qr": qr, "now": now}, {"error": "BadConfig"})
+                for name, origin, qr in qr_negatives]
+    opened_record = config_record({**no_invite,
+                                   "invite_expires_at": U64(created_at + FILE_INVITE_MS)})
+    vectors += chatcfg_vectors(base, opened_record, U64(created_at))
+    return vectors
+
+
+def chatcfg_vectors(record: bytes, opened_record: bytes, now: U64) -> list[dict]:
+    """The pinned file of config_no_invite exported at its creation; its mutations, one byte of
+    each region of the literal or a wrong length; and the typed passwords of R15 against it."""
+    listed = words()  # refuses a changed word list before anything is written (R17, 015 R4)
+    require(all(word in listed for word in CHATCFG_PASSWORD.decode("ascii").split(" ")),
+            "the fixed password is 7 list words")
+    require(len(CHATCFG_REFERENCE) == CHATCFG_LEN, "a .chatcfg file is 1 085 bytes")
+    inputs = {"record": record, "password": CHATCFG_PASSWORD, "salt": CHATCFG_SALT,
+              "nonce": CHATCFG_NONCE, "now": now}
+    vectors = [raw_011("chatcfg_reference", "positive",
+                       "the PCFG file of config_no_invite exported at its creation, produced once "
+                       "by the dispatch checker of T18 under libsodium 1.0.22", inputs,
+                       {"file": CHATCFG_REFERENCE, "opened_record": opened_record},
+                       source="pinned")]
+
+    def flipped(at: int, value: int | None = None) -> bytes:
+        data = bytearray(CHATCFG_REFERENCE)
+        data[at] = data[at] ^ 0x01 if value is None else value
+        return bytes(data)
+
+    typed = "  ABANDON ability　able\u0085about\tabove  absent absorb "
+    require(canonical_password(typed) == CHATCFG_PASSWORD, "the typed password canonicalises")
+    vectors.append(raw_011("password_canonical", "positive",
+                           "chatcfg_reference opened with the password as a keyboard may type "
+                           "it: capitals, NBSP, U+3000, U+0085, a tab, a double space, U+2028",
+                           {"file": CHATCFG_REFERENCE, "password": typed.encode("utf-8"),
+                            "now": now},
+                           {"canonical": CHATCFG_PASSWORD, "opened_record": opened_record}))
+    not_space = "abandon﻿ability able about above absent absorb"
+    long_typed = b"able" + b" " * 1_021
+    not_utf8 = b"able\xff"
+    try:
+        not_utf8.decode("utf-8")
+        require(False, "password_not_utf8 must not be UTF-8")
+    except UnicodeDecodeError:
+        pass
+    mutations = [
+        ("mutate_magic", "the first byte of the magic", flipped(0), CHATCFG_PASSWORD,
+         "BadConfig"),
+        ("mutate_version", "the version byte set to 2", flipped(4, 2), CHATCFG_PASSWORD,
+         "UnsupportedVersion"),
+        ("mutate_salt", "the first byte of the salt", flipped(5), CHATCFG_PASSWORD,
+         "BadPassword"),
+        ("mutate_nonce", "the first byte of the nonce", flipped(21), CHATCFG_PASSWORD,
+         "BadPassword"),
+        ("mutate_sealed", "the last byte of the sealed record", flipped(CHATCFG_LEN - 1),
+         CHATCFG_PASSWORD, "BadPassword"),
+        ("file_4_bytes", "its first 4 bytes, short of the version byte", CHATCFG_REFERENCE[:4],
+         CHATCFG_PASSWORD, "BadConfig"),
+        ("file_1084_bytes", "its last byte removed", CHATCFG_REFERENCE[:-1], CHATCFG_PASSWORD,
+         "BadConfig"),
+        ("file_1086_bytes", "one byte appended", CHATCFG_REFERENCE + b"\x00", CHATCFG_PASSWORD,
+         "BadConfig"),
+        ("password_too_long", "a typed password of 1 025 bytes, 4 once canonical",
+         CHATCFG_REFERENCE, long_typed, "BadPassword"),
+        ("password_empty", "an empty typed password", CHATCFG_REFERENCE, b"", "BadPassword"),
+        ("password_not_utf8", "a typed password holding the byte 0xff", CHATCFG_REFERENCE,
+         not_utf8, "BadPassword"),
+        ("password_canonical_257", "a password of 257 bytes once canonical", CHATCFG_REFERENCE,
+         b"a" * 257, "BadPassword"),
+    ]
+    require(len(long_typed) == 1_025 and canonical_password(long_typed.decode()) == b"able",
+            "password_too_long is over the typed bound only")
+    vectors += [raw_011(name, "negative", f"chatcfg_reference, {origin}",
+                        {"file": file, "password": password, "now": now}, {"error": error})
+                for name, origin, file, password, error in mutations]
+    vectors.append(raw_011("password_not_whitespace", "negative",
+                           "chatcfg_reference opened with U+FEFF, which is not White_Space, in "
+                           "place of a space", {"file": CHATCFG_REFERENCE,
+                                                "password": not_space.encode("utf-8"), "now": now},
+                           {"canonical": canonical_password(not_space), "error": "BadPassword"}))
+    return vectors
+
+
+SECTIONS["011"] = check_s011_t22_r22_section_produces_011_json
+
+
 def words() -> list[str]:
-    """The English BIP-39 list, for the section of spec 014; refused unless its SHA-256 is the
-    literal of 011 R17, before any file is written."""
+    """The English BIP-39 list, for the sections of specs 011 and 014; refused unless its SHA-256
+    is the literal of 011 R17, before any file is written."""
     data = WORD_LIST.read_bytes()
     require(hashlib.sha256(data).hexdigest() == WORD_LIST_SHA256, f"{WORD_LIST} changed")
     return data.decode("ascii").splitlines()

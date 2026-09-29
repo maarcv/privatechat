@@ -13,6 +13,8 @@ use core::fmt;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
+use zeroize::Zeroizing;
+
 mod ffi;
 mod secret;
 #[cfg(test)]
@@ -51,6 +53,7 @@ pub(crate) enum CryptoError {
     Forged,
     BadPadding,
     OutOfMemory,
+    BadEncoding,
 }
 
 /// The 24-byte nonce of the XChaCha20 primitives. Public data.
@@ -558,4 +561,57 @@ pub(crate) fn unpad(buf: &[u8], block: usize) -> Result<usize, CryptoError> {
         return Err(CryptoError::BadLength);
     }
     ffi::unpad(buf, block).ok_or(CryptoError::BadPadding)
+}
+
+/// The URL-safe base64 of `bin`, with no padding (RFC 4648 §5), through
+/// libsodium's constant-time codec, since the text may carry a key (spec 010,
+/// R19). The buffer is allocated once at the length libsodium writes, the
+/// text and its NUL terminator, and the terminator is then cut.
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise, and
+/// `CryptoError::TooLong` when the text's length cannot be expressed.
+pub(crate) fn base64url_encode(bin: &[u8]) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+    init()?;
+    let tail = [0, 2, 3]
+        .get(bin.len() % 3)
+        .copied()
+        .ok_or(CryptoError::TooLong)?;
+    let len = (bin.len() / 3)
+        .checked_mul(4)
+        .and_then(|full| full.checked_add(tail))
+        .ok_or(CryptoError::TooLong)?;
+    let mut text = Zeroizing::new(vec![0u8; checked_output_len(len, 1)?]);
+    if !ffi::bin2base64(&mut text, bin) {
+        return Err(CryptoError::TooLong);
+    }
+    text.truncate(len);
+    Ok(text)
+}
+
+/// The bytes of a URL-safe base64 text with no padding, decoded strictly by
+/// libsodium in constant time (spec 010, R19): every byte string has exactly
+/// one text. The buffer is allocated once, at the most the text can hold.
+///
+/// # Errors
+///
+/// `CryptoError::InitFailed` when libsodium cannot initialise, and
+/// `CryptoError::BadEncoding` for a length that leaves one character over, a
+/// byte outside the alphabet (padding included) or non-zero final bits.
+pub(crate) fn base64url_decode(text: &[u8]) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+    init()?;
+    // Six bits per character, rounded down to whole bytes.
+    let tail = [0, 0, 1, 2]
+        .get(text.len() % 4)
+        .copied()
+        .ok_or(CryptoError::BadEncoding)?;
+    let max = (text.len() / 4)
+        .checked_mul(3)
+        .and_then(|full| full.checked_add(tail))
+        .ok_or(CryptoError::BadEncoding)?;
+    let mut bin = Zeroizing::new(vec![0u8; max]);
+    let len = ffi::base642bin(&mut bin, text).ok_or(CryptoError::BadEncoding)?;
+    bin.truncate(len);
+    Ok(bin)
 }

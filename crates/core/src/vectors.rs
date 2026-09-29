@@ -15,6 +15,7 @@ use std::collections::HashSet;
 /// Every committed file, by spec. A format spec adds its line with its file.
 const FILES: &[(&str, &str)] = &[
     ("010", include_str!("../../../specs/vectors/010.json")),
+    ("011", include_str!("../../../specs/vectors/011.json")),
     ("017", include_str!("../../../specs/vectors/017.json")),
 ];
 

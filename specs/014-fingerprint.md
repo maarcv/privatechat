@@ -19,7 +19,7 @@ This spec fixes the derivation and the three encodings, all as functions of thei
 
 Other specs own the rest:
 
-- the word list and the strict base64url codec: spec 011-config-format, which uses both first;
+- the word list: spec 011-config-format, which uses it first; the strict base64url codec: spec 010-primitives-wrapper R19, which spec 011 uses first;
 - what the user interface does with the three presentations, including the partial-match rule: `docs/spec.md` §7 and spec 055-verify-ui;
 - how short-identifier collisions between peers are reported: spec 022-peers-tofu;
 - the fingerprint of a retired key, a peer's or one's own old key: spec 022-peers-tofu R12, which computes it for any `pk`.
@@ -30,7 +30,7 @@ In plain words: the fingerprint is a hash of "this key, in this channel". Two pe
 
 - R1 The fingerprint MUST be `fp = hash("privatechat/fp/v1" ‖ channel_id ‖ pk_u)`: 32 bytes over exactly 65 bytes of input, which are the 17 ASCII bytes of the tag, the 16 bytes of `channel_id` and the 32 bytes of `pk_u`, with no separator (`docs/spec.md` §4).
 - R2 The fingerprint MUST bind the channel: the same `pk_u` in two channels MUST give two different fingerprints.
-- R3 The verification QR MUST be the ASCII bytes `verify:v1:` followed by the base64url of `channel_id ‖ pk_u`, encoded with the codec of spec 011-config-format (`proto/base64url.rs`): 48 bytes that encode to 64 characters, 74 bytes in total, with no padding and no name of any kind. It MUST cross the boundary as bytes in both directions, never as a `String`, like the config QR (ADR 0028).
+- R3 The verification QR MUST be the ASCII bytes `verify:v1:` followed by the base64url of `channel_id ‖ pk_u`, encoded with the codec of spec 010-primitives-wrapper R19 (`crypto::base64url_encode`, whose `BadEncoding` on decoding becomes `Error::BadPayload`): 48 bytes that encode to 64 characters, 74 bytes in total, with no padding and no name of any kind. It MUST cross the boundary as bytes in both directions, never as a `String`, like the config QR (ADR 0028).
 - R4 Parsing a verification QR MUST return `Error::BadPayload` when the prefix, compared with `ct_eq`, is not `verify:v1:` or the body is not exactly 64 characters accepted by the strict decoder of spec 011-config-format, and MUST return `Error::WrongChannel` when the decoded `channel_id` is not the open channel's.
 - R5 The 12 words MUST be `words[i] = list[bits(fp, 11·i, 11)]` for `i` in 0..12, where `bits(fp, o, 11)` is the 11-bit big-endian integer starting at bit `o` of `fp`, counted from the most significant bit of `fp[0]`. They use the first 132 bits of `fp`, carry no checksum and MUST NOT be described as a BIP-39 mnemonic (ADR 0025).
 - R6 The short identifier MUST be the first 4 of the 12 words (44 bits) and MUST be output only: no function of `core` takes it as input.
@@ -68,7 +68,7 @@ pub struct Fingerprint { pub words: Vec<String>, pub short: Vec<String>, pub qr:
 pub(crate) fn fingerprint(channel_id: &ChannelId, pk_u: &PublicKey) -> Result<[u8; 32], Error>;
 pub(crate) fn words(fp: &[u8; 32]) -> Result<[&'static str; 12], Error>;   // Internal on the impossible out-of-list index
 pub(crate) fn short_identifier(words: &[&'static str; 12]) -> [&'static str; 4];
-pub(crate) fn verify_qr(channel_id: &ChannelId, pk_u: &PublicKey) -> Vec<u8>;
+pub(crate) fn verify_qr(channel_id: &ChannelId, pk_u: &PublicKey) -> Result<Vec<u8>, Error>;   // Internal only when libsodium fails
 pub(crate) fn parse_verify_qr(bytes: &[u8], channel_id: &ChannelId) -> Result<PublicKey, Error>;
 pub(crate) fn presentation(channel_id: &ChannelId, pk_u: &PublicKey) -> Result<Fingerprint, Error>;
 ```
@@ -77,7 +77,7 @@ pub(crate) fn presentation(channel_id: &ChannelId, pk_u: &PublicKey) -> Result<F
 
 The functions are `pub(crate)`; `Fingerprint` is `pub` with public fields and is built only by `presentation`. It is the `Record` of the core boundary (`docs/spec.md` §9) and reaches the UI through `Channel::fingerprint` and the verification screen's call, both of which spec 022-peers-tofu defines and spec 027-core-api exposes; the same type crosses the uniffi boundary, which has no fixed-size arrays, so its fields are `Vec<String>` with the lengths R8 guarantees. No client re-implements any of the three presentations. No function of `core` takes four words as input (R6).
 
-The word list is the one of spec 011-config-format, `crates/core/src/proto/wordlist.rs`, whose BLAKE2b-256 digest `6fefd6b6e47ee66e6bbf8ee322305deebeefb1bd9b24e8618bf126d870175bb7` that spec pins, and the base64url codec is its `proto/base64url.rs`; this module embeds neither a second copy of the list nor a second codec.
+The word list is the one of spec 011-config-format, `crates/core/src/proto/wordlist.rs`, whose BLAKE2b-256 digest `6fefd6b6e47ee66e6bbf8ee322305deebeefb1bd9b24e8618bf126d870175bb7` that spec pins, and the base64url codec is `crypto::base64url_encode` and `crypto::base64url_decode` of spec 010-primitives-wrapper R19; this module embeds neither a second copy of the list nor a second codec.
 
 `s014_vectors_dispatch` calls `vectors::check_all("014", …)` with one entry per vector and is the only code that loads `014.json` (spec 015-test-vectors R3).
 
@@ -132,7 +132,7 @@ All of these are `derived`: each value follows from the formulas of `docs/spec.m
 - The verification screen, the QR camera, the pre-verification flow, the "identifier, not verification" label and the rule that all 12 words must match (`docs/spec.md` §7, spec 055-verify-ui).
 - Reporting short-identifier collisions between peers, what is stored about a peer, the labels and the peer limits (specs 022-peers-tofu, 026-peer-limits).
 - Key regeneration and the retirement record (specs 024-key-retired, 025-identity-regen); the fingerprint of any retired key is spec 022-peers-tofu R12.
-- The word list, its digest and the base64url codec (spec 011-config-format).
+- The word list and its digest (spec 011-config-format), and the base64url codec (spec 010-primitives-wrapper R19).
 - Any other word list: the English one is the only list of v1 (`docs/spec.md` §12).
 
 ## Open questions
@@ -149,3 +149,4 @@ None. Closed after audit F: the list lives in `core`, owned by spec 011-config-f
 - 2026-09-25 revised after audit J round 12 (`docs/audit-log.md`)
 - 2026-09-26 amended by spec 040-uniffi R14 while drafting phase 4: the vectors use the `channel_id` of 011 `config_reference`, so that the bindings reach them through `Device`
 - 2026-09-28 accepted (Marc Vilardebó)
+- 2026-09-29 amended by audit S of spec 011-config-format (`docs/audit-log.md`, AS-Q1): the base64url codec is libsodium's, spec 010-primitives-wrapper R19, not `proto/base64url.rs`; its `BadEncoding` becomes `BadPayload` here, and `verify_qr` returns a `Result`, since the codec may fail to initialise; no requirement of this spec changes

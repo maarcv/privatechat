@@ -8,16 +8,16 @@ use zeroize::Zeroize;
 
 use super::{
     CryptoError, KdfContext, Nonce, PublicKey, SECRET_TYPES, Salt, Secret, Signature, aead_decrypt,
-    aead_encrypt, check_password_len, checked_output_len, ct_eq, ffi, hash, init, init_calls,
-    kdf_derive, keyed_hash, pad, password_key, random_bytes, secretbox_open, secretbox_seal,
-    sign_detached, sign_keypair, sign_keypair_from_seed, stream_xor, unpad, verify_detached,
-    version,
+    aead_encrypt, base64url_decode, base64url_encode, check_password_len, checked_output_len,
+    ct_eq, ffi, hash, init, init_calls, kdf_derive, keyed_hash, pad, password_key, random_bytes,
+    secretbox_open, secretbox_seal, sign_detached, sign_keypair, sign_keypair_from_seed,
+    stream_xor, unpad, verify_detached, version,
 };
 use crate::vectors::{self, Kind};
 
 /// Every `.rs` file of the crate. `core` does no I/O (AGENTS 10), so the test
 /// cannot walk the directory: a new file is added to this list by hand.
-const SOURCES: [(&str, &str); 11] = [
+const SOURCES: [(&str, &str); 17] = [
     ("lib.rs", include_str!("../lib.rs")),
     ("crypto.rs", include_str!("../crypto.rs")),
     ("crypto/ffi.rs", include_str!("ffi.rs")),
@@ -25,7 +25,18 @@ const SOURCES: [(&str, &str); 11] = [
     ("crypto/tests.rs", include_str!("tests.rs")),
     ("vectors.rs", include_str!("../vectors.rs")),
     ("vectors/tests.rs", include_str!("../vectors/tests.rs")),
+    ("error.rs", include_str!("../error.rs")),
+    ("error/tests.rs", include_str!("../error/tests.rs")),
     ("proto.rs", include_str!("../proto.rs")),
+    ("proto/config.rs", include_str!("../proto/config.rs")),
+    (
+        "proto/config/url.rs",
+        include_str!("../proto/config/url.rs"),
+    ),
+    (
+        "proto/config/tests.rs",
+        include_str!("../proto/config/tests.rs"),
+    ),
     ("proto/record.rs", include_str!("../proto/record.rs")),
     (
         "proto/record/test_schema.rs",
@@ -35,6 +46,7 @@ const SOURCES: [(&str, &str); 11] = [
         "proto/record/tests.rs",
         include_str!("../proto/record/tests.rs"),
     ),
+    ("proto/wordlist.rs", include_str!("../proto/wordlist.rs")),
 ];
 
 /// Spec 010, R1: `crypto/ffi.rs` is the only file that uses the keyword, and
@@ -143,6 +155,7 @@ fn s010_t23_r15_error_variants_are_unit_and_ordered() {
         CryptoError::Forged,
         CryptoError::BadPadding,
         CryptoError::OutOfMemory,
+        CryptoError::BadEncoding,
     ]
     .iter()
     .map(|variant| format!("{variant:?}"))
@@ -155,7 +168,8 @@ fn s010_t23_r15_error_variants_are_unit_and_ordered() {
             "BadLength",
             "Forged",
             "BadPadding",
-            "OutOfMemory"
+            "OutOfMemory",
+            "BadEncoding"
         ]
     );
 
@@ -645,4 +659,63 @@ fn ffi_rejects_a_buffer_of_the_wrong_size() {
     ));
     let mut buffer = [0u8; 16];
     assert!(!ffi::pad(&mut buffer, 17, 16));
+}
+
+/// Spec 010, R19: libsodium's URL-safe base64 with no padding, strict: the
+/// RFC 4648 §10 test vectors in the URL-safe alphabet, and each way a text
+/// can fail to be the one encoding of some bytes.
+#[test]
+fn s010_t30_r19_base64url_is_strict() -> Result<(), CryptoError> {
+    let known: [(&[u8], &[u8]); 9] = [
+        (b"", b""),
+        (b"f", b"Zg"),
+        (b"fo", b"Zm8"),
+        (b"foo", b"Zm9v"),
+        (b"foob", b"Zm9vYg"),
+        (b"fooba", b"Zm9vYmE"),
+        (b"foobar", b"Zm9vYmFy"),
+        (b"\xfb\xef", b"--8"),
+        (b"\xff", b"_w"),
+    ];
+    for (bin, text) in known {
+        let encoded = base64url_encode(bin)?;
+        assert_eq!(encoded.as_slice(), text);
+        assert_eq!(encoded.capacity(), text.len() + 1, "text and terminator");
+        let decoded = base64url_decode(text)?;
+        assert_eq!(decoded.as_slice(), bin);
+        assert_eq!(decoded.capacity(), bin.len());
+    }
+    for text in [
+        &b"Zg=="[..],
+        b"Zg=",
+        b"Zm9v+A",
+        b"Zm9v/A",
+        b"Zh",
+        b"Zm9",
+        b"Zm-",
+        b"Zm9vY",
+        b"A",
+        b" Zg",
+        b"Zg\n",
+        b"Z\x00g",
+        "Zé".as_bytes(),
+    ] {
+        assert_eq!(
+            base64url_decode(text).err(),
+            Some(CryptoError::BadEncoding),
+            "{text:?}"
+        );
+    }
+    Ok(())
+}
+
+proptest! {
+    /// Spec 010, R19: decode(encode(x)) = x, and the text uses only the
+    /// URL-safe alphabet.
+    #[test]
+    fn s010_t31_r19_base64url_round_trip(bin in bytes_of(any::<u8>(), 0..=1_024)) {
+        let text = base64url_encode(&bin).unwrap();
+        assert!(text.iter().all(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(byte)));
+        assert_eq!(base64url_decode(&text).unwrap().as_slice(), bin.as_slice());
+    }
 }

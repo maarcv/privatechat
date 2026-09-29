@@ -22,12 +22,17 @@
 #[allow(dead_code, unused_imports)]
 mod crypto;
 
+mod error;
+
 #[allow(dead_code, reason = "reached through Device, spec 027-core-api")]
 mod proto;
 
 #[cfg(test)]
 #[allow(dead_code, reason = "accessors used by specs 011–017")]
 mod vectors;
+
+pub use error::Error;
+pub use proto::config::Config;
 
 /// Default exchange server of a fresh installation (`docs/spec.md` §8, ADR 0022).
 ///
