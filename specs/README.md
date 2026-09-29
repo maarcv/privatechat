@@ -13,7 +13,7 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 002 | 002-adr-log | 0 | implemented |
 | 003 | 003-doc-lint | 0 | implemented |
 | 010 | 010-primitives-wrapper | 1 | implemented |
-| 011 | 011-config-format | 1 | accepted |
+| 011 | 011-config-format | 1 | implemented |
 | 012 | 012-message-keys | 1 | accepted |
 | 013 | 013-wire-message | 1 | accepted |
 | 014 | 014-fingerprint | 1 | accepted |

@@ -1,6 +1,6 @@
 # 011 — Channel config format
 
-Status: accepted
+Status: implemented
 Phase: 1
 Related ADRs: 0001, 0008, 0009, 0010, 0014, 0022, 0023, 0028, 0031, 0038
 Depends on: 010-primitives-wrapper, 015-test-vectors, 017-record-encoding
@@ -248,3 +248,4 @@ None. Decided in audit F (`docs/audit-log.md`):
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-09-29 Limits: the stale duplicate row for the port, which predated ADR 0038, removed
 - 2026-09-29 revised after audit S (`docs/audit-log.md`): the base64url codec is libsodium's, spec 010 R19 (AS-Q1: Context, R12, Interface, T12, T19); every record vector carries its QR text (AS-Q2: R22, Vectors); negative vectors for every rejection the platforms reach (AS-Q3); `password_canonical` and `password_not_whitespace` pin R15's `White_Space` (AS-Q4); R15 names the characters it keeps; R19 on `copy_from`, the drawn password and its draw; `seal_file` takes canonical bytes; the dispatch checks the vectors a test names; T03, T04, T05, T11, T13–T16, T18–T21, T24 cover the check orders, bounds and cases the audit found untested; no requirement renumbered
+- 2026-09-29 implemented: slices (a)–(e) with the audit S fixes, reviewed (Marc Vilardebó)
