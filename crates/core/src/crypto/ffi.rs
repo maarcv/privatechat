@@ -9,7 +9,7 @@
 #![allow(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-use core::ffi::{CStr, c_char, c_void};
+use core::ffi::{CStr, c_char, c_int, c_void};
 use core::ptr;
 
 /// Initialises the library. Negative on failure, `0` on the first call and
@@ -402,4 +402,63 @@ pub(super) fn unpad(buf: &[u8], block: usize) -> Option<usize> {
     let unpadded_ok =
         unsafe { libsodium_sys::sodium_unpad(&raw mut unpadded, buf.as_ptr(), buf.len(), block) };
     (unpadded_ok == 0).then_some(unpadded)
+}
+
+/// The variant of every base64 text of the protocol: RFC 4648 §5, the
+/// URL-safe alphabet, with no padding (spec 010, R19). `None` only if the
+/// binding's constant stopped fitting a C `int`.
+fn base64_variant() -> Option<c_int> {
+    c_int::try_from(libsodium_sys::sodium_base64_VARIANT_URLSAFE_NO_PADDING).ok()
+}
+
+/// Writes the base64 of `bin` into `b64`, followed by the NUL terminator
+/// libsodium appends; `false` when `b64` is shorter than that (spec 010, R19).
+pub(super) fn bin2base64(b64: &mut [u8], bin: &[u8]) -> bool {
+    let Some(variant) = base64_variant() else {
+        return false;
+    };
+    // SAFETY: a pure computation on two integers; it reads no memory.
+    let needed = unsafe { libsodium_sys::sodium_base64_encoded_len(bin.len(), variant) };
+    // libsodium aborts on a buffer shorter than it needs, so refuse first.
+    if b64.len() < needed {
+        return false;
+    }
+    // SAFETY: the check above makes `b64`, whose length is the maximum
+    // passed, large enough for the text and its terminator; `bin` is read
+    // for exactly its own length.
+    let text = unsafe {
+        libsodium_sys::sodium_bin2base64(
+            b64.as_mut_ptr().cast::<c_char>(),
+            b64.len(),
+            bin.as_ptr(),
+            bin.len(),
+            variant,
+        )
+    };
+    !text.is_null()
+}
+
+/// Decodes the whole of `b64` into `bin` and returns the decoded length, or
+/// `None` for any text that is not the canonical encoding of some bytes or
+/// that does not fit `bin` (spec 010, R19).
+pub(super) fn base642bin(bin: &mut [u8], b64: &[u8]) -> Option<usize> {
+    let variant = base64_variant()?;
+    let mut decoded = 0usize;
+    // SAFETY: `bin` is written for at most its own length, the maximum passed;
+    // `b64` is read for exactly its own length and needs no terminator; with
+    // no ignore set and no end pointer, libsodium fails unless it consumes the
+    // whole text; the decoded length goes through a pointer to a local.
+    let decoded_ok = unsafe {
+        libsodium_sys::sodium_base642bin(
+            bin.as_mut_ptr(),
+            bin.len(),
+            b64.as_ptr().cast::<c_char>(),
+            b64.len(),
+            ptr::null(),
+            &raw mut decoded,
+            ptr::null_mut(),
+            variant,
+        )
+    };
+    (decoded_ok == 0).then_some(decoded)
 }
