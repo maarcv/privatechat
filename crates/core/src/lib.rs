@@ -24,6 +24,9 @@ mod crypto;
 
 mod error;
 
+#[cfg(any(test, fuzzing))]
+pub mod fuzz_entry;
+
 #[allow(dead_code, reason = "reached through Device, spec 027-core-api")]
 mod proto;
 

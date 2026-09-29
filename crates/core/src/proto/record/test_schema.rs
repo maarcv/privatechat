@@ -8,6 +8,7 @@
 use zeroize::Zeroizing;
 
 use super::{Reader, RecordError, UnknownKeys, Writer};
+use crate::Error;
 
 /// The largest record of the test schema.
 pub(crate) const MAX_RECORD: usize = 512;
@@ -73,4 +74,13 @@ impl<'a> TestRecord<'a> {
         }
         Ok(writer.finish())
     }
+}
+
+/// The verdict of the test schema on `buf`, for the fuzz target
+/// `record_decode` of spec 016-fuzz-harness: every `RecordError` is
+/// `BadPayload`, so that `RecordError` never leaves `proto`.
+pub(crate) fn decode_test_record(buf: &[u8], unknown: UnknownKeys) -> Result<(), Error> {
+    TestRecord::decode(buf, unknown)
+        .map(|_| ())
+        .map_err(|_| Error::BadPayload)
 }
