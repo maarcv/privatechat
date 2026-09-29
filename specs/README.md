@@ -16,7 +16,7 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 011 | 011-config-format | 1 | implemented |
 | 012 | 012-message-keys | 1 | implemented |
 | 013 | 013-wire-message | 1 | implemented |
-| 014 | 014-fingerprint | 1 | accepted |
+| 014 | 014-fingerprint | 1 | implemented |
 | 015 | 015-test-vectors | 1 | implemented |
 | 016 | 016-fuzz-harness | 1 | accepted |
 | 017 | 017-record-encoding | 1 | implemented |

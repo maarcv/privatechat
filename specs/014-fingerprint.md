@@ -1,6 +1,6 @@
 # 014 — User fingerprint, verification QR and 12 words
 
-Status: accepted
+Status: implemented
 Phase: 1
 Related ADRs: 0005, 0006, 0007, 0025, 0028
 Depends on: 010-primitives-wrapper, 011-config-format, 015-test-vectors
@@ -151,4 +151,5 @@ None. Closed after audit F: the list lives in `core`, owned by spec 011-config-f
 - 2026-09-26 amended by spec 040-uniffi R14 while drafting phase 4: the vectors use the `channel_id` of 011 `config_reference`, so that the bindings reach them through `Device`
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-09-29 revised after audit V (`docs/audit-log.md`): the codec of spec 010 R19 named in R3 and R4, the prefix checked before the channel (R4), R7's fifth negative is not an edit, the derives and the redacted `Debug` of `Fingerprint`, its re-export and its uniffi mirror in the Interface, T01, T03, T05 and T08 say what the dispatch checks, `qr_other_channel` carries the reference channel; one slice of 488 net lines against the 400 of AGENTS 14, most of it tests, accepted by the reviewer; the acceptance criterion's reading by hand done by the reviewer on `words_reference`
+- 2026-09-29 implemented: one slice with the audit V fixes, reviewed (Marc Vilardebó)
 - 2026-09-29 amended by audit S of spec 011-config-format (`docs/audit-log.md`, AS-Q1): the base64url codec is libsodium's, spec 010-primitives-wrapper R19, not `proto/base64url.rs`; its `BadEncoding` becomes `BadPayload` here, and `verify_qr` returns a `Result`, since the codec may fail to initialise; no requirement of this spec changes
