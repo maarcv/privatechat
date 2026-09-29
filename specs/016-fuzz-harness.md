@@ -1,6 +1,6 @@
 # 016 — Fuzz harness
 
-Status: accepted
+Status: implemented
 Phase: 1
 Related ADRs: 0012, 0023, 0027, 0032
 Depends on: 010-primitives-wrapper, 015-test-vectors, 017-record-encoding, 011-config-format, 012-message-keys, 013-wire-message, 014-fingerprint
@@ -133,3 +133,4 @@ None. Closed after audit F: one hour per target, run as a matrix of parallel nig
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): no `cargo deny` over the fuzz crate, which reverses H53, H57, H60 and H62: no licence exception, no `jobserver` wrapper, no lockfile copy and no fuzz deny step; the fuzz `Cargo.lock` is committed and the crate has its own `[workspace]` table (I3); the `cfg` gate of `fuzz_entry` and the shape of its entries move to the Interface, the source-scan clauses of the old T02 and T08 dropped (I2); the test schema is the six types phase 1 implements (I4); the reach check of R6 is an operational rule and the nightly installs its toolchain and `cargo-fuzz` (I9); requirements and tests renumbered R1–R12, T01–T12
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the acceptance criterion names where the second person's review of `proto` is recorded
 - 2026-09-28 accepted (Marc Vilardebó)
+- 2026-09-29 implemented: two slices with the audit W fixes, reviewed (Marc Vilardebó); the seven targets ran one hour each with no crash in the nightly workflow (https://github.com/maarcv/privatechat/actions/runs/36580474551)

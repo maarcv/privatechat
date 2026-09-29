@@ -18,7 +18,7 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 013 | 013-wire-message | 1 | implemented |
 | 014 | 014-fingerprint | 1 | implemented |
 | 015 | 015-test-vectors | 1 | implemented |
-| 016 | 016-fuzz-harness | 1 | accepted |
+| 016 | 016-fuzz-harness | 1 | implemented |
 | 017 | 017-record-encoding | 1 | implemented |
 | 020 | 020-store-files | 2 | accepted |
 | 021 | 021-channel-session | 2 | accepted |

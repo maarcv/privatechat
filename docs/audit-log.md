@@ -2,6 +2,10 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Phase 1 closed
+
+**2026-09-29 — Phase 1 (crypto core) closed on `mvp`.** Specs 010–017 are `implemented`. The exit criteria of `docs/spec.md` §10 hold: `cargo test` reproduces every vector the reference script of spec 015 writes for specs 011–014 and 017, the mutation table of spec 013 and its property included; each of the seven fuzz targets of spec 016 ran one hour with no crash in the nightly workflow (run 36580474551). The internal review of `proto` by a second person was dropped from the criteria by the reviewer (audit W, AW-Q1). From this commit the vectors of `specs/vectors/` are frozen (AGENTS 18): a vector changes only with a new `proto_version` and an ADR, and the `adr-not-needed` label no longer covers a vector change.
+
 ## Audit W
 
 **2026-09-29 — Audit W, code audit of spec 016-fuzz-harness (branch `016-fuzz-harness`, slices (a) and (b)), in three independent passes (W-A: structure and simplicity; W-B: the local CI run, 42 mutants of `fuzz_entry`, 42 of the checker and 27 of the seed script; W-C: conformance with spec 016, `docs/spec.md` §10 and §11, specs 001, 011, 013–015, 017 and the specs that add targets).** CI green; no defect in the code that ships. The seven targets ran 15 minutes each on the dated nightly with no crash, 9 to 500 million runs per target. Findings (numbered AW) and changes applied:
