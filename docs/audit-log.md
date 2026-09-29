@@ -2,6 +2,35 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit S
+
+**2026-09-29 — Audit S, code audit of spec 011-config-format (branch `011-config-format`, slices (a)–(e)), in three independent passes (S-A: structure and simplicity; S-B: the local CI run per commit, 131 mutants of the Rust code, probes of the edge cases; S-C: conformance with spec 011, `docs/spec.md` §4, §5, §9, the ADRs it cites and the specs that consume it).** CI green at every commit; no correctness defect in the code; the bytes of every record, QR text and file are unchanged. The human reviewer decided four questions (numbered AS, so that they do not read as requirements):
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AS-Q1 | The hand-written base64url decoder took a time that depended on each character of a text that carries `K_ch`; libsodium ships the same codec, strict and in constant time (S-A20, S-C21) | libsodium | Spec 010 R19, `crypto::base64url_encode` and `base64url_decode` over `sodium_bin2base64` and `sodium_base642bin`, `CryptoError::BadEncoding`; `proto/base64url.rs` deleted; specs 011 and 014 amended |
+| AS-Q2 | Only `config_reference` carried a QR text, though specs 040 R13 and 054 T16 import the record vectors by QR (S-C4, C3) | Every record vector | R22, Vectors: each vector with a `record` carries `qr`, checked through `parse_qr` |
+| AS-Q3 | Rejections the platforms reach had no negative vector, against `specs/vectors/README.md` (S-C, C4) | Add them | 14 negatives: `record_repeated_key`, `record_missing_key`, `record_missing_key_1`, `record_non_utf8`, `qr_plus`, `qr_slash`, `qr_684_bytes`, `file_4_bytes`, `file_1084_bytes`, `file_1086_bytes`, `password_empty`, `password_not_utf8`, `password_canonical_257`, `password_not_whitespace`; `password_too_long` now over the typed bound only (S-B9) |
+| AS-Q4 | Which characters count as whitespace in R15 differs between Rust, Java and Swift (S-B12) | A vector | `password_canonical`; the script writes Unicode `White_Space` out; R15 names U+001C..=U+001F and U+FEFF as kept |
+
+Findings and changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AS1 | The index derivation of the drawn password was untested: a mask of 10 bits or one byte read twice (56 bits) passed (S-B) | Medium | `password_of`, pure, with a known answer per index bit (T16) |
+| AS2 | Nothing checked that `export_encrypted` draws a fresh salt and nonce (S-B) | Medium | T16 compares both regions of two exports |
+| AS3 | The check orders R3 and R13 fix were not all pinned: expiry before ranges, the version read before key 1, the length before the version byte, and `>=` against the QR bound all passed (S-B, S-C10, S-C11) | Low | Cases in T03, T04, T11, T13 (`bad_headers`) |
+| AS4 | The largest valid config was never exported, so a writer of 400 bytes passed (S-B, S-C8) | Low | `s011_t24_r24_round_trips_the_largest_config`; the T24 strategies reach hosts of 244 bytes, names of 64 bytes and ports of 65 535, and assert the grammar rather than discard what it rejects |
+| AS5 | Grammar and range gaps: `8` and capitals in an onion host, `_` in a host, a grammar too strict on `-`, the ends U+001F, U+007F, U+009F of Cc (S-B) | Low | `good_urls`, `bad_urls`, `out_of_range` |
+| AS6 | The drawn password's buffer could grow, and T15 and T19 checked the canonical capacity on three inputs (S-B, S-C9) | Low | T19 asserts 62; the T15 proptest asserts the capacity over UTF-8, long ASCII and arbitrary bytes |
+| AS7 | The `config_reference` checker derived the QR expiry from the vector itself, so a script that wrote the wrong expiry passed (found re-running the script mutants) | Low | The checker exports at `created_at` |
+| AS8 | R12 and T12 said the codec rejects the 684-byte text; tests named vectors that only the dispatch may load; the Vectors table said `chatcfg_reference` seals `config_reference`; the Interface missed `error/tests.rs` and said every `proto` function returns `core::Error`; R19 promised no copy on a move; `seal_file`'s canonical input was unstated (S-A4, S-A19, S-C1, S-C2, S-C5, S-C6, S-C13–S-C15) | Low | Spec 011 amended, no requirement renumbered; spec 014's `verify_qr` returns a `Result` |
+| AS9 | `export_encrypted(u64::MAX)` ran Argon2id before failing (S-C17); `== [VERSION]` on an array against AGENTS 22 (S-C3) | Low | Expiry checked first; the version byte compared as a `u8` |
+| AS10 | Structure: three near-identical negative checkers, `url::Parts::port` never read, missing `# Errors` on the `pub(crate)` seams, a three-step header split, a double binding, `step_by` pairs, a public `MAX_RECORD`, names shared by a free function and a method, the doc of `Internal`, tests out of T order and without a module doc, a script section that built its vector dicts five ways and a first-run branch that could no longer run (S-A1–S-A3, S-A6–S-A9, S-A11–S-A18) | Low | One `check_negative` over every form a vector carries; `url::parse` returns the host; docs; `as_chunks`; `derive_channel_id`, `derive_channel_keypair`, `from_checked`; `raw_011`, `encode_value` shared with 017, guards on `record_513_bytes`, `qr_length_mod_4`, `qr_684_bytes` and `password_not_utf8` |
+| AS11 | Commit ccaacd4 edited the accepted spec without a History line (S-C19) | Low | History line |
+
+Not changed: slices (b) and (e) are 737 and 629 net lines against the 400 of AGENTS 14; S-A found about 50 lines of trim, applied here, and splitting further would separate tests from the code they test, so the excess stays stated in the commits for the human reviewer (S-A21, S-C18). The mutants that survive are equivalent: the `MAX_QR` comparison beyond 684 (R7 rejects any longer text), the second `parse_file_header` in `open_file_with_key`, the capacity of the file buffer and of `padded_record` (no observable copy), a wider `reader.text` bound (`check_ranges` applies the same), `rsplit_once` for the port. `docs/spec.md` §9 lists fewer `Error` variants than spec 027 R18 (C5): 027 updates §9 when it lands, and 011 R20 names §9 as it stands. The URL grammar stays private to `config` until specs 020, 027 and 031 need the scheme or the port (S-C20).
+
 ## Audit R
 
 **2026-09-28 — Audit R, code audit of slices (a) and (b) of spec 017-record-encoding (branch `017-record-encoding`), in three independent passes (R-A: structure and simplicity; R-B: the local CI run, 63 mutants of the codec and the test schema, mutants of the reference-script section, edge-case probes; R-C: conformance with spec 017, `docs/spec.md` §4 and the specs that consume the codec).** CI green; no correctness defect in the codec; no wire, key or format decision changes. Findings (numbered AR, so that they do not read as requirements) and changes applied:
