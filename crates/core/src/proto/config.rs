@@ -10,6 +10,7 @@ use core::ops::RangeInclusive;
 
 use zeroize::Zeroizing;
 
+use super::base64url;
 use super::record::{Reader, RecordError, UnknownKeys, Writer};
 use crate::Error;
 use crate::crypto::{self, KdfContext, PublicKey, Secret};
@@ -32,6 +33,12 @@ pub(crate) const MAX_RECORD: usize = 512;
 
 /// The largest `suggested_name`, in bytes of UTF-8 (R4).
 const MAX_NAME: usize = 64;
+
+/// The largest QR text, the base64url of a record of `MAX_RECORD` bytes (R11).
+const MAX_QR: usize = 683;
+
+/// How long a QR invitation lives: 10 minutes, fixed (R18, ADR 0028).
+const QR_INVITE_MS: u64 = 600_000;
 
 /// The TTL range, 1 minute to 30 days (R4, ADR 0014).
 const TTL_SECONDS: RangeInclusive<u32> = 60..=2_592_000;
@@ -117,6 +124,36 @@ impl Config {
             fields.suggested_name,
             fields.created_at,
         )
+    }
+
+    /// The config of a scanned QR: the base64url of its record, as ASCII
+    /// bytes (R11).
+    ///
+    /// # Errors
+    ///
+    /// `BadConfig` for a text above 683 bytes or that is not the canonical
+    /// base64url of some bytes, and the errors of [`Config::parse`].
+    pub fn parse_qr(text: &[u8], now: u64) -> Result<Config, Error> {
+        if text.len() > MAX_QR {
+            return Err(Error::BadConfig);
+        }
+        let record = base64url::decode(text).ok_or(Error::BadConfig)?;
+        Config::parse(&record, now)
+    }
+
+    /// The QR text of this config, an invitation that expires 10 minutes
+    /// after `now` (R11, R18). The bytes belong to the caller, who zeroizes
+    /// them once the QR is drawn.
+    ///
+    /// # Errors
+    ///
+    /// `Internal` when `now` leaves no room for the expiry.
+    pub fn export_qr(&self, now: u64) -> Result<Vec<u8>, Error> {
+        let expiry = now.checked_add(QR_INVITE_MS).ok_or(Error::Internal)?;
+        let record = self.record(Some(expiry))?;
+        let mut text = base64url::encode(&record).ok_or(Error::Internal)?;
+        // Moved out, not copied, so no unwiped copy is left behind (R19).
+        Ok(core::mem::take(&mut *text))
     }
 
     /// The channel's identifier on the server (R8).

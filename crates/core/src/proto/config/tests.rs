@@ -1,4 +1,7 @@
-use super::{CHANNEL_AUTH_CONTEXT, CHANNEL_ID_TAG, Config, MAX_RECORD, url};
+use proptest::collection::vec as bytes_of;
+use proptest::prelude::{any, proptest};
+
+use super::{CHANNEL_AUTH_CONTEXT, CHANNEL_ID_TAG, Config, MAX_QR, MAX_RECORD, base64url, url};
 use crate::Error;
 use crate::crypto::{self, SECRET_TYPES, Secret, ct_eq};
 use crate::vectors::{self, Checker, Kind, Vector};
@@ -137,6 +140,32 @@ fn oversized() -> Vec<u8> {
     let head = [field(0, &[2]), field(1, &[1])].concat();
     let filler = MAX_RECORD + 1 - head.len() - 5;
     [head, field(9, &vec![0; filler])].concat()
+}
+
+/// QR texts R11 rejects, each next to the canonical text it breaks.
+fn bad_qr_texts() -> Vec<Vec<u8>> {
+    let text = base64url::encode(&encode(&fields())).unwrap();
+    assert_eq!(
+        text.len() % 4,
+        3,
+        "the base record needs a padding character"
+    );
+    // The last character of a two-byte tail carries two bits past the data,
+    // both zero; the next character of the alphabet sets one of them.
+    let mut last_bit = text.to_vec();
+    *last_bit.last_mut().unwrap() += 1;
+    let mut plus = text.to_vec();
+    plus[0] = b'+';
+    let mut slash = text.to_vec();
+    slash[0] = b'/';
+    vec![
+        [text.as_slice(), b"="].concat(),
+        plus,
+        slash,
+        last_bit,
+        b"AAAAA".to_vec(),
+        vec![b'A'; MAX_QR + 1],
+    ]
 }
 
 /// Spec 011, R1: the keys of §5, key 6 optional and every other mandatory.
@@ -281,20 +310,78 @@ fn s011_t09_r09_literals_and_lengths() {
 }
 
 /// Spec 011, R10: an expired invitation is refused; one that expires at
-/// `now` is accepted and forgotten. `parse_qr` and `open_encrypted` join
-/// with slices (d) and (e).
+/// `now` is accepted and forgotten. `open_encrypted` joins with slice (e).
 #[test]
 fn s011_t10_r10_expired_invitation_on_every_path() {
     let expired = with(6, &(NOW - 1).to_be_bytes());
     assert_eq!(rejection(&expired), Some(Error::InviteExpired));
+    let qr = base64url::encode(&expired).unwrap();
+    assert_eq!(Config::parse_qr(&qr, NOW).err(), Some(Error::InviteExpired));
+    let qr = reference().export_qr(NOW - 600_000).unwrap();
+    let config = Config::parse_qr(&qr, NOW).unwrap();
+    assert_eq!(config.record(None).unwrap().as_slice(), encode(&fields()));
     let config = Config::parse(&with(6, &NOW.to_be_bytes()), NOW).unwrap();
     assert_eq!(config.record(None).unwrap().as_slice(), encode(&fields()));
 }
 
-/// Spec 011, R19: `copy_from` holds the bytes it copied, and no secret type
-/// was added. The buffer capacities join with slices (d) and (e).
+/// Spec 011, R11: the QR is the canonical base64url of the record, and
+/// nothing else parses.
+#[test]
+fn s011_t11_r11_qr_is_canonical_base64url() {
+    let qr = base64url::encode(&encode(&fields())).unwrap();
+    assert!(Config::parse_qr(&qr, NOW).is_ok());
+    for (at, text) in bad_qr_texts().iter().enumerate() {
+        assert_eq!(
+            Config::parse_qr(text, NOW).err(),
+            Some(Error::BadConfig),
+            "case {at}"
+        );
+    }
+    let largest = base64url::encode(&[0; MAX_RECORD]).unwrap();
+    assert_eq!(largest.len(), MAX_QR);
+}
+
+proptest! {
+    /// Spec 011, R12: decode(encode(x)) = x, and the codec alone rejects
+    /// every text R11 rejects.
+    #[test]
+    fn s011_t12_r12_base64url_round_trip(bytes in bytes_of(any::<u8>(), 0..=MAX_RECORD)) {
+        let text = base64url::encode(&bytes).unwrap();
+        assert!(text.iter().all(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(byte)));
+        assert_eq!(base64url::decode(&text).unwrap().as_slice(), bytes);
+    }
+}
+
+#[test]
+fn s011_t12_r12_base64url_rejects_alone() {
+    let (too_long, rest) = bad_qr_texts()
+        .split_last()
+        .map(|(l, r)| (l.clone(), r.to_vec()))
+        .unwrap();
+    assert_eq!(
+        too_long.len(),
+        MAX_QR + 1,
+        "the codec bounds no length: R11 does"
+    );
+    for (at, text) in rest.iter().enumerate() {
+        assert!(base64url::decode(text).is_none(), "case {at}");
+    }
+    assert_eq!(base64url::encode(b"\xff").unwrap().as_slice(), b"_w");
+    assert_eq!(base64url::encode(b"\xfb\xef").unwrap().as_slice(), b"--8");
+    assert!(base64url::decode(b"_x").is_none());
+}
+
+/// Spec 011, R19: `copy_from` holds the bytes it copied, the codec's outputs
+/// are allocated at their exact size, and no secret type was added. The
+/// file's buffers join with slice (e).
 #[test]
 fn s011_t19_r19_no_lingering_secret() {
+    for len in 0..=MAX_RECORD {
+        let text = base64url::encode(&vec![0x5a; len]).unwrap();
+        assert_eq!(text.capacity(), text.len(), "encode {len}");
+        let bytes = base64url::decode(&text).unwrap();
+        assert_eq!(bytes.capacity(), len, "decode {len}");
+    }
     assert!(Secret::copy_from(&K_CH) == Secret::from_bytes(K_CH));
     assert_eq!(SECRET_TYPES, ["Secret<32>", "Secret<64>"]);
 }
@@ -371,6 +458,21 @@ fn check_positive(vector: &Vector) {
         .has_expected("invite_expires_at")
         .then(|| vector.expected("invite_expires_at").u64_hex());
     assert_eq!(config.record(expiry).unwrap().as_slice(), record, "{name}");
+    if vector.has_expected("qr") {
+        let qr = vector.expected("qr").bytes();
+        let created_at = vector.expected("created_at").u64_hex();
+        assert_eq!(config.export_qr(created_at).unwrap(), qr, "{name}");
+        let scanned = Config::parse_qr(qr, vector.input("now").u64_hex()).expect(name);
+        assert_eq!(scanned.record(expiry).unwrap().as_slice(), record, "{name}");
+    }
+}
+
+fn check_negative_qr(vector: &Vector) {
+    let name = vector.name();
+    let qr = vector.input("qr").bytes();
+    let error = Config::parse_qr(qr, vector.input("now").u64_hex()).err();
+    let error = format!("{:?}", error.expect(name));
+    assert_eq!(error, vector.expected("error").text(), "{name}");
 }
 
 fn check_negative(vector: &Vector) {
@@ -411,12 +513,15 @@ fn s011_vectors_dispatch() {
         "url_ws_onion_port_80",
         "invite_expired",
     ];
+    let qr = ["qr_padding", "qr_nonzero_bits", "qr_length_mod_4"];
     let entries = [
         positive
             .map(|name| (name, check_positive as Checker))
             .as_slice(),
         negative
             .map(|name| (name, check_negative as Checker))
+            .as_slice(),
+        qr.map(|name| (name, check_negative_qr as Checker))
             .as_slice(),
     ]
     .concat();

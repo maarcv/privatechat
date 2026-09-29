@@ -21,6 +21,7 @@ writes the first, so a failure writes nothing. Exit code 0 on success.
 from __future__ import annotations
 
 import ast
+import base64
 import hashlib
 import json
 import struct
@@ -46,7 +47,7 @@ TEXT_FIELDS = (
     "words",
 )
 # The modules this file imports, all of the standard library (R4).
-STANDARD_LIBRARY = ("__future__", "ast", "hashlib", "json", "struct", "sys", "pathlib", "typing")
+STANDARD_LIBRARY = ("__future__", "ast", "base64", "hashlib", "json", "struct", "sys", "pathlib", "typing")
 
 
 class U64(int):
@@ -433,6 +434,11 @@ def config_record(values: dict) -> bytes:
     return b"".join(fields)
 
 
+def qr_text(record: bytes) -> bytes:
+    """The QR form of 011 R11: base64url of the record, padding removed."""
+    return base64.urlsafe_b64encode(record).rstrip(b"=")
+
+
 def channel_identity(k_ch: bytes, ttl_seconds: int) -> tuple[bytes, bytes]:
     """`pk_ch` from `KDF(K_ch, "chauth__")` through RFC 8032, and `channel_id`, the first
     16 bytes of `BLAKE2b(tag ‖ pk_ch ‖ BE32(ttl_seconds))` (011 R8)."""
@@ -480,6 +486,8 @@ def check_s011_t22_r22_section_produces_011_json() -> list[dict]:
         positive("channel_id_ttl_2592000", "config_no_invite at the highest TTL",
                  {**no_invite, "ttl_seconds": 2_592_000}),
     ]
+    # The QR text export_qr writes at created_at, whose fixed expiry is that of config_reference.
+    vectors[0]["expected"]["qr"] = qr_text(config_record(reference))
     base = config_record(no_invite)
     key_0_1 = config_record({"config_version": 1, "proto_version": 1})
     swapped = {name: no_invite[name] for name in ("config_version", "proto_version", "k_ch")}
@@ -526,6 +534,21 @@ def check_s011_t22_r22_section_produces_011_json() -> list[dict]:
     ]
     require(len(negatives[6][2]) == CONFIG_MAX_RECORD + 1, "record_513_bytes is 513 bytes")
     vectors += [negative(*item) for item in negatives]
+    padded = base64.urlsafe_b64encode(base)
+    unpadded = qr_text(base)
+    require(padded.endswith(b"=") and len(unpadded) % 4 == 3, "config_no_invite needs padding")
+    alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    low_bit = alphabet[alphabet.index(unpadded[-1]) | 1]  # a final sextet with a bit past the data
+    qr_negatives = [
+        ("qr_padding", "the QR text of config_no_invite with its = padding", padded),
+        ("qr_nonzero_bits", "the QR text of config_no_invite with a non-zero final bit",
+         unpadded[:-1] + bytes([low_bit])),
+        ("qr_length_mod_4", "the QR text of config_reference and one more character",
+         qr_text(config_record(reference)) + b"A"),
+    ]
+    vectors += [{"name": name, "kind": "negative", "source": "derived",
+                 "origin": f"spec 011: {origin}", "inputs": {"qr": qr, "now": now},
+                 "expected": {"error": "BadConfig"}} for name, origin, qr in qr_negatives]
     return vectors
 
 
