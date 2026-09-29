@@ -5,6 +5,7 @@
 
 pub(crate) mod config;
 pub(crate) mod envelope;
+pub(crate) mod fingerprint;
 pub(crate) mod header;
 pub(crate) mod keys;
 pub(crate) mod payload;

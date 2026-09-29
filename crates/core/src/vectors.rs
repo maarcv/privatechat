@@ -18,6 +18,7 @@ const FILES: &[(&str, &str)] = &[
     ("011", include_str!("../../../specs/vectors/011.json")),
     ("012", include_str!("../../../specs/vectors/012.json")),
     ("013", include_str!("../../../specs/vectors/013.json")),
+    ("014", include_str!("../../../specs/vectors/014.json")),
     ("017", include_str!("../../../specs/vectors/017.json")),
 ];
 
