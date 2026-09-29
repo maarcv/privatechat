@@ -1,6 +1,6 @@
 # 013 — Wire message: envelope, payload and verification
 
-Status: accepted
+Status: implemented
 Phase: 1
 Related ADRs: 0002, 0005, 0013, 0016, 0018, 0019, 0023, 0027, 0029, 0030, 0032, 0033
 Depends on: 010-primitives-wrapper, 011-config-format, 012-message-keys, 015-test-vectors, 017-record-encoding
@@ -282,3 +282,4 @@ None. Closed after audit H: the expiry of `Unreadable` messages is spec 023-ttl-
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): the two XORs of the header keystream live in `envelope.rs` over `header_keystream` of spec 012 (no `mask_signature`, no `Header::seal`); `EXPIRY_MARGIN_MS`, `ttl_ms` and `KEY_RETIRED_COUNTER` defined here for spec 021; the stale check stated as a point in the in-order walk (no partial read); the five strict Ed25519 negatives dropped (proven once in spec 010); the reference script produces the vectors and the Rust tests reproduce them, `s013_vectors_dispatch` stated in the Interface; source-scan clauses and slice sentences dropped from the tests; the signed range built in one buffer
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-09-29 revised after audit U (`docs/audit-log.md`): an absent key 0 is judged after the stale check (R12, T16, vector `stale_missing_type`); `PayloadHead` in the Interface; the keystream is not wiped (Security); T02, T06 and T11 name what they prove. The three slices ship as one branch of 473, 1 035 and 614 net lines against the 400 of AGENTS 14, most of it tests, each excess stated in its commit (reviewer's decision)
+- 2026-09-29 implemented: three slices with the audit U fixes, reviewed (Marc Vilardebó)
