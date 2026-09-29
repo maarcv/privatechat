@@ -1,6 +1,6 @@
 # 012 — Message keys and encrypted header
 
-Status: accepted
+Status: implemented
 Phase: 1
 Related ADRs: 0002, 0013, 0018, 0032
 Depends on: 010-primitives-wrapper, 011-config-format, 015-test-vectors
@@ -144,3 +144,4 @@ None open. The former 012-R11 (the own-key verdict: confirmed on 2026-09-24 in a
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the state verdicts described by behaviour, since spec 021's interface names them otherwise; the alerts' UI points to specs 055 and 056
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-09-29 revised after audit T (`docs/audit-log.md`): the dispatch checks the vectors a test names (Interface, T01, T02, T05, T10); R5 names the unreachable wrapper failures; the Interface states the traits of `ChannelKeys` and `Header`; T04, T07 and T08 say what they check; the Context says who checks the vectors (spec 040-uniffi); the `header_sealed` row lists its fields; one slice of 460 lines against the 400 of AGENTS 14, since the rest is tests, accepted under the reviewer's rule for justified excesses; no requirement renumbered
+- 2026-09-29 implemented: one slice with the audit T fixes, reviewed (Marc Vilardebó)
