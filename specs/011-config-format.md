@@ -73,7 +73,6 @@ In plain words: a config is a short list of numbered fields: the channel key, th
 | `server_url` | 1..=256 B, grammar of R5 | `BadConfig` |
 | Host | after `wss://`: ≥ 1 B of `a-z`, `0-9`, `-`, `.`; the `server_url` bound of 256 B is its only bound (250 B at most). After `ws://`: exactly 56 B of `a-z`, `2-7`, then `.onion` | `BadConfig` |
 | Port | 1..=65535, no leading zero; never 443 after `wss://`, never 80 after `ws://` | `BadConfig` |
-| Port | 1..=65535, no leading zero, not 443 | `BadConfig` |
 | `ttl_seconds` | 60..=2 592 000 | `BadConfig` |
 | `suggested_name` | 0..=64 B UTF-8, no Cc | `BadConfig` |
 | `invite_expires_at` on import | ≥ `now` | `InviteExpired` |
