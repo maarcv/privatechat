@@ -75,7 +75,7 @@ fn s013_t10_r06_payload_schema() {
         &[(0, &[0]), (3, b"hi")],
         &[(0, &[0]), (2, &sent_at)],
         &[(0, &[0, 0]), (2, &sent_at), (3, b"hi")],
-        &[(0, &[0]), (3, b"hi"), (2, &sent_at)],
+        &[(0, &[0]), (2, &sent_at), (1, b"ana"), (3, b"hi")],
     ];
     for fields in broken {
         assert_eq!(
@@ -142,6 +142,11 @@ fn s013_t11_r07_validate_table() {
         ),
         ("name too long", text(b"hi", Some(&long_name))),
         ("name with Cc", text(b"hi", Some("a\u{7f}"))),
+        ("name with a Cc outside ASCII", text(b"hi", Some("a\u{85}"))),
+        (
+            "name of 33 characters, 66 bytes",
+            text(b"hi", Some(&"é".repeat(33))),
+        ),
         ("encoding too long", text_of_encoded_len(MAX_PAYLOAD + 1)),
     ];
     for (case, payload) in cases {
@@ -152,6 +157,14 @@ fn s013_t11_r07_validate_table() {
         Ok(())
     );
     assert_eq!(text_of_encoded_len(MAX_PAYLOAD).validate(), Ok(()));
+    // The name's field header counts: 24 + 5 + 64 bytes, the rest body.
+    let named = |len: usize| {
+        let name = "a".repeat(MAX_DISPLAY_NAME);
+        text(&vec![b'b'; len - 24 - 5 - MAX_DISPLAY_NAME], Some(&name))
+    };
+    assert_eq!(named(MAX_PAYLOAD).validate(), Ok(()));
+    assert_eq!(named(MAX_PAYLOAD).encode().unwrap().len(), MAX_PAYLOAD);
+    assert_eq!(named(MAX_PAYLOAD + 1).validate(), Err(Error::BadPayload));
 }
 
 /// Spec 013, R8: `sent_at` must be a whole minute; zero is one.
@@ -159,7 +172,11 @@ fn s013_t11_r07_validate_table() {
 fn s013_t12_r08_sent_at_is_a_whole_minute() {
     for (sent_at, verdict) in [
         (60_001, Err(Error::BadPayload)),
+        (1_000, Err(Error::BadPayload)),
+        (20_000, Err(Error::BadPayload)),
+        (30_000, Err(Error::BadPayload)),
         (60_000, Ok(())),
+        (120_000, Ok(())),
         (0, Ok(())),
     ] {
         assert_eq!(
@@ -184,6 +201,8 @@ fn s013_t13_r09_bad_display_name_is_dropped() {
         (0, &long_name[..]),
         (0, b"a\tb"),
         (0, &[b'a', 0xff]),
+        (0, "a\u{85}".as_bytes()),
+        (0, "é".repeat(33).as_bytes()),
         (1, b"ana"),
     ] {
         let body: &[u8] = if kind == 0 { b"hi" } else { b"" };
@@ -223,6 +242,7 @@ fn s013_t14_r10_padding_sizes() {
 #[test]
 fn s013_t18_r14_payload_debug_hides_content() {
     let debug = format!("{:?}", text(b"secret body", Some("secret name")));
-    assert!(!debug.contains("secret"), "{debug}");
-    assert!(debug.contains("[REDACTED]"), "{debug}");
+    let expected = "Payload { kind: Text, display_name: Some(\"[REDACTED]\"), \
+                    sent_at: 1700000040000, body: [REDACTED] }";
+    assert_eq!(debug, expected);
 }

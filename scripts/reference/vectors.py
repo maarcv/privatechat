@@ -805,11 +805,11 @@ SECTIONS["012"] = check_s012_t10_r08_section_produces_012_json
 PROTO_V1 = 0x01  # 013 R2, R15
 MSG_SIGNATURE_TAG = b"privatechat/msg/v1"  # 013 R4
 HEADER_LEN = 81  # 013 R1: version, channel_id, enc_hdr and nonce, the AEAD's associated data (R3)
-BLOB_OVERHEAD = 161
-PAD_BLOCK = 1_024  # 013 R10
+BLOB_OVERHEAD = HEADER_LEN + 16 + SIGNATURE_LEN  # 013 R1: the header, the tag and the signature
+PAD_BLOCK = 1_024  # 013 R10: 1 024·k bytes, k in 1..=63
 MAX_BLOCKS = 63
-MAX_PAYLOAD = 64_511  # 013 R7
-PAYLOAD_FIXED_LEN = 24  # type (5 + 1), sent_at (5 + 8) and the header of body (5)
+MAX_PAYLOAD = PAD_BLOCK * MAX_BLOCKS - 1  # 013 R7: sodium_pad adds at least one byte
+PAYLOAD_FIXED_LEN = 3 * FIELD_HEADER_LEN + 1 + 8  # type, sent_at and the header of body (R6)
 TYPE_TEXT, TYPE_KEY_RETIRED = 0, 1  # 013 R6
 EXPIRY_MARGIN_MS = 360_000  # 013 R13
 # The inputs of `text_k1`, a copy of those of `crates/core/src/proto/envelope/text_k1.rs` that
@@ -836,6 +836,25 @@ def sodium_pad(data: bytes, block: int) -> bytes:
     """`sodium_pad`: a 0x80 marker, then zeros up to the next multiple of `block`."""
     marked = data + b"\x80"
     return marked + bytes(-len(marked) % block)
+
+
+def unpadded(padded: bytes) -> bytes:
+    """The bytes before the 0x80 marker of `sodium_pad`."""
+    marked = padded.rstrip(b"\x00")
+    require(marked.endswith(b"\x80"), "a padded payload ends with its marker")
+    return marked[:-1]
+
+
+def field_keys(record: bytes) -> tuple[list[int], bytes]:
+    """The keys of the whole fields at the start of `record`, and the bytes after them."""
+    keys, offset = [], 0
+    while len(record) - offset >= FIELD_HEADER_LEN:
+        length = int.from_bytes(record[offset + 1:offset + FIELD_HEADER_LEN], "big")
+        if offset + FIELD_HEADER_LEN + length > len(record):
+            break
+        keys.append(record[offset])
+        offset += FIELD_HEADER_LEN + length
+    return keys, record[offset:]
 
 
 def seal_blob(seed: bytes, counter: int, nonce: bytes, padded: bytes,
@@ -886,10 +905,9 @@ def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
         inputs = {"sender_seed": seed, "pk_u": sealed.pop("pk_u"), "counter": U64(counter),
                   "nonce": nonce, "type": kind, "sent_at": U64(k1["sent_at"]), "body": body}
         require(sealed.pop("channel_id") == channel_id, f"{name}: the channel of text_k1")
-        # The padded payload and the ciphertext are computed above and checked inside `blob`.
-        require(sealed.pop("padded") == sodium_pad(record, PAD_BLOCK), f"{name}: padded")
-        require(sealed["blob"][HEADER_LEN:-SIGNATURE_LEN] == sealed.pop("ciphertext"),
-                f"{name}: the ciphertext at offset 81")
+        # The padded payload and the ciphertext are inside `blob`.
+        sealed.pop("padded")
+        sealed.pop("ciphertext")
         return raw(name, "positive", origin, inputs,
                    {"payload": record, **sealed, "content": content})
 
@@ -912,11 +930,11 @@ def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
         TYPE_KEY_RETIRED, b"", counter=U64_MAX, nonce=bytes(range(0x90, 0xa8)))]
 
     blob = text_k1["expected"]["blob"]
-    ttl_ms = k1["ttl_seconds"] * 1_000
-    received_at = k1["now"] - ttl_ms - EXPIRY_MARGIN_MS - 1
+    margin = k1["ttl_seconds"] * 1_000 + EXPIRY_MARGIN_MS  # ttl_ms + 360 000 (R13)
+    received_at = k1["now"] - margin - 1
     vectors.append(negative("expired_received_at", "text_k1 received ttl_ms + 360 001 ms "
                             "before now", blob, "Expired", signer=True, received_at=received_at))
-    require(received_at + ttl_ms + EXPIRY_MARGIN_MS < k1["now"], "expired by one millisecond")
+    require(received_at + margin == k1["now"] - 1, "expired by one millisecond")
 
     def flip(offset: int, value: int | None = None) -> bytes:
         edited = bytearray(blob)
@@ -928,8 +946,9 @@ def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
                                   ("channel_id", 9, "WrongChannel"), ("enc_hdr", 30, "BadSignature"),
                                   ("nonce", 70, "BadSignature"), ("ciphertext", 600, "BadSignature"),
                                   ("signature", last - 10, "BadSignature")):
-        edited = flip(0, 0x02) if region == "version" else flip(offset)
-        vectors.append(negative(f"mutate_{region}", f"text_k1 with byte {offset} flipped",
+        edited, change = ((flip(0, 0x02), "set to 0x02") if region == "version"
+                          else (flip(offset), "flipped"))
+        vectors.append(negative(f"mutate_{region}", f"text_k1 with byte {offset} {change}",
                                 edited, error))
     ciphertext_only = seal_blob(seed, k1["counter"], k1["nonce"],
                          sodium_pad(text_k1["expected"]["payload"], PAD_BLOCK),
@@ -967,12 +986,6 @@ def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
 
     sent_at, body = k1["sent_at"], k1["body"]
     text = {"type": TYPE_TEXT, "body": body}
-    field = record_field
-    records = {
-        "bad_payload_record": field(0, b"\x00") + field(2, struct.pack(">Q", sent_at))
-        + field(1, b"Ana") + field(3, body),
-        "missing_sent_at": field(0, b"\x00") + field(3, body),
-    }
     record = payload_record(TYPE_TEXT, sent_at, body)
     vectors += [
         opened("unknown_payload_key", "a text with key 9, which is ignored", "message",
@@ -982,9 +995,10 @@ def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
         opened("bad_padding", "a text padded with zeros and no 0x80 marker", "unreadable",
                record + bytes(PAD_BLOCK - len(record))),
         opened("bad_payload_record", "key 1 after key 2", "unreadable",
-               sodium_pad(records["bad_payload_record"], PAD_BLOCK), sent_at),
+               sodium_pad(record_field(0, b"\x00") + record_field(2, struct.pack(">Q", sent_at))
+                          + record_field(1, b"Ana") + record_field(3, body), PAD_BLOCK), sent_at),
         opened("missing_sent_at", "no key 2", "unreadable",
-               sodium_pad(records["missing_sent_at"], PAD_BLOCK)),
+               sodium_pad(record_field(0, b"\x00") + record_field(3, body), PAD_BLOCK)),
         opened("sent_at_not_a_minute", "sent_at 60 001, received 999 ms later", "unreadable",
                padded(TYPE_TEXT, 60_001, body), 60_001, received_at=61_000, now=61_000),
     ]
@@ -999,12 +1013,13 @@ def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
                           padded(TYPE_KEY_RETIRED, sent_at, display_name=b"Ana"), sent_at,
                           {"type": TYPE_KEY_RETIRED, "body": b""}))
 
-    margin = k1["ttl_seconds"] * 1_000 + EXPIRY_MARGIN_MS
     received = min(k1["received_at"], k1["now"])
     stale = (received - margin - 1) // 60_000 * 60_000
     future = (k1["now"] + margin) // 60_000 * 60_000 + 60_000
     require(stale + margin < received and k1["now"] + margin < future, "both are stale")
     require(stale + 60_000 + margin >= received, "the latest stale minute")
+    require(future - 60_000 <= k1["now"] + margin, "the earliest future minute")
+    require(stale % 60_000 == 0 and future % 60_000 == 0, "both are whole minutes")
     vectors += [
         opened("stale_sent_at", "sent_at more than ttl_ms + 360 000 ms before received_at",
                "stale", padded(TYPE_TEXT, stale, body), stale),
@@ -1015,6 +1030,13 @@ def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
         opened("future_sent_at", "sent_at more than ttl_ms + 360 000 ms after now", "stale",
                padded(TYPE_TEXT, future, body), future),
     ]
+    # The records of the vectors whose point is their shape keep that shape.
+    shapes = {"unknown_payload_key": ([0, 2, 3, 9], b""), "missing_sent_at": ([0, 3], b""),
+              "stale_trailing_garbage": ([0, 2], b"\x03\x00")}
+    for item in vectors:
+        if item["name"] in shapes:
+            require(field_keys(unpadded(item["inputs"]["padded"])) == shapes[item["name"]],
+                    f"{item['name']}: the record's fields")
     wrong_k_msg = blake2b_256(b"not the K_msg of text_k1")
     forged = seal_blob(seed, k1["counter"], k1["nonce"], sodium_pad(record, PAD_BLOCK),
                        k_msg=wrong_k_msg)["blob"]

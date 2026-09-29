@@ -12,9 +12,9 @@ use core::ops::Range;
 use super::config::{ChannelId, Config};
 use super::header::{ENC_HDR_LEN, Header, header_keystream};
 use super::keys::{ChannelKeys, message_key};
-use super::payload::{MAX_BLOCKS, PAD_BLOCK, Payload, PayloadHead};
+use super::payload::{PAD_BLOCK, Payload, PayloadHead, is_padded_len};
 use crate::Error;
-use crate::crypto::{self, CryptoError, Nonce, PublicKey, Secret, Signature};
+use crate::crypto::{self, CryptoError, Nonce, PublicKey, Secret, Signature, TAG_LEN};
 
 #[cfg(test)]
 mod tests;
@@ -38,7 +38,7 @@ const NONCE_RANGE: Range<usize> = 57..81;
 const SIGNATURE_LEN: usize = 64;
 
 /// Everything in a blob but the padded payload: header, tag and signature.
-pub(crate) const BLOB_OVERHEAD: usize = 161;
+pub(crate) const BLOB_OVERHEAD: usize = HEADER_LEN + TAG_LEN + SIGNATURE_LEN;
 
 /// The domain tag of the message signature (`docs/spec.md` §4, R4).
 pub(crate) const MSG_SIGNATURE_TAG: &[u8; 18] = b"privatechat/msg/v1";
@@ -98,6 +98,7 @@ impl SenderKey {
         Ok(SenderKey { pk, sk })
     }
 
+    /// `pk_u`, which the header carries.
     pub(crate) fn public(&self) -> &PublicKey {
         &self.pk
     }
@@ -145,8 +146,7 @@ pub(crate) fn seal_padded(
     nonce: &Nonce,
     padded: &[u8],
 ) -> Result<Sealed, Error> {
-    let blocks = padded.len().checked_div(PAD_BLOCK).unwrap_or_default();
-    if !padded.len().is_multiple_of(PAD_BLOCK) || !(1..=MAX_BLOCKS).contains(&blocks) {
+    if !is_padded_len(padded.len()) {
         return Err(Error::BadPayload);
     }
     let (header_mask, signature_mask) = masks(ctx, nonce)?;
@@ -207,10 +207,7 @@ pub(crate) fn verify<'a>(
         &signed_message(envelope.signed),
         &Signature(signature),
     )
-    .map_err(|error| match error {
-        CryptoError::Forged => Error::BadSignature,
-        other => Error::from(other),
-    })?;
+    .map_err(bad_signature)?;
     Ok(Verified {
         envelope,
         ctx,
@@ -233,10 +230,12 @@ pub(crate) struct Verified<'a> {
 }
 
 impl Verified<'_> {
+    /// The `sender_pk` of the opened header, which the signature proved.
     pub(crate) fn sender_pk(&self) -> &PublicKey {
         &self.header.sender_pk
     }
 
+    /// The sender's counter for this message.
     pub(crate) fn counter(&self) -> u64 {
         self.header.counter
     }
@@ -261,10 +260,7 @@ impl Verified<'_> {
         let mk = message_key(&self.ctx.keys, &self.header.sender_pk, self.header.counter)?;
         let envelope = &self.envelope;
         let padded = crypto::aead_decrypt(&mk, &envelope.nonce, envelope.aad, envelope.ciphertext)
-            .map_err(|error| match error {
-                CryptoError::Forged => Error::BadSignature,
-                other => Error::from(other),
-            })?;
+            .map_err(bad_signature)?;
         drop(mk);
         let (sent_at, content) = self.read(&padded)?;
         Ok(Opened {
@@ -283,7 +279,9 @@ impl Verified<'_> {
             Err(CryptoError::BadPadding) => return Ok((None, Content::Unreadable)),
             Err(other) => return Err(Error::from(other)),
         };
-        let record = padded.get(..len).ok_or(Error::Internal)?;
+        let Some(record) = padded.get(..len) else {
+            return Ok((None, Content::Unreadable));
+        };
         let Ok(head) = PayloadHead::read(record) else {
             return Ok((None, Content::Unreadable));
         };
@@ -320,7 +318,8 @@ pub(crate) struct Opened {
 
 /// A readable message, one kept as `Unreadable`, or a stale one, which
 /// spec 021 discards as `Expired` (R12).
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub(crate) enum Content {
     Message(Payload),
     Unreadable,
@@ -346,8 +345,7 @@ impl<'a> Envelope<'a> {
     fn parse(blob: &'a [u8], channel: &ChannelId) -> Result<Envelope<'a>, Error> {
         let len = blob.len();
         let padded = len.checked_sub(BLOB_OVERHEAD).ok_or(Error::BadLength)?;
-        let blocks = padded.checked_div(PAD_BLOCK).unwrap_or_default();
-        if !padded.is_multiple_of(PAD_BLOCK) || !(1..=MAX_BLOCKS).contains(&blocks) {
+        if !is_padded_len(padded) {
             return Err(Error::BadLength);
         }
         if blob.first() != Some(&PROTO_V1) {
@@ -397,6 +395,17 @@ fn signed_message(signed: &[u8]) -> Vec<u8> {
     [MSG_SIGNATURE_TAG.as_slice(), signed].concat()
 }
 
+/// A signature or an AEAD that does not verify is `BadSignature`, the one
+/// verdict of step 4 and of step 7's AEAD (R11, R12); any other failure is
+/// libsodium's.
+fn bad_signature(error: CryptoError) -> Error {
+    match error {
+        CryptoError::Forged => Error::BadSignature,
+        other => Error::from(other),
+    }
+}
+
+/// `bytes` XORed with `mask`, byte by byte.
 fn xor<const N: usize>(mut bytes: [u8; N], mask: &[u8; N]) -> [u8; N] {
     for (byte, mask) in bytes.iter_mut().zip(mask) {
         *byte ^= mask;

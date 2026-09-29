@@ -18,7 +18,7 @@ mod tests;
 pub(crate) mod test_schema;
 
 /// Bytes of a field before its value: the key and the length (R1).
-const FIELD_HEADER_LEN: usize = 5;
+pub(crate) const FIELD_HEADER_LEN: usize = 5;
 
 /// Why a record was rejected, one variant per rule of spec 017.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

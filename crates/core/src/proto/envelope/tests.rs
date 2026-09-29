@@ -108,6 +108,8 @@ fn s013_t02_r02_rejects_bad_length() {
     // 1 185 + 1 024·64 is k = 65.
     for len in [
         0,
+        160,
+        161,
         1_184,
         1_186,
         64_674,
@@ -292,7 +294,7 @@ fn s013_t15_r11_check_order() {
     assert!(verify(&blob, &ctx, 1_000_040_000, now).is_ok());
     assert!(
         verify(&blob, &ctx, now, 1_000_040_000).is_ok(),
-        "min(received_at, now)"
+        "a received_at after now"
     );
 }
 
@@ -519,7 +521,7 @@ fn s013_t16_r12_open_outcomes() {
     let sent_at_field = |sent_at: u64| [&[2, 0, 0, 0, 8][..], &sent_at.to_be_bytes()].concat();
     let body_field: &[u8] = &[3, 0, 0, 0, 1, b'x'];
     let stale = 1_000_000_000;
-    let cases: [(&str, Vec<u8>, Option<u64>, Content); 8] = [
+    let cases: [(&str, Vec<u8>, Option<u64>, Content); 9] = [
         ("broken padding", no_marker, None, Content::Unreadable),
         (
             "broken record",
@@ -570,6 +572,12 @@ fn s013_t16_r12_open_outcomes() {
             Some(stale),
             Content::Stale,
         ),
+        (
+            "stale, a type of 2 bytes before key 2",
+            fields(&[&[0, 0, 0, 0, 2, 0, 0], &sent_at_field(stale), body_field]),
+            None,
+            Content::Unreadable,
+        ),
     ];
     for (case, padded, sent_at, content) in cases {
         let opened = open_padded(&padded, RECEIVED_AT, NOW).unwrap();
@@ -586,8 +594,12 @@ fn s013_t16_r12_open_outcomes() {
         (opened.sender_pk.0, opened.counter),
         (sender(SENDER_SEED).public().0, COUNTER)
     );
+}
 
-    // The worked example, sealed with `seal` at received_at = now.
+/// Spec 013, R12: the stale and future cases of the worked example, sealed
+/// with `seal` at `received_at = now`.
+#[test]
+fn s013_t16_r12_stale_worked_example() {
     for (now, sent_at, is_stale) in [
         (10_000_000_000, 6_000_000_000, true),
         (10_000_000_000, 9_996_060_000, false),
@@ -606,10 +618,14 @@ fn s013_t16_r12_open_outcomes() {
             "{sent_at}"
         );
     }
+}
 
-    // The bounds exactly, and `min(received_at, now)` on either side: with
-    // `window = ttl_ms + 360 000`, fresh while `sent_at + window` is not
-    // below the earlier of the two times.
+/// Spec 013, R12: the two bounds of the stale check exactly, with
+/// `window = ttl_ms + 360 000`, and `min(received_at, now)` with either
+/// time the earlier one: fresh while `sent_at + window` is not below the
+/// earlier time and `now + window` is not below `sent_at`.
+#[test]
+fn s013_t16_r12_stale_bounds_exactly() {
     let window = ttl_ms(TTL_SECONDS) + EXPIRY_MARGIN_MS;
     let sent_at = 9_996_000_000;
     let bound = sent_at + window;
@@ -636,21 +652,28 @@ fn s013_t16_r12_open_outcomes() {
         };
         assert_eq!(opened.content, expected, "{received_at} {now}");
     }
+    let sent_at = 10_003_920_000;
+    let now = sent_at - window;
+    for (received_at, now, is_stale) in [
+        (now, now, false),
+        (now - 1_000, now, false),
+        (now - 1, now - 1, true),
+    ] {
+        let payload = text(sent_at, BODY);
+        let opened = open_padded(&padded(&payload), received_at, now).unwrap();
+        let expected = if is_stale {
+            Content::Stale
+        } else {
+            Content::Message(payload)
+        };
+        assert_eq!(opened.content, expected, "{received_at} {now}");
+    }
+}
 
-    // A failure before key 2 is `Unreadable` even when the message is stale.
-    let wide_type = [
-        &[0, 0, 0, 0, 2, 0, 0][..],
-        &sent_at_field(stale),
-        body_field,
-    ]
-    .concat();
-    let opened = open_padded(&fields(&[&wide_type]), RECEIVED_AT, NOW).unwrap();
-    assert_eq!(
-        (opened.sent_at, opened.content),
-        (None, Content::Unreadable)
-    );
-
-    // A ciphertext under another `K_msg`, validly signed: the AEAD fails.
+/// Spec 013, R12: a ciphertext under another `K_msg`, validly signed, passes
+/// `verify` and fails the AEAD of `open`.
+#[test]
+fn s013_t16_r12_forged_aead_is_bad_signature() {
     let real = ctx();
     let forged = ChannelCtx {
         id: ChannelId(real.id.0),
@@ -673,23 +696,27 @@ fn s013_t16_r12_open_outcomes() {
     assert!(matches!(verified.open(), Err(Error::BadSignature)));
 }
 
-/// Spec 013, R13: the extremes of every time give a verdict and no panic.
+/// Spec 013, R13: the extremes of every time give their exact verdict and
+/// no panic: nothing wraps.
 #[test]
 fn s013_t17_r13_time_arithmetic_saturates() {
-    let extremes = [0, u64::MAX];
-    for sent_at in extremes {
-        let padded = padded(&text(sent_at, BODY));
-        for received_at in extremes {
-            for now in extremes {
-                let verdict = open_padded(&padded, received_at, now);
-                assert!(
-                    matches!(verdict, Err(Error::Expired) | Ok(_)),
-                    "{sent_at} {received_at} {now}"
-                );
-            }
-        }
+    let max = u64::MAX;
+    let last_minute = max - max % 60_000;
+    let message = |sent_at| Ok(Content::Message(text(sent_at, BODY)));
+    for (sent_at, received_at, now, verdict) in [
+        (0, 0, 0, message(0)),
+        (0, max, max, Ok(Content::Stale)),
+        (0, 0, max, Err(Error::Expired)),
+        (0, max, 0, message(0)),
+        (last_minute, max, max, message(last_minute)),
+        (last_minute, 0, 0, Ok(Content::Stale)),
+        (last_minute, max, 0, Ok(Content::Stale)),
+        (max, max, max, Ok(Content::Unreadable)),
+    ] {
+        let opened = open_padded(&padded(&text(sent_at, BODY)), received_at, now);
+        let content = opened.map(|opened| opened.content);
+        assert_eq!(content, verdict, "{sent_at} {received_at} {now}");
     }
-    assert_eq!(ttl_ms(u32::MAX), 4_294_967_295_000);
 }
 
 proptest! {
@@ -704,22 +731,23 @@ proptest! {
         is_text in any::<bool>(),
         blocks in 1..=MAX_BLOCKS,
         fill in 0..PAD_BLOCK,
-        name_len in 0..=MAX_DISPLAY_NAME,
+        name_len in proptest::option::of(0..=MAX_DISPLAY_NAME),
+        counter in any::<u64>(),
     ) {
         let payload = if is_text {
-            let name = "n".repeat(name_len);
-            let overhead = 24 + 5 + name_len;
+            let name = name_len.map(|len| "n".repeat(len));
+            let overhead = 24 + name_len.map_or(0, |len| 5 + len);
             let target = (PAD_BLOCK * (blocks - 1) + fill).clamp(overhead, MAX_PAYLOAD);
-            Payload { display_name: Some(name), ..text(SENT_AT, &vec![b'b'; target - overhead]) }
+            Payload { display_name: name, ..text(SENT_AT, &vec![b'b'; target - overhead]) }
         } else {
             Payload { kind: PayloadKind::KeyRetired, ..text(SENT_AT, b"") }
         };
         let ctx = ctx();
         let key = sender(SENDER_SEED);
-        let sealed = seal(&ctx, &key, KEY_RETIRED_COUNTER, &Nonce(NONCE), &payload).unwrap();
-        let again = seal(&ctx, &key, KEY_RETIRED_COUNTER, &Nonce(NONCE), &payload).unwrap();
+        let sealed = seal(&ctx, &key, counter, &Nonce(NONCE), &payload).unwrap();
+        let again = seal(&ctx, &key, counter, &Nonce(NONCE), &payload).unwrap();
         assert_eq!(&sealed.blob, &again.blob);
-        let direct = seal_padded(&ctx, &key, KEY_RETIRED_COUNTER, &Nonce(NONCE), &padded(&payload));
+        let direct = seal_padded(&ctx, &key, counter, &Nonce(NONCE), &padded(&payload));
         assert_eq!(&sealed.blob, &direct.unwrap().blob);
         let opened = verify(&sealed.blob, &ctx, RECEIVED_AT, NOW).unwrap().open().unwrap();
         assert_eq!(opened.content, Content::Message(payload));
@@ -730,7 +758,7 @@ proptest! {
     /// reached.
     #[test]
     fn s013_t21_r17_every_flipped_byte_is_rejected_by_verify(
-        body_len in 0..3_000usize,
+        body_len in 0..=MAX_PAYLOAD - 24,
         offset in any::<usize>(),
         mask in 1..=u8::MAX,
     ) {
@@ -785,6 +813,9 @@ fn check_sealed(vector: &Vector) {
         assert_eq!(vector.input("body").bytes(), BODY);
         assert_eq!(vector.input("received_at").u64_hex(), RECEIVED_AT);
         assert_eq!(vector.input("now").u64_hex(), NOW);
+    }
+    if vector.name() == "key_retired" {
+        assert_eq!(counter, KEY_RETIRED_COUNTER, "ADR 0033");
     }
     let kind = match vector.input("type").number() {
         0 => PayloadKind::Text,
@@ -892,6 +923,7 @@ fn check_rejected(vector: &Vector) {
     let verdict = verify(blob, &ctx, received_at, vector.input("now").u64_hex());
     let error = format!("{:?}", verdict.err().expect("a rejected blob"));
     assert_eq!(error, vector.expected("error").text(), "{}", vector.name());
+    check_edit(vector.name(), blob);
     if vector.has_input("pk_u") {
         let key = check_sender(vector);
         let stream = header_keystream(&ctx.keys, &Nonce(blob[57..81].try_into().unwrap())).unwrap();
@@ -906,6 +938,39 @@ fn check_rejected(vector: &Vector) {
         let signature = crypto::Signature(signature);
         assert!(crypto::verify_detached(key.public(), &message, &signature).is_ok());
     }
+}
+
+/// The edits a negative vector's name promises (T08, T22): a `mutate_*`
+/// differs from `text_k1` in one byte of its region, and
+/// `signed_ciphertext_only` opens to the header of `text_k1` with its lowest
+/// counter bit flipped.
+fn check_edit(name: &str, blob: &[u8]) {
+    let original = sealed().blob;
+    let last = original.len() - 1;
+    let region = match name {
+        "mutate_version" => 0..1,
+        "mutate_channel_id" => 1..17,
+        "mutate_enc_hdr" => 17..57,
+        "mutate_nonce" => 57..81,
+        "mutate_ciphertext" => HEADER_LEN..last + 1 - 64,
+        "mutate_signature" => last + 1 - 64..last + 1,
+        "signed_ciphertext_only" => {
+            let stream = header_keystream(&ctx().keys, &Nonce(NONCE)).unwrap();
+            let header = Header::from_bytes(&xor(
+                blob[17..57].try_into().unwrap(),
+                stream[..40].try_into().unwrap(),
+            ));
+            assert_eq!(header.sender_pk.0, sender(SENDER_SEED).public().0);
+            assert_eq!(header.counter, COUNTER ^ 1);
+            return;
+        }
+        _ => return,
+    };
+    let changed: Vec<usize> = (0..original.len())
+        .filter(|&offset| blob[offset] != original[offset])
+        .collect();
+    assert_eq!(changed.len(), 1, "{name}");
+    assert!(region.contains(&changed[0]), "{name}");
 }
 
 /// Spec 015, R3: every vector of `013.json` is checked once.

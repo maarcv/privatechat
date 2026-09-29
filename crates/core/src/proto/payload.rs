@@ -9,7 +9,7 @@
 
 use core::fmt;
 
-use super::record::{Reader, RecordError, UnknownKeys, Writer};
+use super::record::{FIELD_HEADER_LEN, Reader, RecordError, UnknownKeys, Writer};
 use crate::Error;
 
 #[cfg(test)]
@@ -23,7 +23,12 @@ pub(crate) const MAX_BLOCKS: usize = 63;
 
 /// The largest encoded payload before padding: `sodium_pad` adds at least
 /// one byte, so 63 blocks hold one byte less (R7).
-pub(crate) const MAX_PAYLOAD: usize = 64_511;
+pub(crate) const MAX_PAYLOAD: usize = PAD_BLOCK * MAX_BLOCKS - 1;
+
+/// Whether `len` is a padded payload, 1 024·k bytes with k in 1..=63 (R10).
+pub(crate) fn is_padded_len(len: usize) -> bool {
+    len.is_multiple_of(PAD_BLOCK) && (PAD_BLOCK..=PAD_BLOCK * MAX_BLOCKS).contains(&len)
+}
 
 /// The largest `display_name`, in bytes of UTF-8 (R7, R9).
 pub(crate) const MAX_DISPLAY_NAME: usize = 64;
@@ -41,12 +46,9 @@ const KEY_BODY: u8 = 3;
 const TYPE_TEXT: u8 = 0;
 const TYPE_KEY_RETIRED: u8 = 1;
 
-/// Bytes of a field before its value: key and length (spec 017 R1).
-const FIELD_HEADER_LEN: usize = 5;
-
-/// The bytes every payload has: `type` (5 + 1), `sent_at` (5 + 8) and the
-/// field header of `body` (5).
-const FIXED_LEN: usize = 24;
+/// The bytes every payload has: the fields `type` (1 byte) and `sent_at`
+/// (8 bytes) and the field header of `body`.
+const FIXED_LEN: usize = 3 * FIELD_HEADER_LEN + 1 + 8;
 
 /// What a payload is; any other `type` is a message of a later version.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,8 +77,8 @@ impl PayloadKind {
 }
 
 /// A decrypted message. Its `Debug` hides `body` and `display_name`, which
-/// are content (R14); it has no `Display`.
-#[derive(PartialEq, Eq)]
+/// are content (R14); it has no `Display`, and only the tests compare two.
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub(crate) struct Payload {
     pub(crate) kind: PayloadKind,
     pub(crate) display_name: Option<String>,
@@ -140,8 +142,9 @@ impl Payload {
         Ok(core::mem::take(&mut *writer.finish()))
     }
 
-    /// The record of R6 with its name filtered by R9, and no validation:
-    /// `open` runs `validate` after the stale check.
+    /// The whole record of R6 with its name filtered by R9, and no
+    /// validation: what `open` reads through [`PayloadHead`], in one call,
+    /// for the tests and the fuzz target of spec 016.
     ///
     /// # Errors
     ///
