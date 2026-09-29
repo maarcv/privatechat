@@ -124,7 +124,7 @@ Everything comes from libsodium; no primitive of our own is implemented. All lit
 | Message and channel signature | `crypto_sign` (Ed25519) | pk 32 B, sk 64 B, sig 64 B. Verification with libsodium's `crypto_sign_verify_detached` compiled **without** `ED25519_COMPAT`: rejects S ≥ L, small-order `R`, small-order `pk` and non-canonical `pk`. The server verifies exclusively through `core::crypto` |
 | Password → key (exported config) | `crypto_pwhash` (Argon2id13) | 32 B; `OPSLIMIT_INTERACTIVE`, `MEMLIMIT_INTERACTIVE` (64 MiB), fixed by `config_version = 1` |
 | Encryption of exported files | `crypto_secretbox` | key 32 B, nonce 24 B |
-| Fixed-size comparison | `sodium_memcmp` | Every comparison of `[u8; N]` in `core` |
+| Fixed-size comparison | `sodium_memcmp` | Every comparison of `[u8; N]` in the production code of `core`, but public identifiers used as map keys or for ordering (AGENTS 22) |
 | Randomness | `randombytes_buf` | — |
 
 **Domain tags.** Every hash or signature carries a fixed ASCII prefix that separates its use. They are protocol literals, not the product name:
