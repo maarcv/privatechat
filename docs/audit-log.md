@@ -2,6 +2,22 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit T
+
+**2026-09-29 — Audit T, code audit of spec 012-message-keys (branch `012-message-keys`), in three independent passes (T-A: structure and simplicity; T-B: the local CI run, 46 mutants of the Rust code and 14 of the reference-script section, probes of the edge cases, the script's XChaCha20 against libsodium; T-C: conformance with spec 012, `docs/spec.md` §4, ADR 0002, 0013, 0018, 0032 and the specs that consume it).** CI green; no defect in the code; the values of every vector are unchanged. No question needed the human reviewer. Findings (numbered AT) and changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AT1 | Three vectors could lose their meaning with every test green: `message_key_other_sender` with the first sender, `message_key_max` below 2^64 − 1, a `header_sealed` counter whose bytes repeat (T-B S09, S10, S12) | Low | Guards in the script section; its helpers `header_bytes`, `header_keystream` and `xor`, which spec 013's section will reuse (T-C8) |
+| AT2 | Nothing held R6's single error mapping: a local `map_err` to another variant passed, since libsodium does not fail in a test (T-B K18, K19, H23) | Low | T08 asserts that `keys.rs` and `header.rs` contain no `map_err` |
+| AT3 | T07 claimed every byte of the keystream differs and asserted one; T05 mostly tested XOR and omitted two cases the spec names; T02 checked its own helper and repeated T04 (T-A2, T-A3, T-A5, T-C3, T-C4) | Low | T05 and T07 assert what they say; T04 keeps the negatives; the spec's test cases amended |
+| AT4 | As in audit S, the tests named vectors that only the dispatch loads (T-C2) | Low | Interface sentence; T01, T02, T05, T10 |
+| AT5 | The Interface did not state the traits `ChannelKeys` and `Header` implement, nor why `Header` is not `Copy`; R5 named only one failure (T-C5, T-C6) | Low | Interface; R5 |
+| AT6 | The Context said three platforms check these vectors, which spec 040 says the bindings do not reach; the `header_sealed` row listed fewer fields than it carries (T-C7, C2) | Low | Context; Vectors |
+| AT7 | Duplicated zip loops and a bare `40` in `message_key`, hand-written XOR loops, three copies of the key derivation in the checkers, a weaker T09 than 011's, uneven docs and `# Errors` wording, a stale `proto.rs` module doc (T-A1, T-A4, T-A6–T-A11, T-A13) | Low | `concat` in `message_key`; one `xor` and one `keys(k_ch)` per test module; T09 checks the formula lines of §4; docs |
+
+Not changed: the slice is 460 net lines against the 400 of AGENTS 14, since the audit's trims were offset by the script's guards and the rest is tests; it ships as one slice, stated in the spec's History, rather than the two the spec allows (T-A12, T-C1). The mutants that survive are equivalent: a `swap_bytes().to_le_bytes()` counter, and a hand-written `Debug` that prints the same text. `header_keystream` returns a plain array that is not wiped; it is not a key, and whether it should be is left to spec 013, where it is used (T-C12). AGENTS 22 says "no exceptions" while the rust skill lets tests use `assert_eq!` on byte arrays; the tests of every spec already follow the skill, and the wording is left for the human reviewer (T-C, C1).
+
 ## Audit S
 
 **2026-09-29 — Audit S, code audit of spec 011-config-format (branch `011-config-format`, slices (a)–(e)), in three independent passes (S-A: structure and simplicity; S-B: the local CI run per commit, 131 mutants of the Rust code, probes of the edge cases; S-C: conformance with spec 011, `docs/spec.md` §4, §5, §9, the ADRs it cites and the specs that consume it).** CI green at every commit; no correctness defect in the code; the bytes of every record, QR text and file are unchanged. The human reviewer decided four questions (numbered AS, so that they do not read as requirements):
