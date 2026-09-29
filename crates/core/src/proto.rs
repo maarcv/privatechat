@@ -4,7 +4,9 @@
 //! envelope, which is a fixed layout and not a record, and the fingerprint.
 
 pub(crate) mod config;
+pub(crate) mod envelope;
 pub(crate) mod header;
 pub(crate) mod keys;
+pub(crate) mod payload;
 pub(crate) mod record;
 pub(crate) mod wordlist;

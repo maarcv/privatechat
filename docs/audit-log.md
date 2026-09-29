@@ -2,6 +2,27 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit U
+
+**2026-09-29 — Audit U, code audit of spec 013-wire-message (branch `013-wire-message`, slices (a)–(c)), in three independent passes (U-A: structure and simplicity; U-B: the local CI run, 81 mutants of the Rust code and 30 of the reference-script section; U-C: conformance with spec 013, `docs/spec.md` §4, ADR 0005, 0018, 0023, 0027, 0029, 0030, 0032, 0033, and an independent checker of the 29 vectors).** CI green; no defect in the code. U-C is the second reading the acceptance criterion asks for: the offsets of R1 and the order of R11 and R12 match `docs/spec.md` §4 byte for byte, and every vector has the outcome its row gives. Findings (numbered AU) and changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AU1 | Boundaries no test reached: a blob of 161 bytes (k = 0), a divisor of 60 000 other than 60 000, a Cc character outside ASCII, a name limit counted in characters, the name's field header at the 64 511-byte bound, the future bound with `received_at` before `now`, the exact verdicts at the time extremes, a `Debug` that prints the body as numbers (U-A1–UA3, U-B E17, E40–E44, P03–P08, P22, P32, P36) | Low | T02, T11, T12, T13, T16, T17 and T18 carry the cases; each of those mutants now fails a test |
+| AU2 | A vector could lose its point with every test green: a `mutate_*` byte outside its region, `signed_ciphertext_only` without its counter flip, `key_retired` below the last counter, expiry or future bounds one step off, records that lost the field their name is about (U-B S07–S27) | Low | The dispatch checks each edit against `text_k1`; the script requires each vector's shape; two tautological requires dropped (U-A16) |
+| AU3 | Literals that derive from others, the padded-length rule written twice, the `Forged` mapping written twice, an error after the message was consumed, missing doc lines, `PartialEq` on content outside tests (U-A4–UA10) | Low | Derived constants, `record::FIELD_HEADER_LEN` shared, `is_padded_len`, `bad_signature`; `Unreadable` for a failed slice; docs; `cfg_attr(test)` |
+| AU4 | T16 in one test of 170 lines; T20 always at the last counter and always with a name; T21 only up to k = 3; T10's out-of-order case tested a missing key instead (U-A13, U-A15, U-C5–UC7) | Low | T16 in four tests; T20 over any counter and an optional name; T21 over every k; T10 as the vector's shape |
+| AU5 | The spec's Interface lacked `PayloadHead`, and said `open` calls `decode`; T02 named k = 65 as the first length above the class; T06 and T11 named the wrong proof (U-A D1, U-C2, UC4, UC8) | Low | Interface, T02, T06, T11 |
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AU-Q1 | R12 did not say whether a stale record with no key 0 is `Stale` or `Unreadable`, and no vector fixed it, so two platforms could disagree (U-A D2, U-C1, U-B P30) | `Stale`: the absent key 0 is judged with the `type`, after the stale check, as §4 step 7 lists it | R12, T16, vector `stale_missing_type` |
+| AU-Q2 | Audit T left open whether the header keystream is wiped (U-C11) | Not wiped: it opens only what the receiver keeps, as audit H (H55) decided | Security of spec 013 |
+| AU-Q3 | AGENTS 22 said "no exceptions", against the tests' `assert_eq!` of the rust skill and the exception for public identifiers decided in audit J (021-R9) and never written in (U-C12) | Rewrite | AGENTS 22 and the `sodium_memcmp` row of `docs/spec.md` §4: production code, keys, signatures and anything secret-dependent always `ct_eq`; tests and public identifiers used as map keys or for ordering exempt |
+| AU-Q4 | The three slices are 473, 1 035 and 614 net lines against the 400 of AGENTS 14 (U-A D3, U-C3) | Accept, most of it is tests | History of spec 013; each excess stated in its commit |
+
+Not changed: the mutants that survive are equivalent — `wrapping_mul` in `ttl_ms` (a `u32` times 1 000 fits), step 2 without `min` (the same verdict for either order of the times), `saturating_sub` for the blob length (0 blocks is still `BadLength`), `sent_at` left out of `Debug`, and script mutants that move a byte within its region or change a bad record into another bad record. Test names that reuse a T for a closely related check (`s013_t10_r06_encode_decode_round_trip`, `s013_t20_r16_seal_padded_checks_its_length`) stay, since each covers the requirement it names (U-A12). ADR 0027's wording of the stale point is looser than §4 step 7, which is canonical and refines it (U-C10).
+
 ## Audit T
 
 **2026-09-29 — Audit T, code audit of spec 012-message-keys (branch `012-message-keys`), in three independent passes (T-A: structure and simplicity; T-B: the local CI run, 46 mutants of the Rust code and 14 of the reference-script section, probes of the edge cases, the script's XChaCha20 against libsodium; T-C: conformance with spec 012, `docs/spec.md` §4, ADR 0002, 0013, 0018, 0032 and the specs that consume it).** CI green; no defect in the code; the values of every vector are unchanged. No question needed the human reviewer. Findings (numbered AT) and changes applied:
