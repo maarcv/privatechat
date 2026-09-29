@@ -1,6 +1,6 @@
 # 017 — Record encoding
 
-Status: accepted
+Status: implemented
 Phase: 1
 Related ADRs: 0015, 0021, 0023
 Depends on: 010-primitives-wrapper, 015-test-vectors
@@ -174,3 +174,4 @@ None. Decided in audit F (`docs/audit-log.md`):
 - 2026-09-24 revised after audit I (`docs/audit-log.md`): only the six types phase 1 decodes (`bool`, nested records and `list<T>` leave with their vectors; 020 and 030 add them when needed); no partial-read mode (the in-order reader checks a value as soon as it is read); the reference script of spec 015 produces `017.json` and the Rust tests reproduce it; `#[must_use]` stated in the Interface; the dispatch test is an Interface sentence; the test schema written like production code; requirements and tests renumbered
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-09-28 revised after audit R (`docs/audit-log.md`), the code audit of both slices: text length checked before UTF-8 (R4); a getter asked out of order returns `KeyOrder` and when an absent key is decided (Interface); vector fields named; vectors `all_fields`, `record_at_limit` and `unknown_key_then_extra_byte`; T01 reads `u8_field` by hand; T02, T04, T05, T07 and T11 extended
+- 2026-09-29 implemented: slices (a) and (b) with the audit R fixes, reviewed (Marc Vilardebó)
