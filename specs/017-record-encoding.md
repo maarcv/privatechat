@@ -149,7 +149,7 @@ None. The codec is `pub(crate)`.
 
 ## Acceptance criterion
 
-`cargo test -p privatechat-core s017_` green; clippy, `cargo deny` and the documentation lint green; the reference script of spec 015-test-vectors produces `017.json` and its CI step finds no difference. Fuzzing `record_decode` belongs to spec 016-fuzz-harness and to the phase 1 exit. Non-automatable criterion: a second person reads R1 to R8 against `docs/spec.md` §4 "Record encoding" and confirms that the vectors can be written by hand from them.
+`cargo test -p privatechat-core s017_` green; clippy, `cargo deny` and the documentation lint green; the reference script of spec 015-test-vectors produces `017.json` and its CI step finds no difference. Fuzzing `record_decode` belongs to spec 016-fuzz-harness and to the phase 1 exit.
 
 ## Out of scope
 

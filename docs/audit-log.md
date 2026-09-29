@@ -2,6 +2,27 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit W
+
+**2026-09-29 — Audit W, code audit of spec 016-fuzz-harness (branch `016-fuzz-harness`, slices (a) and (b)), in three independent passes (W-A: structure and simplicity; W-B: the local CI run, 42 mutants of `fuzz_entry`, 42 of the checker and 27 of the seed script; W-C: conformance with spec 016, `docs/spec.md` §10 and §11, specs 001, 011, 013–015, 017 and the specs that add targets).** CI green; no defect in the code that ships. The seven targets ran 15 minutes each on the dated nightly with no crash, 9 to 500 million runs per target. Findings (numbered AW) and changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AW1 | The tests of `receive` and `receive_signed` sealed with the entries' own `context()`, so a wrong channel or TTL passed; T05 let `BadPayload` through, so the truncation and padding of R5 were untested; four entries had no verdict test and `QR_CHANNEL` was tied to nothing (W-A1, WA2, W-B R07–R29, W-C WC6) | Medium | A context built in the tests, the expiry bound, T05 asserts `Ok` or `Expired` and pins the counter, the sender, 63 blocks, the bytes after them and the padding; `receive_signed_verdict` returns `Opened`; `s016_t08_r08_seeds_reach_their_entries` |
+| AW2 | The checker missed parsers with a lifetime or generics, took two functions of one name for one, never flagged a stale exclusion, let any code beside the target macro through, missed grouped imports and the randomness of `core`, read untracked files, and had fixtures for T06 only (W-A3–WA7, W-B C03–C39, W-C WC2, WC3, WC5) | Medium | R6 reaches a method as `T::name(`, exclusions are `T::name` and must name a function; T07 compares each target with the template and each entry with its one call; wider T10; `git ls-files`; a fixture for every rule, run each time |
+| AW3 | `fuzz_seeds.py` deleted the grown corpus, wrote each filter twice, and its check compared file names only (W-A8, WA9, W-B S01–S26) | Medium | Seeds are written beside the corpus; one table; the check cuts each seed by its layout and compares the vector's fields |
+| AW4 | The nightly installed `cargo-fuzz` under the pinned stable it never installed, kept no crashing input and flagged a slow input only after 20 minutes (W-A10, WA11, W-C WC1, W-B §4) | Medium | `cargo +nightly install`, the artifacts kept on failure, `-timeout=10` (R9) |
+| AW5 | Inconsistent splits, a helper named like the parsers, stale docs, a one-entry `.sh` list in §11 and the Interface, §10 without the steps of R12, AGENTS 8 silent on the fuzz crate (W-A12–WA16, W-C WC4, WC16, WC17) | Low | `fuzz_entry.rs`, spec 016's Interface, `docs/spec.md` §10 and §11, AGENTS 8 |
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AW-Q1 | The phase 1 exit asked for an internal review of `proto` by a second person, recorded here by name (W-C D1) | Dropped: the reviewer will not do it; the independent audits S–W stand in its place | `docs/spec.md` §10; the acceptance criteria of specs 013, 016 and 017 |
+| AW-Q2 | Keep the crashing input, pin `cargo-fuzz`, a limit per input (W-C D2, D3, W-A D3) | Keep the input and a limit of 10 s; `cargo-fuzz` unpinned | R9 and `fuzz.yml` |
+| AW-Q3 | When 016 is `implemented` (W-C D4) | After the first green hour of all seven targets on GitHub | — |
+| AW-Q4 | How strict "reached" is (W-A D1) | The technically correct rule | R6, spec 020 R29 |
+
+Not changed: the equivalent mutants (the server URL of the context, which derives nothing; an AEAD failure after a correct seal; the checker's self-tests, whose removal is invisible by construction), the one PR for both slices (551 and 318 net lines, the first above 400 with its reason in the commit), and the seed check on every pull request, left to the nightly (W-C D6).
+
 ## Audit V
 
 **2026-09-29 — Audit V, code audit of spec 014-fingerprint (branch `014-fingerprint`, one slice), in three independent passes (V-A: structure and simplicity; V-B: the local CI run, 63 mutants of the Rust code and 40 of the reference-script section; V-C: conformance with spec 014, `docs/spec.md` §4, §7, §9, ADR 0025, 0028, specs 010, 011, 015 and the specs that consume 014, and an independent recomputation of the 15 vectors).** CI green; no defect in the code. The reviewer read the first three words of `words_reference` against the list by hand (lines 1153, 1087 and 864: `mosquito`, `march`, `hip`), the acceptance criterion's non-automatable step. Findings (numbered AV) and changes applied:

@@ -256,7 +256,7 @@ A mutated `enc_hdr` or `nonce` fails at the signature, and not at the header, be
 
 ## Acceptance criterion
 
-`cargo test -p privatechat-core s013_` green, the mutation table and its property included; clippy, `cargo deny` and the documentation lint green; the section of the reference script of spec 015-test-vectors produces `013.json` byte for byte as committed. Non-automatable criterion: a second person reads the offsets of R1 and the order of R11 and R12 against `docs/spec.md` §4 and confirms them byte for byte, which is the internal review of `proto` the phase 1 exit criterion asks for.
+`cargo test -p privatechat-core s013_` green, the mutation table and its property included; clippy, `cargo deny` and the documentation lint green; the section of the reference script of spec 015-test-vectors produces `013.json` byte for byte as committed.
 
 ## Out of scope
 
