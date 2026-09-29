@@ -32,6 +32,7 @@ mod proto;
 mod vectors;
 
 pub use error::Error;
+pub use proto::config::Config;
 
 /// Default exchange server of a fresh installation (`docs/spec.md` §8, ADR 0022).
 ///

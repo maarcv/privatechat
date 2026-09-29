@@ -401,6 +401,123 @@ def check_s017_t13_r13_section_produces_017_json() -> list[dict]:
 SECTIONS["017"] = check_s017_t13_r13_section_produces_017_json
 
 
+# --- Spec 011: channel config -------------------------------------------------------
+
+# The config record of `docs/spec.md` §5, in key order: field → (key, type). Key 6 is optional.
+CONFIG_SCHEMA = {
+    "config_version": (0, "u8"), "proto_version": (1, "u8"), "k_ch": (2, "bytes32"),
+    "server_url": (3, "text"), "ttl_seconds": (4, "u32"), "created_at": (5, "u64"),
+    "invite_expires_at": (6, "u64"), "suggested_name": (7, "text"),
+}
+CONFIG_MAX_RECORD = 512  # 011 R7
+CHANNEL_ID_TAG = b"privatechat/chid/v1"  # 011 R9
+CHANNEL_AUTH_CONTEXT = b"chauth__"
+CHANNEL_ID_LEN = 16
+
+
+def config_record(values: dict) -> bytes:
+    """The canonical record (017 R10) of `values`, which may hold values out of their ranges:
+    the negatives need them, and only the width of an integer is fixed here."""
+    fields = []
+    for name, (key, kind) in CONFIG_SCHEMA.items():
+        if name not in values:
+            continue
+        value = values[name]
+        if kind in INTEGER_WIDTHS:
+            value = value.to_bytes(INTEGER_WIDTHS[kind], "big")
+        elif kind == "text":
+            value = value.encode("utf-8")
+        fields.append(record_field(key, value))
+    return b"".join(fields)
+
+
+def channel_identity(k_ch: bytes, ttl_seconds: int) -> tuple[bytes, bytes]:
+    """`pk_ch` from `KDF(K_ch, "chauth__")` through RFC 8032, and `channel_id`, the first
+    16 bytes of `BLAKE2b(tag ‖ pk_ch ‖ BE32(ttl_seconds))` (011 R8)."""
+    pk_ch = ed25519_public_key(kdf_derive(k_ch, CHANNEL_AUTH_CONTEXT))
+    digest = blake2b_256(CHANNEL_ID_TAG + pk_ch + struct.pack(">I", ttl_seconds))
+    return pk_ch, digest[:CHANNEL_ID_LEN]
+
+
+def check_s011_t22_r22_section_produces_011_json() -> list[dict]:
+    """The vectors of spec 011: each positive with its record and the fields and identity it
+    decodes to, each negative a one-rule edit of `config_no_invite` or `config_reference`."""
+    created_at = 1_790_000_000_000
+    now = U64(created_at + 60_000)
+    reference = {
+        "config_version": 1, "proto_version": 1, "k_ch": bytes(range(0x40, 0x60)),
+        "server_url": "wss://chat.example.org:9001", "ttl_seconds": 86_400,
+        "created_at": U64(created_at), "invite_expires_at": U64(created_at + 600_000),
+        "suggested_name": "Família",
+    }
+    no_invite = {name: value for name, value in reference.items() if name != "invite_expires_at"}
+
+    def positive(name: str, origin: str, values: dict) -> dict:
+        pk_ch, channel_id = channel_identity(values["k_ch"], values["ttl_seconds"])
+        expected = {name: value.encode("utf-8") if isinstance(value, str) else value
+                    for name, value in values.items()}
+        record = config_record(values)
+        require(len(record) <= CONFIG_MAX_RECORD, f"{name}: above the record limit")
+        return {"name": name, "kind": "positive", "source": "derived",
+                "origin": f"spec 011: {origin}", "inputs": {"record": record, "now": now},
+                "expected": {**expected, "pk_ch": pk_ch, "channel_id": channel_id}}
+
+    def negative(name: str, origin: str, record: bytes, error: str) -> dict:
+        return {"name": name, "kind": "negative", "source": "derived",
+                "origin": f"spec 011: {origin}", "inputs": {"record": record, "now": now},
+                "expected": {"error": error}}
+
+    vectors = [
+        positive("config_reference", "every key, the invitation expiring 10 min after creation",
+                 reference),
+        positive("config_no_invite", "config_reference without key 6", no_invite),
+        positive("channel_id_ttl_60", "config_no_invite at the lowest TTL",
+                 {**no_invite, "ttl_seconds": 60}),
+        positive("channel_id_ttl_2592000", "config_no_invite at the highest TTL",
+                 {**no_invite, "ttl_seconds": 2_592_000}),
+    ]
+    base = config_record(no_invite)
+    key_0_1 = config_record({"config_version": 1, "proto_version": 1})
+    swapped = {name: no_invite[name] for name in ("config_version", "proto_version", "k_ch")}
+    out_of_order = (config_record(swapped)
+                    + config_record({"ttl_seconds": no_invite["ttl_seconds"]})
+                    + config_record({"server_url": no_invite["server_url"]})
+                    + config_record({name: no_invite[name]
+                                     for name in ("created_at", "suggested_name")}))
+    filler = CONFIG_MAX_RECORD + 1 - len(key_0_1) - FIELD_HEADER_LEN
+    negatives = [
+        ("record_key_order", "key 4 before key 3", out_of_order, "BadConfig"),
+        ("record_unknown_key", "config_no_invite and an extra key 8",
+         base + record_field(8, b"x"), "BadConfig"),
+        ("record_extra_byte", "config_no_invite and one byte after it", base + b"\x00",
+         "BadConfig"),
+        ("record_kch_31_bytes", "a K_ch of 31 bytes",
+         config_record({**no_invite, "k_ch": bytes(31)}), "BadConfig"),
+        ("record_version_2", "config_version 2",
+         config_record({**no_invite, "config_version": 2}), "UnsupportedVersion"),
+        ("record_proto_version_2", "proto_version 2",
+         config_record({**no_invite, "proto_version": 2}), "UnsupportedVersion"),
+        ("record_513_bytes", "513 bytes: keys 0 and 1, then a key 9 as filler",
+         key_0_1 + record_field(9, bytes(filler)), "BadConfig"),
+        ("ttl_59", "a TTL one below the range", config_record({**no_invite, "ttl_seconds": 59}),
+         "BadConfig"),
+        ("ttl_2592001", "a TTL one above the range",
+         config_record({**no_invite, "ttl_seconds": 2_592_001}), "BadConfig"),
+        ("name_65_bytes", "a suggested name of 65 bytes",
+         config_record({**no_invite, "suggested_name": "a" * 65}), "BadConfig"),
+        ("name_control", "a suggested name holding U+0085, a C1 control",
+         config_record({**no_invite, "suggested_name": "a\u0085b"}), "BadConfig"),
+        ("invite_expired", "an invitation that expired 1 ms before now",
+         config_record({**reference, "invite_expires_at": U64(now - 1)}), "InviteExpired"),
+    ]
+    require(len(negatives[6][2]) == CONFIG_MAX_RECORD + 1, "record_513_bytes is 513 bytes")
+    vectors += [negative(*item) for item in negatives]
+    return vectors
+
+
+SECTIONS["011"] = check_s011_t22_r22_section_produces_011_json
+
+
 def words() -> list[str]:
     """The English BIP-39 list, for the section of spec 014; refused unless its SHA-256 is the
     literal of 011 R17, before any file is written."""

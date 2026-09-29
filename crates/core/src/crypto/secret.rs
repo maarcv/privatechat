@@ -23,6 +23,15 @@ impl<const N: usize> Secret<N> {
         Self(bytes)
     }
 
+    /// Copies key material out of a buffer the caller keeps, such as a decoded
+    /// record, straight into the secret's own storage: `from_bytes(*bytes)`
+    /// would leave a copy of the array behind (spec 011 R19).
+    pub(crate) fn copy_from(bytes: &[u8; N]) -> Self {
+        let mut secret = Self([0; N]);
+        secret.0.copy_from_slice(bytes);
+        secret
+    }
+
     /// A fresh secret from libsodium's random source (spec 010, R5).
     ///
     /// # Errors
