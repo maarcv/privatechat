@@ -1167,7 +1167,6 @@ SECTIONS["014"] = check_s014_t07_r07_section_produces_014_json
 TYPES_SCHEMA = {"small": (0, "u8"), "flag": (1, "bool"), "nested": (2, "record"),
                 "numbers": (3, "list")}
 TYPES_MAX_NUMBERS = 4
-ITEM_HEADER_LEN = 4  # the `len` before each list item (020 R1)
 # The schemas of 020, in key order. A `list` value is its items, already encoded.
 PEER_SCHEMA = {
     "pk": (0, "bytes32"), "label": (1, "text"), "verified": (2, "bool"), "muted": (3, "bool"),
@@ -1282,7 +1281,7 @@ def check_s020_t30_r30_section_produces_020_json() -> list[dict]:
         "identity_seed": bytes(range(0x20, 0x40)), "identity_epoch": 2, "send_counter": U64(8),
         "cursor": U64(1_790_000_500_000), "own_display_name": "Marta", "local_name": "Família",
         "peers": peers, "outbox": outbox, "retiring_seed": bytes(range(0xe0, 0x100)),
-        "own_old_keys": own_old_keys, "own_key_used_elsewhere": False, "read_only": False,
+        "own_old_keys": own_old_keys, "own_key_used_elsewhere": True, "read_only": False,
         "log_committed_len": U64(9 + 4 + 200), "log_generation": 3,
         "synced_at": U64(1_790_000_600_000), "truncated_at": U64(1_790_000_000_500),
     }

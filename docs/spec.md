@@ -187,7 +187,7 @@ record = field*            field = key (u8) ‖ len (u32 BE) ‖ value (len byte
 ```
 
 - Keys are strictly increasing within a record: no duplicate and no reordering, so each value has exactly one encoding.
-- The schema of the record fixes the type of each key: `u8`, `u32` or `u64` (exactly 1, 4 or 8 bytes, big-endian), `bool` (1 byte, 0x00 or 0x01), `bytes` (any length within the schema's limit), `bytesN` (exactly N bytes), `text` (valid UTF-8), a nested record of a named schema, or `list<T>` (the value is a sequence of items, each `len` u32 BE ‖ item). Phase 1 implements `u8`, `u32`, `u64`, `bytes`, `bytesN` and `text` (spec 017-record-encoding); specs 020-store-files and 030-ws-protocol add `bool`, nested records and lists when their first schema needs them.
+- The schema of the record fixes the type of each key: `u8`, `u32` or `u64` (exactly 1, 4 or 8 bytes, big-endian), `bool` (1 byte, 0x00 or 0x01), `bytes` (any length within the schema's limit), `bytesN` (exactly N bytes), `text` (valid UTF-8), a nested record of a named schema, or `list<T>` (the value is a sequence of items, each `len` u32 BE ‖ item). Phase 1 implements `u8`, `u32`, `u64`, `bytes`, `bytesN` and `text` (spec 017-record-encoding); spec 020-store-files R1 adds `bool`, nested records and lists.
 - A record ends exactly at the end of its buffer, and each value is consumed exactly: no trailing byte anywhere.
 - A missing mandatory key is an error. An optional key is present or absent; there is no null.
 - Each schema says whether an unknown key is ignored (payload, client-server messages) or is an error (config, local files). An ignored key still obeys the framing and the order.
@@ -400,8 +400,8 @@ The device is where the real attacks land; these measures are mandatory in v1 un
 
 | Measure | Android | iOS | Desktop (Tauri) |
 | --- | --- | --- | --- |
-| Local storage | No database. Per channel, two files encrypted with `crypto_secretbox` under `K_db`: `state.bin` (small state, rewritten atomically) and `messages.log` (append-only, one record per message). Rust `store` crate (ADR 0021); Kotlin never touches the files | Same; Swift never touches the files | Same |
-| App settings | `settings.bin` in the `data_dir`, same format and key `K_db` as `state.bin`: `default_server_url`, `lock_timeout`, SOCKS5 proxy. On first open, `default_server_url` = the compile-time constant `DEFAULT_SERVER_URL` (the project's server; each *fork* puts its own). No other server URL in the code | Same | Same |
+| Local storage | No database. Per channel, two files encrypted with `crypto_secretbox` under a key derived from `K_db` for that channel's directory (spec 020-store-files R3): `state.bin` (small state, rewritten atomically) and `messages.log` (append-only, one record per message). Rust `store` crate (ADR 0021); Kotlin never touches the files | Same; Swift never touches the files | Same |
+| App settings | `settings.bin` in the `data_dir`, the format of `state.bin` with its own magic, sealed under `K_settings`, derived from `K_db` (spec 020-store-files R3, R4): `default_server_url`, `lock_timeout`, SOCKS5 proxy. On first open, `default_server_url` = the compile-time constant `DEFAULT_SERVER_URL` (the project's server; each *fork* puts its own). No other server URL in the code | Same | Same |
 | Storage key `K_db` | 32 random bytes wrapped with an AES-GCM key from the Keystore: `setUserAuthenticationParameters(lock_timeout, AUTH_BIOMETRIC_STRONG \| AUTH_DEVICE_CREDENTIAL)`, `setInvalidatedByBiometricEnrollment(false)`, `setUnlockedDeviceRequired(true)`, StrongBox if available | 32 random bytes wrapped with a P-256 key from the Secure Enclave: `SecAccessControl(.privateKeyUsage, .userPresence)`, item `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` | 32 random bytes in the OS keychain (Keychain with code-signature ACL, Credential Manager, Secret Service) |
 | Loss of the wrapping key | Backup restore, reinstallation or hardware failure erase all local data; recovery is re-importing the config from a fresh invitation, which gives a new key (§1, §7). Documented in §1 and in the help. No transient Keystore failure regenerates the wrapping key | Same | Same |
 | App lock | **It is the system prompt** (BiometricPrompt with `DEVICE_CREDENTIAL`) that unwraps the key; no app-specific PIN or password. App `lock_timeout` = Keystore timeout; default 1 min; "strict" option = lock on app switch; quick action "Lock now". The user is recommended a device PIN over biometrics | Same with `LAContext` (`.userPresence`) | App password only if the OS has no keychain; documented |
@@ -446,7 +446,7 @@ flowchart TD
 | Component | Technology | Reason |
 | --- | --- | --- |
 | `core` | Stable Rust pinned in `rust-toolchain.toml` (exact version in spec 000), `libsodium-sys-stable`, `zeroize`, and `unicode-normalization` and `unicode-security` for the name comparison of §7 (ADR 0036); nothing else (own record encoding, ADR 0023) | One implementation, controlled memory, no GC leaving keys on the heap |
-| `store` | Separate Rust crate: `std::fs` + `core::crypto` (secretbox). Implements the `Store` trait of `core` with two files per channel and atomic commit via `rename` (ADR 0021). No SQLite, no C outside libsodium | Outside `core` because it does I/O (AGENTS 10); a single implementation for the three platforms, fuzzable from Rust |
+| `store` | Separate Rust crate: `std::fs` and the seal and open functions of `core` (spec 020-store-files), never libsodium on its own. Implements the `Store` trait of `core` with two files per channel and atomic commit via `rename` (ADR 0021). No SQLite, no C outside libsodium | Outside `core` because it does I/O (AGENTS 10); a single implementation for the three platforms, fuzzable from Rust |
 | Mobile bindings | `uniffi` (proc macros; no UDL). `Config`, `Channel`, `Session` and `Settings` are opaque handles (uniffi `Object`); only `Received`, `Peer`, `Fingerprint`, `Gap` and `Event` are `Record`s. | Generates Kotlin and Swift; secrets do not cross the boundary by value |
 | Desktop | Tauri 2 + Svelte 5 + TypeScript; the core is linked in as a Rust crate, no wasm | Pinned and signed code, OS keychain, one more reproducible build |
 | Android | Kotlin, Jetpack Compose, minSdk 26. No Room or SQLite: storage belongs to the core | Current standard |
@@ -468,10 +468,22 @@ pub enum Error {
 
 pub type PeerId = [u8; 32]; // a peer's pk_u, as `Peer` carries it; one's own pk_u is never a PeerId (ADR 0029)
 
-pub trait Store {
-    fn load(&mut self) -> Result<ChannelState, StoreError>;               // on open; truncates the log to the committed length
-    fn commit(&mut self, batch: WriteBatch) -> Result<(), StoreError>;   // single write; atomic (ADR 0021)
-    fn compact(&mut self, now: u64) -> Result<u32, StoreError>;          // TTL purge
+pub trait Store: Send {                                                  // spec 020-store-files, which is normative
+    fn name(&self) -> &DirName;
+    fn load(&mut self) -> Result<Option<(ChannelState, Vec<LogRecord>)>, StoreError>; // on open; truncates the log to the committed length
+    fn commit(&mut self, batch: &WriteBatch) -> Result<(), StoreError>;  // single write; atomic (ADR 0021)
+    fn compact(&mut self, state: &ChannelState, now: u64) -> Result<u32, StoreError>; // TTL purge
+    fn log_len(&self) -> u64;
+    fn destroy(&mut self) -> Result<(), StoreError>;
+}
+
+pub trait Vault: Send {                                                  // the data directory: every channel's store and settings.bin
+    fn list(&mut self) -> Result<Vec<Box<dyn Store>>, StoreError>;
+    fn create(&mut self, channel_id: &[u8; 16]) -> Result<Box<dyn Store>, StoreError>;
+    fn remove(&mut self, name: &DirName) -> Result<(), StoreError>;
+    fn dir_name(&self, channel_id: &[u8; 16]) -> Result<DirName, StoreError>;
+    fn load_settings(&mut self) -> Result<Option<Settings>, StoreError>;
+    fn save_settings(&mut self, settings: &Settings) -> Result<(), StoreError>;
 }
 
 impl Config {
@@ -508,10 +520,8 @@ impl Channel {
     pub fn leave(self) -> Result<(), Error>;
 }
 
-impl Settings {                                                                 // settings.bin (ADR 0021)
-    pub fn load(store: &dyn Store) -> Result<Settings, Error>;                  // first open: DEFAULT_SERVER_URL
-    pub fn save(&self, store: &mut dyn Store) -> Result<(), Error>;
-}
+// Settings (settings.bin, ADR 0021) is loaded and saved through `Vault` (spec 020-store-files R22);
+// what the app reads and sets, and DEFAULT_SERVER_URL on first open, is spec 027-core-api's.
 
 impl Session {                                                                  // sans-I/O, ADR 0020; one per server
     pub fn new(server_url: &str, channels: Vec<Channel>) -> Session;             // all channels of one server (host and port)
@@ -568,7 +578,7 @@ From then on the three clients advance in parallel over a core whose API no long
 - [ ] The local CI commands of `.github/CONTRIBUTING.md` green (fmt, clippy, build, test, deny, doc lint, requirements)
 - [ ] Workspace lints (`[workspace.lints]` in `Cargo.toml`) at `deny` in `core`, `store` and `server`; `overflow-checks = true` in release
 - [ ] No secret in logs; redacted `Debug` on every new secret type (added to `SECRET_TYPES`)
-- [ ] Every rejection path has a test `input → Error::X · commits = 0` (commits other than the cursor); stateful spec → test with `FailingStore`
+- [ ] Every rejection path has a test `input → Error::X · commits = 0` (commits other than those that move only the cursor or `synced_at`, AGENTS 23); stateful spec → test with `FailingStore`
 - [ ] New dependencies justified in the PR, one sentence each
 - [ ] Format, config, derivation or tag change → new ADR in `docs/adr/`
 - [ ] No accepted ADR modified outside its status line, except a stale-reference correction logged in `docs/audit-log.md`
@@ -682,7 +692,7 @@ None of the open decisions blocks phases 0–2. Those that would change the wire
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
 | Our own error in the format or in the key derivation | Breaks confidentiality without anyone noticing | Fixed binary format, positive and negative vectors, mutation table, fuzzing, external review before the beta |
-| State error (counter, cursor, anti-replay) spread across layers | Messages silently rejected or replay accepted | A single `Store` in Rust with `commit(Batch)`; `FailingStore` in CI; "counter before blob" rule (§4) |
+| State error (counter, cursor, anti-replay) spread across layers | Messages silently rejected or replay accepted | A single `Store` in Rust with `commit(&WriteBatch)`; `FailingStore` in CI; "counter before blob" rule (§4) |
 | Users who share the config by photo or messaging | The whole model falls | UX that pushes towards the in-person QR, warnings on export, ephemeral QR, generated 7-word password |
 | TOFU confusion: accepting an impostor as a "new phone" | Impersonation | Labels not reusable without verifying, pre-verification by QR, key retirement, short identifier marked as non-verification and collision rule |
 | App stores reject reproducible builds or demand SDKs that break the model | Delay | Start the publication process in phase 5; F-Droid as an alternative |

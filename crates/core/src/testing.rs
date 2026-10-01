@@ -11,8 +11,8 @@ mod compare;
 mod faults;
 mod memory;
 
-pub use self::builders::{batch, record, state_for};
-pub use self::compare::{records_eq, state_eq};
+pub use self::builders::{batch, record, settings, state_for};
+pub use self::compare::{records_eq, settings_eq, state_eq};
 pub use self::faults::{FailingStore, FailingVault, Faults};
 pub use self::memory::{MemoryStore, MemoryVault};
 

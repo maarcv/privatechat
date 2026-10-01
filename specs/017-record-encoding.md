@@ -50,7 +50,7 @@ This spec fixes the codec. Which keys each record has, and which error a failure
 
 The 4-byte length is wide enough for the largest value any record carries: the `outbox` list of `state.bin` (spec 020-store-files), a value of at most 2 073 920 bytes. The real bound is always the smaller of the buffer and the caller's maximum.
 
-**Test schema.** The tests, the vectors and the fuzz target `record_decode` of spec 016-fuzz-harness decode by one fixed schema that uses every type this spec implements, compiled under `cfg(any(test, fuzzing))` so that both reach it, and so that no path of the codec depends on a later spec to be exercised: 0 `u8` mandatory; 1 `u32`; 2 `u64`; 3 `bytes` (max 64); 4 `bytes32`; 5 `text` (max 64). Every key but 0 is optional, and the whole record is at most 512 bytes. The test schema is written like production code — no `unwrap`, `get` instead of indexing, checked arithmetic — because it also compiles under `cfg(fuzzing)`, where the test relaxations of AGENTS 4 do not apply.
+**Test schema.** The tests, the vectors and the fuzz target `record_decode` of spec 016-fuzz-harness (which also drives spec 020's codec schema, 016 R3) decode by one fixed schema that uses every type this spec implements, compiled under `cfg(any(test, fuzzing))` so that both reach it, and so that no path of the codec depends on a later spec to be exercised: 0 `u8` mandatory; 1 `u32`; 2 `u64`; 3 `bytes` (max 64); 4 `bytes32`; 5 `text` (max 64). Every key but 0 is optional, and the whole record is at most 512 bytes. The test schema is written like production code — no `unwrap`, `get` instead of indexing, checked arithmetic — because it also compiles under `cfg(fuzzing)`, where the test relaxations of AGENTS 4 do not apply.
 
 ## Interface
 
@@ -176,3 +176,4 @@ None. Decided in audit F (`docs/audit-log.md`):
 - 2026-09-28 revised after audit R (`docs/audit-log.md`), the code audit of both slices: text length checked before UTF-8 (R4); a getter asked out of order returns `KeyOrder` and when an absent key is decided (Interface); vector fields named; vectors `all_fields`, `record_at_limit` and `unknown_key_then_extra_byte`; T01 reads `u8_field` by hand; T02, T04, T05, T07 and T11 extended
 - 2026-09-29 implemented: slices (a) and (b) with the audit R fixes, reviewed (Marc Vilardebó)
 - 2026-09-30 amended by spec 020-store-files R1: `bool`, nested records and `list<T>` added; R9 and the Security lines say no schema is recursive; the largest value is the `outbox` list; a sealed `open` has its decoder fuzzed on its own
+- 2026-09-30 amended by audit X of spec 020-store-files: the test schema's paragraph says `record_decode` also drives 020's codec schema

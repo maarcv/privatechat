@@ -17,10 +17,10 @@ use crate::storage::{
 /// What the faults are armed with, shared by the test and every double.
 #[derive(Default)]
 struct Armed {
-    /// Calls of `commit`, `compact` and `destroy` since a fault was armed.
-    calls: u32,
-    fail_at: Option<u32>,
-    poison_after: Option<u32>,
+    /// `fail_at` and `poison_after`, each with the calls of `commit`,
+    /// `compact` and `destroy` counted since it was armed.
+    fail_at: Option<Countdown>,
+    poison_after: Option<Countdown>,
     fail_commits: bool,
     fail_compactions: bool,
     /// Calls of `create` since `fail_create_at` was armed.
@@ -33,6 +33,23 @@ struct Armed {
     fail_save_settings: bool,
     /// The last state each directory's store let through.
     last_committed: BTreeMap<DirName, ChannelState>,
+}
+
+/// A fault armed for the `at`-th counted call, and the calls counted since.
+#[derive(Clone, Copy)]
+struct Countdown {
+    at: u32,
+    calls: u32,
+}
+
+impl Countdown {
+    /// Counts one call; whether it is the armed one.
+    fn tick(countdown: &mut Option<Countdown>) -> bool {
+        countdown.as_mut().is_some_and(|countdown| {
+            countdown.calls = countdown.calls.saturating_add(1);
+            countdown.calls == countdown.at
+        })
+    }
 }
 
 /// A handle to the faults, `Clone` so that the test keeps one after giving
@@ -72,17 +89,13 @@ impl Faults {
     /// Fails the `n`-th `commit`, `compact` or `destroy` from now, across
     /// every store sharing this handle.
     pub fn fail_at(&self, n: u32) {
-        let mut armed = self.armed();
-        armed.calls = 0;
-        armed.fail_at = Some(n);
+        self.armed().fail_at = Some(Countdown { at: n, calls: 0 });
     }
 
     /// Lets the `n`-th `commit`, `compact` or `destroy` from now through,
     /// then fails it and every later call of that one store.
     pub fn poison_after(&self, n: u32) {
-        let mut armed = self.armed();
-        armed.calls = 0;
-        armed.poison_after = Some(n);
+        self.armed().poison_after = Some(Countdown { at: n, calls: 0 });
     }
 
     /// Fails every `commit` while on.
@@ -130,24 +143,22 @@ impl Faults {
     /// A duplicate of the last state a store of `name` let through.
     pub fn last_committed(&self, name: &DirName) -> Option<ChannelState> {
         let armed = self.armed();
-        armed
-            .last_committed
-            .get(name)
-            .and_then(|state| state.duplicate().ok())
+        armed.last_committed.get(name).map(ChannelState::duplicate)
     }
 
     /// Counts a call and says what it does.
     fn verdict(&self, call: Call) -> Verdict {
         let mut armed = self.armed();
-        armed.calls = armed.calls.saturating_add(1);
+        let failing = Countdown::tick(&mut armed.fail_at);
+        let poisoning = Countdown::tick(&mut armed.poison_after);
         let blocked = match call {
             Call::Commit => armed.fail_commits,
             Call::Compact => armed.fail_compactions,
             Call::Destroy => false,
         };
-        if blocked || armed.fail_at == Some(armed.calls) {
+        if blocked || failing {
             Verdict::Fail
-        } else if armed.poison_after == Some(armed.calls) {
+        } else if poisoning {
             Verdict::PassThenPoison
         } else {
             Verdict::Pass
@@ -217,7 +228,7 @@ impl Store for FailingStore {
         let faults = self.faults.clone();
         self.counted(Call::Commit, |store| {
             store.commit(batch)?;
-            let state = batch.state().duplicate()?;
+            let state = batch.state().duplicate();
             faults.armed().last_committed.insert(name, state);
             Ok(())
         })

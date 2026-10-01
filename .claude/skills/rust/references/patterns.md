@@ -144,29 +144,32 @@ expected field and nowhere else). The full mutation table belongs to
 
 ## 3. `Store` trait and `WriteBatch` — one commit per operation (AGENTS 23)
 
+The normative shape is the Interface of spec 020-store-files; in short:
+
 ```rust
-pub trait Store {
-    fn load(&mut self) -> Result<ChannelState, StoreError>;
-    fn commit(&mut self, batch: WriteBatch) -> Result<(), StoreError>;
-    fn compact(&mut self, now: u64) -> Result<u32, StoreError>;
+pub trait Store: Send {
+    fn name(&self) -> &DirName;
+    fn load(&mut self) -> Result<Option<(ChannelState, Vec<LogRecord>)>, StoreError>;
+    fn commit(&mut self, batch: &WriteBatch) -> Result<(), StoreError>;
+    fn compact(&mut self, state: &ChannelState, now: u64) -> Result<u32, StoreError>;
+    fn log_len(&self) -> u64;
+    fn destroy(&mut self) -> Result<(), StoreError>;
 }
 
-#[derive(Default)]
 pub struct WriteBatch {
-    pub messages: Vec<StoredMessage>,
-    pub peers: Vec<PeerUpdate>,
-    pub outbox_add: Vec<(ClientRef, Vec<u8>, [u8; 64])>, // blob and its unmasked signature (ADR 0029)
-    pub outbox_remove: Vec<ClientRef>,
-    pub send_counter: Option<u64>,
-    pub cursor: Option<u64>,
+    state: ChannelState,     // the whole new state, not a diff
+    records: Vec<LogRecord>, // appended to the log, in order
 }
 ```
 
-`Channel` builds one `WriteBatch` per logical operation and commits it once;
-a rejection builds a batch containing only `cursor`. The two in-memory test
-stores are `CountingStore` (counts commits other than the cursor's) and
-`FailingStore { fail_at: n }` (returns `StoreError::Io` at the n-th commit;
-tests reopen and compare state).
+`Channel` builds one `WriteBatch` per logical operation and commits it once,
+by reference, so that it can move the parts into memory after `Ok` and retry
+after `LogFull`; a rejection commits only a state whose cursor moved. The
+doubles live in `core::testing` (feature `test-support` for the `store`
+tests): `MemoryStore` counts the commits of AGENTS 23 in `commits()`, and
+`FailingStore` with a `Faults` handle fails the *n*-th call (`fail_at`) or
+poisons a store after it (`poison_after`); tests reopen and compare with
+`state_eq`.
 
 ## 4. Sans-I/O `Session` (ADR 0020)
 
@@ -197,19 +200,24 @@ real server binary in Docker with a fake clock.
 
 ## 5. Encrypt: reserve before you emit (`docs/spec.md` §4 "Send counter")
 
+A sketch; spec 021-channel-session is normative.
+
 ```rust
-pub fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> Result<(ClientRef, Vec<u8>), Error> {
+pub fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> Result<ClientRef, Error> {
     let payload = Payload::text(body, display_name, now)?; // the core builds and validates it
-    let counter = self.send_counter;
+    let counter = self.state.send_counter;
     let next = counter.checked_add(1).ok_or(Error::CounterExhausted)?;
-    let client_ref = ClientRef::random();
+    let client_ref = ClientRef::random()?;
     let sealed = self.seal(&payload, counter, now)?;        // draws the nonce, derives mk, encrypts, signs and masks the signature (013 R16)
-    let mut batch = WriteBatch::default();
-    batch.send_counter = Some(next);
-    batch.outbox_add.push((client_ref, sealed.blob.clone(), sealed.signature));
-    self.store.commit(batch)?;                               // if this fails, no blob leaves
-    self.send_counter = next;
-    Ok((client_ref, sealed.blob))
+    let mut state = self.state.duplicate();                 // the whole new state, not a diff
+    state.send_counter = next;
+    state.outbox.push(outbox_entry(client_ref, now, counter, &sealed)); // spec 021 builds the entry
+    let batch = WriteBatch::new(state, vec![own_record(client_ref, counter, now, &payload)]); // 021 R8
+    self.store.commit(&batch)?;                             // if this fails, no blob leaves and memory is unchanged
+    let (state, records) = batch.into_parts();              // only after `Ok` does memory move on, both parts
+    self.state = state;
+    self.records.extend(records);
+    Ok(client_ref)                                          // the blob leaves only through outbox()
 }
 ```
 

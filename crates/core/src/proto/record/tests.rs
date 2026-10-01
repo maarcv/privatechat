@@ -307,7 +307,12 @@ fn s020_t01_r01_new_codec_types() {
         .iter()
         .flat_map(|n| item(&n.to_be_bytes()))
         .collect();
-    for (value, expected) in [(&full[..], &numbers[..]), (&[], &[])] {
+    let three = &full[..3 * (ITEM_HEADER_LEN + 8)];
+    for (value, expected) in [
+        (&full[..], &numbers[..]),
+        (three, &numbers[..3]),
+        (&[], &[]),
+    ] {
         let buf = record(&[(0, &[1]), (3, value)]);
         let decoded = TypesRecord::decode(&buf, Reject).unwrap();
         assert_eq!(decoded.numbers.as_deref(), Some(expected));
@@ -317,10 +322,18 @@ fn s020_t01_r01_new_codec_types() {
     let one_more = [&full[..], &item(&[0; 8])].concat();
     let short_header = [&full[..8 + ITEM_HEADER_LEN], &[0, 0]].concat();
     let short_item = [&item(&[0; 8])[..], &[0, 0, 0, 8, 1]].concat();
-    let cases: [(&[u8], RecordError); 5] = [
+    // An item longer than both its bound and the bytes left: the bytes are
+    // checked first, as R2 checks a field.
+    let over_both = [0, 0, 0, 9, 0, 0, 0];
+    // Every item is framed before the first is decoded: a bad item ahead of
+    // a framing error gives the framing error.
+    let bad_then_cut = [&item(&[0; 7])[..], &[0, 0]].concat();
+    let cases: [(&[u8], RecordError); 7] = [
+        (&bad_then_cut, Truncated),
         (&one_more, TooLong),
         (&short_header, Truncated),
         (&short_item, Truncated),
+        (&over_both, Truncated),
         (&item(&[0; 9]), TooLong),
         (&item(&[0; 7]), Width),
     ];

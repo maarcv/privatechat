@@ -26,10 +26,18 @@ pub(crate) const FIELD_HEADER_LEN: usize = 5;
 /// Bytes of a list item before its value: the length (spec 020 R1).
 pub(crate) const ITEM_HEADER_LEN: usize = 4;
 
+/// The widths of the fixed-width types (R3, spec 020 R1), for the lengths a
+/// writer is allocated at.
+pub(crate) const U8_LEN: usize = 1;
+pub(crate) const BOOL_LEN: usize = 1;
+pub(crate) const U32_LEN: usize = 4;
+pub(crate) const U64_LEN: usize = 8;
+
 /// The encoded length of a record whose present fields have these value
 /// lengths (R1), for a writer allocated at its exact size (spec 020 R25).
 /// Saturating: every caller checks each value's bound first, so it never
-/// saturates, and a writer given a wrong length refuses with `TooLong`.
+/// saturates. A writer given too short a length refuses with `TooLong`; too
+/// long a one would only over-allocate, which the capacity tests catch.
 pub(crate) fn record_len(values: &[Option<usize>]) -> usize {
     values.iter().flatten().fold(0, |sum, len| {
         sum.saturating_add(FIELD_HEADER_LEN).saturating_add(*len)
@@ -84,7 +92,8 @@ pub(crate) struct Writer {
 impl Writer {
     /// A writer of at most `max` bytes, all allocated here: a `Vec` that grew
     /// would free its old copy of a secret without wiping it (R11). `max` is a
-    /// constant of the schema, never input.
+    /// constant of the schema, or the exact length of a record whose values
+    /// were bounded first (spec 020 R25), never an unchecked input.
     pub(crate) fn with_capacity(max: usize) -> Writer {
         Writer {
             buf: Zeroizing::new(Vec::with_capacity(max)),

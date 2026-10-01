@@ -5,10 +5,15 @@
 
 use zeroize::Zeroizing;
 
-use super::{DirName, MAX_NAME, StorageKey, StoreError, open_box, seal_box, store_key};
+use super::{
+    DirName, ID_LEN, KEY_LEN, MAX_NAME, SIGNATURE_LEN, StorageKey, StoreError, open_box, required,
+    seal_box, store_key, within,
+};
 use crate::crypto::{PublicKey, Signature};
 use crate::proto::payload::MAX_PAYLOAD;
-use crate::proto::record::{Reader, RecordError, UnknownKeys, Writer, record_len};
+use crate::proto::record::{
+    BOOL_LEN, Reader, RecordError, U8_LEN, U32_LEN, U64_LEN, UnknownKeys, Writer, record_len,
+};
 
 #[cfg(test)]
 pub(super) mod tests;
@@ -79,12 +84,14 @@ pub(crate) struct Message {
     pub(crate) counter: u64,
     /// Key 8, with key 11 for a text.
     pub(crate) content: Content,
-    pub(crate) display_name: Option<Vec<u8>>,
+    /// Wiped on drop like the body: whatever comes out of a sealed log
+    /// record is.
+    pub(crate) display_name: Option<Zeroizing<Vec<u8>>>,
     /// Absent when `open` read none.
     pub(crate) sent_at: Option<u64>,
     /// Key 12 and, when it is true, key 13: a message sealed by this device
     /// carries its `client_ref`.
-    pub(crate) own: Option<[u8; 16]>,
+    pub(crate) own_client_ref: Option<[u8; 16]>,
 }
 
 /// Key 8 of a message: 0 text with its body, 1 `key_retired`, 2 unreadable.
@@ -92,14 +99,6 @@ pub(crate) enum Content {
     Text(Zeroizing<Vec<u8>>),
     KeyRetired,
     Unreadable,
-}
-
-/// `Corrupt` unless `len` is within `max` (R27).
-fn within(len: usize, max: usize) -> Result<(), StoreError> {
-    if len > max {
-        return Err(StoreError::Corrupt);
-    }
-    Ok(())
 }
 
 impl LogRecord {
@@ -159,31 +158,30 @@ impl LogRecord {
     /// body on anything else, or an own message without its `client_ref`.
     pub(crate) fn decode(buf: &[u8]) -> Result<(LogRecord, u32, u64), StoreError> {
         let mut reader = Reader::new(buf, MAX_LOG_RECORD, UnknownKeys::Reject)?;
-        let missing = || RecordError::Missing;
-        let kind = reader.u8(KEY_KIND)?.ok_or_else(missing)?;
-        let generation = reader.u32(KEY_GENERATION)?.ok_or_else(missing)?;
-        let offset = reader.u64(KEY_OFFSET)?.ok_or_else(missing)?;
-        let purge_at = reader.u64(KEY_PURGE_AT)?.ok_or_else(missing)?;
+        let kind = required(reader.u8(KEY_KIND))?;
+        let generation = required(reader.u32(KEY_GENERATION))?;
+        let offset = required(reader.u64(KEY_OFFSET))?;
+        let purge_at = required(reader.u64(KEY_PURGE_AT))?;
         let entry = match kind {
             0 => LogEntry::Message(Message::decode(&mut reader)?),
             1 => LogEntry::Acked {
-                server_id: *reader.bytes_n(KEY_SERVER_ID)?.ok_or_else(missing)?,
-                received_at: reader.u64(KEY_RECEIVED_AT)?.ok_or_else(missing)?,
-                client_ref: *reader.bytes_n(KEY_CLIENT_REF)?.ok_or_else(missing)?,
+                server_id: *required(reader.bytes_n(KEY_SERVER_ID))?,
+                received_at: required(reader.u64(KEY_RECEIVED_AT))?,
+                client_ref: *required(reader.bytes_n(KEY_CLIENT_REF))?,
             },
             2 => LogEntry::NotDelivered {
-                client_ref: *reader.bytes_n(KEY_CLIENT_REF)?.ok_or_else(missing)?,
+                client_ref: *required(reader.bytes_n(KEY_CLIENT_REF))?,
             },
             3 => LogEntry::KeptSignature {
-                sent_at: reader.u64(KEY_SENT_AT)?.ok_or_else(missing)?,
-                client_ref: *reader.bytes_n(KEY_CLIENT_REF)?.ok_or_else(missing)?,
-                signature: Signature(*reader.bytes_n(KEY_SIGNATURE)?.ok_or_else(missing)?),
-                epoch: reader.u32(KEY_EPOCH)?.ok_or_else(missing)?,
+                sent_at: required(reader.u64(KEY_SENT_AT))?,
+                client_ref: *required(reader.bytes_n(KEY_CLIENT_REF))?,
+                signature: Signature(*required(reader.bytes_n(KEY_SIGNATURE))?),
+                epoch: required(reader.u32(KEY_EPOCH))?,
             },
             4 => LogEntry::Seen {
-                server_id: *reader.bytes_n(KEY_SERVER_ID)?.ok_or_else(missing)?,
-                sender_pk: PublicKey(*reader.bytes_n(KEY_SENDER_PK)?.ok_or_else(missing)?),
-                counter: reader.u64(KEY_COUNTER)?.ok_or_else(missing)?,
+                server_id: *required(reader.bytes_n(KEY_SERVER_ID))?,
+                sender_pk: PublicKey(*required(reader.bytes_n(KEY_SENDER_PK))?),
+                counter: required(reader.u64(KEY_COUNTER))?,
             },
             _ => return Err(StoreError::Corrupt),
         };
@@ -249,13 +247,18 @@ impl LogRecord {
     /// The exact length of [`LogRecord::encode`]'s output: the four keys
     /// every record has, then those of its kind.
     fn encoded_len(&self) -> usize {
-        let head = record_len(&[Some(1), Some(4), Some(8), Some(8)]);
+        let head = record_len(&[Some(U8_LEN), Some(U32_LEN), Some(U64_LEN), Some(U64_LEN)]);
         let entry = match &self.entry {
             LogEntry::Message(message) => record_len(&message.value_lens()),
-            LogEntry::Acked { .. } => record_len(&[Some(16), Some(8), Some(16)]),
-            LogEntry::NotDelivered { .. } => record_len(&[Some(16)]),
-            LogEntry::KeptSignature { .. } => record_len(&[Some(8), Some(16), Some(64), Some(4)]),
-            LogEntry::Seen { .. } => record_len(&[Some(16), Some(32), Some(8)]),
+            LogEntry::Acked { .. } => record_len(&[Some(ID_LEN), Some(U64_LEN), Some(ID_LEN)]),
+            LogEntry::NotDelivered { .. } => record_len(&[Some(ID_LEN)]),
+            LogEntry::KeptSignature { .. } => record_len(&[
+                Some(U64_LEN),
+                Some(ID_LEN),
+                Some(SIGNATURE_LEN),
+                Some(U32_LEN),
+            ]),
+            LogEntry::Seen { .. } => record_len(&[Some(ID_LEN), Some(KEY_LEN), Some(U64_LEN)]),
         };
         head.saturating_add(entry)
     }
@@ -272,18 +275,28 @@ impl LogRecord {
     }
 }
 
+impl Content {
+    /// Key 8 of this content.
+    fn to_byte(&self) -> u8 {
+        match self {
+            Content::Text(_) => 0,
+            Content::KeyRetired => 1,
+            Content::Unreadable => 2,
+        }
+    }
+}
+
 impl Message {
     /// Keys 4 to 13 of a message, after the four every record has.
     fn decode(reader: &mut Reader<'_>) -> Result<Message, StoreError> {
-        let missing = || RecordError::Missing;
         let server_id = reader.bytes_n(KEY_SERVER_ID)?.copied();
-        let received_at = reader.u64(KEY_RECEIVED_AT)?.ok_or_else(missing)?;
-        let sender_pk = PublicKey(*reader.bytes_n(KEY_SENDER_PK)?.ok_or_else(missing)?);
-        let counter = reader.u64(KEY_COUNTER)?.ok_or_else(missing)?;
-        let content = reader.u8(KEY_CONTENT)?.ok_or_else(missing)?;
+        let received_at = required(reader.u64(KEY_RECEIVED_AT))?;
+        let sender_pk = PublicKey(*required(reader.bytes_n(KEY_SENDER_PK))?);
+        let counter = required(reader.u64(KEY_COUNTER))?;
+        let content = required(reader.u8(KEY_CONTENT))?;
         let display_name = reader
             .bytes(KEY_DISPLAY_NAME, MAX_NAME)?
-            .map(<[u8]>::to_vec);
+            .map(|name| Zeroizing::new(name.to_vec()));
         let sent_at = reader.u64(KEY_SENT_AT)?;
         let body = reader.bytes(KEY_BODY, MAX_PAYLOAD)?;
         let content = match (content, body) {
@@ -292,8 +305,8 @@ impl Message {
             (2, None) => Content::Unreadable,
             _ => return Err(StoreError::Corrupt),
         };
-        let own = match (
-            reader.bool(KEY_OWN)?.ok_or_else(missing)?,
+        let own_client_ref = match (
+            required(reader.bool(KEY_OWN))?,
             reader.bytes_n(KEY_CLIENT_REF)?,
         ) {
             (true, Some(client_ref)) => Some(*client_ref),
@@ -308,13 +321,16 @@ impl Message {
             content,
             display_name,
             sent_at,
-            own,
+            own_client_ref,
         })
     }
 
     /// `Corrupt` for a value open would refuse (R27).
     fn check(&self) -> Result<(), StoreError> {
-        within(self.display_name.as_ref().map_or(0, Vec::len), MAX_NAME)?;
+        within(
+            self.display_name.as_ref().map_or(0, |name| name.len()),
+            MAX_NAME,
+        )?;
         match &self.content {
             Content::Text(body) => within(body.len(), MAX_PAYLOAD),
             Content::KeyRetired | Content::Unreadable => Ok(()),
@@ -328,16 +344,16 @@ impl Message {
             Content::KeyRetired | Content::Unreadable => None,
         };
         [
-            self.server_id.map(|_| 16),
-            Some(8),
-            Some(32),
-            Some(8),
-            Some(1),
-            self.display_name.as_ref().map(Vec::len),
-            self.sent_at.map(|_| 8),
+            self.server_id.map(|_| ID_LEN),
+            Some(U64_LEN),
+            Some(KEY_LEN),
+            Some(U64_LEN),
+            Some(U8_LEN),
+            self.display_name.as_ref().map(|name| name.len()),
+            self.sent_at.map(|_| U64_LEN),
             body,
-            Some(1),
-            self.own.map(|_| 16),
+            Some(BOOL_LEN),
+            self.own_client_ref.map(|_| ID_LEN),
         ]
     }
 
@@ -349,12 +365,7 @@ impl Message {
         writer.u64(KEY_RECEIVED_AT, self.received_at)?;
         writer.bytes(KEY_SENDER_PK, &self.sender_pk.0)?;
         writer.u64(KEY_COUNTER, self.counter)?;
-        let content = match self.content {
-            Content::Text(_) => 0,
-            Content::KeyRetired => 1,
-            Content::Unreadable => 2,
-        };
-        writer.u8(KEY_CONTENT, content)?;
+        writer.u8(KEY_CONTENT, self.content.to_byte())?;
         if let Some(name) = &self.display_name {
             writer.bytes(KEY_DISPLAY_NAME, name)?;
         }
@@ -364,8 +375,8 @@ impl Message {
         if let Content::Text(body) = &self.content {
             writer.bytes(KEY_BODY, body)?;
         }
-        writer.bool(KEY_OWN, self.own.is_some())?;
-        if let Some(client_ref) = &self.own {
+        writer.bool(KEY_OWN, self.own_client_ref.is_some())?;
+        if let Some(client_ref) = &self.own_client_ref {
             writer.bytes(KEY_CLIENT_REF, client_ref)?;
         }
         Ok(())

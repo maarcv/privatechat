@@ -2,10 +2,12 @@
 //! `ChannelState` and `LogRecord` implement neither `PartialEq` nor `Debug`,
 //! since they hold secrets.
 
-use crate::storage::{ChannelState, LogRecord};
+use crate::storage::{ChannelState, LogRecord, Settings};
 
 /// Whether `a` and `b` hold the same state, field by field, the seeds
-/// compared in constant time through `Secret`'s `PartialEq`. The store's own
+/// compared in constant time through `Secret`'s `PartialEq`; the config,
+/// which holds `K_ch` in a record of variable length, with `==`, since a
+/// test's timing leaks nothing. The store's own
 /// `log_committed_len` and `log_generation` are ignored: a store sets them
 /// at each commit. A list item is compared by its canonical encoding, which
 /// holds each field at its own key.
@@ -50,4 +52,11 @@ pub fn records_eq(a: &[LogRecord], b: &[LogRecord]) -> bool {
                 (Ok(a), Ok(b)) => a == b,
                 _ => false,
             })
+}
+
+/// Whether `a` and `b` hold the same settings.
+pub fn settings_eq(a: &Settings, b: &Settings) -> bool {
+    a.default_server_url == b.default_server_url
+        && a.lock_timeout_seconds == b.lock_timeout_seconds
+        && a.socks5_proxy == b.socks5_proxy
 }

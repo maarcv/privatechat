@@ -116,6 +116,65 @@ Not changed: `padded_record`'s capacity, whose growth no test can see (Y2-G2B-3)
 Stopped after round 4: every pass of the last two rounds found nothing substantive, and what survives is equivalent or far-fetched.
 
 
+## Audit X
+
+**2026-09-30 — Audit X, code audit of the `core` half of spec 020-store-files (branch `020-store-files`, slices (a)–(d3), before the `store` crate), in three independent passes (X-A: structure and simplicity; X-B: the local CI run and 126 hand mutants of the storage code, the doubles and the reference-script section; X-C: conformance with spec 020, `docs/spec.md` §4, §8, §9 and the specs 020 amends, and the Limits recomputed from the schemas).** CI green; every schema matched the spec key by key and every limit recomputed to its constant; no defect in code that ships. 55 mutants survived, 9 of them equivalent; the tests below kill the rest. Findings (numbered AX) and changes applied:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AX1 | The round trips compared an encoding with its own re-encoding and never went through `seal` and `open`, so a symmetric swap (key 14 written from the other boolean) passed; `state_eq`'s own test changed 8 of its 16 fields (X-A1, X-A9, X-B4, X-C2, X-C7) | Medium | `open(seal(x))` compared with `state_eq`, `records_eq` and `settings_eq`; `state_reference` sets `own_key_used_elsewhere`; a change per field |
+| AX2 | No test left out a mandatory key, planted a key of another log kind, checked a bound on open (names, config, list counts, body), a version other than 2, the derivation tags against fixed values, or `K_settings` against `K_db` (X-B1–X-B3, X-B5–X-B7) | Medium | A test per rule; known answers from Python's `hashlib.blake2b` |
+| AX3 | `MemoryStore::commit` opened the whole log it appends to; `Faults` shared one counter between two faults; gaps in the doubles' tests (list wrapping, destroy, a failed commit, stale bytes, the exact log limit) (X-A2, X-A7, X-B8, X-B11, X-C11) | Medium | Commit reads the state and the committed length only; a counter per fault; the tests |
+| AX4 | The `store` tests could not build a `Settings`, and the file limits `store` checks before reading lived only as crate-internal record maxima (X-C1, X-C9) | Medium | `testing::settings` and `settings_eq`; `MAX_STATE_FILE`, `MAX_SETTINGS_FILE`, `MAX_LOG_ENTRY` and `MAX_LOG_LEN` exported (AX-Q1, AX-Q2) |
+| AX5 | Three `within` helpers, a `missing` closure per decoder, bare widths, enum bytes mapped inline, a 75-line encoder, `own` naming a `client_ref`, the state tests in the module file (X-A3–X-A5, X-A10–X-A14) | Low | One `within` and one `required`, named widths, `to_byte`/`from_byte`, `check_limits`, `own_client_ref`, `storage/state/tests.rs` |
+| AX6 | Negative vectors that could break another rule and still say `Corrupt`; the list reader's check order and exact allocation untested (X-B9, X-B10, X-B12) | Low | Each negative is its positive plus its one edit; T01 cases |
+| AX7 | Stale text: 011 R20 without `Store`, 016's Interface, exclusions and acceptance, the rust skill's feature sentence and `patterns.md` §3, `docs/spec.md` §8 and §9 on the old `Store` and `K_db` for `settings.bin`, two doc comments; a log test named after R8 (X-A6, X-A16, X-C3, X-C4, X-C8, X-C10) | Low | Rewritten; `s020_t09_r09_log_schema` |
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AX-Q1 | How the `store` tests get settings (X-C Q1) | A builder and `settings_eq` in `core::testing` | Interface |
+| AX-Q2 | Where the file limits live (X-C Q2) | All four exported by `core` | Interface |
+| AX-Q3 | Which byte an entry's `offset` names (X-C Q3) | That of its `len`, 9 for the first | R5, R9 |
+| AX-Q4 | Fuzz the nested-record reader, which no production schema uses yet (X-C Q4) | Yes: `record_decode` also drives the codec schema | 020 R29, 016 R3 |
+| AX-Q5 | `duplicate` returning a `Result` for a copy that cannot fail (X-A Q1) | Return the state | Interface |
+| AX-Q6 | Wipe a message's display name like its body (X-A Q2) | Yes | Interface |
+| AX-Q7 | Constant time for the config inside `state_eq` (X-A Q3) | `==` in test code; the spec says so | Interface |
+
+**Round 2**, the same three passes over the fixed code (185 mutants, the 126 of round 1 re-expressed and 59 new; 36 survived, 12 of them equivalent). Findings and changes:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AX8 | `MemoryStore::compact` took the generation from the state it was handed, which a channel keeps in memory unchanged, so two compactions in one session would repeat a generation, what R15 and ADR 0035 exist to prevent; R15 did not say whose generation; nothing committed after a compaction or compacted twice (X2-A2, X2-C1, X2-B2) | Medium | The store's own generation (AX-Q8); `log_position`'s doc; a test of two compactions from one stale state |
+| AX9 | No test tied a field of a peer, `outbox` entry, old key or `acked` record to its key, so a swap made alike in encoder and decoder passed (X2-A1) | Medium | Records built by hand with a distinct value per key |
+| AX10 | The exported file limits and the record maxima were never pinned by value; the per-fault counters, the settings builder and comparison, two load checks and `duplicate`'s log position untested; the long-blob case broke the framing instead of the bound; two codec negatives not pinned to their edit (X2-B1, X2-B3–X2-B8) | Low | The tests; the case planted at key 3 |
+| AX11 | `record_decode` had no seed with a real `bool`, nested record or list (X2-C6) | Low | Seeded from the `types` vectors of `020.json` too (016 R8) |
+| AX12 | Stale text: `patterns.md` §5 and the architecture skill with the old `WriteBatch`, 027's list of `pub` items without the file limits, `docs/spec.md` on `store` and on who adds the codec types, 017's test-schema paragraph, the fuzz script's comment, 020's file table; 027 R17's wider reach check would flag the item decoders passed by path (X2-C2–X2-C5, X2-C7) | Low | Rewritten; 027 R17 excludes the three item decoders |
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AX-Q8 | Where a compaction takes its generation (X2-A Q1) | From the store, the `state.bin` it last loaded or wrote | R15 |
+| AX-Q9 | Wipe the names the state holds, after AX-Q6 (X2-A Q2) | A peer's last display name only, the data the log wipes; labels and local names stay plain | Interface |
+| AX-Q10 | AGENTS 23 on the old `commit(WriteBatch)` and a count that skipped only the cursor (X2-C Q1) | Reworded: `commit(&WriteBatch)`, and `commits` skips a commit that moves only the cursor or `synced_at` | AGENTS 23 |
+
+**Round 3**, the same three passes (235 mutants: round 2's re-run, 50 new). Passes A and C found nothing substantive; B found test gaps only, no defect in shipped code. Changes:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AX13 | The proxy's host grammar was untested (an empty host, uppercase, `_`, port 65536, `+9050`, an onion host); the round-2 counter test re-armed a fault and so hid a shared counter; a never-committed compaction, `log_len` over stale bytes, `Vault::remove` and `fail_compactions` against `destroy` untested (X3-B1–X3-B4) | Low | The tests |
+| AX14 | `fuzz_seeds.py` checked itself against its own table, so a lost row or a wrong schema passed (X3-B5) | Low | Its rows checked against R2's list, each decoder against its schemas, the `ignore` byte against `fuzz_entry.rs` |
+| AX15 | The `store` crate's T15 did not ask for two compactions from one stale state; `ChannelFiles` did not say it keeps its log position; `WriteBatch` had no way to give its parts back after `Ok` (021 R2); 027 R17 named three of the five decoders its wider check would flag; the commit count "other than the cursor" left in §10, the PR and spec templates and the rust skill, `commit(Batch)` in §12, `StoreError::TooLarge` in the skill (X3-C1–X3-C4) | Low | T15, the Interface and `WriteBatch::into_parts`, 027 R17's rule, the wording |
+| AX16 | The doubles do not model the live-store lock of R20 (X3-A Q1) | Low | The Interface says so; T20 checks it over the real store |
+
+**Round 4**, passes B and C only, A having found nothing in round 3 (83 mutants: round 3's gaps re-run, all dead, and 48 new). Both found nothing substantive: small test gaps and text left behind, closed.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AX17 | `into_parts` tested with one record; the memory log never planted by hand, so a layout changed alike in `append` and `entries` passed; a committed length inside the header, a generation-0 header with a byte after it and no state, and a bad list item ahead of a framing error untested (X4-B1–X4-B5) | Low | The tests |
+| AX18 | The vectors README kept the old commit count; the encrypt sketch of `patterns.md` dropped the records `into_parts` hands back (021 R2, R8); `fuzz_seeds.py`'s check read the files from the table it checks; History lines missing in 020 and 027 (X4-C1–X4-C4) | Low | Rewritten; the check names each decoder's files |
+
+Stopped after round 4: every pass of the last round found nothing substantive; the survivors left are equivalent or weaken a checker's own guard.
+
+Not changed: the equivalent mutants (the size check before the box, which `secretbox_open` repeats; the record bound no valid state reaches; the vector values a test does not single out). Slices (b1), (b2) and (c) are above 400 net lines, with their reason in the commits; (c) is to be split between log and settings when it goes to a pull request. `020.json` is a new file: its pull request needs the reviewer's `adr-not-needed` label or an ADR, since `adr-guard` refuses any diff under `specs/vectors/` without one (AGENTS 18).
 
 ## Phase 1 closed
 

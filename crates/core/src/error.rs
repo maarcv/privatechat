@@ -1,11 +1,11 @@
 //! The one error type of the core boundary (`docs/spec.md` §9, spec
 //! 011-config-format R20).
 //!
-//! Written by hand, with no derive crate. Every variant is a unit variant, so
-//! an error never carries a byte of a key or a password (spec 011 R21), and
-//! there is no `Display`: the core produces no user-facing text (spec
-//! 027-core-api R18). `Store` carries the storage's own unit error (spec
-//! 020-store-files R26).
+//! Written by hand, with no derive crate. Every variant is a unit variant or,
+//! for `Store`, carries the storage's own unit error (spec 020-store-files
+//! R26), so an error never carries a byte of a key or a password (spec 011
+//! R21), and there is no `Display`: the core produces no user-facing text
+//! (spec 027-core-api R18).
 
 use crate::crypto::CryptoError;
 use crate::storage::StoreError;

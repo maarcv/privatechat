@@ -4,9 +4,10 @@ use proptest::option::of as maybe;
 use proptest::prelude::{any, proptest};
 
 use super::super::StoreError;
-use super::super::tests::{field, key};
+use super::super::tests::{field, key, replaced, without};
 use super::{MAX_LOCK_TIMEOUT_SECONDS, MAX_SETTINGS_RECORD, Settings};
 use crate::proto::config::url::MAX_URL;
+use crate::testing::settings_eq;
 use crate::vectors::{Kind, Vector};
 
 /// Settings with every key.
@@ -31,12 +32,30 @@ fn s020_t08_r08_settings_schema() {
         Settings::decode(&with_unknown).err(),
         Some(StoreError::Corrupt)
     );
-    let mut newer = with_unknown.clone();
-    newer[5] = 2;
+    for version in [0, 2, 255] {
+        let mut other = with_unknown.clone();
+        other[5] = version;
+        let error = Settings::decode(&other).err();
+        assert_eq!(error, Some(StoreError::UnsupportedVersion), "{version}");
+    }
+    // Keys 0 to 2 are mandatory, the proxy is not.
+    for key in [0, 1, 2] {
+        assert_eq!(
+            Settings::decode(&without(&record, key)).err(),
+            Some(StoreError::Corrupt)
+        );
+    }
+    assert!(Settings::decode(&without(&record, 3)).is_ok());
+    // The proxy's bound holds on seal as on open: 257 bytes is refused.
+    let long_proxy = Settings {
+        socks5_proxy: Some(format!("{}:9050", "a".repeat(MAX_URL - 4))),
+        ..settings()
+    };
     assert_eq!(
-        Settings::decode(&newer).err(),
-        Some(StoreError::UnsupportedVersion)
+        long_proxy.socks5_proxy.as_ref().map(String::len),
+        Some(MAX_URL + 1)
     );
+    assert_eq!(long_proxy.encode().err(), Some(StoreError::Corrupt));
     let bad = [
         Settings {
             default_server_url: "wss://chat.example.org/path".to_owned(),
@@ -52,6 +71,26 @@ fn s020_t08_r08_settings_schema() {
         },
         Settings {
             socks5_proxy: Some("127.0.0.1".to_owned()),
+            ..settings()
+        },
+        Settings {
+            socks5_proxy: Some(":9050".to_owned()),
+            ..settings()
+        },
+        Settings {
+            socks5_proxy: Some("LOCALHOST:9050".to_owned()),
+            ..settings()
+        },
+        Settings {
+            socks5_proxy: Some("host_x:9050".to_owned()),
+            ..settings()
+        },
+        Settings {
+            socks5_proxy: Some("127.0.0.1:65536".to_owned()),
+            ..settings()
+        },
+        Settings {
+            socks5_proxy: Some("127.0.0.1:+9050".to_owned()),
             ..settings()
         },
         Settings {
@@ -77,6 +116,12 @@ fn s020_t08_r08_settings_schema() {
         ..settings()
     };
     assert!(Settings::decode(&edge.encode().unwrap()).is_ok());
+    // An onion host is a host of the grammar too.
+    let onion = Settings {
+        socks5_proxy: Some(format!("{}.onion:9050", "a".repeat(56))),
+        ..settings()
+    };
+    assert!(Settings::decode(&onion.encode().unwrap()).is_ok());
 }
 
 /// Spec 020, R3 and R4 (the settings): sealed under `K_settings` with a
@@ -117,6 +162,14 @@ pub(in crate::storage) fn check_vector(vector: &Vector) {
     if vector.kind() == Kind::Negative {
         let error = format!("{:?}", decoded.err().unwrap());
         assert_eq!(error, vector.expected("error").text(), "{}", vector.name());
+        // `Corrupt` says nothing of the rule: the bytes say which one broke.
+        let reference = crate::vectors::load("020", "settings_reference");
+        let edited = replaced(
+            reference.input("record").bytes(),
+            1,
+            b"wss://chat.example.org/path",
+        );
+        assert_eq!(buf, edited.as_slice(), "{}", vector.name());
         return;
     }
     let settings = decoded.unwrap();
@@ -151,6 +204,9 @@ proptest! {
         };
         let record = settings.encode().unwrap();
         assert_eq!(Settings::decode(&record).unwrap().encode().unwrap(), record);
+        // `open(seal(x))` gives `x`, field by field.
+        let sealed = settings.seal(&key(1)).unwrap();
+        assert!(settings_eq(&Settings::open(&key(1), &sealed).unwrap(), &settings));
         let _ = Settings::decode(&buf);
     }
 }
