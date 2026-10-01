@@ -55,7 +55,8 @@ mod tests {
         for line in toml.lines() {
             // A trailing comment is prose too.
             let line = line.split(" #").next().unwrap_or(line).trim();
-            if line.starts_with('[') && !line.starts_with("[[") {
+            // `[[array]]` opens a table too and so closes the section.
+            if line.starts_with('[') {
                 inside = line == header;
                 continue;
             }
@@ -146,10 +147,13 @@ mod tests {
     #[test]
     fn s000_t08_r08_deny_bans_crypto_crates() {
         let deny = include_str!("../../../deny.toml");
-        let bans: Vec<&str> = deny
-            .lines()
-            .map(str::trim)
-            .filter(|l| l.starts_with("{ crate = "))
+        // Only the entries of `deny = [ … ]`: a crate under `skip` is not banned.
+        let bans: Vec<&str> = section(deny, "[bans]")
+            .into_iter()
+            .skip_while(|line| *line != "deny = [")
+            .skip(1)
+            .take_while(|line| *line != "]")
+            .filter(|line| line.starts_with("{ crate = "))
             .collect();
         let entry = |name: &str| {
             let prefix = format!("{{ crate = \"{name}\"");
@@ -173,6 +177,7 @@ mod tests {
             "hkdf",
             "hmac",
             "ring",
+            "sodiumoxide",
             "openssl",
             "openssl-sys",
             "zstd",
@@ -211,13 +216,12 @@ mod tests {
         }
         let wrapped = bans.iter().filter(|line| line.contains("wrappers")).count();
         assert_eq!(wrapped, 15, "a ban gained wrappers the test does not name");
-        let licences: Vec<&str> = section(deny, "[licenses]")
-            .into_iter()
-            .filter(|line| line.starts_with('"'))
-            .collect();
+        // Whole sections, so that an added exception or source fails too.
         assert_eq!(
-            licences,
+            section(deny, "[licenses]"),
             [
+                "version = 2",
+                "allow = [",
                 "\"MIT\",",
                 "\"Apache-2.0\",",
                 "\"Apache-2.0 WITH LLVM-exception\",",
@@ -227,16 +231,18 @@ mod tests {
                 "\"Unicode-3.0\",",
                 "\"Zlib\",",
                 "\"MPL-2.0\",",
+                "]",
+                "confidence-threshold = 0.9",
             ]
         );
-        let sources = section(deny, "[sources]");
-        for line in [
-            "unknown-registry = \"deny\"",
-            "unknown-git = \"deny\"",
-            "allow-registry = [\"https://github.com/rust-lang/crates.io-index\"]",
-        ] {
-            assert!(sources.contains(&line), "{line}");
-        }
+        assert_eq!(
+            section(deny, "[sources]"),
+            [
+                "unknown-registry = \"deny\"",
+                "unknown-git = \"deny\"",
+                "allow-registry = [\"https://github.com/rust-lang/crates.io-index\"]",
+            ]
+        );
         assert!(section(deny, "[advisories]").contains(&"yanked = \"deny\""));
         assert!(section(deny, "[bans]").contains(&"wildcards = \"deny\""));
     }

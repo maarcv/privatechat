@@ -20,7 +20,7 @@ The source of truth of this project is a set of documents: `docs/spec.md`, the A
 - R5 A line in the `## Requirements` section of a spec MUST NOT contain an example-introducing phrase (the phrases matched by `check_s003_t05_r05_no_examples_in_requirements`): requirements carry fixed values.
 - R6 If `docs/spec.md` changes with respect to the base commit of the PR, the `Updated: YYYY-MM-DD` of its header MUST equal the date of the latest change to the file: today when the file has uncommitted changes, otherwise the author date of the newest commit in the PR that touches it.
 - R7 `specs/README.md` MUST contain an `## Index` table with one row per `specs/NNN-*.md` file (number, name, phase, state) consistent with the file, and the state of every spec MUST be one of `draft`, `in review`, `accepted`, `implemented`.
-- R8 `scripts/doc_lint_selftest.py` MUST copy the tracked documentation into a temporary repository, check that the lint passes there, then break each of the rules above and of spec 002 R1–R3 one at a time and check that the lint fails each time; the CI MUST run it after the lint.
+- R8 `scripts/doc_lint_selftest.py` MUST copy the tracked documentation into a temporary repository, check that the lint passes there, then break each of the rules above and of spec 002 R1–R3 one at a time and check that the lint fails each time with the message of the rule broken, so another rule failing in its place does not hide it; the CI MUST run it after the lint.
 
 ## Limits
 
@@ -76,4 +76,4 @@ DOC_LINT_BASE=<ref>            # optional; base commit for R6
 - 2026-09-20 draft · 2026-09-20 in review · 2026-09-20 accepted (Marc Vilardebó) · 2026-09-20 implemented
 - 2026-09-24 R6 amended: the header date must equal the date of the latest change to the file, so several changes on one day pass and a forgotten date still fails (audit G)
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): open question 003-R3 closed with its proposal
-- 2026-10-01 revised after audit Z (`docs/audit-log.md`): R8 adds the self-test that breaks each rule; R5 stops at the next section, not at a subheading
+- 2026-10-01 revised after audit Z (`docs/audit-log.md`): R8 adds the self-test that breaks each rule; R5 stops at the next section, not at a subheading; round 2: the self-test checks each rule's message

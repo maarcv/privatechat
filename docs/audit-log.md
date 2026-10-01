@@ -26,6 +26,17 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AZ-Q4 | `SECURITY.md` points to private vulnerability reporting, switched off (Z1-A-5) | The reviewer turns it on | — |
 | AZ-Q5 | A required approval cannot be given by the one account that opens the pull request | The pull request and its jobs are required; the reviewer's merge is the review | — |
 
+**Round 2.** CI green; 199 mutants, 115 killed, every survivor equivalent, far-fetched or outside phase 0 but these:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ8 | The round-1 step `s000_t05_r05_inici_is_ignored` gave `git check-ignore -q` eight paths, which it refuses: the doc-lint job failed on every run, and the local CI list does not run it (Z2-A-1, Z2-B-1) | High | One path at a time |
+| AZ9 | A renamed ADR counted as the new ADR `adr-guard` asks for, since round 1 diffed with `--no-renames` (Z2-A-2) | Medium | A new ADR is a file whose number the base does not have |
+| AZ10 | `doc_lint_selftest` checked only that the lint failed, so another rule failing hid a dead one: the ADR state fixture broke line 3 instead of the vocabulary, and contiguous numbering, the index state, §10 listing every spec, the spec state, phase and index rows, four R6 paths and spec 027 R22 had no fixture (Z2-A-3, Z2-B-2, Z2-B-3) | Medium | Each fixture names its rule's message; 28 fixtures; 003 R8 |
+| AZ11 | The `check_requirements` fixtures had no two-digit requirement and none under a `###` subheading (Z2-A-3) | Low | R10 under `### Notes`, and a test of R100 that must not cover it |
+| AZ12 | T08 left `sodiumoxide` out, read a ban from any `{ crate =` line, `skip` too, and the licence and source sections by containment; `section()` read past a `[[array]]` (Z2-A-4, Z2-A-5, Z2-B-4) | Low | `sodiumoxide`; bans from `deny = [ … ]`; both sections compared whole; `[[` closes a section |
+| AZ13 | §9 said `cargo deny` checks the core does no I/O; §10 named only 011–017 for `adr-not-needed`; 000's tree lacked `clippy.toml` and the self-test; the `Updated` date of `docs/spec.md` was stale since audit Y, which no pull request had checked (Z2-A-6) | Low | Rewritten |
+
 ## Audit Y
 
 **2026-10-01 — Audit Y, a re-audit of phase 1 in rounds (branch `phase1-audit` from `mvp` at 107c578), after audits Q–W had run one round each.** Each round runs three passes (A: structure, simplicity and logic; B: the local CI run and hand mutants; C: conformance) over three groups (G1: specs 010, 015 and `core::Error`; G2: specs 011, 014, 017; G3: specs 012, 013, 016), nine agents in all. The human reviewer allowed specs to change, nothing being in production.

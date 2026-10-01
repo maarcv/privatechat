@@ -1,6 +1,6 @@
 # Private E2E chat — Specification and plan (SDD)
 
-Version: mvp · Post-audit I revision · Updated: 2026-09-28 · Marc Vilardebó (audits in `docs/audit-log.md`)
+Version: mvp · Post-audit I revision · Updated: 2026-10-01 · Marc Vilardebó (audits in `docs/audit-log.md`)
 
 This file, on the default branch (`mvp` until the first release), is the canonical source of the specification (see §11 "Governance"). Read copy, may lag behind: https://claude.ai/code/artifact/1527bf13-79e8-485a-908d-a515cbd062a4
 
@@ -524,7 +524,7 @@ impl Session {                                                                  
 - The UI never touches a key. The core never touches the network or the UI: it receives bytes and returns bytes. The UI groups the `Channel`s by the host and port of `server_url`, opens one TLS socket per group, passes frames in both directions and reconnects with backoff when it receives `Event::Reconnect`.
 - No server URL in the code outside the `DEFAULT_SERVER_URL` constant (spec 000).
 - The record encoding and `core::crypto` are crate-internal. `store` and `server` reach them only through `pub` functions of `core` that their own specs define (020-store-files, 030-ws-protocol); each such function that takes external bytes has a fuzz target (AGENTS 21).
-- The core does no I/O and does not read the clock: no `std::net`, `std::fs`, `tokio`, `SystemTime::now`. Time enters as a parameter (`now`). Checked with `cargo deny` (bans) and clippy `disallowed_methods`.
+- The core does no I/O and does not read the clock: no `std::net`, `std::fs`, `tokio`, `SystemTime::now`. Time enters as a parameter (`now`). Checked by the dependency test of spec 010 R16 and clippy `disallowed_methods` (AGENTS 10).
 - One data directory per device with a `LOCK` file (advisory), one process: no widget or share extension in v1.
 - `Channel` has no state that has not gone through `commit`: in memory there is the copy loaded at `open`, and every change is written before returning the result.
 
@@ -547,7 +547,7 @@ Seven phases; each one closes when its specifications have green tests and a hum
 **CI per phase**
 
 - Phase 0: `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings` (workspace lints), `cargo test`, `cargo deny --all-features check -D checksum-mismatch` (advisories, licenses, bans, sources), `scripts/doc_lint.sh` and its self-test, `scripts/check_requirements.sh` (which tests itself), `adr-guard` (a diff that touches `crates/core/src/{proto,crypto,storage}.rs` or anything under those modules, `specs/vectors/**` or specs 011–014, 017, 020 and 031, renames counted at both ends, without adding a file `docs/adr/NNNN-<kebab>.md` fails, unless the `adr-not-needed` label is set by a human), `commit-lint`. `adr-guard` and `commit-lint` run on pull requests, and `mvp` takes changes only through a pull request with the CI green (branch protection, audit Z).
-- Phase 1: nightly fuzz (`cargo fuzz`, 1 h per target of spec 016-fuzz-harness, one parallel job per target), property tests (`proptest`: round-trip for all k, byte-by-byte mutation), the reference script of spec 015-test-vectors producing the vectors and the `s015_…` steps checking that `cargo test` reproduces them, redacted `Debug` test; on every pull request, `scripts/check_fuzz_targets.sh` and clippy under `--cfg fuzzing` (spec 016 R12). The fuzz crate of spec 016 has its own workspace and a committed `Cargo.lock`, and runs no `cargo deny` step of its own. The log test arrives with spec 035-server-ops. Every implementation pull request of specs 011–017 touches a path `adr-guard` protects; one that changes no format carries `adr-not-needed`, set by the human reviewer with the reason "implements accepted spec NNN, no format change".
+- Phase 1: nightly fuzz (`cargo fuzz`, 1 h per target of spec 016-fuzz-harness, one parallel job per target), property tests (`proptest`: round-trip for all k, byte-by-byte mutation), the reference script of spec 015-test-vectors producing the vectors and the `s015_…` steps checking that `cargo test` reproduces them, redacted `Debug` test; on every pull request, `scripts/check_fuzz_targets.sh` and clippy under `--cfg fuzzing` (spec 016 R12). The fuzz crate of spec 016 has its own workspace and a committed `Cargo.lock`, and runs no `cargo deny` step of its own. The log test arrives with spec 035-server-ops. Every implementation pull request of specs 011–017 and of phase 2 touches a path `adr-guard` protects; one that changes no format carries `adr-not-needed`, set by the human reviewer with the reason "implements accepted spec NNN, no format change".
 - Phase 3: integration test with the server in Docker; Kotlin/Swift vs Rust differential test over vectors from phase 4 onwards.
 - Phase 5: basic UI tests per platform.
 - Phase 6: reproducible build and hash comparison.

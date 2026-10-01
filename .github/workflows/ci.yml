@@ -95,8 +95,10 @@ jobs:
         run: python3 scripts/doc_lint_selftest.py
       - name: s000_t05_r05_inici_is_ignored
         run: |
-          git check-ignore -q --no-index inici/x .DS_Store target/x node_modules/x dist/x .env \
-            bindings/a/generated/x .claude/worktrees/x
+          # One path at a time: with several, check-ignore succeeds when any one is ignored.
+          for p in inici/x .DS_Store target/x node_modules/x dist/x .env bindings/a/generated/x .claude/worktrees/x; do
+            git check-ignore -q --no-index "$p" || { echo "not ignored: $p"; exit 1; }
+          done
           test "$(git ls-files inici | wc -l)" -eq 0
       - name: s000_t06_r06_root_files_exist
         run: |
@@ -140,7 +142,15 @@ jobs:
           protected="$(printf '%s\n' "$changed" | grep -E '^(crates/core/src/(proto|crypto|storage)(/|\.rs$)|specs/vectors/|specs/0(1[12347]|20|31)-)' || true)"
           if [ -z "$protected" ]; then echo "no protected paths touched"; exit 0; fi
           case ",$LABELS," in *,adr-not-needed,*) echo "label adr-not-needed present"; exit 0;; esac
-          added_adr="$(git diff --no-renames --name-only --diff-filter=A "$BASE"...HEAD | grep -E '^docs/adr/[0-9]{4}-[a-z0-9-]+\.md$' || true)"
+          # A new ADR is an added file with a number the base does not have: a
+          # renamed old ADR is neither.
+          added_adr="$(git diff --name-only --diff-filter=A "$BASE"...HEAD | grep -E '^docs/adr/[0-9]{4}-[a-z0-9-]+\.md$' || true)"
+          known="$(git ls-tree --name-only "$BASE" docs/adr/ | sed -n 's#^docs/adr/\([0-9]\{4\}\)-.*#\1#p')"
+          added_adr="$(printf '%s\n' "$added_adr" | while read -r f; do
+            [ -n "$f" ] || continue
+            n="$(basename "$f" | cut -c1-4)"
+            printf '%s\n' "$known" | grep -qx "$n" || echo "$f"
+          done)"
           if [ -z "$added_adr" ]; then
             echo "Protected paths changed without a new ADR (AGENTS 3):"; echo "$protected"; exit 1
           fi

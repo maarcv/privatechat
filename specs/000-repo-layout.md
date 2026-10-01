@@ -32,13 +32,13 @@ Before any line of product code we need a monorepo where the spec is the source 
 /
 ├─ Cargo.toml                (workspace: members crates/core, crates/store, crates/server; [workspace.lints]; [profile.release])
 ├─ crates/core/ (lib privatechat_core)   crates/store/ (lib privatechat_store)   crates/server/ (bin privatechat-server)
-├─ rust-toolchain.toml · rustfmt.toml · deny.toml · .editorconfig · .gitignore
+├─ rust-toolchain.toml · rustfmt.toml · clippy.toml · deny.toml · .editorconfig · .gitignore
 ├─ AGENTS.md · CLAUDE.md · README.md · LICENSE
 ├─ .claude/skills/{architecture,rust,kotlin,swift,typescript-svelte}/SKILL.md
 ├─ .github/{workflows/ci.yml, PULL_REQUEST_TEMPLATE.md, dependabot.yml, CONTRIBUTING.md, SECURITY.md, CODEOWNERS}
 ├─ docs/{spec.md, threat-model.md, audit-log.md, assistant.example.md, adr/}    specs/{TEMPLATE.md, README.md, NNN-*.md, vectors/}
 ├─ bindings/ · clients/ · deploy/   (README.md only; contents in phases 3–5)
-└─ scripts/{doc_lint.sh, doc_lint.py, check_requirements.sh, check_requirements.py}
+└─ scripts/{doc_lint.sh, doc_lint.py, doc_lint_selftest.py, check_requirements.sh, check_requirements.py}
 ```
 
 ```rust
@@ -88,4 +88,4 @@ pub const DEFAULT_SERVER_URL: &str = "wss://server.invalid";
 
 - 2026-09-20 draft · 2026-09-20 in review · 2026-09-20 accepted (Marc Vilardebó) · 2026-09-20 implemented
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): open question 000-R4 closed with its proposal
-- 2026-10-01 revised after audit Z (`docs/audit-log.md`): R1 and Out of scope no longer say the crates are empty; R5 adds `.claude/worktrees/`; R8 names the wrapped bans and the source rules; T03, T04, T05, T07 and T08 read each line in its section, pin the URL, check every ignored path, the edition and the exact bans
+- 2026-10-01 revised after audit Z (`docs/audit-log.md`): R1 and Out of scope no longer say the crates are empty; R5 adds `.claude/worktrees/`; R8 names the wrapped bans and the source rules; T03, T04, T05, T07 and T08 read each line in its section, pin the URL, check every ignored path, the edition and the exact bans; round 2: T08 reads only the `deny` list, compares the licence and source sections whole and names `sodiumoxide`; the tree lists `clippy.toml` and the self-test

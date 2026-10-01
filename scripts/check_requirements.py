@@ -62,14 +62,18 @@ def check_s001_t07_r07_the_gate_fires() -> list[str]:
     """The gate on fixtures, each of which breaks one of its rules: a gate that stopped
     firing fails the script (spec 001 R7)."""
     spec = ("# 999\n\nStatus: {state}\nPhase: 9\n\n## Requirements\n\n- R1 One.\n"
-            "- R2 Two.\n\n## Limits\n\n- R3 is not a requirement here.\n")
+            "- R2 Two.\n\n### Notes\n\n- R10 Ten, under a subheading of the section.\n\n"
+            "## Limits\n\n- R3 is not a requirement here.\n")
+    every = "s999_t01_r01_a s999_t02_r02_b s999_t10_r10_c"
     cases = [
         # (what the case shows, the spec's state, the tracked test file, gate fails?)
-        ("an implemented spec with every test", "implemented", "s999_t01_r01_a s999_t02_r02_b", False),
-        ("a requirement with no test", "implemented", "s999_t01_r01_a", True),
-        ("a test of another requirement", "implemented", "s999_t01_r01_a s999_t02_r03_b", True),
-        ("a test of another spec", "implemented", "s999_t01_r01_a s998_t02_r02_b", True),
-        ("a name glued to a longer word", "implemented", "s999_t01_r01_a xs999_t02_r02_b", True),
+        ("an implemented spec with every test", "implemented", every, False),
+        ("a requirement with no test", "implemented", "s999_t01_r01_a s999_t10_r10_c", True),
+        ("a requirement under a ### subheading with no test", "implemented", "s999_t01_r01_a s999_t02_r02_b", True),
+        ("a test of another requirement", "implemented", "s999_t01_r01_a s999_t02_r03_b s999_t10_r10_c", True),
+        ("a test of R100 for R10", "implemented", "s999_t01_r01_a s999_t02_r02_b s999_t10_r100_c", True),
+        ("a test of another spec", "implemented", "s999_t01_r01_a s998_t02_r02_b s999_t10_r10_c", True),
+        ("a name glued to a longer word", "implemented", "s999_t01_r01_a xs999_t02_r02_b s999_t10_r10_c", True),
         ("an accepted spec, not gated", "accepted", "", False),
     ]
     errors = []

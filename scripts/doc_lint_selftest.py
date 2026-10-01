@@ -3,7 +3,8 @@
 
 Copies the tracked Markdown and `doc_lint.py` into a temporary git repository,
 checks that the lint passes there, then breaks one rule at a time and checks
-that the lint fails each time: a rule that stopped firing fails this script.
+that the lint fails each time with that rule's message: a rule that stopped
+firing fails this script, even when another rule fails in its place.
 Standard library only; runs in CI after the lint itself.
 """
 
@@ -20,8 +21,8 @@ from typing import Callable
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def git(cwd: Path, *args: str, when: str = "2026-01-01T12:00:00") -> str:
-    env = dict(os.environ, GIT_AUTHOR_DATE=when, GIT_COMMITTER_DATE=when)
+def git(cwd: Path, *args: str, when: str = "2026-01-01T12:00:00", committed: str | None = None) -> str:
+    env = dict(os.environ, GIT_AUTHOR_DATE=when, GIT_COMMITTER_DATE=committed or when)
     return subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *args], cwd=cwd,
                           capture_output=True, text=True, check=True, env=env).stdout.strip()
 
@@ -37,12 +38,13 @@ def copy_tree(to: Path) -> None:
     git(to, "commit", "-qm", "base")
 
 
-def lint(cwd: Path, base: str | None = None) -> int:
+def lint(cwd: Path, base: str | None = None) -> tuple[int, str]:
     env = {k: v for k, v in os.environ.items() if k != "DOC_LINT_BASE"}
     if base:
         env["DOC_LINT_BASE"] = base
-    return subprocess.run([sys.executable, "scripts/doc_lint.py"], cwd=cwd, capture_output=True,
-                          env=env).returncode
+    run = subprocess.run([sys.executable, "scripts/doc_lint.py"], cwd=cwd, capture_output=True,
+                         text=True, env=env)
+    return run.returncode, run.stdout
 
 
 def replace(path: Path, old: str, new: str) -> None:
@@ -76,10 +78,21 @@ def adr_line3(root: Path) -> None:
 
 
 def adr_state(root: Path) -> None:
-    path = first_adr(root)
-    text = path.read_text(encoding="utf-8").splitlines()
-    text[2] = text[2].replace("Status: ", "Status: rejected · was: ")
-    path.write_text("\n".join(text) + "\n", encoding="utf-8")
+    # In the file, the index and §3 alike, so that only the vocabulary rule breaks.
+    replace(first_adr(root), "Status: accepted", "Status: withdrawn")
+    for path in (root / "docs" / "adr" / "README.md", root / "docs" / "spec.md"):
+        text = path.read_text(encoding="utf-8")
+        row = next(line for line in text.splitlines() if line.startswith("| 0001 |"))
+        replace(path, row, row.replace("| accepted |", "| withdrawn |", 1))
+
+
+def adr_first_line(root: Path) -> None:
+    replace(first_adr(root), "# ADR 0001 — ", "# ADR 0001 - ")
+
+
+def adr_gap(root: Path) -> None:
+    text = first_adr(root).read_text(encoding="utf-8").replace("# ADR 0001 ", "# ADR 0999 ", 1)
+    (root / "docs" / "adr" / "0999-gap.md").write_text(text, encoding="utf-8")
 
 
 def adr_duplicate(root: Path) -> None:
@@ -124,21 +137,114 @@ def spec_phase(root: Path) -> None:
     replace(first_spec(root), "\nPhase: ", "\nStage: ")
 
 
-# Each rule, and the edit that breaks it.
-BREAKS: dict[str, Callable[[Path], None]] = {
-    "R1 threat table": threat_cell,
-    "002 R1 ADR sections": adr_section,
-    "002 R1 ADR line 3": adr_line3,
-    "002 R3 ADR state": adr_state,
-    "002 R1 duplicate ADR number": adr_duplicate,
-    "002 R1 misnamed ADR file": adr_misnamed,
-    "002 R1 heading number": adr_heading_number,
-    "002 R2 ADR index title": adr_index_title,
-    "R3 unknown spec id": unknown_spec_reference,
-    "R4 range in AGENTS": agents_range,
-    "R5 example in requirements": example_in_requirements,
-    "R7 spec index state": spec_index_state,
-    "R7 spec phase line": spec_phase,
+def adr_index_state(root: Path) -> None:
+    path = root / "docs" / "adr" / "README.md"
+    row = next(line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("| 0001 |"))
+    replace(path, row, row.replace("| accepted |", "| deprecated |", 1))
+
+
+def spec_missing_from_plan(root: Path) -> None:
+    path = root / "docs" / "spec.md"
+    row = next(line for line in path.read_text(encoding="utf-8").splitlines()
+               if line.startswith("| 1. ") and first_spec(root).stem in line)
+    replace(path, row, row.replace(f"{first_spec(root).stem}, ", "", 1))
+
+
+def spec_missing_from_index(root: Path) -> None:
+    path = root / "specs" / "README.md"
+    row = next(line for line in path.read_text(encoding="utf-8").splitlines()
+               if line.startswith(f"| {first_spec(root).name[:3]} |"))
+    replace(path, row + "\n", "")
+
+
+def spec_phase_number(root: Path) -> None:
+    path = first_spec(root)
+    phase = next(line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("Phase: "))
+    replace(path, phase, "Phase: 9")
+
+
+def spec_state_vocabulary(root: Path) -> None:
+    replace(first_spec(root), "\nStatus: ", "\nStatus: shelved · was: ")
+
+
+def spec_not_in_plan(root: Path) -> None:
+    shutil.copy2(first_spec(root), root / "specs" / "998-ghost.md")
+
+
+def agents_device(root: Path) -> None:
+    replace(root / "AGENTS.md", "one opaque handle, `Device`", "one opaque handle")
+
+
+def spec_imported(root: Path) -> None:
+    replace(root / "docs" / "spec.md", "until the channel is imported", "before the channel is imported")
+
+
+def spec_device_in_9(root: Path) -> None:
+    path = next((root / "specs").glob("027-*.md"))
+    text = path.read_text(encoding="utf-8")
+    state = next(line for line in text.splitlines() if line.startswith("Status: "))
+    replace(path, state, "Status: implemented")
+
+
+# Each rule, the edit that breaks it, and a part of the message the rule prints.
+BREAKS: dict[str, tuple[Callable[[Path], None], str]] = {
+    "R1 threat table": (threat_cell, "threat-model.md table differs"),
+    "002 R1 ADR sections": (adr_section, "sections must be exactly"),
+    "002 R1 ADR first line": (adr_first_line, "first line must be"),
+    "002 R1 ADR line 3": (adr_line3, "line 3 must be"),
+    "002 R1 duplicate ADR number": (adr_duplicate, "used by more than one file"),
+    "002 R1 misnamed ADR file": (adr_misnamed, "is named NNNN-kebab-case.md"),
+    "002 R1 heading number": (adr_heading_number, "the heading's number is 0002"),
+    "002 R1 contiguous numbering": (adr_gap, "numbering has gaps"),
+    "002 R3 ADR state": (adr_state, "invalid state 'withdrawn'"),
+    "002 R2 ADR index title": (adr_index_title, "ADR 0001 differs"),
+    "002 R2 ADR index state": (adr_index_state, "ADR 0001 differs"),
+    "R3 unknown spec id": (unknown_spec_reference, "'999-no-such-spec' is referenced"),
+    "R3 spec file not in the plan": (spec_not_in_plan, "specs/998-ghost.md is not listed"),
+    "R3 spec dropped from the plan": (spec_missing_from_plan, "-primitives-wrapper.md is not listed"),
+    "R4 range in AGENTS": (agents_range, "contains a spec range"),
+    "R5 example in requirements": (example_in_requirements, "'for example' is not a fixed value"),
+    "R7 spec index state": (spec_index_state, "specs index vs file for"),
+    "R7 spec phase line": (spec_phase, "missing 'Phase: N' line"),
+    "R7 spec phase number": (spec_phase_number, "specs index vs file for"),
+    "R7 spec missing from the index": (spec_missing_from_index, "specs index vs file for"),
+    "R7 spec state vocabulary": (spec_state_vocabulary, "invalid state 'shelved"),
+    "027 R22 AGENTS 20": (agents_device, "AGENTS 20 must name"),
+    "027 R22 §5": (spec_imported, "§5 must say"),
+    "027 R22 §9": (spec_device_in_9, "§9 must name"),
+}
+
+
+def fires(case: Path, message: str, base: str | None = None) -> bool:
+    code, out = lint(case, base)
+    return code != 0 and message in out
+
+
+def r6_case(base: Path, case: Path, header: str | None, message: str, *, commit: bool = True,
+            committed: str | None = None) -> bool:
+    """docs/spec.md changed with its header line replaced by `header` (None keeps it),
+    committed on 2026-01-02 by its author (`committed` sets another committer date) or
+    left uncommitted; whether the lint fails with `message`."""
+    shutil.copytree(base, case, symlinks=True)
+    start = git(case, "rev-parse", "HEAD")
+    spec = case / "docs" / "spec.md"
+    lines = spec.read_text(encoding="utf-8").splitlines()
+    if header is not None:
+        lines = [header if line.startswith("Version: ") else line for line in lines]
+    spec.write_text("\n".join(lines) + "\nx\n", encoding="utf-8")
+    if commit:
+        git(case, "commit", "-qam", "stale", when="2026-01-02T12:00:00", committed=committed)
+    return fires(case, message, start)
+
+
+R6_STALE = "but its header says"
+# Each case, and the header, commit and message it takes.
+R6_CASES: dict[str, tuple[str | None, bool, str | None, str]] = {
+    "a change committed under a stale date": (None, True, None, R6_STALE),
+    "an uncommitted change under a stale date": ("Version: mvp · Updated: 2000-01-01", False, None, R6_STALE),
+    "a header with the committer's date, not the author's": (
+        "Version: mvp · Updated: 2026-01-03", True, "2026-01-03T12:00:00", R6_STALE),
+    "no 'Updated' header": ("Version: mvp", True, None, "Updated: YYYY-MM-DD' missing"),
 }
 
 
@@ -147,23 +253,18 @@ def check_s003_t08_r08_every_rule_fires() -> list[str]:
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp) / "base"
         copy_tree(base)
-        if lint(base) != 0:
-            return ["the lint fails on an unbroken copy of the tree"]
-        for rule, breaks in BREAKS.items():
+        code, out = lint(base)
+        if code != 0:
+            return ["the lint fails on an unbroken copy of the tree:\n" + out]
+        for rule, (breaks, message) in BREAKS.items():
             case = Path(tmp) / rule.replace(" ", "_")
             shutil.copytree(base, case, symlinks=True)
             breaks(case)
-            if lint(case) == 0:
-                errors.append(f"the lint accepts a broken {rule}")
-        # R6: a committed change to docs/spec.md under a stale `Updated` date.
-        case = Path(tmp) / "R6"
-        shutil.copytree(base, case, symlinks=True)
-        start = git(case, "rev-parse", "HEAD")
-        spec = case / "docs" / "spec.md"
-        spec.write_text(spec.read_text(encoding="utf-8") + "\nx\n", encoding="utf-8")
-        git(case, "commit", "-qam", "stale", when="2026-01-02T12:00:00")
-        if lint(case, start) == 0:
-            errors.append("the lint accepts docs/spec.md changed under a stale date")
+            if not fires(case, message):
+                errors.append(f"the lint accepts a broken {rule}, or fails without {message!r}")
+        for i, (name, (header, commit, committed, message)) in enumerate(R6_CASES.items()):
+            if not r6_case(base, Path(tmp) / f"R6_{i}", header, message, commit=commit, committed=committed):
+                errors.append(f"the lint accepts docs/spec.md with {name}")
     return errors
 
 
@@ -173,7 +274,7 @@ def main() -> int:
         print(f"doc_lint_selftest: {error}")
     if errors:
         return 1
-    print(f"doc_lint_selftest: ok, {len(BREAKS) + 1} rules fire")
+    print(f"doc_lint_selftest: ok, {len(BREAKS) + len(R6_CASES)} rules fire")
     return 0
 
 
