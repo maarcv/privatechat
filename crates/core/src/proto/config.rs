@@ -17,7 +17,7 @@ use crate::crypto::{self, CryptoError, KdfContext, Nonce, PublicKey, Salt, Secre
 
 #[cfg(test)]
 mod tests;
-mod url;
+pub(crate) mod url;
 
 /// Domain tag of the `channel_id` hash (`docs/spec.md` §4, R9).
 pub(crate) const CHANNEL_ID_TAG: &[u8; 19] = b"privatechat/chid/v1";

@@ -14,6 +14,8 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::crypto::{self, CryptoError, Nonce, Secret, TAG_LEN};
 use crate::proto::record::RecordError;
 
+mod log;
+mod settings;
 mod state;
 
 #[cfg(test)]
