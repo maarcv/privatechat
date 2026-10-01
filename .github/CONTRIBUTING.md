@@ -31,6 +31,7 @@ cargo build --workspace --all-targets
 cargo test --workspace
 cargo deny --all-features check -D checksum-mismatch
 scripts/check_layout.sh
+scripts/check_store_io.sh
 scripts/doc_lint.sh
 python3 scripts/doc_lint_selftest.py
 scripts/check_requirements.sh

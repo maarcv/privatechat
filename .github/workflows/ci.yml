@@ -63,6 +63,9 @@ jobs:
         run: cargo build --workspace --all-targets
       - name: s000_t02_r02_workspace_tests_pass
         run: cargo test --workspace
+      - name: s020_t23_r23_io_in_one_module
+        # Every system call of store in crates/store/src/fs.rs; the script tests itself first.
+        run: scripts/check_store_io.sh
       - name: s015_t06_r06_reference_script
         # The reference script rewrites specs/vectors/; any difference from the commit fails.
         run: |

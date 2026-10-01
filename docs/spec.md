@@ -621,7 +621,7 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 │  └─ adr/README.md (index) · TEMPLATE.md · NNNN-*.md, one per decision
 ├─ specs/                    ← one spec per feature (TEMPLATE.md, README.md index)
 │  └─ vectors/               ← JSON test vectors, produced by the reference script of spec 015 (README.md with the schema)
-├─ scripts/{doc_lint,check_requirements,check_fuzz_targets}.{sh,py}, check_layout.sh, doc_lint_selftest.py, fuzz_exclusions.txt, fuzz_seeds.py, {sign,verify}_release.sh, release_env.sh (spec 060), check_public_server.sh (spec 066), third_party_notices.py (spec 060)
+├─ scripts/{doc_lint,check_requirements,check_fuzz_targets}.{sh,py}, check_layout.sh, check_store_io.sh (spec 020), doc_lint_selftest.py, fuzz_exclusions.txt, fuzz_seeds.py, {sign,verify}_release.sh, release_env.sh (spec 060), check_public_server.sh (spec 066), third_party_notices.py (spec 060)
 │  └─ reference/             ← vectors.py, the reference script that produces the vectors (spec 015), never shipped
 ├─ crates/
 │  ├─ core/                  ← Rust crate: crypto, proto, session (no I/O); fuzz/ in phase 1 (own workspace, Cargo.lock committed)
