@@ -4,9 +4,11 @@
 //! Written by hand, with no derive crate. Every variant is a unit variant, so
 //! an error never carries a byte of a key or a password (spec 011 R21), and
 //! there is no `Display`: the core produces no user-facing text (spec
-//! 027-core-api R18). `Store` arrives with spec 020-store-files.
+//! 027-core-api R18). `Store` carries the storage's own unit error (spec
+//! 020-store-files R26).
 
 use crate::crypto::CryptoError;
+use crate::storage::StoreError;
 
 #[cfg(test)]
 mod tests;
@@ -47,6 +49,8 @@ pub enum Error {
     /// allocate the 64 MiB of Argon2id, or otherwise), an expiry overflowed,
     /// or a bug.
     Internal,
+    /// The storage failed (spec 020-store-files).
+    Store(StoreError),
 }
 
 /// Every primitive failure is `Internal` (R20). A call site that expects
@@ -54,5 +58,12 @@ pub enum Error {
 impl From<CryptoError> for Error {
     fn from(_: CryptoError) -> Error {
         Error::Internal
+    }
+}
+
+/// A storage failure crosses the core boundary as it is (spec 020 R26).
+impl From<StoreError> for Error {
+    fn from(error: StoreError) -> Error {
+        Error::Store(error)
     }
 }

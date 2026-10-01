@@ -68,7 +68,8 @@ fn s012_t04_r03_message_key_comes_from_k_msg() {
 /// reach since libsodium does not fail here.
 #[test]
 fn s012_t08_r06_no_new_secret_type() {
-    assert_eq!(SECRET_TYPES, ["Secret<32>", "Secret<64>"]);
+    // `StorageKey` is spec 020's (R24), not this spec's.
+    assert_eq!(SECRET_TYPES, ["Secret<32>", "Secret<64>", "StorageKey"]);
     let debug = format!("{:?}", keys(K_CH));
     assert_eq!(debug, "ChannelKeys { msg: [REDACTED], hdr: [REDACTED] }");
     for source in [include_str!("../keys.rs"), include_str!("../header.rs")] {

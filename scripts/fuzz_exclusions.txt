@@ -4,3 +4,4 @@
 Config::open_encrypted # spec 011: not fuzzed past Argon2id; a mutated file almost never passes the secretbox tag, and the round-trip test of 011 R24 covers it
 parse_file_header # spec 011, crate-internal: reached only through open_encrypted; the R24 round trip and 011 T13 cover it
 Config::open_file_with_key # spec 011, crate-internal: checks the header with parse_file_header; the R24 round trip and 011 T13 cover it
+ChannelState::open # spec 020 R29: a sealed open, whose box a mutated input almost never passes; its decoder is fuzzed on its own over the plaintext, and the R29 round trip covers it

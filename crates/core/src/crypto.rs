@@ -32,7 +32,7 @@ pub(crate) const HASH_LEN: usize = 32;
 
 /// The types that hold key material, as the PR checklist of AGENTS 5 names
 /// them. A new secret type is added here and to the redacted-`Debug` test.
-pub(crate) const SECRET_TYPES: [&str; 2] = ["Secret<32>", "Secret<64>"];
+pub(crate) const SECRET_TYPES: [&str; 3] = ["Secret<32>", "Secret<64>", "StorageKey"];
 
 /// Result of the one initialisation this process performs (spec 010, R2).
 static SODIUM: OnceLock<Result<(), CryptoError>> = OnceLock::new();

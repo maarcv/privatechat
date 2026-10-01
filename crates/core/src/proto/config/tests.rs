@@ -748,7 +748,8 @@ fn s011_t19_r19_no_lingering_secret() {
         assert_eq!(canonical_password(typed).unwrap().capacity(), typed.len());
     }
     assert!(Secret::copy_from(&K_CH) == Secret::from_bytes(K_CH));
-    assert_eq!(SECRET_TYPES, ["Secret<32>", "Secret<64>"]);
+    // `StorageKey` is spec 020's (R24), not this spec's.
+    assert_eq!(SECRET_TYPES, ["Secret<32>", "Secret<64>", "StorageKey"]);
 }
 
 /// Spec 011, R20: `Forged` from the secret box is `BadPassword`.

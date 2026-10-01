@@ -75,7 +75,7 @@ pub(crate) enum CryptoError { InitFailed, TooLong, BadLength, Forged, BadPadding
 
 pub(crate) const TAG_LEN: usize = 16;
 pub(crate) const HASH_LEN: usize = 32;
-pub(crate) const SECRET_TYPES: [&str; 2] = ["Secret<32>", "Secret<64>"];   // the checklist of AGENTS 5
+pub(crate) const SECRET_TYPES: [&str; 3] = ["Secret<32>", "Secret<64>", "StorageKey"];   // the checklist of AGENTS 5; `StorageKey` since spec 020
 
 pub(crate) fn init() -> Result<(), CryptoError>;                             // R2
 pub(crate) fn version() -> Result<&'static str, CryptoError>;                // R16

@@ -17,7 +17,7 @@ use crate::vectors::{self, Kind};
 
 /// Every `.rs` file of the crate. `core` does no I/O (AGENTS 10), so the test
 /// cannot walk the directory: a new file is added to this list by hand.
-const SOURCES: [(&str, &str); 30] = [
+const SOURCES: [(&str, &str); 34] = [
     ("lib.rs", include_str!("../lib.rs")),
     ("crypto.rs", include_str!("../crypto.rs")),
     ("crypto/ffi.rs", include_str!("ffi.rs")),
@@ -79,6 +79,13 @@ const SOURCES: [(&str, &str); 30] = [
         "proto/fingerprint/tests.rs",
         include_str!("../proto/fingerprint/tests.rs"),
     ),
+    ("storage.rs", include_str!("../storage.rs")),
+    ("storage/tests.rs", include_str!("../storage/tests.rs")),
+    ("storage/state.rs", include_str!("../storage/state.rs")),
+    (
+        "storage/state/items.rs",
+        include_str!("../storage/state/items.rs"),
+    ),
     ("proto/payload.rs", include_str!("../proto/payload.rs")),
     (
         "proto/payload/tests.rs",
@@ -136,14 +143,17 @@ fn s010_t02_r02_init_runs_once() {
 }
 
 /// Spec 010, R3: every secret prints as the literal `[REDACTED]`, and the
-/// types listed in `SECRET_TYPES` are the ones this spec instantiates.
+/// types listed in `SECRET_TYPES` are the ones this spec instantiates and
+/// `StorageKey` of spec 020 (R24).
 #[test]
 fn s010_t03_r03_debug_is_redacted() {
     let short = Secret::<32>::from_bytes([7u8; 32]);
     let long = Secret::<64>::from_bytes([9u8; 64]);
     assert_eq!(format!("{short:?}"), "[REDACTED]");
     assert_eq!(format!("{long:?}"), "[REDACTED]");
-    assert_eq!(SECRET_TYPES, ["Secret<32>", "Secret<64>"]);
+    let storage_key = crate::storage::StorageKey::from_bytes(&mut [8u8; 32]);
+    assert_eq!(format!("{storage_key:?}"), "[REDACTED]");
+    assert_eq!(SECRET_TYPES, ["Secret<32>", "Secret<64>", "StorageKey"]);
 }
 
 /// Spec 010, R3: `Secret` implements nothing that could copy it, order it,
