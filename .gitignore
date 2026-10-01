@@ -32,3 +32,5 @@ clients/ios/DerivedData/
 
 # Personal AI-assistant preferences (see CLAUDE.md and docs/assistant.example.md)
 /assistant.md
+# The worktrees of agents run in isolation (Claude Code).
+.claude/worktrees/

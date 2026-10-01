@@ -9,19 +9,19 @@ Human reviewer: Marc Vilardebó · Accepted on: 2026-09-20
 
 ## Context
 
-The 22 ADRs in `docs/adr/` are the historical context of every decision and the barrier against silent changes (AGENTS 3). For them to be useful, they must have a single format, an index that matches the table in `docs/spec.md` §3 and a closed state vocabulary, and a machine must check it. This spec fixes the format and the procedure; the check is implemented by spec 003.
+The ADRs in `docs/adr/` are the historical context of every decision and the barrier against silent changes (AGENTS 3). For them to be useful, they must have a single format, an index that matches the table in `docs/spec.md` §3 and a closed state vocabulary, and a machine must check it. This spec fixes the format and the procedure; the check is implemented by spec 003.
 
 ## Requirements
 
 - R1 Every ADR MUST live at `docs/adr/NNNN-<kebab>.md`, with `NNNN` sequential with no gaps and no reuse, and follow `docs/adr/TEMPLATE.md`: first line `# ADR NNNN — Title`, third line `Date: YYYY-MM-DD · Status: <state>[ · Supersedes: NNNN]`, and exactly the sections `## Context`, `## Decision`, `## Alternatives considered`, `## Consequences`, in that order.
 - R2 `docs/adr/README.md` MUST contain an `## Index` table with one row per ADR (number, literal title, date, state) identical in number, title and state to the table in `docs/spec.md` §3 and to the files.
 - R3 The state MUST be one of `proposed`, `accepted`, `deprecated`, `superseded by NNNN`.
-- R4 An accepted ADR MUST NOT be edited except to change its state; changing a decision MUST be done with a new ADR carrying `Supersedes: NNNN`, and the old one becomes `superseded by MMMM`. Documented exception in the README: ADRs 0001–0022, written before the repository, carry review notes in their Context.
+- R4 An accepted ADR MUST NOT be edited except to change its state; changing a decision MUST be done with a new ADR carrying `Supersedes: NNNN`, and the old one becomes `superseded by MMMM`. Documented exceptions in the README: ADRs 0001–0022, written before the repository, carry review notes in their Context, Decision or Consequences; and a stale reference may be corrected when the correction is logged in `docs/audit-log.md`.
 - R5 Every change to the wire format, the channel config, the domain tags or the key derivations MUST be accompanied by a new ADR (AGENTS 3); the CI enforces it (spec 001, R8).
 
 ## Limits
 
-- Title ≤ 80 characters. No formulas inside an ADR: reference to `docs/spec.md` §4.
+- Title ≤ 80 characters, ADR 0027 (85) excepted, written before the limit was checked. No formulas inside an ADR: reference to `docs/spec.md` §4.
 
 ## Interface
 
@@ -51,7 +51,7 @@ The 22 ADRs in `docs/adr/` are the historical context of every decision and the 
 
 ## Acceptance criterion
 
-`scripts/doc_lint.sh` green with the current 22 ADRs; a test ADR with one section missing makes the lint fail.
+`scripts/doc_lint.sh` green with the current ADRs; a test ADR with one section missing makes the lint fail.
 
 ## Out of scope
 
@@ -65,3 +65,4 @@ The 22 ADRs in `docs/adr/` are the historical context of every decision and the 
 
 - 2026-09-20 draft · 2026-09-20 in review · 2026-09-20 accepted (Marc Vilardebó) · 2026-09-20 implemented
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): open question 002-R4 closed: no script, the reviewer checks the Definition of done item
+- 2026-10-01 revised after audit Z (`docs/audit-log.md`): R4 states both exceptions of the README; the count of ADRs leaves the text; the title limit names its one exception; doc_lint reads every file of `docs/adr/`, refuses a misnamed one and a duplicate number

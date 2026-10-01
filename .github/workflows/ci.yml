@@ -2,10 +2,13 @@
 name: ci
 
 # s001_t10_r10_triggers_and_permissions: push to main/mvp, every PR, read-only.
+# A label added or removed reruns it too, since adr-guard reads the labels of the event, and
+# so does `edited`, which a change of base branch fires.
 on:
   push:
     branches: [main, mvp]
   pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
 
 concurrency:
   # s001_t05_r05_concurrency_cancels_previous_runs: one run per branch.
@@ -19,6 +22,12 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+
+# `bash` named explicitly runs every step with `-eo pipefail`: a failing command
+# inside a pipe fails its step instead of being hidden by the last one.
+defaults:
+  run:
+    shell: bash
 
 jobs:
   fmt:
@@ -85,21 +94,12 @@ jobs:
         env:
           DOC_LINT_BASE: ${{ github.event.pull_request.base.sha || '' }}
         run: scripts/doc_lint.sh
+      - name: s003_t08_r08_doc_lint_self_test
+        run: python3 scripts/doc_lint_selftest.py
       - name: s000_t05_r05_inici_is_ignored
-        run: |
-          test ! -e inici || git check-ignore -q inici
-          test "$(git ls-files inici | wc -l)" -eq 0
+        run: scripts/check_layout.sh ignored
       - name: s000_t06_r06_root_files_exist
-        run: |
-          for f in AGENTS.md CLAUDE.md README.md LICENSE .github/CONTRIBUTING.md .github/SECURITY.md .github/CODEOWNERS docs/assistant.example.md \
-                   Cargo.toml rust-toolchain.toml rustfmt.toml deny.toml .editorconfig .gitignore \
-                   docs/spec.md docs/threat-model.md docs/audit-log.md docs/adr/README.md docs/adr/TEMPLATE.md \
-                   specs/TEMPLATE.md specs/README.md specs/vectors/README.md \
-                   .claude/skills/architecture/SKILL.md .claude/skills/rust/SKILL.md \
-                   .claude/skills/kotlin/SKILL.md .claude/skills/swift/SKILL.md \
-                   .claude/skills/typescript-svelte/SKILL.md; do
-            test -f "$f" || { echo "missing $f"; exit 1; }
-          done
+        run: scripts/check_layout.sh files
 
   check-requirements:
     name: check-requirements
@@ -124,11 +124,22 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
-          changed="$(git diff --name-only "$BASE"...HEAD)"
-          protected="$(printf '%s\n' "$changed" | grep -E '^(crates/core/src/proto/|crates/core/src/crypto/|specs/vectors/|specs/01[12347]-)' || true)"
+          # No rename detection: a file moved out of a protected path is listed at
+          # both ends. The module roots `crypto.rs`, `proto.rs` and `storage.rs` are
+          # the modules themselves.
+          changed="$(git diff --no-renames --name-only "$BASE"...HEAD)"
+          protected="$(printf '%s\n' "$changed" | grep -E '^(crates/core/src/(proto|crypto|storage)(/|\.rs$)|crates/store/(src|tests/golden)/|specs/vectors/|specs/0(1[12347]|20|31)-)' || true)"
           if [ -z "$protected" ]; then echo "no protected paths touched"; exit 0; fi
           case ",$LABELS," in *,adr-not-needed,*) echo "label adr-not-needed present"; exit 0;; esac
-          added_adr="$(git diff --name-only --diff-filter=A "$BASE"...HEAD | grep -E '^docs/adr/[0-9]{4}-.*\.md$' || true)"
+          # A new ADR is an added file with a number the base does not have: a
+          # renamed old ADR is neither.
+          added_adr="$(git diff --name-only --diff-filter=A "$BASE"...HEAD | grep -E '^docs/adr/[0-9]{4}-[a-z0-9-]+\.md$' || true)"
+          known="$(git ls-tree --name-only "$BASE" docs/adr/ | sed -n 's#^docs/adr/\([0-9]\{4\}\)-.*#\1#p')"
+          added_adr="$(printf '%s\n' "$added_adr" | while read -r f; do
+            [ -n "$f" ] || continue
+            n="$(basename "$f" | cut -c1-4)"
+            printf '%s\n' "$known" | grep -qx "$n" || echo "$f"
+          done)"
           if [ -z "$added_adr" ]; then
             echo "Protected paths changed without a new ADR (AGENTS 3):"; echo "$protected"; exit 1
           fi
@@ -146,8 +157,10 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          # No pipe into `while`: a variable set inside it would be lost in the subshell.
-          bad="$(git log --no-merges --format=%s "$BASE"..HEAD | grep -Ev '^([0-9]{3}|docs|ci|chore|adr): ' || true)"
+          # `git log` on its own line, so that an unreachable BASE fails the step;
+          # each subject behind a `>`, so that an empty one is a line too.
+          subjects="$(git log --no-merges --format='>%s' "$BASE"..HEAD)"
+          bad="$(printf '%s\n' "$subjects" | grep -Ev '^>([0-9]{3}|docs|ci|chore|adr): ' | grep -v '^$' || true)"
           if [ -n "$bad" ]; then
             echo "bad commit subjects:"; echo "$bad"; exit 1
           fi

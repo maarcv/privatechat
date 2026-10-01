@@ -38,6 +38,10 @@ deny = [
   { crate = "rand_chacha", wrappers = ["proptest", "rand"] },
   { crate = "rand_xorshift", wrappers = ["proptest"] },
   { crate = "fastrand", wrappers = ["tempfile"] },
+  # `tempfile` itself only under `proptest` (directly or through its `rusty-fork`),
+  # so that the OS randomness it pulls never reaches a shipped crate.
+  { crate = "tempfile", wrappers = ["proptest", "rusty-fork"] },
+  { crate = "rusty-fork", wrappers = ["proptest"] },
   { crate = "minisign-verify", wrappers = ["libsodium-sys-stable"] },
   { crate = "rand_core", wrappers = ["proptest", "rand", "rand_chacha", "rand_xorshift"] },
   { crate = "getrandom", wrappers = ["rand_core", "tempfile"] },

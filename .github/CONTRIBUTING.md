@@ -30,7 +30,9 @@ RUSTFLAGS="--cfg fuzzing" cargo clippy -p privatechat-core -- -D warnings
 cargo build --workspace --all-targets
 cargo test --workspace
 cargo deny --all-features check -D checksum-mismatch
+scripts/check_layout.sh
 scripts/doc_lint.sh
+python3 scripts/doc_lint_selftest.py
 scripts/check_requirements.sh
 scripts/check_fuzz_targets.sh
 python3 scripts/reference/vectors.py   # then: no change under specs/vectors/

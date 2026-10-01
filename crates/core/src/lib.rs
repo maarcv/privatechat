@@ -47,20 +47,47 @@ pub const DEFAULT_SERVER_URL: &str = "wss://server.invalid";
 mod tests {
     use super::DEFAULT_SERVER_URL;
 
-    /// Spec 000, R4: the default URL is `wss://` and, until there is a domain,
-    /// points at the reserved `.invalid` TLD.
-    #[test]
-    fn s000_t04_r04_default_server_url_is_wss_placeholder() {
-        assert!(DEFAULT_SERVER_URL.starts_with("wss://"));
-        assert!(DEFAULT_SERVER_URL.ends_with(".invalid"));
+    /// The code lines of one `[section]` of a TOML file, comments and blank
+    /// lines dropped, so that a commented-out copy of a line never counts.
+    fn section<'a>(toml: &'a str, header: &str) -> Vec<&'a str> {
+        let mut lines = Vec::new();
+        let mut inside = false;
+        for line in toml.lines() {
+            // A trailing comment is prose too.
+            let line = line.split(" #").next().unwrap_or(line).trim();
+            // `[[array]]` opens a table too and so closes the section.
+            if line.starts_with('[') {
+                inside = line == header;
+                continue;
+            }
+            if inside && !line.is_empty() && !line.starts_with('#') {
+                lines.push(line);
+            }
+        }
+        lines
     }
 
-    /// Spec 000, R3: the workspace lints deny `unwrap` and friends, `unsafe`
-    /// is denied in the workspace and forbidden in `store` and `server`.
-    /// Checked by reading the workspace `Cargo.toml`, which is the single source.
+    /// Whether a Rust source holds `attribute` as a line of its own, not in a
+    /// comment.
+    fn has_line(source: &str, attribute: &str) -> bool {
+        source.lines().any(|line| line.trim() == attribute)
+    }
+
+    /// Spec 000, R4: the default URL is the reserved `.invalid` placeholder
+    /// until there is a domain.
+    #[test]
+    fn s000_t04_r04_default_server_url_is_wss_placeholder() {
+        assert_eq!(DEFAULT_SERVER_URL, "wss://server.invalid");
+    }
+
+    /// Spec 000, R3: the workspace lints deny `unwrap` and friends, every
+    /// crate takes them, `unsafe` is denied in the workspace and in `core` and
+    /// forbidden in `store` and `server`, and release builds check overflow.
+    /// Each line is read in its own section and never from a comment.
     #[test]
     fn s000_t03_r03_workspace_lints_deny_unwrap_and_arithmetic() {
         let manifest = include_str!("../../../Cargo.toml");
+        let clippy = section(manifest, "[workspace.lints.clippy]");
         for lint in [
             "arithmetic_side_effects",
             "cast_possible_truncation",
@@ -78,36 +105,63 @@ mod tests {
             "unwrap_used",
         ] {
             let line = format!("{lint} = \"deny\"");
-            assert!(manifest.contains(&line), "missing workspace lint: {line}");
+            assert!(
+                clippy.contains(&line.as_str()),
+                "missing workspace lint: {line}"
+            );
         }
-        assert!(manifest.contains("unsafe_code = \"deny\""));
-        assert!(manifest.contains("overflow-checks = true"));
+        let rust = section(manifest, "[workspace.lints.rust]");
+        assert!(rust.contains(&"unsafe_code = \"deny\""));
+        assert!(section(manifest, "[profile.release]").contains(&"overflow-checks = true"));
+        for crate_manifest in [
+            include_str!("../Cargo.toml"),
+            include_str!("../../store/Cargo.toml"),
+            include_str!("../../server/Cargo.toml"),
+        ] {
+            assert_eq!(section(crate_manifest, "[lints]"), ["workspace = true"]);
+        }
+        assert!(has_line(include_str!("lib.rs"), "#![deny(unsafe_code)]"));
         for crate_root in [
             include_str!("../../store/src/lib.rs"),
             include_str!("../../server/src/main.rs"),
         ] {
-            assert!(crate_root.contains("#![forbid(unsafe_code)]"));
+            assert!(has_line(crate_root, "#![forbid(unsafe_code)]"));
         }
     }
 
-    /// Spec 000, R7: the toolchain is pinned to one concrete stable version.
+    /// Spec 000, R7: the toolchain is pinned to one concrete stable version
+    /// with its two components, and the workspace is on edition 2024.
     #[test]
     fn s000_t07_r07_toolchain_is_pinned() {
-        let toolchain = include_str!("../../../rust-toolchain.toml");
-        assert!(toolchain.contains("channel = \"1.98.1\""));
-        assert!(toolchain.contains("\"rustfmt\"") && toolchain.contains("\"clippy\""));
+        let toolchain = section(include_str!("../../../rust-toolchain.toml"), "[toolchain]");
+        assert!(toolchain.contains(&"channel = \"1.98.1\""));
+        assert!(toolchain.contains(&"components = [\"rustfmt\", \"clippy\"]"));
+        let manifest = include_str!("../../../Cargo.toml");
+        assert!(section(manifest, "[workspace.package]").contains(&"edition = \"2024\""));
     }
 
     /// Spec 000, R8: `deny.toml` bans every cryptographic and compression
-    /// crate, lets `rand` in only under `proptest`, and allows exactly the
-    /// listed licences.
+    /// crate outright, lets the ones with wrappers in only under exactly those
+    /// wrappers, allows exactly the listed licences, and refuses unknown
+    /// sources, yanked crates and wildcard versions.
     #[test]
     fn s000_t08_r08_deny_bans_crypto_crates() {
         let deny = include_str!("../../../deny.toml");
+        // Only the entries of `deny = [ … ]`: a crate under `skip` is not banned.
+        let bans: Vec<&str> = section(deny, "[bans]")
+            .into_iter()
+            .skip_while(|line| *line != "deny = [")
+            .skip(1)
+            .take_while(|line| *line != "]")
+            .filter(|line| line.starts_with("{ crate = "))
+            .collect();
+        let entry = |name: &str| {
+            let prefix = format!("{{ crate = \"{name}\"");
+            bans.iter().copied().find(|line| {
+                line.starts_with(&format!("{prefix} ")) || line.starts_with(&format!("{prefix},"))
+            })
+        };
         for crate_name in [
-            "rand",
-            "rand_core",
-            "getrandom",
             "sha2",
             "sha3",
             "blake2",
@@ -123,38 +177,103 @@ mod tests {
             "hkdf",
             "hmac",
             "ring",
+            "sodiumoxide",
             "openssl",
             "openssl-sys",
-            "sodiumoxide",
-            "flate2",
             "zstd",
             "brotli",
             "lz4",
         ] {
+            let line = entry(crate_name).expect("deny.toml bans every crate of the list");
+            // Any other key (`wrappers`, `deny-multiple-versions`) stops the outright ban.
+            let rest = line
+                .strip_prefix(&format!("{{ crate = \"{crate_name}\""))
+                .unwrap_or(line);
+            let reason_only = rest.starts_with(", reason = \"")
+                && rest.ends_with("\" },")
+                && rest.matches(" = ").count() == 1;
             assert!(
-                deny.contains(&format!("{{ crate = \"{crate_name}\"")),
-                "deny.toml must ban {crate_name}"
+                rest == " }," || reason_only,
+                "{crate_name} is banned outright: {line}"
             );
         }
-        assert!(deny.contains("{ crate = \"rand\", wrappers = [\"proptest\""));
-        for licence in [
-            "MIT",
-            "Apache-2.0",
-            "Apache-2.0 WITH LLVM-exception",
-            "BSD-2-Clause",
-            "BSD-3-Clause",
-            "ISC",
-            "Unicode-3.0",
-            "Zlib",
-            "MPL-2.0",
+        // The wrapped bans, each with exactly the wrappers AGENTS 2 and 24 allow.
+        for (crate_name, wrappers) in [
+            ("rand", r#"["proptest", "rand_chacha", "rand_xorshift"]"#),
+            ("rand_chacha", r#"["proptest", "rand"]"#),
+            ("rand_xorshift", r#"["proptest"]"#),
+            (
+                "rand_core",
+                r#"["proptest", "rand", "rand_chacha", "rand_xorshift"]"#,
+            ),
+            ("getrandom", r#"["rand_core", "tempfile"]"#),
+            ("fastrand", r#"["tempfile"]"#),
+            ("tempfile", r#"["proptest", "rusty-fork"]"#),
+            ("rusty-fork", r#"["proptest"]"#),
+            ("minisign-verify", r#"["libsodium-sys-stable"]"#),
+            ("flate2", r#"["zip"]"#),
+            ("zlib-rs", r#"["flate2"]"#),
+            ("zip", r#"["libsodium-sys-stable"]"#),
+            ("zopfli", r#"["zip"]"#),
+            ("libflate", r#"["libsodium-sys-stable"]"#),
+            ("libflate_lz77", r#"["libflate"]"#),
         ] {
-            assert!(
-                deny.contains(&format!("  \"{licence}\",\n")),
-                "deny.toml must allow the licence {licence}"
-            );
+            let line = format!("{{ crate = \"{crate_name}\", wrappers = {wrappers} }},");
+            assert_eq!(entry(crate_name), Some(line.as_str()), "{crate_name}");
         }
-        assert!(
-            deny.contains("allow-registry = [\"https://github.com/rust-lang/crates.io-index\"]")
+        // No other table, so that no `[[licenses.exceptions]]` or `[sources.allow-org]` slips in.
+        let tables: Vec<&str> = deny
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with('['))
+            .collect();
+        assert_eq!(
+            tables,
+            [
+                "[graph]",
+                "[advisories]",
+                "[licenses]",
+                "[bans]",
+                "[bans.build]",
+                "[[bans.build.bypass]]",
+                "[sources]",
+            ]
         );
+        let wrapped = bans.iter().filter(|line| line.contains("wrappers")).count();
+        assert_eq!(wrapped, 15, "a ban gained wrappers the test does not name");
+        // Whole sections, so that an added exception or source fails too.
+        assert_eq!(
+            section(deny, "[licenses]"),
+            [
+                "version = 2",
+                "allow = [",
+                "\"MIT\",",
+                "\"Apache-2.0\",",
+                "\"Apache-2.0 WITH LLVM-exception\",",
+                "\"BSD-2-Clause\",",
+                "\"BSD-3-Clause\",",
+                "\"ISC\",",
+                "\"Unicode-3.0\",",
+                "\"Zlib\",",
+                "\"MPL-2.0\",",
+                "]",
+                "confidence-threshold = 0.9",
+            ]
+        );
+        assert_eq!(
+            section(deny, "[sources]"),
+            [
+                "unknown-registry = \"deny\"",
+                "unknown-git = \"deny\"",
+                "allow-registry = [\"https://github.com/rust-lang/crates.io-index\"]",
+            ]
+        );
+        // Whole too: `exclude` under `[graph]` would take a banned crate out of every check.
+        assert_eq!(section(deny, "[graph]"), ["all-features = true"]);
+        assert_eq!(
+            section(deny, "[advisories]"),
+            ["version = 2", "yanked = \"deny\"", "ignore = []"]
+        );
+        assert!(section(deny, "[bans]").contains(&"wildcards = \"deny\""));
     }
 }

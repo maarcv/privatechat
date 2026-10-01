@@ -2,6 +2,68 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit Z
+
+**2026-10-01 — Audit Z, the first code audit of phase 0 (branch `phase0-audit` from `mvp` at 2136de2): specs 000–003 and what implements them — the CI workflows, `doc_lint`, `check_requirements`, `deny.toml`, the workspace lints and toolchain — in rounds of three passes (A: structure and logic; B: the local CI, 131 mutants and crafted git histories against `adr-guard` and `commit-lint`; C: conformance with the specs, AGENTS and `docs/spec.md`).** Audits A–D had reviewed documents, not this code.
+
+**Round 1.** CI green; the guards had holes:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ1 | `adr-guard` and `commit-lint` run on pull requests only, and every merge reached `mvp` by a local push, so neither ever ran; `mvp` had no protection (Z1-A-1, Z1-C-2) | High | Branch protection on `mvp`: a pull request with the jobs green (AZ-Q1, AZ-Q5); 001 R10 |
+| AZ2 | `adr-guard` missed the module roots `crypto.rs` and `proto.rs`, where most derivations live, a file renamed out of a protected path, and the tags and derivations of specs 020 and 031 (Z1-A-2–Z1-A-4, Z1-B-1, Z1-B-2, Z1-C-1) | High | `(proto|crypto|storage)(/|\.rs$)`, specs 020 and 031, `--no-renames` (AZ-Q3); 001 R8, §10 |
+| AZ3 | Neither Python guard tested itself: removing most rules left CI green (3 of 55 `doc_lint` mutants and 3 of 22 `check_requirements` mutants killed); `doc_lint` missed a duplicate ADR number, a misnamed ADR file and a requirement after a `###` subheading (Z1-A-7, Z1-B-6–Z1-B-8) | Medium | `doc_lint_selftest.py` (003 R8) and a self-test in `check_requirements` (001 R7); the three rules |
+| AZ4 | The spec 000 tests matched text anywhere, so a commented-out line passed; no check that each crate takes the workspace lints, of the release profile, the edition, the exact URL, the wrappers, licences and source rules of `deny.toml`, or of `.gitignore` beyond `inici` (Z1-A-9, Z1-B-3–Z1-B-5, Z1-C-7, Z1-C-9) | Medium | Each line read in its TOML section; T03–T08 |
+| AZ5 | `tempfile` unbanned, so the OS randomness it pulls could reach a shipped crate; `commit-lint` passed an empty subject and an unreachable base; no `pipefail` (Z1-A-6, Z1-A-8, Z1-B-9) | Medium | `tempfile` and `rusty-fork` only under `proptest`; `defaults: shell: bash`; the subjects read on their own line |
+| AZ6 | Specs 027, 040 and 053 required amendments at their acceptance that were not made: AGENTS 20 described four handles where ADR 0037 has one, §5 an old trigger (Z1-C-3) | Medium | AGENTS 20 and 23 and §5 now, with `check_s027_t22_r22_boundary_documented`; the rest moved to each spec's implementation (AZ-Q2) |
+| AZ7 | Stale text: §11 without `fuzz.yml`, `crates/host/` and `clippy.toml`; 000 R1 and R8, AGENTS 10, 002 R4 and its count of ADRs and title limit, 001's `@v4` and "eight jobs"; the landing workflow not run on the docs it builds from; `.claude/worktrees/` not ignored (Z1-A-10, Z1-C-4–Z1-C-6, Z1-C-8, Z1-C-10) | Low | Rewritten |
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AZ-Q1 | Pull requests and branch protection, or the checks on every push (Z1-A Q1, Z1-C Q1) | Protect `mvp`; every change by pull request | 001 R10; the repository's settings |
+| AZ-Q2 | The amendments 027, 040 and 053 owed at acceptance (Z1-C Q2) | AGENTS 20, 23 and §5 now; the rest at implementation | 027 R22, 040 R14, 053 R20 |
+| AZ-Q3 | Widen `adr-guard` to 020, 031 and `storage`, and `docs/spec.md` too (Z1-A Q2) | 020, 031, `storage` and the module roots; not `docs/spec.md` | 001 R8 |
+| AZ-Q4 | `SECURITY.md` points to private vulnerability reporting, switched off (Z1-A-5) | The reviewer turns it on | — |
+| AZ-Q5 | A required approval cannot be given by the one account that opens the pull request | The pull request and its jobs are required; the reviewer's merge is the review | — |
+
+**Round 2.** CI green; 199 mutants, 115 killed, every survivor equivalent, far-fetched or outside phase 0 but these:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ8 | The round-1 step `s000_t05_r05_inici_is_ignored` gave `git check-ignore -q` eight paths, which it refuses: the doc-lint job failed on every run, and the local CI list does not run it (Z2-A-1, Z2-B-1) | High | One path at a time |
+| AZ9 | A renamed ADR counted as the new ADR `adr-guard` asks for, since round 1 diffed with `--no-renames` (Z2-A-2) | Medium | A new ADR is a file whose number the base does not have |
+| AZ10 | `doc_lint_selftest` checked only that the lint failed, so another rule failing hid a dead one: the ADR state fixture broke line 3 instead of the vocabulary, and contiguous numbering, the index state, §10 listing every spec, the spec state, phase and index rows, four R6 paths and spec 027 R22 had no fixture (Z2-A-3, Z2-B-2, Z2-B-3) | Medium | Each fixture names its rule's message; 28 fixtures; 003 R8 |
+| AZ11 | The `check_requirements` fixtures had no two-digit requirement and none under a `###` subheading (Z2-A-3) | Low | R10 under `### Notes`, and a test of R100 that must not cover it |
+| AZ12 | T08 left `sodiumoxide` out, read a ban from any `{ crate =` line, `skip` too, and the licence and source sections by containment; `section()` read past a `[[array]]` (Z2-A-4, Z2-A-5, Z2-B-4) | Low | `sodiumoxide`; bans from `deny = [ … ]`; both sections compared whole; `[[` closes a section |
+| AZ13 | §9 said `cargo deny` checks the core does no I/O; §10 named only 011–017 for `adr-not-needed`; 000's tree lacked `clippy.toml` and the self-test; the `Updated` date of `docs/spec.md` was stale since audit Y, which no pull request had checked (Z2-A-6) | Low | Rewritten |
+
+**Round 3.** CI green; 85 crafted histories and 251 mutants, every survivor equivalent, far-fetched or caught by another step but these:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ14 | Adding the `adr-not-needed` label started no run, and a rerun reads the old payload, so the label could never turn `adr-guard` green (Z3-A-1) | Medium | The workflow also runs on `labeled` and `unlabeled` |
+| AZ15 | The file framing of spec 020 goes into `crates/store/src/`, which `adr-guard` did not protect (Z3 question 1) | Medium | Protected (AZ-Q6); 001 R8, §10 |
+| AZ16 | Dropping `specs/`, `.claude/` or `AGENTS.md` from the exclusions of `check_requirements` left it green: every spec's own `T` lines would cover it (Z3-A-2) | Medium | The fixture names the tests in its spec, `.claude/` and `AGENTS.md` too |
+| AZ17 | T08 took `deny-multiple-versions`, which lifts an outright ban, a `[[licenses.exceptions]]` table and `[sources.allow-org]` (Z3-B-1) | Low | An outright ban has no key but `reason`; the list of tables is exact |
+| AZ18 | R6 read the date of the test merge GitHub makes, and had no case that must pass; §3 titles, an index row with no file, `superseded by` with a bad number, `e.g.` and `such as`, and the spec id in AGENTS 20 had no fixture; the §9 rule read to the end of the file (Z3-A-3–Z3-A-5, Z3-B-2–Z3-B-4) | Low | `--no-merges`; 34 fixtures, three that must pass; §9 ends at §10 |
+| AZ19 | The local CI list did not run the two layout steps, which is how AZ8 went unseen; §10 named phase 2 where only 020 and 031 are protected; the pull request template's count of commits (Z3-C-2) | Low | `scripts/check_layout.sh`, run by both; rewritten |
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AZ-Q6 | Protect `crates/store/src/`, or move the file framing into `core::storage` | Protect `crates/store/src/` | 001 R8 |
+
+**Round 4.** CI green; 103 crafted histories and 209 mutants, every survivor equivalent, far-fetched or caught by another step but these, after which the audit closed with nothing substantive left:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ20 | A pull request retargeted to `mvp` fires only `edited`, so its check from the old base stayed green (Z4-A-1) | Medium | `edited` among the triggers; 001 R10 |
+| AZ21 | The frozen files of spec 020 R31, `crates/store/tests/golden/`, are the store format and were not protected (Z4-A-2) | Medium | Protected; 001 R8, §10 |
+| AZ22 | T08 did not read `[graph]` or `[advisories]`, where `exclude` takes a banned crate out of every check (Z4-A-4, Z4-B-1) | Low | Both sections compared whole |
+| AZ23 | No fixture pinned `--no-merges`, the end of §9, a §3 row with no file, a §3 state, "For example", or an untouched spec under an old header (Z4-A-3, Z4-B-2, Z4-B-3) | Low | 38 fixtures; a branch resolving a docs/spec.md conflict in its own merge dates the header by a later commit that is not a merge |
+| AZ24 | §10 left out 027, whose exit test lives under the protected `crates/store/src/`; the template's command list lacked the layout script (Z4-C-1, Z4-C-2) | Low | Rewritten |
+
+The `labeled`, `unlabeled` and `edited` triggers stay a review item (001 T10) (Z4-B-4).
+
 ## Audit Y
 
 **2026-10-01 — Audit Y, a re-audit of phase 1 in rounds (branch `phase1-audit` from `mvp` at 107c578), after audits Q–W had run one round each.** Each round runs three passes (A: structure, simplicity and logic; B: the local CI run and hand mutants; C: conformance) over three groups (G1: specs 010, 015 and `core::Error`; G2: specs 011, 014, 017; G3: specs 012, 013, 016), nine agents in all. The human reviewer allowed specs to change, nothing being in production.
