@@ -50,7 +50,7 @@ pub enum Error {
 }
 
 /// Every primitive failure is `Internal` (R20). A call site that expects
-/// `Forged` or `BadPadding` matches it before this conversion.
+/// `Forged`, `BadPadding` or `BadEncoding` matches it before this conversion.
 impl From<CryptoError> for Error {
     fn from(_: CryptoError) -> Error {
         Error::Internal

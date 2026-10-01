@@ -103,7 +103,7 @@ AGENTS 12 fixes where `unsafe` may appear. Inside that one file:
 - The `// SAFETY:` comment states the invariant that makes the block sound
   (buffer lengths, non-null, initialised).
 - Wrap every libsodium call in a safe function with typed arguments
-  (`fn aead_encrypt(key: &Secret<32>, nonce: &[u8; 24], ...)`) so the rest of
+  (`fn aead_encrypt(key: &Secret<32>, nonce: &Nonce, ...)`) so the rest of
   `core` never sees a raw pointer or a length parameter.
 - Call `sodium_init()` once via `std::sync::OnceLock` and return an error, not a
   panic, if it fails (spec 010 R2).

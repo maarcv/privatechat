@@ -32,7 +32,7 @@ from typing import Callable
 ROOT = Path(__file__).resolve().parent.parent.parent
 VECTORS_DIR = ROOT / "specs" / "vectors"
 # The repository files the script reads, as data (R4): its own source for the import check,
-# the published vectors of spec 010 for its self-tests and the word list of spec 014.
+# the published vectors of spec 010 for its self-tests and the word list of spec 011, shared by 014.
 VECTORS_010 = VECTORS_DIR / "010.json"
 WORD_LIST = ROOT / "crates" / "core" / "src" / "proto" / "bip39_english.txt"
 WORD_LIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"  # 011 R17
@@ -280,6 +280,7 @@ def render(spec: str, vectors: list[dict]) -> str:
     document = {"spec": spec, "proto_version": PROTO_VERSION, "vectors": vectors}
     text = json.dumps(document, indent=2, ensure_ascii=False) + "\n"
     require("\\" not in text, f"{spec}: an escape the loader does not read")
+    require(not any("\x7f" <= c <= "\x9f" for c in text), f"{spec}: a control character the loader refuses")
     return text
 
 
@@ -515,6 +516,10 @@ def check_s011_t22_r22_section_produces_011_json() -> list[dict]:
     """The vectors of spec 011: each positive with its record, its QR text and the fields and
     identity it decodes to; each negative a one-rule edit of `config_no_invite` or
     `config_reference`, of its QR text or of the pinned file."""
+    require(WHITE_SPACE == {c for c in range(0x110000) if chr(c).isspace()} - set(range(0x1C, 0x20)),
+            "011 R15: White_Space is Python's isspace less U+001C..=U+001F")
+    require(canonical_password("Able\x1c\u00c9CRIT\x1fx") == "able\x1c\u00c9crit\x1fx".encode("utf-8"),
+            "011 R15: U+001C..=U+001F are kept and only ASCII letters fold")
     created_at = 1_790_000_000_000
     now = U64(created_at + 60_000)
     reference = {
@@ -647,6 +652,8 @@ def chatcfg_vectors(record: bytes, opened_record: bytes, now: U64) -> list[dict]
     require(all(word in listed for word in CHATCFG_PASSWORD.decode("ascii").split(" ")),
             "the fixed password is 7 list words")
     require(len(CHATCFG_REFERENCE) == CHATCFG_LEN, "a .chatcfg file is 1 085 bytes")
+    require(CHATCFG_REFERENCE[:45] == b"PCFG\x01" + CHATCFG_SALT + CHATCFG_NONCE,
+            "the pinned file begins with the header of 011 R13, which the mutations edit")
     inputs = {"record": record, "password": CHATCFG_PASSWORD, "salt": CHATCFG_SALT,
               "nonce": CHATCFG_NONCE, "now": now}
     vectors = [raw_011("chatcfg_reference", "positive",
@@ -839,9 +846,11 @@ def sodium_pad(data: bytes, block: int) -> bytes:
 
 
 def unpadded(padded: bytes) -> bytes:
-    """The bytes before the 0x80 marker of `sodium_pad`."""
+    """The bytes before the 0x80 marker of `sodium_pad`, which, as libsodium's `sodium_unpad`
+    requires, sits in the last block."""
     marked = padded.rstrip(b"\x00")
-    require(marked.endswith(b"\x80"), "a padded payload ends with its marker")
+    require(marked.endswith(b"\x80") and len(padded) >= PAD_BLOCK
+            and len(padded) - len(marked) < PAD_BLOCK, "a padded payload ends with its marker")
     return marked[:-1]
 
 
@@ -935,6 +944,8 @@ def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
     vectors.append(negative("expired_received_at", "text_k1 received ttl_ms + 360 001 ms "
                             "before now", blob, "Expired", signer=True, received_at=received_at))
     require(received_at + margin == k1["now"] - 1, "expired by one millisecond")
+    require(EXPIRY_MARGIN_MS == 360_000, "the margin of 013 R13, which the vector sits one past")
+    require(margin == k1["ttl_seconds"] * 1_000 + 360_000, "ttl_ms + 360 000, written out (R13)")
 
     def flip(offset: int, value: int | None = None) -> bytes:
         edited = bytearray(blob)
@@ -1036,7 +1047,13 @@ def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
     # The records of the vectors whose point is their shape keep that shape.
     shapes = {"unknown_payload_key": ([0, 2, 3, 9], b""), "missing_sent_at": ([0, 3], b""),
               "stale_missing_type": ([2, 3], b""),
-              "stale_trailing_garbage": ([0, 2], b"\x03\x00")}
+              "stale_trailing_garbage": ([0, 2], b"\x03\x00"),
+              "display_name_in_key_retired": ([0, 1, 2, 3], b"")}
+    # The type byte of the two unknown-type vectors is one no type takes.
+    for name in ("unknown_type", "stale_unknown_type"):
+        item = next(item for item in vectors if item["name"] == name)
+        key_0 = unpadded(item["inputs"]["padded"])[FIELD_HEADER_LEN]
+        require(key_0 not in (TYPE_TEXT, TYPE_KEY_RETIRED), f"{name}: an unknown type")
     for item in vectors:
         if item["name"] in shapes:
             require(field_keys(unpadded(item["inputs"]["padded"])) == shapes[item["name"]],

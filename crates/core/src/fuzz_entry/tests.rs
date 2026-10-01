@@ -108,6 +108,8 @@ fn s016_t03_r03_record_schema_uses_every_type() {
     for (policy, verdict) in [
         (0x00, Ok(())),
         (0x01, Err(Error::BadPayload)),
+        (0x02, Err(Error::BadPayload)),
+        (0x80, Err(Error::BadPayload)),
         (0xff, Err(Error::BadPayload)),
     ] {
         let input = [&[policy][..], &unknown].concat();
@@ -272,6 +274,17 @@ fn s016_t08_r08_seeds_reach_their_entries() {
     assert_eq!(verify_qr_parse_verdict(&other), Err(Error::WrongChannel));
 
     assert_eq!(payload_decode_verdict(&encoded_text(40)), Ok(()));
+    // The entry adds no logic of its own (R7): a payload `validate` would
+    // refuse, its `sent_at` off the minute, still decodes.
+    let off_the_minute = Payload {
+        kind: PayloadKind::Text,
+        display_name: None,
+        sent_at: text_k1::SENT_AT + 1,
+        body: b"hi".to_vec(),
+    };
+    let encoded = off_the_minute.encode().unwrap();
+    assert!(off_the_minute.validate().is_err());
+    assert_eq!(payload_decode_verdict(&encoded), Ok(()));
     assert_eq!(payload_decode_verdict(&[]), Err(Error::BadPayload));
 }
 

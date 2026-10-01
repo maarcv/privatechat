@@ -108,6 +108,7 @@ fn unsupported() -> Vec<Vec<u8>> {
         with(0, &[0]),
         with(0, &[2]),
         with(1, &[2]),
+        [with(0, &[0]), field(8, b"x")].concat(),
         [with(0, &[2]), field(8, b"x")].concat(),
         [with(1, &[2]), field(8, b"x")].concat(),
         tail(2, 1),
@@ -174,6 +175,16 @@ fn bad_urls() -> Vec<String> {
     .map(String::from)
     .to_vec();
     urls.push(format!("ws://{}", onion(55, 'a')));
+    urls.push(format!("ws://{}", onion(57, 'a')));
+    urls.push(format!("ws://{}-.onion", "a".repeat(55)));
+    urls.push(format!("ws://{}.a.onion", "a".repeat(54)));
+    urls.push(format!("ws://{}.ONION", "a".repeat(56)));
+    // The scheme is matched as written, and nothing is percent-decoded.
+    urls.push("WSS://host".to_owned());
+    urls.push("Wss://host".to_owned());
+    urls.push(format!("WS://{}", onion(56, 'a')));
+    urls.push("wss://ho%73t".to_owned());
+    urls.push("wss://host!".to_owned());
     urls.push(format!("ws://{}.onion", "a".repeat(55) + "1"));
     urls.push(format!("ws://{}.onion", "a".repeat(55) + "8"));
     urls.push(format!("ws://{}", onion(56, 'A')));
@@ -563,6 +574,32 @@ fn s011_t15_r15_password_canonical_form() {
         );
     }
     assert!(canonical_password(&[b'a'; 256]).is_ok());
+    // Exactly the 25 White_Space code points separate words; every other
+    // character is kept, U+001C..=U+001F included.
+    let white_space: Vec<u32> = [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0x85, 0xa0, 0x1680]
+        .into_iter()
+        .chain(0x2000..=0x200a)
+        .chain([0x2028, 0x2029, 0x202f, 0x205f, 0x3000])
+        .collect();
+    assert_eq!(white_space.len(), 25);
+    for c in (0..=0x10ffff).filter_map(char::from_u32) {
+        let typed = format!("a{c}b");
+        let canonical = canonical_password(typed.as_bytes()).unwrap();
+        let expected = if white_space.contains(&u32::from(c)) {
+            "a b".to_owned()
+        } else {
+            typed.to_ascii_lowercase()
+        };
+        assert_eq!(
+            canonical.as_slice(),
+            expected.as_bytes(),
+            "U+{:04X}",
+            u32::from(c)
+        );
+    }
+    // Only ASCII letters fold.
+    let kept = canonical_password("Able\u{1c}ÉCRIT\u{1f}x".as_bytes()).unwrap();
+    assert_eq!(kept.as_slice(), "able\u{1c}Écrit\u{1f}x".as_bytes());
     let spaced = [&b"able"[..], &[b' '; 1_020]].concat();
     assert_eq!(canonical_password(&spaced).unwrap().as_slice(), b"able");
 }
@@ -926,6 +963,9 @@ fn check_negative(vector: &Vector) {
                 vector.expected("canonical").bytes(),
                 "{name}"
             );
+        } else if name.starts_with("password_") {
+            // A bound, not a wrong password: the canonical form refuses it.
+            assert!(canonical_password(password).is_err(), "{name}");
         }
     }
     assert!(!errors.is_empty(), "{name}: no form to check");
@@ -1034,4 +1074,36 @@ fn s011_vectors_dispatch() {
     ]
     .concat();
     vectors::check_all("011", &entries);
+}
+
+/// Spec 011, R2, R3, R4 and R13: the edges round 3 of audit Y found unpinned:
+/// a name of 33 two-byte characters is over 64 bytes at `create` too, a
+/// `proto_version` of 0 and a file version of 0 are unsupported, and the
+/// optional key 6 at the wrong width breaks the record.
+#[test]
+fn s011_t04_r04_edges_of_create_and_the_versions() {
+    let long_name = "é".repeat(33);
+    assert_eq!(
+        Config::create("wss://host", 86_400, &long_name, NOW).err(),
+        Some(Error::BadConfig)
+    );
+    assert_eq!(rejection(&with(1, &[0])), Some(Error::UnsupportedVersion));
+    assert_eq!(rejection(&with(6, &[0; 4])), Some(Error::BadConfig));
+    let mut file = keyed_file();
+    file[4] = 0;
+    assert_eq!(parse_file_header(&file), Err(Error::UnsupportedVersion));
+}
+
+/// Spec 011, R4: a suggested name holding any Cc character, at every one of
+/// its 65 code points, is out of range.
+#[test]
+fn s011_t04_r04_every_control_in_a_name() {
+    for control in ('\u{0}'..='\u{10ffff}').filter(|c| c.is_control()) {
+        let record = with(7, format!("a{control}b").as_bytes());
+        assert_eq!(
+            Config::parse(&record, NOW).err(),
+            Some(Error::BadConfig),
+            "{control:?}"
+        );
+    }
 }

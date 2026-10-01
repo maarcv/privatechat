@@ -33,9 +33,11 @@ def field(vector: dict, name: str) -> bytes | None:
 
 
 def unpad(padded: bytes) -> bytes | None:
-    """The record before the 0x80 marker of `sodium_pad`, or `None` for broken padding."""
+    """The record before the 0x80 marker of `sodium_pad`, or `None` for broken padding: as
+    libsodium's `sodium_unpad`, the marker must sit in the last block."""
     marked = padded.rstrip(b"\x00")
-    return marked[:-1] if marked.endswith(b"\x80") else None
+    in_last_block = len(padded) >= PAD_BLOCK and len(padded) - len(marked) < PAD_BLOCK
+    return marked[:-1] if marked.endswith(b"\x80") and in_last_block else None
 
 
 def payload_record(v: dict) -> bytes | None:
@@ -102,13 +104,20 @@ def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
     return {"whole": field(v, whole)}
 
 
+# How many vectors seed each target, counted once by hand from the frozen files: the filters of
+# `TARGETS` are checked against it, so that a narrowed filter that drops seeds fails here.
+SEED_COUNTS = {"record_decode": 23, "config_parse": 27, "config_parse_qr": 32,
+               "payload_decode": 17, "receive": 30, "receive_signed": 18, "verify_qr_parse": 6}
+
+
 def check_s016_t08_r08_corpus_is_seeded() -> None:
     """Each target's directory holds one file per vector that carries its row's fields, and
     each file, cut by its layout, gives the vector's own fields back."""
     for target, (spec, carries, _) in TARGETS.items():
         vectors = [v for v in load(spec) if carries(v)]
-        if not vectors:
-            raise SystemExit(f"fuzz_seeds.py: {target}: no vector carries its fields")
+        if len(vectors) != SEED_COUNTS.get(target):
+            raise SystemExit(f"fuzz_seeds.py: {target}: {len(vectors)} seeds, not "
+                             f"{SEED_COUNTS.get(target)}")
         for v in vectors:
             fields = read_back(target, (CORPUS / target / v["name"]).read_bytes())
             expected = vector_fields(target, v)

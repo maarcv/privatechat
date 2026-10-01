@@ -14,8 +14,8 @@ The reference script `scripts/reference/vectors.py` of spec 015-test-vectors pro
     {
       "name": "text_message_k1",
       "kind": "positive",
-      "source":   "published",
-      "origin":   "RFC 9999 section 7.1 TEST 1",
+      "source":   "derived",
+      "origin":   "docs/spec.md §4, the message format, from the inputs below",
       "inputs":   { "k_ch": "<hex>", "pk_u": "<hex>", "counter": "0000000000000000", "nonce": "<hex>", "payload": "<hex>" },
       "expected": { "blob": "<hex>", "mk": "<hex>" }
     },
@@ -51,4 +51,4 @@ The reference script `scripts/reference/vectors.py` of spec 015-test-vectors pro
   covers the exact parameters, and the spec's "Vectors" section says why.
 - Every requirement that rejects external input (bytes from the network, a scanned or typed text, a file) has a `negative` vector with the exact `Error`, except a rejection the primitive wrapper (spec 010) already proves, which is not repeated one layer up; a rejection of a crate-internal function no platform reaches is a unit test of its spec, not a vector. Phase 1 vectors test pure functions and carry no `commits` (the `"commits": 0` of some `010.json` vectors predates this rule and is read as nothing); a vector of a stateful spec (phase 2) adds `commits`, the number of commits other than the cursor, which is 0 on every rejection path except the own-key and step-5 exceptions of spec 021-channel-session R3, which are unit tests. A rejection that needs state built by a sequence of calls (`Replay`, `RetiredKey`, `PeerLimit`, a label already in use) is a unit test of its spec, not a vector.
 - For formats, the spec's mutation table (offset region → `Error`) is materialised as `negative` vectors with `name` = `mutate_<region>`.
-- The strict Ed25519 negatives — `signature_s_plus_l`, `pk_identity`, `pk_small_order`, `r_small_order`, `pk_non_canonical` (`docs/spec.md` §4 "Primitives") — live once, in `010.json`; no format spec repeats them.
+- The strict Ed25519 cases — `signature_s_plus_l` and the twelve published ed25519-speccheck cases, beside `pk_order_4`, `pk_not_on_curve`, `r_wrong_point` and `pk_non_canonical` (`docs/spec.md` §4 "Primitives", ADR 0042) — live once, in `010.json`; no format spec repeats them.

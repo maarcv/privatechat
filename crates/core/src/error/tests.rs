@@ -5,9 +5,9 @@ use super::Error;
 use crate::crypto::CryptoError;
 
 /// Spec 011, R20: every `CryptoError` becomes `Internal`, and the enum has
-/// exactly the variants of `docs/spec.md` §9 but `Store`. The exhaustive match
-/// fails to compile when a variant is added or removed, `BadPassphrase`,
-/// `BadPadding` and `Store` included.
+/// exactly the variants of `docs/spec.md` §9 but `Store`. Both lists are
+/// checked by an exhaustive match, which fails to compile when a variant is
+/// added or removed.
 #[test]
 fn s011_t20_r20_error_mapping() {
     for error in [
@@ -17,7 +17,18 @@ fn s011_t20_r20_error_mapping() {
         CryptoError::Forged,
         CryptoError::BadPadding,
         CryptoError::OutOfMemory,
+        CryptoError::BadEncoding,
     ] {
+        let listed = match error {
+            CryptoError::InitFailed
+            | CryptoError::TooLong
+            | CryptoError::BadLength
+            | CryptoError::Forged
+            | CryptoError::BadPadding
+            | CryptoError::OutOfMemory
+            | CryptoError::BadEncoding => true,
+        };
+        assert!(listed);
         assert_eq!(Error::from(error), Error::Internal, "{error:?}");
     }
     for error in [

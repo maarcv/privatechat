@@ -62,7 +62,8 @@ pub fn receive(data: &[u8]) {
 
 /// `receive_signed`: `BE64(counter) ‖ nonce ‖ BE64(received_at) ‖ BE64(now)
 /// ‖ plaintext`, sealed by the sender of `text_k1` and then verified and
-/// opened, so that every input passes the signature (R5).
+/// opened, so that every input whose times pass step 2 passes the
+/// signature (R5).
 pub fn receive_signed(data: &[u8]) {
     let _ = receive_signed_verdict(data);
 }

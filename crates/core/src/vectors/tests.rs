@@ -46,6 +46,8 @@ fn s015_t01_r01_reads_every_value_type() {
     assert_eq!(vector.input("key").array::<2>(), [0x00, 0xff]);
     assert_eq!(vector.input("block").number(), 1024);
     assert!(vector.input("flag").flag());
+    let falsy = parse("999", &file(&VECTOR.replace("true", "false"))).unwrap();
+    assert!(!falsy[0].input("flag").flag());
     assert_eq!(vector.input("list").list()[1].bytes(), [0x11]);
     assert_eq!(vector.input("words").list()[0].text(), "abandon");
     assert_eq!(vector.expected("counter").u64_hex(), 0x0102);
@@ -88,8 +90,18 @@ fn s015_t01_r01_rejects_every_broken_rule() {
         ),
         ("true", "{}", Broken::Shape("value")),
         (
+            r#""inputs": {"key": "00ff", "block": 1024, "flag": true, "list": ["00", "11"], "words": ["abandon"]}"#,
+            r#""inputs": []"#,
+            Broken::Shape("vector"),
+        ),
+        (
             r#""block": 1024"#,
             r#""block": 1024, "block": 1024"#,
+            Broken::DuplicateKey,
+        ),
+        (
+            r#""block": 1024"#,
+            r#""block": 1024, "x": 1, "block": 1024"#,
             Broken::DuplicateKey,
         ),
         ("a formula", r"a\nformula", Broken::Syntax),
@@ -107,6 +119,46 @@ fn s015_t01_r01_rejects_every_broken_rule() {
             parse("999", &source).err(),
             Some(expected),
             "{from} -> {to}"
+        );
+    }
+    // A tab, CR or LF between tokens is JSON whitespace; a form feed or a
+    // vertical tab is not, and no escape or control character may sit in a
+    // string.
+    for between in ["\t", "\r\n"] {
+        let spaced = one.replace(
+            r#""00ff", "block""#,
+            &format!("\"00ff\",{between}\"block\""),
+        );
+        assert!(parse("999", &spaced).is_ok(), "{between:?}");
+    }
+    for between in ["\u{c}", "\u{b}"] {
+        let spaced = one.replace(
+            r#""00ff", "block""#,
+            &format!("\"00ff\",{between}\"block\""),
+        );
+        assert_eq!(
+            parse("999", &spaced).err(),
+            Some(Broken::Syntax),
+            "{between:?}"
+        );
+    }
+    for inside in [r"a\u0041", "a\u{7f}formula", "a\u{85}formula"] {
+        let edited = one.replace("a formula", inside);
+        assert_eq!(
+            parse("999", &edited).err(),
+            Some(Broken::Syntax),
+            "{inside:?}"
+        );
+    }
+    for (from, trailing) in [
+        (r#""11"]"#, r#""11",]"#),
+        (r#""BadLength"}"#, r#""BadLength",}"#),
+    ] {
+        let edited = one.replace(from, trailing);
+        assert_eq!(
+            parse("999", &edited).err(),
+            Some(Broken::Syntax),
+            "{trailing}"
         );
     }
     let duplicate = file(&format!("{VECTOR}, {VECTOR}"));
