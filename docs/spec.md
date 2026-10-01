@@ -269,7 +269,7 @@ The config is the only secret of the system. It is a small record (§4 "Record e
 - Derives `channel_id`; if a channel with this id already exists locally, it does not duplicate. If it exists with a different `server_url` → `Error::ConfigMismatch` with a visible error "different config for the same channel": the server is part of the channel and there is no hot migration (members with a different `server_url` would not see each other).
 - Draws no key pair yet: `(pk_u, sk_u)` for this channel is generated at its first `Channel::open`, created or imported (§4 "Keys", spec 021-channel-session).
 - Stores the config without `invite_expires_at`: an imported channel never expires as an invitation.
-- Sends nothing to the server until the user opens the channel.
+- Sends nothing to the server until the channel is imported.
 
 **Rules on export and display**
 
@@ -546,7 +546,7 @@ Seven phases; each one closes when its specifications have green tests and a hum
 
 **CI per phase**
 
-- Phase 0: `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings` (workspace lints), `cargo test`, `cargo deny --all-features check` (advisories, licenses, bans, sources), `scripts/doc_lint.sh`, `scripts/check_requirements.sh`, `adr-guard` (a diff that touches `crates/core/src/proto/**`, `crates/core/src/crypto/**`, `specs/vectors/**` or specs 011–014 and 017 without adding a file to `docs/adr/` fails, unless the `adr-not-needed` label is set by a human), `commit-lint`.
+- Phase 0: `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings` (workspace lints), `cargo test`, `cargo deny --all-features check -D checksum-mismatch` (advisories, licenses, bans, sources), `scripts/doc_lint.sh` and its self-test, `scripts/check_requirements.sh` (which tests itself), `adr-guard` (a diff that touches `crates/core/src/{proto,crypto,storage}.rs` or anything under those modules, `specs/vectors/**` or specs 011–014, 017, 020 and 031, renames counted at both ends, without adding a file `docs/adr/NNNN-<kebab>.md` fails, unless the `adr-not-needed` label is set by a human), `commit-lint`. `adr-guard` and `commit-lint` run on pull requests, and `mvp` takes changes only through a pull request with the CI green (branch protection, audit Z).
 - Phase 1: nightly fuzz (`cargo fuzz`, 1 h per target of spec 016-fuzz-harness, one parallel job per target), property tests (`proptest`: round-trip for all k, byte-by-byte mutation), the reference script of spec 015-test-vectors producing the vectors and the `s015_…` steps checking that `cargo test` reproduces them, redacted `Debug` test; on every pull request, `scripts/check_fuzz_targets.sh` and clippy under `--cfg fuzzing` (spec 016 R12). The fuzz crate of spec 016 has its own workspace and a committed `Cargo.lock`, and runs no `cargo deny` step of its own. The log test arrives with spec 035-server-ops. Every implementation pull request of specs 011–017 touches a path `adr-guard` protects; one that changes no format carries `adr-not-needed`, set by the human reviewer with the reason "implements accepted spec NNN, no format change".
 - Phase 3: integration test with the server in Docker; Kotlin/Swift vs Rust differential test over vectors from phase 4 onwards.
 - Phase 5: basic UI tests per platform.
@@ -589,9 +589,9 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 ├─ README.md                 ← what it promises and does not promise (§1), how to contribute
 ├─ LICENSE
 ├─ Cargo.toml                ← workspace with [workspace.lints]
-├─ rust-toolchain.toml · rustfmt.toml · deny.toml · .editorconfig · .gitignore
+├─ rust-toolchain.toml · rustfmt.toml · clippy.toml · deny.toml · .editorconfig · .gitignore
 ├─ .github/
-│  ├─ workflows/ci.yml · release.yml (spec 060) · advisories.yml (spec 065) · probe.yml (spec 066) · landing.yml (spec 062)
+│  ├─ workflows/ci.yml · fuzz.yml (spec 016) · release.yml (spec 060) · advisories.yml (spec 065) · probe.yml (spec 066) · landing.yml (spec 062)
 │  ├─ allowed_signers        ← the release keys and their backups (spec 060)
 │  ├─ PULL_REQUEST_TEMPLATE.md · dependabot.yml
 │  └─ CONTRIBUTING.md · SECURITY.md · CODEOWNERS
@@ -611,12 +611,13 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 │  └─ adr/README.md (index) · TEMPLATE.md · NNNN-*.md, one per decision
 ├─ specs/                    ← one spec per feature (TEMPLATE.md, README.md index)
 │  └─ vectors/               ← JSON test vectors, produced by the reference script of spec 015 (README.md with the schema)
-├─ scripts/{doc_lint,check_requirements,check_fuzz_targets}.{sh,py}, fuzz_exclusions.txt, fuzz_seeds.py, {sign,verify}_release.sh, release_env.sh (spec 060), check_public_server.sh (spec 066), third_party_notices.py (spec 060)
+├─ scripts/{doc_lint,check_requirements,check_fuzz_targets}.{sh,py}, doc_lint_selftest.py, fuzz_exclusions.txt, fuzz_seeds.py, {sign,verify}_release.sh, release_env.sh (spec 060), check_public_server.sh (spec 066), third_party_notices.py (spec 060)
 │  └─ reference/             ← vectors.py, the reference script that produces the vectors (spec 015), never shipped
 ├─ crates/
 │  ├─ core/                  ← Rust crate: crypto, proto, session (no I/O); fuzz/ in phase 1 (own workspace, Cargo.lock committed)
 │  ├─ store/                 ← Rust crate: Store trait over encrypted files (phase 2)
-│  └─ server/                ← Rust axum crate (phase 3)
+│  ├─ server/                ← Rust axum crate (phase 3)
+│  └─ host/                  ← the connection host shared by the clients, own workspace (spec 042, ADR 0041)
 ├─ bindings/uniffi/          (phase 4)
 ├─ clients/desktop · android · ios   (phase 5)
 ├─ deploy/                   ← reference docker-compose.yml, Caddyfile, nginx.conf, torrc (phase 3); release/ build container (spec 060); public/env the project's server configuration (spec 066)

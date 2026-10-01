@@ -2,6 +2,30 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit Z
+
+**2026-10-01 — Audit Z, the first code audit of phase 0 (branch `phase0-audit` from `mvp` at 2136de2): specs 000–003 and what implements them — the CI workflows, `doc_lint`, `check_requirements`, `deny.toml`, the workspace lints and toolchain — in rounds of three passes (A: structure and logic; B: the local CI, 131 mutants and crafted git histories against `adr-guard` and `commit-lint`; C: conformance with the specs, AGENTS and `docs/spec.md`).** Audits A–D had reviewed documents, not this code.
+
+**Round 1.** CI green; the guards had holes:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ1 | `adr-guard` and `commit-lint` run on pull requests only, and every merge reached `mvp` by a local push, so neither ever ran; `mvp` had no protection (Z1-A-1, Z1-C-2) | High | Branch protection on `mvp`: a pull request with the jobs green (AZ-Q1, AZ-Q5); 001 R10 |
+| AZ2 | `adr-guard` missed the module roots `crypto.rs` and `proto.rs`, where most derivations live, a file renamed out of a protected path, and the tags and derivations of specs 020 and 031 (Z1-A-2–Z1-A-4, Z1-B-1, Z1-B-2, Z1-C-1) | High | `(proto|crypto|storage)(/|\.rs$)`, specs 020 and 031, `--no-renames` (AZ-Q3); 001 R8, §10 |
+| AZ3 | Neither Python guard tested itself: removing most rules left CI green (3 of 55 `doc_lint` mutants and 3 of 22 `check_requirements` mutants killed); `doc_lint` missed a duplicate ADR number, a misnamed ADR file and a requirement after a `###` subheading (Z1-A-7, Z1-B-6–Z1-B-8) | Medium | `doc_lint_selftest.py` (003 R8) and a self-test in `check_requirements` (001 R7); the three rules |
+| AZ4 | The spec 000 tests matched text anywhere, so a commented-out line passed; no check that each crate takes the workspace lints, of the release profile, the edition, the exact URL, the wrappers, licences and source rules of `deny.toml`, or of `.gitignore` beyond `inici` (Z1-A-9, Z1-B-3–Z1-B-5, Z1-C-7, Z1-C-9) | Medium | Each line read in its TOML section; T03–T08 |
+| AZ5 | `tempfile` unbanned, so the OS randomness it pulls could reach a shipped crate; `commit-lint` passed an empty subject and an unreachable base; no `pipefail` (Z1-A-6, Z1-A-8, Z1-B-9) | Medium | `tempfile` and `rusty-fork` only under `proptest`; `defaults: shell: bash`; the subjects read on their own line |
+| AZ6 | Specs 027, 040 and 053 required amendments at their acceptance that were not made: AGENTS 20 described four handles where ADR 0037 has one, §5 an old trigger (Z1-C-3) | Medium | AGENTS 20 and 23 and §5 now, with `check_s027_t22_r22_boundary_documented`; the rest moved to each spec's implementation (AZ-Q2) |
+| AZ7 | Stale text: §11 without `fuzz.yml`, `crates/host/` and `clippy.toml`; 000 R1 and R8, AGENTS 10, 002 R4 and its count of ADRs and title limit, 001's `@v4` and "eight jobs"; the landing workflow not run on the docs it builds from; `.claude/worktrees/` not ignored (Z1-A-10, Z1-C-4–Z1-C-6, Z1-C-8, Z1-C-10) | Low | Rewritten |
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AZ-Q1 | Pull requests and branch protection, or the checks on every push (Z1-A Q1, Z1-C Q1) | Protect `mvp`; every change by pull request | 001 R10; the repository's settings |
+| AZ-Q2 | The amendments 027, 040 and 053 owed at acceptance (Z1-C Q2) | AGENTS 20, 23 and §5 now; the rest at implementation | 027 R22, 040 R14, 053 R20 |
+| AZ-Q3 | Widen `adr-guard` to 020, 031 and `storage`, and `docs/spec.md` too (Z1-A Q2) | 020, 031, `storage` and the module roots; not `docs/spec.md` | 001 R8 |
+| AZ-Q4 | `SECURITY.md` points to private vulnerability reporting, switched off (Z1-A-5) | The reviewer turns it on | — |
+| AZ-Q5 | A required approval cannot be given by the one account that opens the pull request | The pull request and its jobs are required; the reviewer's merge is the review | — |
+
 ## Audit Y
 
 **2026-10-01 — Audit Y, a re-audit of phase 1 in rounds (branch `phase1-audit` from `mvp` at 107c578), after audits Q–W had run one round each.** Each round runs three passes (A: structure, simplicity and logic; B: the local CI run and hand mutants; C: conformance) over three groups (G1: specs 010, 015 and `core::Error`; G2: specs 011, 014, 017; G3: specs 012, 013, 016), nine agents in all. The human reviewer allowed specs to change, nothing being in production.

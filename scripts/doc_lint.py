@@ -84,11 +84,23 @@ def check_s003_t01_r01_threat_table_matches_spec(spec: str, tm: str) -> None:
 
 def adr_files() -> dict[str, tuple[str, str, Path]]:
     found: dict[str, tuple[str, str, Path]] = {}
-    for f in sorted(ADR_DIR.glob("[0-9][0-9][0-9][0-9]-[a-z0-9-]*.md")):
+    numbers: list[str] = []
+    for f in sorted(ADR_DIR.glob("*.md")):
+        if f.name in ("README.md", "TEMPLATE.md"):
+            continue
+        # The name adr-guard accepts as a new ADR, and nothing else (R1).
+        named = re.fullmatch(r"(\d{4})-[a-z0-9-]+\.md", f.name)
+        if not named:
+            fail(f"{f.name}: an ADR file is named NNNN-kebab-case.md")
+            continue
+        numbers.append(named.group(1))
         lines = f.read_text(encoding="utf-8").splitlines()
         m = re.match(r"# ADR (\d{4}) — (.+)", lines[0] if lines else "")
         if not m:
             fail(f"{f.name}: first line must be '# ADR NNNN — Title'")
+            continue
+        if m.group(1) != named.group(1):
+            fail(f"{f.name}: the heading's number is {m.group(1)}, not the file's")
             continue
         line3 = ADR_LINE3.fullmatch(lines[2] if len(lines) > 2 else "")
         if not line3:
@@ -99,6 +111,9 @@ def adr_files() -> dict[str, tuple[str, str, Path]]:
         if headings != ADR_SECTIONS:
             fail(f"{f.name}: sections must be exactly {ADR_SECTIONS}, got {headings}")
         found[m.group(1)] = (m.group(2).strip(), state, f)
+    duplicates = sorted({n for n in numbers if numbers.count(n) > 1})
+    if duplicates:
+        fail(f"ADR numbers used by more than one file: {duplicates}")
     return found
 
 
@@ -163,7 +178,8 @@ def check_s003_t05_r05_no_examples_in_requirements() -> None:
     for f in SPECS_DIR.glob("[0-9][0-9][0-9]-*.md"):
         text = f.read_text(encoding="utf-8")
         start = text.find("## Requirements")
-        end = text.find("## ", start + 3) if start >= 0 else -1
+        # The next section, not a `###` subheading inside this one.
+        end = text.find("\n## ", start + 3) if start >= 0 else -1
         section = text[start:end] if start >= 0 else ""
         for i, line in enumerate(section.splitlines()):
             if re.search(r"\bfor example\b|\be\.g\.|\bsuch as\b", line, re.IGNORECASE):
@@ -226,6 +242,25 @@ def check_s003_t07_r07_specs_index_matches_files() -> None:
             fail(f"specs index vs file for {n}: index={index.get(n)} file={files.get(n)}")
 
 
+def spec_state(number: str) -> str:
+    for f in SPECS_DIR.glob(f"{number}-*.md"):
+        m = re.search(r"^Status: (.+)$", f.read_text(encoding="utf-8"), re.MULTILINE)
+        return m.group(1).strip() if m else "?"
+    return "?"
+
+
+def check_s027_t22_r22_boundary_documented(spec: str) -> None:
+    """Spec 027 R22: AGENTS 20 and §5 say what the core boundary is; §9 too once 027 is
+    implemented."""
+    rule = re.search(r"^20\. .*$", AGENTS.read_text(encoding="utf-8"), re.MULTILINE)
+    if not rule or "`Device`" not in rule.group(0) or "027-core-api" not in rule.group(0):
+        fail("AGENTS 20 must name `Device` as the one handle of spec 027-core-api")
+    if "until the channel is imported" not in spec:
+        fail("docs/spec.md §5 must say the client sends nothing until the channel is imported")
+    if spec_state("027") == "implemented" and "Device" not in spec[spec.find("## 9."):]:
+        fail("docs/spec.md §9 must name `Device` once spec 027 is implemented")
+
+
 def main() -> int:
     spec = SPEC.read_text(encoding="utf-8")
     tm = THREAT_MODEL.read_text(encoding="utf-8")
@@ -239,6 +274,7 @@ def main() -> int:
     check_s003_t05_r05_no_examples_in_requirements()
     check_s003_t06_r06_spec_header_date_changes_with_content()
     check_s003_t07_r07_specs_index_matches_files()
+    check_s027_t22_r22_boundary_documented(spec)
     if failures:
         print("doc_lint: FAIL")
         for f in failures:
