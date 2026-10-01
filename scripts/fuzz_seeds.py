@@ -114,7 +114,7 @@ def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
 
 # How many vectors seed each target, counted once by hand from the frozen files: the filters of
 # `TARGETS` are checked against it, so that a narrowed filter that drops seeds fails here.
-SEED_COUNTS = {"record_decode": 23, "config_parse": 27, "config_parse_qr": 32,
+SEED_COUNTS = {"record_decode": 31, "config_parse": 27, "config_parse_qr": 32,
                "payload_decode": 17, "receive": 30, "receive_signed": 18, "verify_qr_parse": 6,
                "state_decode": 2, "log_record_decode": 4, "settings_decode": 2}
 
