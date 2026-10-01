@@ -31,6 +31,9 @@ mod proto;
 #[allow(dead_code, reason = "reached through Device, spec 027-core-api")]
 mod storage;
 
+#[cfg(any(test, fuzzing, feature = "test-support"))]
+pub mod testing;
+
 #[cfg(test)]
 mod vectors;
 

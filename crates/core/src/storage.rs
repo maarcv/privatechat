@@ -16,9 +16,11 @@ use crate::proto::record::RecordError;
 
 mod log;
 mod settings;
-mod state;
+pub(crate) mod state;
 
 pub use self::log::LogRecord;
+#[cfg(any(test, fuzzing, feature = "test-support"))]
+pub(crate) use self::log::{Content, LogEntry, Message};
 pub use self::settings::Settings;
 pub use self::state::ChannelState;
 
