@@ -2,6 +2,28 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit Y
+
+**2026-10-01 — Audit Y, a re-audit of phase 1 in rounds (branch `phase1-audit` from `mvp` at 107c578), after audits Q–W had run one round each.** Each round runs three passes (A: structure, simplicity and logic; B: the local CI run and hand mutants; C: conformance) over three groups (G1: specs 010, 015 and `core::Error`; G2: specs 011, 014, 017; G3: specs 012, 013, 016), nine agents in all. The human reviewer allowed specs to change, nothing being in production.
+
+**Round 1.** CI green in every group; 569 mutants (159 in G1, 201 in G2, 209 in G3), 77 survivors, about half of them equivalent. No defect in code that ships but one test that did not test what it claimed. Findings (numbered AY) and changes:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AY1 | Four of the five "strict" Ed25519 negatives of `010.json` were rejected by any verifier, so strictness, on which the server relies, was proved by `signature_s_plus_l` alone; three names said the wrong thing about their points (Y1-G1A-1, Y1-G1C-1) | Medium | ADR 0042: the twelve ed25519-speccheck cases, three renames (AY-Q1) |
+| AY2 | Unpinned guards and comparisons: the public types' `PartialEq`, the FFI size checks against a buffer one byte too large, `memzero`, the base64 buffer guard, the password limits at the wrapper, a short AEAD ciphertext, the second half of `random_bytes`, `Secret`'s traits outside `secret.rs`, two of the three forbidden features, `BadEncoding` in the mapping test, the loader's tab and non-object inputs (Y1-G1A-4, Y1-G1A-5, Y1-G1B-1–Y1-G1B-8, Y1-G1C-2, Y1-G1C-3) | Medium | The tests |
+| AY3 | `Secret::random` left an unwiped copy of a fresh key (R18); `clippy.toml` banned a handful of I/O and clock calls of many (Y1-G1A-2, Y1-G1A-6, Y1-G1C-5) | Low | Drawn into its own storage; twelve more methods banned (010 R17) |
+| AY4 | `unpad` and T21 claimed a multiple-of-block check libsodium does not make; `pad`'s bound, `version()`, the Interface, R14's "before any libsodium call", the loader's per-name rule (015 R1), the README's example, the lint allows of `lib.rs`, the skill's examples (Y1-G1A-3, Y1-G1A-7, Y1-G1A-8, Y1-G1C-4, Y1-G1C-6–Y1-G1C-8, Y1-G2A-3, Y1-G3A-3) | Low | Specs 010 and 015, comments, tests |
+| AY5 | `Config::host` parsed the URL again at each call with an empty fallback, the string the subscription signature covers (Y1-G2A-1) | Low | Parsed once at construction |
+| AY6 | Untested in G2: `Fingerprint`'s redacted `Debug`, a writer that grows to its capacity by doubling, a 57-character onion label, U+001C..=U+001F and non-ASCII capitals in the canonical password (Rust and the script), `config_version` 0 with key 8, the password negatives refused by the canonical form; the pinned `.chatcfg` header unchecked by the script; R22 and §9 wording (Y1-G2A-2, Y1-G2B-1–Y1-G2B-5, Y1-G2C-1–Y1-G2C-3) | Low | Tests, two `require`s, specs 011 and `docs/spec.md` §9 |
+| AY7 | `Payload::decode`, which skips the stale check, was compiled into the product; the script's and seed script's `unpad` looser than libsodium's; T17 without `sent_at = 2^64 − 1` against the other times; the policy byte, `payload_decode`'s lack of validation, five impure words and the seed counts unpinned; three 013 vectors and the margin not guarded by the script (Y1-G3A-1, Y1-G3A-2, Y1-G3B-1–Y1-G3B-6, Y1-G3C-3) | Low | `cfg(any(test, fuzzing))`, the tests, the guards, `SEED_COUNTS` |
+| AY8 | Wording: 016 T05 and R5, 013 R17 and its table without "at times that pass step 2", 016 R2's list of amending specs, §4's `enc_hdr` notation, AGENTS 21 asking a round trip of each fuzz entry against spec 016 (Y1-G3C-1, Y1-G3C-2, Y1-G3C-4–Y1-G3C-6) | Low | Rewritten (AY-Q2) |
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AY-Q1 | May the frozen `010.json` change to prove strictness (Y1-G1A Q1, Y1-G1C Q1) | Yes, by an ADR: it describes no format | ADR 0042, AGENTS 18 |
+| AY-Q2 | AGENTS 21 against spec 016 on round trips of fuzz entries (Y1-G3C-6) | AGENTS 21 asks the round trip of the codecs only | AGENTS 21 |
+
 ## Phase 1 closed
 
 **2026-09-29 — Phase 1 (crypto core) closed on `mvp`.** Specs 010–017 are `implemented`. The exit criteria of `docs/spec.md` §10 hold: `cargo test` reproduces every vector the reference script of spec 015 writes for specs 011–014 and 017, the mutation table of spec 013 and its property included; each of the seven fuzz targets of spec 016 ran one hour with no crash in the nightly workflow (run 36580474551). The internal review of `proto` by a second person was dropped from the criteria by the reviewer (audit W, AW-Q1). From this commit the vectors of `specs/vectors/` are frozen (AGENTS 18): a vector changes only with a new `proto_version` and an ADR, and the `adr-not-needed` label no longer covers a vector change.

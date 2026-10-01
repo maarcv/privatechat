@@ -843,9 +843,11 @@ def sodium_pad(data: bytes, block: int) -> bytes:
 
 
 def unpadded(padded: bytes) -> bytes:
-    """The bytes before the 0x80 marker of `sodium_pad`."""
+    """The bytes before the 0x80 marker of `sodium_pad`, which, as libsodium's `sodium_unpad`
+    requires, sits in the last block."""
     marked = padded.rstrip(b"\x00")
-    require(marked.endswith(b"\x80"), "a padded payload ends with its marker")
+    require(marked.endswith(b"\x80") and len(padded) >= PAD_BLOCK
+            and len(padded) - len(marked) < PAD_BLOCK, "a padded payload ends with its marker")
     return marked[:-1]
 
 
@@ -939,6 +941,7 @@ def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
     vectors.append(negative("expired_received_at", "text_k1 received ttl_ms + 360 001 ms "
                             "before now", blob, "Expired", signer=True, received_at=received_at))
     require(received_at + margin == k1["now"] - 1, "expired by one millisecond")
+    require(EXPIRY_MARGIN_MS == 360_000, "the margin of 013 R13, which the vector sits one past")
 
     def flip(offset: int, value: int | None = None) -> bytes:
         edited = bytearray(blob)
@@ -1040,7 +1043,13 @@ def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
     # The records of the vectors whose point is their shape keep that shape.
     shapes = {"unknown_payload_key": ([0, 2, 3, 9], b""), "missing_sent_at": ([0, 3], b""),
               "stale_missing_type": ([2, 3], b""),
-              "stale_trailing_garbage": ([0, 2], b"\x03\x00")}
+              "stale_trailing_garbage": ([0, 2], b"\x03\x00"),
+              "display_name_in_key_retired": ([0, 1, 2, 3], b"")}
+    # The type byte of the two unknown-type vectors is one no type takes.
+    for name in ("unknown_type", "stale_unknown_type"):
+        item = next(item for item in vectors if item["name"] == name)
+        key_0 = unpadded(item["inputs"]["padded"])[FIELD_HEADER_LEN]
+        require(key_0 not in (TYPE_TEXT, TYPE_KEY_RETIRED), f"{name}: an unknown type")
     for item in vectors:
         if item["name"] in shapes:
             require(field_keys(unpadded(item["inputs"]["padded"])) == shapes[item["name"]],

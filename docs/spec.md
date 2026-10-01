@@ -171,7 +171,7 @@ Terminology: *envelope* is the structure, *blob* the bytes on the wire and on th
 | --- | --- | --- | --- |
 | 0 | 1 | `proto_version` = 0x01 | yes |
 | 1 | 16 | `channel_id` | yes |
-| 17 | 40 | `enc_hdr` = (`sender_pk` (32) ‖ `counter` u64 BE (8)) ⊕ `crypto_stream_xchacha20_xor(K_hdr, nonce)` | yes (opaque) |
+| 17 | 40 | `enc_hdr` = (`sender_pk` (32) ‖ `counter` u64 BE (8)) ⊕ `crypto_stream_xchacha20(K_hdr, nonce)[0..40]` | yes (opaque) |
 | 57 | 24 | `nonce` | yes |
 | 81 | n | `ciphertext`, n = 16 + 1 024·k, 1 ≤ k ≤ 63 | yes (opaque) |
 | 81+n | 64 | `signature` ⊕ `crypto_stream_xchacha20(K_hdr, nonce)[40..104]` (ADR 0032) | yes (opaque) |

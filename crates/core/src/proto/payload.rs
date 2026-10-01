@@ -144,12 +144,15 @@ impl Payload {
 
     /// The whole record of R6 with its name filtered by R9, and no
     /// validation: what `open` reads through [`PayloadHead`], in one call,
-    /// for the tests and the fuzz target of spec 016.
+    /// for the tests and the fuzz target of spec 016. It is compiled for
+    /// them alone, so that no product path decodes a payload around the
+    /// stale check of `open` (R12).
     ///
     /// # Errors
     ///
     /// `BadPayload` for a record that breaks the framing of spec 017, a
     /// field of the wrong width, or a missing `type`, `sent_at` or `body`.
+    #[cfg(any(test, fuzzing))]
     pub(crate) fn decode(bytes: &[u8]) -> Result<Payload, Error> {
         PayloadHead::read(bytes)?.finish()
     }

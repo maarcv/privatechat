@@ -724,6 +724,9 @@ fn s013_t17_r13_time_arithmetic_saturates() {
         (last_minute, 0, 0, Ok(Content::Stale)),
         (last_minute, max, 0, Ok(Content::Stale)),
         (max, max, max, Ok(Content::Unreadable)),
+        (max, 0, 0, Ok(Content::Stale)),
+        (max, 0, max, Err(Error::Expired)),
+        (max, max, 0, Ok(Content::Stale)),
     ] {
         let opened = open_padded(&padded(&text(sent_at, BODY)), received_at, now);
         let content = opened.map(|opened| opened.content);

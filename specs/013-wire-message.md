@@ -35,7 +35,7 @@ This spec is pure: it seals a message and verifies and opens a blob, with every 
 - R14 The `Debug` of a `Payload` MUST NOT print `body` or `display_name`: the decrypted payload is content and never reaches a log or an error (AGENTS 19).
 - R15 The version, offsets, sizes, the domain tag, `EXPIRY_MARGIN_MS` (R13) and `KEY_RETIRED_COUNTER` MUST be named constants next to the code that uses them, equal to the literals of `docs/spec.md` §4, and the tag `privatechat/msg/v1` MUST be exactly 18 bytes. `KEY_RETIRED_COUNTER` MUST be `2^64 − 1`, the counter every `key_retired` is sealed with (ADR 0033), which `Channel::encrypt` refuses for an ordinary message with `CounterExhausted` (`docs/spec.md` §4 "Send counter"); it is defined here and used by spec 021-channel-session.
 - R16 `seal` MUST call `validate`, encode and pad, then pass the padded payload to `seal_padded`, which computes `header_keystream`, XORs `Header::to_bytes` with its bytes 0..40 into `enc_hdr`, encrypts with `mk` and the associated data of R3, signs, and XORs the signature with bytes 40..104. A blob `seal` returns MUST be accepted by `verify` and `open` with the same inputs, and the same inputs MUST give the same bytes.
-- R17 For every blob `seal` returns and every byte offset in it, flipping that byte MUST make `verify` return the error of its region in the mutation table below: `UnsupportedVersion`, `WrongChannel` or `BadSignature`.
+- R17 For every blob `seal` returns and every byte offset in it, flipping that byte MUST make `verify`, at times that pass step 2, return the error of its region in the mutation table below: `UnsupportedVersion`, `WrongChannel` or `BadSignature`.
 - R18 This spec MUST add its section to `scripts/reference/vectors.py` of spec 015-test-vectors, which produces `specs/vectors/013.json` from fixed inputs written in the script. For every positive vector the section computes the whole blob: the padded plaintext (the payload record padded to 1 024·k, or the vector's own padded bytes when it was built with `seal_padded`), `mk` through spec 012's section, `enc_hdr` as the header XORed with its own XChaCha20 under `K_hdr` and the blob's nonce, the ciphertext as its own XChaCha20-Poly1305 under `mk`, the blob's nonce and `AAD = blob[0..81]`, the signature with the RFC 8032 §6 reference Ed25519 over `privatechat/msg/v1 ‖ blob[0..81 + n]` and its mask with bytes 40..104 of the same XChaCha20 keystream as `enc_hdr`, and `blob[0]` and `blob[1..17]` from the version and the `channel_id` of spec 011's section. For `aead_forged_signed` it produces a blob whose unmasked signature verifies over a ciphertext sealed under a wrong `K_msg`, and for `signed_ciphertext_only` one whose unmasked signature verifies over `privatechat/msg/v1 ‖ blob[81..81 + n]` of the blob before the flip. The verdicts (`content`, `error`) are checked by the Rust tests.
 - R19 `ChannelCtx::from_config(&Config)` MUST build the `ChannelId`, the `ChannelKeys` (from `Config::channel_key()` through `ChannelKeys::derive`) and the TTL of a `ChannelCtx` from the config alone, so that a context can never mix the keys of one channel with the identifier of another.
 - R20 `Verified::signature` MUST return the unmasked signature, the 64 bytes that verified at step 4, and `seal` and `seal_padded` MUST return, beside the blob, the same unmasked signature; spec 021-channel-session keeps the one and compares it with the other for the own-key echo (ADR 0029), never with the masked bytes of a blob.
@@ -96,7 +96,7 @@ pub(crate) enum PayloadKind { Text, KeyRetired, Unknown(u8) }
 impl Payload {
     pub(crate) fn validate(&self) -> Result<(), Error>;
     pub(crate) fn encode(&self) -> Result<Vec<u8>, Error>;
-    pub(crate) fn decode(bytes: &[u8]) -> Result<Payload, Error>;   // R6, R9: `PayloadHead::read` then `finish`; the tests and the fuzz target
+    #[cfg(any(test, fuzzing))] pub(crate) fn decode(bytes: &[u8]) -> Result<Payload, Error>;   // R6, R9: `PayloadHead::read` then `finish`; compiled for the tests and the fuzz target alone, so no product path skips the stale check of `open`
 }
 
 /// The record read up to key 2, where `open` runs the stale check (R12).
@@ -240,7 +240,7 @@ None directly: every item here is `pub(crate)`. `docs/spec.md` §9 gives `Channe
 | `short_blob`, `long_blob`, `unaligned_blob` | negative | derived | 1184, 64 674 and 1186 bytes → `BadLength` |
 | `aead_forged_signed` | negative | derived | a ciphertext sealed under a wrong `K_msg` and validly signed → `BadSignature` from `open` |
 
-**Mutation table** (normative, `docs/spec.md` §4 and the template): every region of a well-formed blob, and the error a single flipped byte must produce in `verify`. Because `verify` reads no state (R11), the table holds for any receiver; R17 extends it from one byte per region to every byte.
+**Mutation table** (normative, `docs/spec.md` §4 and the template): every region of a well-formed blob, and the error a single flipped byte must produce in `verify`. Because `verify` reads no state (R11), the table holds for any receiver at times that pass step 2, which runs first; R17 extends it from one byte per region to every byte.
 
 | Region | Bytes | Error from `verify` |
 | --- | --- | --- |
@@ -283,3 +283,4 @@ None. Closed after audit H: the expiry of `Unreadable` messages is spec 023-ttl-
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-09-29 revised after audit U (`docs/audit-log.md`): an absent key 0 is judged after the stale check (R12, T16, vector `stale_missing_type`); `PayloadHead` in the Interface; the keystream is not wiped (Security); T02, T06 and T11 name what they prove. The three slices ship as one branch of 473, 1 035 and 614 net lines against the 400 of AGENTS 14, most of it tests, each excess stated in its commit (reviewer's decision)
 - 2026-09-29 implemented: three slices with the audit U fixes, reviewed (Marc Vilardebó)
+- 2026-10-01 revised after audit Y (`docs/audit-log.md`): R17 and the mutation table hold at times that pass step 2; `Payload::decode` is compiled for the tests and the fuzz target alone

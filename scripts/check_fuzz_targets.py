@@ -181,6 +181,12 @@ def self_test(sources: dict[str, str], entry: str, targets: dict[str, str],
             {}, "use std::{env, fs};")),
         ("the randomness of core", "random_bytes", check_s016_t10_r10_targets_are_pure(
             {}, "let x = crypto::random_bytes::<32>();")),
+        *[(f"{word} in the entries", word, check_s016_t10_r10_targets_are_pure({}, line))
+          for word, line in [("File", "let f = File::create(path);"),
+                             ("Instant", "let t = Instant::now();"),
+                             ("SystemTime", "let t = SystemTime::now();"),
+                             ("OpenOptions", "let o = OpenOptions::new();"),
+                             ("sign_keypair", "let k = crypto::sign_keypair();")]],
     ]
     errors = [f"the check accepts {case}" for case, word, found in fixtures
               if not any(word in error for error in found)]
