@@ -1,9 +1,11 @@
-//! Tests of the comparisons the storage tests rely on (spec 020 T29).
+//! Tests of the doubles and comparisons the storage tests rely on (spec 020).
 
-use super::{MemoryStore, MemoryVault, batch, record, records_eq, state_eq, state_for};
+use super::{
+    FailingVault, Faults, MemoryStore, MemoryVault, batch, record, records_eq, state_eq, state_for,
+};
 use crate::crypto::{PublicKey, Secret};
 use crate::storage::state::items::PeerRecord;
-use crate::storage::{MAX_LOG_LEN, Settings, Store, StoreError, Vault};
+use crate::storage::{DirName, MAX_LOG_LEN, Settings, Store, StoreError, Vault};
 
 /// A peer seen once.
 fn peer() -> PeerRecord {
@@ -177,14 +179,93 @@ fn s020_t16_r16_memory_log_full() {
 fn s020_t22_r22_memory_settings() {
     let mut vault = MemoryVault::new();
     assert!(vault.load_settings().unwrap().is_none());
-    let settings = Settings {
-        default_server_url: "wss://chat.example.org".to_owned(),
-        lock_timeout_seconds: 0,
-        socks5_proxy: None,
-    };
+    let settings = settings();
     vault.save_settings(&settings).unwrap();
     let loaded = vault.load_settings().unwrap().unwrap();
     assert_eq!(loaded.encode().unwrap(), settings.encode().unwrap());
     vault.put_settings_raw(&[0; 45]);
     assert!(matches!(vault.load_settings(), Err(StoreError::Corrupt)));
+}
+
+/// Spec 020, R11 (the doubles): `fail_at` fails one call before it touches
+/// the store, which keeps the previous commit; `poison_after` lets its call
+/// through, then fails it and every later call of that store only; the
+/// switches fail their calls while on.
+#[test]
+fn s020_t11_r11_failing_doubles() {
+    let faults = Faults::new();
+    let mut vault = FailingVault::new(Box::new(MemoryVault::new()), faults.clone());
+    let mut store = vault.create(&[1; 16]).unwrap();
+    let name = *store.name();
+    let first = batch(state_for([1; 16]), vec![record(1, 1)]);
+    store.commit(&first).unwrap();
+    assert!(state_eq(
+        &faults.last_committed(&name).unwrap(),
+        first.state()
+    ));
+    faults.fail_at(2);
+    store.commit(&first).unwrap();
+    let mut second = state_for([1; 16]);
+    second.send_counter = 2;
+    let second = batch(second, vec![record(2, 1)]);
+    assert!(matches!(store.commit(&second), Err(StoreError::Io)));
+    let (state, records) = store.load().unwrap().unwrap();
+    assert_eq!((state.send_counter, records.len()), (0, 2));
+    store.commit(&second).unwrap();
+    // Poisoned after its commit went through: the next load sees it, the
+    // poisoned store refuses everything, a store handed out later works.
+    faults.poison_after(1);
+    let mut third = state_for([1; 16]);
+    third.send_counter = 3;
+    assert!(matches!(
+        store.commit(&batch(third, vec![])),
+        Err(StoreError::Io)
+    ));
+    assert!(matches!(store.load(), Err(StoreError::Io)));
+    assert!(matches!(store.destroy(), Err(StoreError::Io)));
+    let mut again = vault.create(&[1; 16]).unwrap();
+    assert_eq!(again.load().unwrap().unwrap().0.send_counter, 3);
+    faults.fail_commits(true);
+    assert!(matches!(again.commit(&second), Err(StoreError::Io)));
+    let (state, _) = again.load().unwrap().unwrap();
+    assert_eq!(again.compact(&state, 0).unwrap(), 0);
+    faults.fail_commits(false);
+    faults.fail_compactions(true);
+    assert!(matches!(again.compact(&state, 5), Err(StoreError::Io)));
+    again.commit(&second).unwrap();
+    faults.fail_compactions(false);
+    type Switch = fn(&Faults, bool);
+    type Fails = fn(&mut FailingVault) -> bool;
+    let switches: [(Switch, Fails); 5] = [
+        (Faults::fail_create, |vault| vault.create(&[2; 16]).is_err()),
+        (Faults::fail_remove, |vault| {
+            vault.remove(&DirName([0; 16])).is_err()
+        }),
+        (Faults::fail_list, |vault| vault.list().is_err()),
+        (Faults::fail_load_settings, |vault| {
+            vault.load_settings().is_err()
+        }),
+        (Faults::fail_save_settings, |vault| {
+            vault.save_settings(&settings()).is_err()
+        }),
+    ];
+    for (at, (switch, fails)) in switches.into_iter().enumerate() {
+        switch(&faults, true);
+        assert!(fails(&mut vault), "switch {at}");
+        switch(&faults, false);
+        assert!(!fails(&mut vault), "switch {at}");
+    }
+    faults.fail_create_at(2);
+    assert!(vault.create(&[3; 16]).is_ok());
+    assert!(vault.create(&[4; 16]).is_err());
+    assert!(vault.create(&[4; 16]).is_ok());
+}
+
+/// Valid settings.
+fn settings() -> Settings {
+    Settings {
+        default_server_url: "wss://chat.example.org".to_owned(),
+        lock_timeout_seconds: 0,
+        socks5_proxy: None,
+    }
 }

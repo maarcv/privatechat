@@ -8,10 +8,12 @@
 
 mod builders;
 mod compare;
+mod faults;
 mod memory;
 
 pub use self::builders::{batch, record, state_for};
 pub use self::compare::{records_eq, state_eq};
+pub use self::faults::{FailingStore, FailingVault, Faults};
 pub use self::memory::{MemoryStore, MemoryVault};
 
 #[cfg(test)]
