@@ -103,7 +103,8 @@ def check_s016_t06_r06_every_parser_is_reached(sources: dict[str, str], entry: s
     reach_parser = "\n".join([entry, *targets.values()])
     reach_entry = "\n".join(targets.values())
     # Name → (where it must be called, how): a method as `T::name(`, a free function as the
-    # whole word `name(`, an entry as `fuzz_entry::name(` from a target.
+    # whole word `name(`, unqualified or after a module path, an entry as `fuzz_entry::name(`
+    # from a target.
     wanted = {}
     for source in sources.values():
         for match in PARSER.finditer(source):

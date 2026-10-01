@@ -280,6 +280,7 @@ def render(spec: str, vectors: list[dict]) -> str:
     document = {"spec": spec, "proto_version": PROTO_VERSION, "vectors": vectors}
     text = json.dumps(document, indent=2, ensure_ascii=False) + "\n"
     require("\\" not in text, f"{spec}: an escape the loader does not read")
+    require(not any("\x7f" <= c <= "\x9f" for c in text), f"{spec}: a control character the loader refuses")
     return text
 
 

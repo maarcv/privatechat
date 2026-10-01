@@ -231,11 +231,13 @@ fn s010_t06_r05_random_bytes_differ() -> Result<(), CryptoError> {
     assert_ne!(first[32..], second[32..]);
     let (first, second) = (Secret::<64>::random()?, Secret::<64>::random()?);
     assert_ne!(first.expose()[32..], second.expose()[32..]);
-    let mut last_bytes = 0u8;
+    let (mut secret_last, mut array_last) = (0u8, 0u8);
     for _ in 0..8 {
-        last_bytes |= Secret::<64>::random()?.expose()[63] | random_bytes::<64>()?[63];
+        secret_last |= Secret::<64>::random()?.expose()[63];
+        array_last |= random_bytes::<64>()?[63];
     }
-    assert_ne!(last_bytes, 0);
+    assert_ne!(secret_last, 0);
+    assert_ne!(array_last, 0);
     assert_ne!(Secret::<32>::random()?.expose(), &[0u8; 32]);
     Ok(())
 }
@@ -588,8 +590,26 @@ fn s010_t22_r14_wrapper_bounds_are_the_primitives() -> Result<(), CryptoError> {
     for len in [0, 1024 * 1024] {
         let mut buffer = vec![19u8; len];
         stream_xor(&stream_key, &nonce, &mut buffer)?;
+        if let Some(tail) = buffer
+            .get(len.saturating_sub(64)..)
+            .filter(|t| !t.is_empty())
+        {
+            assert_ne!(tail, &[19u8; 64][..], "the keystream reaches the end");
+        }
         stream_xor(&stream_key, &nonce, &mut buffer)?;
         assert_eq!(buffer, vec![19u8; len], "{len}");
+    }
+    // A ciphertext that is a tag alone, for the empty plaintext, is forged
+    // unless the tag verifies.
+    for tag_only in [[0u8; super::TAG_LEN], [0xffu8; super::TAG_LEN]] {
+        assert_eq!(
+            aead_decrypt(&key, &nonce, &[], &tag_only),
+            Err(CryptoError::Forged)
+        );
+        assert_eq!(
+            secretbox_open(&key, &nonce, &tag_only),
+            Err(CryptoError::Forged)
+        );
     }
     let empty: [u8; 32] = core::array::from_fn(|at| {
         let hex = "0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8";

@@ -1069,3 +1069,21 @@ fn s011_vectors_dispatch() {
     .concat();
     vectors::check_all("011", &entries);
 }
+
+/// Spec 011, R2, R3, R4 and R13: the edges round 3 of audit Y found unpinned:
+/// a name of 33 two-byte characters is over 64 bytes at `create` too, a
+/// `proto_version` of 0 and a file version of 0 are unsupported, and the
+/// optional key 6 at the wrong width breaks the record.
+#[test]
+fn s011_t04_r04_edges_of_create_and_the_versions() {
+    let long_name = "é".repeat(33);
+    assert_eq!(
+        Config::create("wss://host", 86_400, &long_name, NOW).err(),
+        Some(Error::BadConfig)
+    );
+    assert_eq!(rejection(&with(1, &[0])), Some(Error::UnsupportedVersion));
+    assert_eq!(rejection(&with(6, &[0; 4])), Some(Error::BadConfig));
+    let mut file = keyed_file();
+    file[4] = 0;
+    assert_eq!(parse_file_header(&file), Err(Error::UnsupportedVersion));
+}

@@ -31,11 +31,20 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AY9 | T26 checked 8 of the 20 methods of R17, by substring and with one "AGENTS 10" for the file (Y2-G1-1, Y2-G1B-1) | Medium | The exact list, a reason per entry |
 | AY10 | The text claimed every speccheck case defeats a lax verifier; about half pin the cofactorless equation and `R`'s encoding instead; ADR 0042 named amendments not made and a platform test that does not read `010.json` (Y2-G1-2, Y2-G1-3) | Low | Spec 010 R10 and Security, T15, ADR 0042, `docs/spec.md` §3 and §4 |
 | AY11 | Untested: the decrypt size checks one byte too small over a real seal, the second half and last byte of a random `Secret`, a path-qualified impl on `Secret`, the loader's CR, form feed, vertical tab, escapes and DEL/C1, `stream_xor` at 0 bytes and 1 MiB, the hash of nothing (Y2-G1B-2–Y2-G1B-6) | Low | The tests |
-| AY12 | The canonical password's White_Space pinned at a few code points (Rust and script); the onion label's characters and suffix case; the channel check at its first and last byte (Y2-G2B-1, Y2-G2B-2, Y2-G2B-4) | Low | Every code point checked; the script's table derived from `isspace`; three URLs; two QRs |
+| AY12 | The canonical password's White_Space pinned at a few code points (Rust and script); the onion label's characters and suffix case; the channel check at its first and last byte (Y2-G2B-1, Y2-G2B-2, Y2-G2B-4) | Low | Every code point checked; the script's written-out table checked against `isspace`; three URLs; two QRs |
 | AY13 | The host parsed twice, the second after the derivation; §6 described WHATWG's host, not the bytes `Config::host()` signs; R22's wording; the Interface's `Config` (Y2-G2-1, Y2-G2-3–Y2-G2-5) | Low | `check_ranges` returns the host; §6, 011 R22, Vectors and Interface |
 | AY14 | `PayloadHead` visible to the whole crate; the `decode` gate unpinned; the free-function reach rule refused a module path, which 027 R17 would trip on; `std::io`, `net`, `process`, `thread`, `time` and `env` without a checker fixture; the TTL half of the margin unpinned; a misplaced docstring and three stale comments (Y2-G1-4–Y2-G1-6, Y2-G2-2, Y2-G3-1–Y2-G3-3, Y2-G3B-1–Y2-G3B-3) | Low | `pub(super)`, a source test, R6's rule, the fixtures, a `require`, the comments |
 
 Not changed: `padded_record`'s capacity, whose growth no test can see (Y2-G2B-3); making `pad` refuse to grow would break the envelope, whose padded payload grows by one byte and holds no key.
+
+**Round 3**, the same six agents (264 mutants: every round-2 real gap re-run, 118 new). The three passes A and C found nothing substantive; G3's mutants, nothing; G1's and G2's, test gaps only:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AY15 | No test refused a tag-only forgery of the empty plaintext, in the AEAD or the secret box; the last byte of a random `Secret` and of `random_bytes` pinned only together; a truncated 1 MiB keystream passed its round trip; the loader's trailing comma and `false` (Y3-G1B-1–Y3-G1B-5) | Low | The tests |
+| AY16 | Untested in spec 011: a name of 33 two-byte characters at `create`, `proto_version` 0, a file version of 0, a key 6 of the wrong width (Y3-G2B-1–Y3-G2B-4) | Low | One test |
+| AY17 | The reference script let DEL and the C1 controls through to a file the loader refuses; T15 of 011 did not say it checks every code point; a stale comment in the checker; this log's AY12 row (Y3-G1-1, Y3-G2-1, Y3-G2-2, Y3-G3) | Low | A `require`, the text |
+
 
 
 ## Phase 1 closed

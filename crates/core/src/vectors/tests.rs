@@ -46,6 +46,8 @@ fn s015_t01_r01_reads_every_value_type() {
     assert_eq!(vector.input("key").array::<2>(), [0x00, 0xff]);
     assert_eq!(vector.input("block").number(), 1024);
     assert!(vector.input("flag").flag());
+    let falsy = parse("999", &file(&VECTOR.replace("true", "false"))).unwrap();
+    assert!(!falsy[0].input("flag").flag());
     assert_eq!(vector.input("list").list()[1].bytes(), [0x11]);
     assert_eq!(vector.input("words").list()[0].text(), "abandon");
     assert_eq!(vector.expected("counter").u64_hex(), 0x0102);
@@ -141,6 +143,17 @@ fn s015_t01_r01_rejects_every_broken_rule() {
             parse("999", &edited).err(),
             Some(Broken::Syntax),
             "{inside:?}"
+        );
+    }
+    for (from, trailing) in [
+        (r#""11"]"#, r#""11",]"#),
+        (r#""BadLength"}"#, r#""BadLength",}"#),
+    ] {
+        let edited = one.replace(from, trailing);
+        assert_eq!(
+            parse("999", &edited).err(),
+            Some(Broken::Syntax),
+            "{trailing}"
         );
     }
     let duplicate = file(&format!("{VECTOR}, {VECTOR}"));
