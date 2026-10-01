@@ -50,6 +50,7 @@ fn within(len: usize, max: usize) -> Result<(), StoreError> {
 }
 
 /// One peer of the channel (spec 022-peers-tofu).
+#[derive(Clone)]
 pub(crate) struct PeerRecord {
     /// Key 0, the peer's public key.
     pub(crate) pk: PublicKey,
@@ -152,6 +153,7 @@ pub(crate) enum OutboxKind {
 }
 
 /// One sealed message waiting to leave (spec 021-channel-session).
+#[derive(Clone)]
 pub(crate) struct OutboxEntry {
     /// Key 0.
     pub(crate) client_ref: [u8; CLIENT_REF_LEN],
@@ -237,6 +239,7 @@ impl OutboxEntry {
 }
 
 /// One of one's own retired keys (spec 025-identity-regen).
+#[derive(Clone)]
 pub(crate) struct OldKey {
     /// Key 0.
     pub(crate) pk: PublicKey,

@@ -7,7 +7,7 @@
 //! here is shorter than a dependency would be (AGENTS 8). Every file is checked
 //! against the schema of `specs/vectors/README.md` as it is read, and a broken
 //! file fails the test that reads it (R1). The reference script of spec 015
-//! writes the files of specs 011–017 and `010.json` is transcribed by hand;
+//! writes the files from spec 011 on and `010.json` is transcribed by hand;
 //! Rust only reads and checks them.
 
 use std::collections::HashSet;
@@ -20,6 +20,7 @@ const FILES: &[(&str, &str)] = &[
     ("013", include_str!("../../../specs/vectors/013.json")),
     ("014", include_str!("../../../specs/vectors/014.json")),
     ("017", include_str!("../../../specs/vectors/017.json")),
+    ("020", include_str!("../../../specs/vectors/020.json")),
 ];
 
 /// Where a vector's values come from (`specs/vectors/README.md`).

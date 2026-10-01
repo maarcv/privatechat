@@ -3,11 +3,12 @@
 
 use super::Error;
 use crate::crypto::CryptoError;
+use crate::storage::StoreError;
 
 /// Spec 011, R20: every `CryptoError` becomes `Internal`, and the enum has
-/// exactly the variants of `docs/spec.md` §9 but `Store`. Both lists are
-/// checked by an exhaustive match, which fails to compile when a variant is
-/// added or removed.
+/// exactly the variants of `docs/spec.md` §9, `Store` since spec 020. Both
+/// lists are checked by an exhaustive match, which fails to compile when a
+/// variant is added or removed.
 #[test]
 fn s011_t20_r20_error_mapping() {
     for error in [
@@ -47,6 +48,7 @@ fn s011_t20_r20_error_mapping() {
         Error::InviteExpired,
         Error::ConfigMismatch,
         Error::Internal,
+        Error::Store(StoreError::Corrupt),
     ] {
         let name = match error {
             Error::BadLength => "BadLength",
@@ -64,6 +66,7 @@ fn s011_t20_r20_error_mapping() {
             Error::InviteExpired => "InviteExpired",
             Error::ConfigMismatch => "ConfigMismatch",
             Error::Internal => "Internal",
+            Error::Store(_) => "Store(Corrupt)",
         };
         assert_eq!(format!("{error:?}"), name);
     }

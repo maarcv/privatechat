@@ -38,7 +38,7 @@ WORD_LIST = ROOT / "crates" / "core" / "src" / "proto" / "bip39_english.txt"
 WORD_LIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"  # 011 R17
 
 PROTO_VERSION = 1
-FORMAT_SPECS = ("011", "012", "013", "014", "017")
+FORMAT_SPECS = ("011", "012", "013", "014", "017", "020")
 KINDS = ("positive", "negative")
 SOURCES = ("published", "derived", "pinned")
 # The fields whose strings are text; every other string is hexadecimal (R1).
@@ -1159,6 +1159,134 @@ def check_s014_t07_r07_section_produces_014_json() -> list[dict]:
 
 
 SECTIONS["014"] = check_s014_t07_r07_section_produces_014_json
+
+
+# --- Spec 020: store files ----------------------------------------------------------
+
+# The schema of the codec vectors, next to 017's test schema: field → (key, type) (020 Vectors).
+TYPES_SCHEMA = {"small": (0, "u8"), "flag": (1, "bool"), "nested": (2, "record"),
+                "numbers": (3, "list")}
+TYPES_MAX_NUMBERS = 4
+ITEM_HEADER_LEN = 4  # the `len` before each list item (020 R1)
+# The schemas of 020, in key order. A `list` value is its items, already encoded.
+PEER_SCHEMA = {
+    "pk": (0, "bytes32"), "label": (1, "text"), "verified": (2, "bool"), "muted": (3, "bool"),
+    "retired_at": (4, "u64"), "first_seen": (5, "u64"), "last_seen": (6, "u64"),
+    "max_counter": (7, "u64"), "last_display_name": (8, "bytes"),
+}
+OUTBOX_SCHEMA = {
+    "client_ref": (0, "bytes16"), "kind": (1, "u8"), "sent_at": (2, "u64"), "blob": (3, "bytes"),
+    "signature": (4, "bytes64"), "under_retired_key": (5, "bool"), "counter": (6, "u64"),
+}
+OLD_KEY_SCHEMA = {"pk": (0, "bytes32"), "retired_at": (1, "u64")}
+STATE_SCHEMA = {
+    "state_version": (0, "u8"), "channel_id": (1, "bytes16"), "config": (2, "bytes"),
+    "identity_seed": (3, "bytes32"), "identity_epoch": (4, "u32"), "send_counter": (5, "u64"),
+    "cursor": (6, "u64"), "own_display_name": (7, "text"), "local_name": (8, "text"),
+    "peers": (9, "list"), "outbox": (10, "list"), "retiring_seed": (11, "bytes32"),
+    "own_old_keys": (12, "list"), "own_key_used_elsewhere": (13, "bool"),
+    "read_only": (14, "bool"), "log_committed_len": (15, "u64"), "log_generation": (16, "u32"),
+    "synced_at": (17, "u64"), "truncated_at": (18, "u64"),
+}
+
+
+def list_value(items: list[bytes]) -> bytes:
+    """A `list<T>` value: each item `len` (4 bytes, big-endian) ‖ item (020 R1)."""
+    return b"".join(struct.pack(">I", len(item)) + item for item in items)
+
+
+def encode_020(schema: dict, values: dict) -> bytes:
+    """The canonical record (017 R10) of `values` by `schema`: a `bool` as one byte, a `list` from
+    its encoded items, a nested `record` as its bytes, the rest as 017 encodes them."""
+    def value(kind: str, raw: object) -> bytes:
+        if kind == "bool":
+            return bytes([1 if raw else 0])
+        if kind == "list":
+            return list_value(raw)
+        return raw if kind == "record" else encode_value(kind, raw)
+    return b"".join(record_field(key, value(kind, values[name]))
+                    for name, (key, kind) in schema.items() if name in values)
+
+
+def check_s020_t30_r30_section_produces_020_json() -> list[dict]:
+    """The vectors of spec 020: the codec types of R1 over the schema of the codec vectors, and
+    one plaintext state record with fixed values, positive and with an unknown key."""
+    def raw(name: str, kind: str, origin: str, inputs: dict, expected: dict) -> dict:
+        return {"name": name, "kind": kind, "source": "derived", "origin": f"spec 020: {origin}",
+                "inputs": inputs, "expected": expected}
+
+    def types(name: str, kind: str, origin: str, record: bytes, expected: dict) -> dict:
+        return raw(name, kind, f"codec schema, {origin}",
+                   {"schema": "types", "policy": "reject", "record": record}, expected)
+
+    small = {"small": 1}
+    nested = encode_test_record({"small": 7, "text": "hi"})
+    numbers = [U64(1), U64(2**64 - 1)]
+    number_items = [n.to_bytes(8, "big") for n in numbers]
+    five = [n.to_bytes(8, "big") for n in range(TYPES_MAX_NUMBERS + 1)]
+    head = encode_020(TYPES_SCHEMA, small)
+    vectors = [
+        types("bool_true", "positive", "key 1 true", encode_020(TYPES_SCHEMA, {**small, "flag": True}),
+              {**small, "flag": True}),
+        types("bool_false", "positive", "key 1 false",
+              encode_020(TYPES_SCHEMA, {**small, "flag": False}), {**small, "flag": False}),
+        types("bool_two", "negative", "key 1 holding 0x02", head + record_field(1, b"\x02"),
+              {"error": "Width"}),
+        types("nested_record", "positive", "key 2 a test record of spec 017",
+              encode_020(TYPES_SCHEMA, {**small, "nested": nested}), {**small, "nested": nested}),
+        types("list_two_items", "positive", "key 3 two u64 items",
+              encode_020(TYPES_SCHEMA, {**small, "numbers": number_items}),
+              {**small, "numbers": numbers}),
+        types("list_empty", "positive", "key 3 no item",
+              encode_020(TYPES_SCHEMA, {**small, "numbers": []}), {**small, "numbers": []}),
+        types("list_item_truncated", "negative", "key 3 an item whose len says 8 and carries 3",
+              head + record_field(3, struct.pack(">I", 8) + bytes(3)), {"error": "Truncated"}),
+        types("list_too_many", "negative", "key 3 five items, one over the maximum",
+              encode_020(TYPES_SCHEMA, {**small, "numbers": five}), {"error": "TooLong"}),
+    ]
+    k_ch = bytes(range(0x40, 0x60))
+    config = {"config_version": 1, "proto_version": 1, "k_ch": k_ch,
+              "server_url": "wss://chat.example.org:9001", "ttl_seconds": 86_400,
+              "created_at": U64(1_790_000_000_000), "suggested_name": "Família"}
+    _, channel_id = channel_identity(k_ch, config["ttl_seconds"])
+    peers = [
+        encode_020(PEER_SCHEMA, {"pk": bytes(range(0x60, 0x80)), "label": "Anna", "verified": True,
+                                 "muted": False, "first_seen": U64(1_790_000_100_000),
+                                 "last_seen": U64(1_790_000_200_000), "max_counter": U64(41),
+                                 "last_display_name": "Anna B.".encode("utf-8")}),
+        encode_020(PEER_SCHEMA, {"pk": bytes(range(0x80, 0xa0)), "verified": False, "muted": True,
+                                 "retired_at": U64(1_790_000_300_000),
+                                 "first_seen": U64(1_790_000_150_000),
+                                 "last_seen": U64(1_790_000_250_000)}),
+    ]
+    outbox = [encode_020(OUTBOX_SCHEMA, {
+        "client_ref": bytes(range(0xa0, 0xb0)), "kind": 0, "sent_at": U64(1_790_000_400_000),
+        "blob": bytes(range(100)), "signature": bytes(range(0xb0, 0xf0)),
+        "under_retired_key": False, "counter": U64(7)})]
+    own_old_keys = [encode_020(OLD_KEY_SCHEMA, {"pk": bytes(range(0xc0, 0xe0)),
+                                                "retired_at": U64(1_790_000_050_000)})]
+    state = {
+        "state_version": 1, "channel_id": channel_id, "config": config_record(config),
+        "identity_seed": bytes(range(0x20, 0x40)), "identity_epoch": 2, "send_counter": U64(8),
+        "cursor": U64(1_790_000_500_000), "own_display_name": "Marta", "local_name": "Família",
+        "peers": peers, "outbox": outbox, "retiring_seed": bytes(range(0xe0, 0x100)),
+        "own_old_keys": own_old_keys, "own_key_used_elsewhere": False, "read_only": False,
+        "log_committed_len": U64(9 + 4 + 200), "log_generation": 3,
+        "synced_at": U64(1_790_000_600_000), "truncated_at": U64(1_790_000_000_500),
+    }
+    record = encode_020(STATE_SCHEMA, state)
+    expected = {name: value.encode("utf-8") if isinstance(value, str) else value
+                for name, value in state.items() if name != "state_version"}
+    vectors += [
+        raw("state_reference", "positive", "a state record with every key",
+            {"schema": "state", "record": record}, expected),
+        raw("state_unknown_key", "negative", "state_reference and a key 19",
+            {"schema": "state", "record": record + record_field(19, b"")}, {"error": "Corrupt"}),
+    ]
+    return vectors
+
+
+SECTIONS["020"] = check_s020_t30_r30_section_produces_020_json
 
 
 def words() -> list[str]:

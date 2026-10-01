@@ -8,9 +8,14 @@ use super::state::items::{
     MAX_BLOB, MAX_OLD_KEY, MAX_OUTBOX_ENTRY, MAX_PEER_RECORD, OldKey, OutboxEntry, OutboxKind,
     PeerRecord,
 };
+use super::state::{ChannelState, MAX_OLD_KEYS, MAX_OUTBOX, MAX_PEERS, MAX_STATE_RECORD};
 use super::{MAX_NAME, StoreError};
-use crate::crypto::{PublicKey, Signature};
+use crate::crypto::{PublicKey, Secret, Signature};
+use crate::proto::config;
 use crate::proto::record::ITEM_HEADER_LEN;
+use crate::proto::record::UnknownKeys::Reject;
+use crate::proto::record::test_schema::TypesRecord;
+use crate::vectors::{self, Checker, Kind, Vector};
 
 /// One field: key ‖ 4-byte big-endian length ‖ value (spec 017 R1).
 fn field(key: u8, value: &[u8]) -> Vec<u8> {
@@ -143,6 +148,332 @@ fn s020_t08_r08_list_item_schemas() {
     }
 }
 
+/// A state with every optional field absent and every list empty.
+fn small_state() -> ChannelState {
+    ChannelState {
+        channel_id: [1; 16],
+        config: zeroize::Zeroizing::new(vec![2; 40]),
+        identity_seed: Secret::from_bytes([3; 32]),
+        identity_epoch: 0,
+        send_counter: 0,
+        cursor: None,
+        own_display_name: None,
+        local_name: None,
+        peers: Vec::new(),
+        outbox: Vec::new(),
+        retiring_seed: None,
+        own_old_keys: Vec::new(),
+        own_key_used_elsewhere: false,
+        read_only: false,
+        log_committed_len: 9,
+        log_generation: 0,
+        synced_at: None,
+        truncated_at: None,
+    }
+}
+
+/// The largest state the Limits table allows.
+fn largest_state() -> ChannelState {
+    let old_key = OldKey {
+        pk: PublicKey([4; 32]),
+        retired_at: 5,
+    };
+    ChannelState {
+        config: zeroize::Zeroizing::new(vec![2; config::MAX_RECORD]),
+        cursor: Some(6),
+        own_display_name: Some("o".repeat(MAX_NAME)),
+        local_name: Some("l".repeat(MAX_NAME)),
+        peers: vec![full_peer(MAX_NAME); MAX_PEERS],
+        outbox: vec![entry(MAX_BLOB); MAX_OUTBOX],
+        retiring_seed: Some(Secret::from_bytes([7; 32])),
+        own_old_keys: vec![old_key; MAX_OLD_KEYS],
+        synced_at: Some(8),
+        truncated_at: Some(9),
+        ..small_state()
+    }
+}
+
+/// `state` encoded at the log position it holds.
+fn encode(state: &ChannelState) -> Result<zeroize::Zeroizing<Vec<u8>>, StoreError> {
+    let (log_len, generation) = state.log_position();
+    state.encode(log_len, generation)
+}
+
+/// Spec 020, R8 (the state record): key 0 is read first, so a newer version
+/// is `UnsupportedVersion` even with a key this version does not know; the
+/// rest decodes under `Reject`.
+#[test]
+fn s020_t08_r08_state_schema() {
+    let record = encode(&small_state()).unwrap().to_vec();
+    assert_eq!(&record[..6], [0, 0, 0, 0, 1, 1]);
+    let with_unknown = [&record[..], &field(19, &[])].concat();
+    assert_eq!(
+        ChannelState::decode(&with_unknown).err(),
+        Some(StoreError::Corrupt)
+    );
+    let mut newer = with_unknown.clone();
+    newer[5] = 2;
+    assert_eq!(
+        ChannelState::decode(&newer).err(),
+        Some(StoreError::UnsupportedVersion)
+    );
+    // Without key 0, and with a mandatory key missing.
+    assert_eq!(
+        ChannelState::decode(&record[6..]).err(),
+        Some(StoreError::Corrupt)
+    );
+    assert_eq!(
+        ChannelState::decode(&record[..27]).err(),
+        Some(StoreError::Corrupt)
+    );
+    assert_eq!(ChannelState::decode(&[]).err(), Some(StoreError::Corrupt));
+}
+
+/// Spec 020, R25 (the state record): the writer's buffer is allocated at the
+/// encoded length, for a small state and for the largest.
+#[test]
+fn s020_t25_r25_state_buffer_is_exact() {
+    for state in [small_state(), largest_state()] {
+        let record = encode(&state).unwrap();
+        assert_eq!(record.capacity(), record.len());
+    }
+}
+
+/// Spec 020, R26: each variant is a unit variant whose `Debug` is its name,
+/// and `core::Error` carries it as it is.
+#[test]
+fn s020_t26_r26_store_error_has_no_data() {
+    for (error, name) in [
+        (StoreError::Io, "Io"),
+        (StoreError::Locked, "Locked"),
+        (StoreError::Corrupt, "Corrupt"),
+        (StoreError::UnsupportedVersion, "UnsupportedVersion"),
+        (StoreError::LogFull, "LogFull"),
+        (StoreError::OutboxFull, "OutboxFull"),
+    ] {
+        let exhaustive = match error {
+            StoreError::Io
+            | StoreError::Locked
+            | StoreError::Corrupt
+            | StoreError::UnsupportedVersion
+            | StoreError::LogFull
+            | StoreError::OutboxFull => format!("{error:?}"),
+        };
+        assert_eq!(exhaustive, name);
+        assert_eq!(crate::Error::from(error), crate::Error::Store(error));
+    }
+}
+
+/// Spec 020, R27 (the state record): 33 `outbox` entries are `OutboxFull`,
+/// one peer or old key over the limit or a long name is `Corrupt`, and the
+/// largest state encodes within the record limit and decodes back.
+#[test]
+fn s020_t27_r27_state_within_limits() {
+    let over_outbox = ChannelState {
+        outbox: vec![entry(10); MAX_OUTBOX + 1],
+        ..small_state()
+    };
+    assert_eq!(encode(&over_outbox).err(), Some(StoreError::OutboxFull));
+    let over_peers = ChannelState {
+        peers: vec![full_peer(1); MAX_PEERS + 1],
+        ..small_state()
+    };
+    let old_key = OldKey {
+        pk: PublicKey([4; 32]),
+        retired_at: 5,
+    };
+    let over_old_keys = ChannelState {
+        own_old_keys: vec![old_key; MAX_OLD_KEYS + 1],
+        ..small_state()
+    };
+    let long_name = ChannelState {
+        local_name: Some("l".repeat(MAX_NAME + 1)),
+        ..small_state()
+    };
+    let long_config = ChannelState {
+        config: zeroize::Zeroizing::new(vec![2; config::MAX_RECORD + 1]),
+        ..small_state()
+    };
+    let long_label = ChannelState {
+        peers: vec![full_peer(MAX_NAME + 1)],
+        ..small_state()
+    };
+    for state in [
+        over_peers,
+        over_old_keys,
+        long_name,
+        long_config,
+        long_label,
+    ] {
+        assert_eq!(encode(&state).err(), Some(StoreError::Corrupt));
+    }
+    let largest = encode(&largest_state()).unwrap();
+    assert!(largest.len() <= MAX_STATE_RECORD, "{}", largest.len());
+    let decoded = ChannelState::decode(&largest).unwrap();
+    assert_eq!(encode(&decoded).unwrap(), largest);
+    // One peer over the limit, planted in the bytes, does not open either.
+    let full = ChannelState {
+        peers: vec![full_peer(1); MAX_PEERS],
+        ..small_state()
+    };
+    let mut buf = encode(&full).unwrap().to_vec();
+    assert!(ChannelState::decode(&buf).is_ok());
+    // Keys 0 to 5 of `small_state` take 131 bytes; key 9 follows.
+    let peers_at = 131;
+    assert_eq!(buf[peers_at], 9);
+    let len_range = peers_at + 1..peers_at + 5;
+    let len = u32::from_be_bytes(buf[len_range.clone()].try_into().unwrap());
+    let item = full_peer(1).encode().unwrap();
+    let extra = [&u32::try_from(item.len()).unwrap().to_be_bytes()[..], &item].concat();
+    let end = peers_at + 5 + usize::try_from(len).unwrap();
+    buf.splice(end..end, extra.iter().copied());
+    let new_len = len + u32::try_from(extra.len()).unwrap();
+    buf[len_range].copy_from_slice(&new_len.to_be_bytes());
+    assert_eq!(ChannelState::decode(&buf).err(), Some(StoreError::Corrupt));
+}
+
+/// Checks a codec vector of `020.json`: a positive decodes to its values and
+/// encodes back to its bytes, a negative returns its `RecordError`.
+fn check_types_vector(vector: &Vector) {
+    assert_eq!(vector.input("schema").text(), "types");
+    assert_eq!(vector.input("policy").text(), "reject");
+    let record = vector.input("record").bytes();
+    let decoded = TypesRecord::decode(record, Reject);
+    if vector.kind() == Kind::Negative {
+        let error = format!("{:?}", decoded.unwrap_err());
+        assert_eq!(error, vector.expected("error").text(), "{}", vector.name());
+        return;
+    }
+    let decoded = decoded.unwrap();
+    let optional = |field| vector.has_expected(field).then(|| vector.expected(field));
+    let small = u8::try_from(vector.expected("small").number()).unwrap();
+    assert_eq!(decoded.small, small, "{}", vector.name());
+    assert_eq!(decoded.flag, optional("flag").map(|value| value.flag()));
+    let nested = decoded
+        .nested
+        .as_ref()
+        .map(|nested| nested.encode().unwrap().to_vec());
+    assert_eq!(
+        nested.as_deref(),
+        optional("nested").map(|value| value.bytes())
+    );
+    let numbers =
+        optional("numbers").map(|value| value.list().iter().map(|n| n.u64_hex()).collect());
+    assert_eq!(decoded.numbers, numbers, "{}", vector.name());
+    assert_eq!(
+        decoded.encode().unwrap().as_slice(),
+        record,
+        "{}",
+        vector.name()
+    );
+}
+
+/// The encodings of a decoded list's items, to compare with a vector's.
+fn encoded_items<T>(
+    items: &[T],
+    encode: fn(&T) -> Result<zeroize::Zeroizing<Vec<u8>>, StoreError>,
+) -> Vec<Vec<u8>> {
+    items
+        .iter()
+        .map(|item| encode(item).unwrap().to_vec())
+        .collect()
+}
+
+/// Checks a state vector of `020.json`: the positive decodes to every value
+/// it names and encodes back to its bytes; the negative is `Corrupt`.
+fn check_state_vector(vector: &Vector) {
+    assert_eq!(vector.input("schema").text(), "state");
+    let record = vector.input("record").bytes();
+    let decoded = ChannelState::decode(record);
+    if vector.kind() == Kind::Negative {
+        let error = format!("{:?}", decoded.err().unwrap());
+        assert_eq!(error, vector.expected("error").text(), "{}", vector.name());
+        return;
+    }
+    let state = decoded.unwrap();
+    let expected = |field| vector.expected(field);
+    let items = |field| -> Vec<Vec<u8>> {
+        expected(field)
+            .list()
+            .iter()
+            .map(|item| item.bytes().to_vec())
+            .collect()
+    };
+    let text = |value: &Option<String>| value.as_ref().map(|text| text.as_bytes().to_vec());
+    assert_eq!(state.channel_id, expected("channel_id").array::<16>());
+    assert_eq!(state.config.as_slice(), expected("config").bytes());
+    assert_eq!(
+        state.identity_seed.expose(),
+        &expected("identity_seed").array::<32>()
+    );
+    assert_eq!(state.identity_epoch, expected("identity_epoch").number());
+    assert_eq!(state.send_counter, expected("send_counter").u64_hex());
+    assert_eq!(state.cursor, Some(expected("cursor").u64_hex()));
+    let own_display_name = expected("own_display_name").bytes();
+    assert_eq!(
+        text(&state.own_display_name).as_deref(),
+        Some(own_display_name)
+    );
+    assert_eq!(
+        text(&state.local_name).as_deref(),
+        Some(expected("local_name").bytes())
+    );
+    assert_eq!(
+        encoded_items(&state.peers, PeerRecord::encode),
+        items("peers")
+    );
+    assert_eq!(
+        encoded_items(&state.outbox, OutboxEntry::encode),
+        items("outbox")
+    );
+    let retiring_seed = state.retiring_seed.as_ref().map(|seed| *seed.expose());
+    assert_eq!(retiring_seed, Some(expected("retiring_seed").array::<32>()));
+    assert_eq!(
+        encoded_items(&state.own_old_keys, OldKey::encode),
+        items("own_old_keys")
+    );
+    assert_eq!(
+        state.own_key_used_elsewhere,
+        expected("own_key_used_elsewhere").flag()
+    );
+    assert_eq!(state.read_only, expected("read_only").flag());
+    let position = (
+        expected("log_committed_len").u64_hex(),
+        expected("log_generation").number(),
+    );
+    assert_eq!(state.log_position(), position);
+    assert_eq!(state.synced_at, Some(expected("synced_at").u64_hex()));
+    assert_eq!(state.truncated_at, Some(expected("truncated_at").u64_hex()));
+    let (log_len, generation) = state.log_position();
+    assert_eq!(
+        state.encode(log_len, generation).unwrap().as_slice(),
+        record
+    );
+}
+
+/// Spec 015, R3: every vector of `020.json` is checked once.
+#[test]
+fn s020_vectors_dispatch() {
+    let types: [&str; 8] = [
+        "bool_true",
+        "bool_false",
+        "bool_two",
+        "nested_record",
+        "list_two_items",
+        "list_empty",
+        "list_item_truncated",
+        "list_too_many",
+    ];
+    let mut entries: Vec<(&str, Checker)> = types
+        .iter()
+        .map(|name| (*name, check_types_vector as Checker))
+        .collect();
+    for name in ["state_reference", "state_unknown_key"] {
+        entries.push((name, check_state_vector));
+    }
+    vectors::check_all("020", &entries);
+}
+
 proptest! {
     /// Spec 020, R29 (the items of the three lists): each re-encodes to the
     /// bytes it was decoded from, at the length `encoded_len` announced
@@ -192,6 +523,70 @@ proptest! {
         let encoded = old_key.encode().unwrap();
         assert_eq!(encoded.len(), old_key.encoded_len());
         assert_eq!(OldKey::decode(&encoded).unwrap().encode().unwrap(), encoded);
+    }
+
+    /// Spec 020, R29 (the state record): a state re-encodes to the bytes it
+    /// was decoded from, and so does its `duplicate`, for every optional
+    /// field present or absent and lists of a few items.
+    #[test]
+    fn s020_t29_r29_state_round_trip(
+        seeds in any::<([u8; 32], Option<[u8; 32]>)>(),
+        numbers in any::<(u32, u64, Option<u64>, u64, u32, Option<u64>, Option<u64>)>(),
+        names in (maybe("[a-zà-ü]{0,32}"), maybe("[a-z ]{0,64}")),
+        flags in any::<(bool, bool)>(),
+        config in bytes_of(any::<u8>(), 0..=config::MAX_RECORD),
+        counts in (0usize..=3, 0usize..=3, 0usize..=3),
+    ) {
+        let (identity_seed, retiring_seed) = seeds;
+        let (identity_epoch, send_counter, cursor, log_len, generation, synced_at, truncated_at) =
+            numbers;
+        let (own_display_name, local_name) = names;
+        let (peers, outbox, old_keys) = counts;
+        let old_key = OldKey { pk: PublicKey([4; 32]), retired_at: send_counter };
+        let state = ChannelState {
+            channel_id: [5; 16],
+            config: zeroize::Zeroizing::new(config),
+            identity_seed: Secret::from_bytes(identity_seed),
+            identity_epoch,
+            send_counter,
+            cursor,
+            own_display_name,
+            local_name,
+            peers: vec![full_peer(3); peers],
+            outbox: vec![entry(50); outbox],
+            retiring_seed: retiring_seed.map(Secret::from_bytes),
+            own_old_keys: vec![old_key; old_keys],
+            own_key_used_elsewhere: flags.0,
+            read_only: flags.1,
+            log_committed_len: 0,
+            log_generation: 0,
+            synced_at,
+            truncated_at,
+        };
+        let encoded = state.encode(log_len, generation).unwrap();
+        let decoded = ChannelState::decode(&encoded).unwrap();
+        assert_eq!(decoded.log_position(), (log_len, generation));
+        assert_eq!(encode(&decoded).unwrap(), encoded);
+        assert_eq!(encode(&decoded.duplicate().unwrap()).unwrap(), encoded);
+    }
+
+    /// Spec 020, R29 (the state record): the decoder never panics on
+    /// arbitrary bytes, nor on a valid state with one byte changed.
+    #[test]
+    fn s020_t29_r29_state_never_panics(
+        buf in bytes_of(any::<u8>(), 0..=1024),
+        flip in any::<(usize, u8)>(),
+    ) {
+        let _ = ChannelState::decode(&buf);
+        let some = ChannelState {
+            peers: vec![full_peer(3); 2],
+            outbox: vec![entry(20); 2],
+            ..small_state()
+        };
+        let mut changed = encode(&some).unwrap().to_vec();
+        let at = flip.0 % changed.len();
+        changed[at] ^= flip.1;
+        let _ = ChannelState::decode(&changed);
     }
 
     /// Spec 020, R29 (the items of the three lists): no decoder panics on

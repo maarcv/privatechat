@@ -29,7 +29,7 @@ pub(crate) const CHANNEL_AUTH_CONTEXT: KdfContext = KdfContext::new(*b"chauth__"
 const VERSION: u8 = 1;
 
 /// The largest encoded record (R7).
-const MAX_RECORD: usize = 512;
+pub(crate) const MAX_RECORD: usize = 512;
 
 /// The largest `suggested_name`, in bytes of UTF-8 (R4).
 const MAX_NAME: usize = 64;
