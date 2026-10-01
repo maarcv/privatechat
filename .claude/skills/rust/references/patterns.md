@@ -144,29 +144,32 @@ expected field and nowhere else). The full mutation table belongs to
 
 ## 3. `Store` trait and `WriteBatch` — one commit per operation (AGENTS 23)
 
+The normative shape is the Interface of spec 020-store-files; in short:
+
 ```rust
-pub trait Store {
-    fn load(&mut self) -> Result<ChannelState, StoreError>;
-    fn commit(&mut self, batch: WriteBatch) -> Result<(), StoreError>;
-    fn compact(&mut self, now: u64) -> Result<u32, StoreError>;
+pub trait Store: Send {
+    fn name(&self) -> &DirName;
+    fn load(&mut self) -> Result<Option<(ChannelState, Vec<LogRecord>)>, StoreError>;
+    fn commit(&mut self, batch: &WriteBatch) -> Result<(), StoreError>;
+    fn compact(&mut self, state: &ChannelState, now: u64) -> Result<u32, StoreError>;
+    fn log_len(&self) -> u64;
+    fn destroy(&mut self) -> Result<(), StoreError>;
 }
 
-#[derive(Default)]
 pub struct WriteBatch {
-    pub messages: Vec<StoredMessage>,
-    pub peers: Vec<PeerUpdate>,
-    pub outbox_add: Vec<(ClientRef, Vec<u8>, [u8; 64])>, // blob and its unmasked signature (ADR 0029)
-    pub outbox_remove: Vec<ClientRef>,
-    pub send_counter: Option<u64>,
-    pub cursor: Option<u64>,
+    state: ChannelState,     // the whole new state, not a diff
+    records: Vec<LogRecord>, // appended to the log, in order
 }
 ```
 
-`Channel` builds one `WriteBatch` per logical operation and commits it once;
-a rejection builds a batch containing only `cursor`. The two in-memory test
-stores are `CountingStore` (counts commits other than the cursor's) and
-`FailingStore { fail_at: n }` (returns `StoreError::Io` at the n-th commit;
-tests reopen and compare state).
+`Channel` builds one `WriteBatch` per logical operation and commits it once,
+by reference, so that it can move the parts into memory after `Ok` and retry
+after `LogFull`; a rejection commits only a state whose cursor moved. The
+doubles live in `core::testing` (feature `test-support` for the `store`
+tests): `MemoryStore` counts the commits of AGENTS 23 in `commits()`, and
+`FailingStore` with a `Faults` handle fails the *n*-th call (`fail_at`) or
+poisons a store after it (`poison_after`); tests reopen and compare with
+`state_eq`.
 
 ## 4. Sans-I/O `Session` (ADR 0020)
 

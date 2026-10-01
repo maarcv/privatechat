@@ -33,11 +33,11 @@ AGENTS 23 says every state write goes through `commit`; `compact` (R15) is the o
 
 - R3 Every file MUST be sealed with a key derived from `K_db` and never with `K_db` itself: the state and log of a channel with `K_store = keyed_hash(K_db, "privatechat/store/v1" ‖ name)`, where `name` is the 16-byte directory hash of R18, and the settings with `K_settings = keyed_hash(K_db, "privatechat/settings/v1")`, each derived into a `Secret<32>` at each seal and open and dropped after it.
 - R4 `state.bin` MUST be `"PSTA"` ‖ `store_version` u8 = 1 ‖ `nonce` 24 bytes ‖ `secretbox_seal(K_store, nonce, state record)`; `settings.bin` MUST be `"PSET"` ‖ 1 ‖ `nonce` ‖ `secretbox_seal(K_settings, nonce, settings record)`; each write draws a fresh nonce with `random_bytes`.
-- R5 `messages.log` MUST be `"PLOG"` ‖ `store_version` u8 = 1 ‖ `generation` u32 BE, a 9-byte header, followed by zero or more entries, each `len` u32 BE ‖ `nonce` 24 bytes ‖ `secretbox_seal(K_store, nonce, log record)`, where `len` counts the nonce and the box; `core` produces and opens the `nonce ‖ box` of each entry, and `store` writes the header and each `len`.
+- R5 `messages.log` MUST be `"PLOG"` ‖ `store_version` u8 = 1 ‖ `generation` u32 BE, a 9-byte header, followed by zero or more entries, each `len` u32 BE ‖ `nonce` 24 bytes ‖ `secretbox_seal(K_store, nonce, log record)`, where `len` counts the nonce and the box, and an entry's offset is the byte offset of its `len` in the file, 9 for the first; `core` produces and opens the `nonce ‖ box` of each entry, and `store` writes the header and each `len`.
 - R6 `store` MUST read at most the limit of the Limits table plus one byte of every file, allocating nothing beyond it, and leave the verdict on a larger file to the order of R7.
 - R7 Opening any file MUST check, in this order: at least the minimum size of its kind (45 bytes for `state.bin` and `settings.bin`, 9 for `messages.log`, 40 for a log entry), else `Corrupt`; the magic, else `Corrupt`; `store_version` = 1, else `StoreError::UnsupportedVersion` — except that for `state.bin` and `settings.bin`, when `ChannelState::open` (or `Settings::open`) of its `nonce ‖ box` returns `Ok`, the header was forged outside the box and the result is `Corrupt`, any error of that open leaving `UnsupportedVersion` (a newer app that raises `store_version` MUST also change what the box holds so that it does not open as version 1); a `messages.log` header whose version is not 1 next to a `state.bin` that opened as version 1 gives `Corrupt`, since a log schema change raises `state_version` (R8), never the log's own byte; the size limit, else `Corrupt`; the box, where any failure is `Corrupt`; the record, where any `RecordError` is `Corrupt`.
 - R8 Before the full decode, key 0 of the state and settings records (`state_version`, `settings_version`) MUST be read and, when it is not 1, give `UnsupportedVersion`; any later change to the state, log or settings schemas MUST raise key 0 (`state_version` for a state or log change, `settings_version` for a settings change), `store_version` being raised only together with a change to what the box holds (R7), so that an older app reports `UnsupportedVersion` for a newer app's data, not `Corrupt`. The state record MUST be decoded under `UnknownKeys::Reject` with the schema "State record" below; the settings record the same with the schema "Settings record", whose `default_server_url` and `socks5_proxy` MUST satisfy the grammars of Limits and whose `lock_timeout_seconds` MUST be within 0..=86 400, else `Corrupt`; `Settings::seal` MUST refuse with `Corrupt` any value `open` would refuse.
-- R9 Every log record MUST be decoded under `UnknownKeys::Reject` with the schema "Log record" below and MUST carry the `generation` of its file and its own byte `offset`; a record whose `generation` or `offset` differs from where it was read MUST return `Corrupt`. Because a channel's files are sealed under its own `K_store` (R3), an entry or a state of another directory does not open.
+- R9 Every log record MUST be decoded under `UnknownKeys::Reject` with the schema "Log record" below and MUST carry the `generation` of its file and its own byte `offset`, that of its `len` (R5); a record whose `generation` or `offset` differs from where it was read MUST return `Corrupt`. Because a channel's files are sealed under its own `K_store` (R3), an entry or a state of another directory does not open.
 
 **Commit and recovery**
 
@@ -66,7 +66,7 @@ AGENTS 23 says every state write goes through `commit`; `compact` (R15) is the o
 - R26 `StoreError` MUST have exactly the unit variants `Io`, `Locked`, `Corrupt`, `UnsupportedVersion`, `LogFull` and `OutboxFull`, and MUST NOT carry an OS error, a path or any byte of a file; `core::Error` MUST gain the variant `Store(StoreError)`.
 - R27 `ChannelState::seal` MUST return `StoreError::OutboxFull` for more than 32 `outbox` entries and `Corrupt` for any other value beyond the Limits table, so that the store never writes a file it would refuse to read.
 - R28 `Store` and `Vault` MUST be `Send`, and `ChannelFiles` MUST share the lock and the key with its `DataDir` through `Arc`, so that the `Device` of spec 027-core-api can live behind a `Mutex` in the bindings.
-- R29 This spec MUST amend spec 016-fuzz-harness R2, R8 and R9 with the targets `state_decode`, `log_record_decode` and `settings_decode` over the plaintext decoders, seeded from the records of `020.json`; the three sealed `open` functions are counted as reached by the check of 016-R6, and their decoders are the fuzzed part. Every record kind MUST have a round-trip property test (AGENTS 21).
+- R29 This spec MUST amend spec 016-fuzz-harness R2, R8 and R9 with the targets `state_decode`, `log_record_decode` and `settings_decode` over the plaintext decoders, seeded from the records of `020.json`; the three sealed `open` functions are counted as reached by the check of 016-R6, and their decoders are the fuzzed part; and 016 R3, so that `record_decode` also drives the codec schema of this spec's Vectors, which nests a record and a list. Every record kind MUST have a round-trip property test (AGENTS 21).
 - R30 This spec MUST add its section to `scripts/reference/vectors.py`, which produces `020.json`: the encoding of each codec type of R1, one reference state, log and settings record in plaintext, and the negatives of the Vectors table. The sealed files have no vector: no platform other than Rust reads them.
 - R31 An app that raises any version of R8 MUST read every earlier version of each file and write it back in its own version, `state.bin` and `settings.bin` in one commit and `messages.log` by a compaction (R15), never leaving a channel with files of two versions it cannot read together; there is no migration framework, only that rule. So that a later version can prove it, three golden files written by this version under a fixed 32-byte test key, a `state.bin`, a `messages.log` of three entries and a `settings.bin`, MUST be committed in `crates/store/tests/golden/v1/`, never regenerated, and decoded by a test.
 
@@ -89,7 +89,7 @@ AGENTS 23 says every state write goes through `commit`; `compact` (R15) is the o
 | `socks5_proxy` | host by the grammar of spec 011-config-format R5 ‖ `:` ‖ port 1..=65535 with no leading zero, at most 256 B | `Corrupt` |
 | `lock_timeout_seconds` | 0..=86 400; 0 means lock on app switch | `Corrupt` |
 
-The state record bound is the sum of its maxima — the config of at most 512 B, 550 peer records of at most 243 B, 32 `outbox` entries of at most 64 810 B, 16 old keys of 54 B, and the fixed fields — about 2.21 MB, rounded up to 2.25 MiB; T27 builds the largest state and checks that it seals and opens.
+The state record bound is the sum of its maxima — the config of at most 512 B, 550 peer records of at most 243 B, 32 `outbox` entries of at most 64 810 B, 16 old keys of 54 B (each framed as a list item), and the fixed fields — about 2.21 MB, rounded up to 2.25 MiB; T27 builds the largest state and checks that it seals and opens.
 
 **State record** (`Reject`)
 
@@ -152,7 +152,7 @@ crates/core/src/storage/state.rs           the state record and its seal/open
 crates/core/src/storage/log.rs             the log record and its seal/open
 crates/core/src/storage/settings.rs        the settings record and its seal/open
 crates/core/src/storage/tests.rs           s020_* tests of the records
-crates/core/src/testing.rs                 MemoryStore, MemoryVault, FailingStore, state_eq; cfg(any(test, fuzzing, feature = "test-support"))
+crates/core/src/testing.rs                 MemoryStore, MemoryVault, FailingStore, state_eq, settings; cfg(any(test, fuzzing, feature = "test-support"))
 crates/store/src/lib.rs                    DataDir, ChannelFiles
 crates/store/src/fs.rs                     every system call (R23), the crash points and the fault injector
 crates/store/src/tests.rs                  s020_* tests of the files
@@ -171,6 +171,10 @@ pub struct Settings { /* default_server_url, lock_timeout_seconds, socks5_proxy;
 pub struct ChannelState { /* the fields of the state record, pub(crate) */ }
 pub struct LogRecord { /* the fields of the log record except generation and offset, which open checks and seal writes from their parameters; pub(crate) */ }
 pub(crate) const MAX_NAME: usize = 64;          // every stored name; specs 021, 022 and 027 use it
+pub const MAX_STATE_FILE: usize = 2_359_341;       // the file limits of the Limits table, which store checks before reading (R6, R7)
+pub const MAX_SETTINGS_FILE: usize = 1_069;
+pub const MAX_LOG_ENTRY: usize = 65_576;           // the largest log entry `len`
+pub const MAX_LOG_LEN: u64 = 67_108_864;           // R16; spec 021 keeps its headroom below it
 pub struct WriteBatch { /* the new ChannelState, the records to append */ }
 
 pub trait Store: Send {
@@ -201,7 +205,7 @@ impl LogRecord {
     pub fn seal(&self, key: &StorageKey, name: &DirName, generation: u32, offset: u64) -> Result<Vec<u8>, StoreError>;
     pub fn purge_at(&self) -> u64;
 }
-impl ChannelState { pub(crate) fn duplicate(&self) -> Result<ChannelState, StoreError>; }   // the one deep copy, secrets through Secret::copy_from
+impl ChannelState { pub(crate) fn duplicate(&self) -> ChannelState; }   // the one deep copy, secrets through Secret::copy_from; it cannot fail
 impl WriteBatch {
     pub fn state(&self) -> &ChannelState;
     pub fn records(&self) -> &[LogRecord];
@@ -220,15 +224,15 @@ pub(crate) struct ChannelFiles { /* directory, Arc of the key and lock, poisoned
 impl Store for ChannelFiles { /* R10–R16, R21 */ }
 ```
 
-`WriteBatch` is built only inside `core` (spec 021-channel-session) and is committed by reference, so that `Channel` moves its parts into memory after `Ok` and can retry after `LogFull` (spec 023-ttl-purge); the store keeps no copy of the state. `ChannelState`, `LogRecord` and `WriteBatch` implement neither `Clone` nor `Debug`; `ChannelState::duplicate`, declared here, is the one deep copy, through `Secret::copy_from`.
+`WriteBatch` is built only inside `core` (spec 021-channel-session) and is committed by reference, so that `Channel` moves its parts into memory after `Ok` and can retry after `LogFull` (spec 023-ttl-purge); the store keeps no copy of the state. `ChannelState`, `LogRecord` and `WriteBatch` implement neither `Clone` nor `Debug`; `ChannelState::duplicate`, declared here, is the one deep copy, through `Secret::copy_from`. A message's body and display name come out of a log record in buffers wiped on drop, like the record itself (R25).
 
 The `testing` module compiles under `cfg(any(test, fuzzing, feature = "test-support"))`, where the test relaxations of AGENTS 4 do not apply, so it is written like production code; `store` enables `test-support` only in its dev-dependency, and `store` has `privatechat-core` as its only dependency. Its doubles are handles over shared state (`Arc<Mutex<_>>`, which R2's rust-skill amendment allows in this module only), so that a test keeps a handle after giving a store or a vault away:
 
 - `MemoryStore` and `MemoryVault`, `Clone`, which seal and open through the same functions with a fixed key; `reopen()` gives a fresh store over the same bytes; `commits()` counts the commits that append a record or change the state beyond `cursor` and `synced_at` (the count of AGENTS 23), and `all_commits()` every successful commit, for the rate rules of spec 021-channel-session R20; `log_len()` counts bytes as R5 lays them out (9-byte header, then 4 + `len` per entry); `list` skips, and `load` returns `Ok(None)` for, a store with no state whose log is absent or short as R13 and R19 say, as they do; `put_raw(name, state_bytes, log_bytes)` and `put_settings_raw(bytes)` plant arbitrary bytes; `commit` applies R16 and returns `LogFull` for a log that would pass 67 108 864 bytes.
 - `Faults`, a `Clone` handle shared by the test and the doubles, which counts calls from the moment a fault is armed, across every store sharing the handle: `fail_at(n)` fails the *n*-th `commit`, `compact` or `destroy` with `Io` before touching the store; `poison_after(n)` lets the *n*-th call through and then returns `Io` for it and for every later call of that one store instance, as a store poisoned after its rename (R11), while stores handed out afterwards are healthy; `fail_compactions(on)` fails every `compact` with `Io` before touching the store while on, leaving commits alone, and `fail_commits(on)` does the same for every `commit`, leaving loads and compactions alone; `fail_create(on)`, `fail_remove(on)`, `fail_list(on)`, `fail_load_settings(on)` and `fail_save_settings(on)` fail those `Vault` calls while on, `fail_create_at(n)` only the *n*-th `create`; `last_committed(&DirName)` returns a duplicate of the last state let through.
 - `FailingStore`, which wraps a `Box<dyn Store>` with a `Faults` handle, and `FailingVault`, which wraps a `Box<dyn Vault>` and every store it hands out.
-- The builders `state_for(channel_id)`, `record(purge_at, body_len)` and `batch(state, records)`, with which the `store` tests commit chosen content.
-- `state_eq` and `records_eq`, which compare two states and two record lists field by field, with `ct_eq` for the secrets, `state_eq` ignoring the store's own `log_committed_len` and `log_generation`.
+- The builders `state_for(channel_id)`, `record(purge_at, body_len)`, `batch(state, records)` and `settings(default_server_url, lock_timeout_seconds, socks5_proxy)`, with which the `store` tests commit and save chosen content; `Settings` has no other constructor until spec 027-core-api.
+- `state_eq`, `records_eq` and `settings_eq`, which compare two states, two record lists and two settings field by field, the seeds in constant time through `Secret` and the config, a record of variable length, with `==`, since a test's timing leaks nothing; `state_eq` ignores the store's own `log_committed_len` and `log_generation`.
 
 **Crash points and faults.** All of it exists under `cfg(test)` only, in `fs.rs`, and the tests that use it live in `crates/store/src/tests.rs` and its submodules, never under `crates/store/tests/`, so that `cfg(test)` applies.
 
@@ -354,3 +358,4 @@ Decided on 2026-09-25: 020-R5, R9 and R18 (log header, generation and offset, ke
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the forward-read rule and the golden files move from R8 to their own R31, citing this spec's compaction (R15)
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-09-30 open question 020-R26 decided with the human reviewer during slice (b3): a libsodium failure is `Corrupt`
+- 2026-09-30 revised after audit X of slices (a)–(d3) (`docs/audit-log.md`), decisions of the human reviewer: an entry's offset is that of its `len` (R5, R9); `record_decode` also drives the codec schema (R29, 016 R3); core exports the four file limits (Interface); the doubles gain `settings` and `settings_eq`, and `state_eq` compares the config with `==` (Interface); `duplicate` returns the state; a message's display name is wiped like its body; the Limits sizes are framed

@@ -199,7 +199,7 @@ R28). `server` uses `tokio`:
 - `#[must_use]` on functions that return a value the caller must not drop
   (`encrypt` returns the reserved counter's blob — dropping it loses a counter).
 - No `impl Trait` in return position on public `core` API (uniffi cannot see
-  it). No feature flags in `core`: one build, one behaviour. The one feature,
+  it). One build, one behaviour in `core`: its one feature,
   `test-support`, only compiles the doubles of `core::testing` for the tests
-  of `store` (spec 020-store-files R2). No macros for
+  of `store` (spec 020-store-files R2), and no other feature flag exists. No macros for
   anything a function can do.

@@ -400,8 +400,8 @@ The device is where the real attacks land; these measures are mandatory in v1 un
 
 | Measure | Android | iOS | Desktop (Tauri) |
 | --- | --- | --- | --- |
-| Local storage | No database. Per channel, two files encrypted with `crypto_secretbox` under `K_db`: `state.bin` (small state, rewritten atomically) and `messages.log` (append-only, one record per message). Rust `store` crate (ADR 0021); Kotlin never touches the files | Same; Swift never touches the files | Same |
-| App settings | `settings.bin` in the `data_dir`, same format and key `K_db` as `state.bin`: `default_server_url`, `lock_timeout`, SOCKS5 proxy. On first open, `default_server_url` = the compile-time constant `DEFAULT_SERVER_URL` (the project's server; each *fork* puts its own). No other server URL in the code | Same | Same |
+| Local storage | No database. Per channel, two files encrypted with `crypto_secretbox` under a key derived from `K_db` for that channel's directory (spec 020-store-files R3): `state.bin` (small state, rewritten atomically) and `messages.log` (append-only, one record per message). Rust `store` crate (ADR 0021); Kotlin never touches the files | Same; Swift never touches the files | Same |
+| App settings | `settings.bin` in the `data_dir`, the format of `state.bin` with its own magic, sealed under `K_settings`, derived from `K_db` (spec 020-store-files R3, R4): `default_server_url`, `lock_timeout`, SOCKS5 proxy. On first open, `default_server_url` = the compile-time constant `DEFAULT_SERVER_URL` (the project's server; each *fork* puts its own). No other server URL in the code | Same | Same |
 | Storage key `K_db` | 32 random bytes wrapped with an AES-GCM key from the Keystore: `setUserAuthenticationParameters(lock_timeout, AUTH_BIOMETRIC_STRONG \| AUTH_DEVICE_CREDENTIAL)`, `setInvalidatedByBiometricEnrollment(false)`, `setUnlockedDeviceRequired(true)`, StrongBox if available | 32 random bytes wrapped with a P-256 key from the Secure Enclave: `SecAccessControl(.privateKeyUsage, .userPresence)`, item `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` | 32 random bytes in the OS keychain (Keychain with code-signature ACL, Credential Manager, Secret Service) |
 | Loss of the wrapping key | Backup restore, reinstallation or hardware failure erase all local data; recovery is re-importing the config from a fresh invitation, which gives a new key (§1, §7). Documented in §1 and in the help. No transient Keystore failure regenerates the wrapping key | Same | Same |
 | App lock | **It is the system prompt** (BiometricPrompt with `DEVICE_CREDENTIAL`) that unwraps the key; no app-specific PIN or password. App `lock_timeout` = Keystore timeout; default 1 min; "strict" option = lock on app switch; quick action "Lock now". The user is recommended a device PIN over biometrics | Same with `LAContext` (`.userPresence`) | App password only if the OS has no keychain; documented |
@@ -468,10 +468,22 @@ pub enum Error {
 
 pub type PeerId = [u8; 32]; // a peer's pk_u, as `Peer` carries it; one's own pk_u is never a PeerId (ADR 0029)
 
-pub trait Store {
-    fn load(&mut self) -> Result<ChannelState, StoreError>;               // on open; truncates the log to the committed length
-    fn commit(&mut self, batch: WriteBatch) -> Result<(), StoreError>;   // single write; atomic (ADR 0021)
-    fn compact(&mut self, now: u64) -> Result<u32, StoreError>;          // TTL purge
+pub trait Store: Send {                                                  // spec 020-store-files, which is normative
+    fn name(&self) -> &DirName;
+    fn load(&mut self) -> Result<Option<(ChannelState, Vec<LogRecord>)>, StoreError>; // on open; truncates the log to the committed length
+    fn commit(&mut self, batch: &WriteBatch) -> Result<(), StoreError>;  // single write; atomic (ADR 0021)
+    fn compact(&mut self, state: &ChannelState, now: u64) -> Result<u32, StoreError>; // TTL purge
+    fn log_len(&self) -> u64;
+    fn destroy(&mut self) -> Result<(), StoreError>;
+}
+
+pub trait Vault: Send {                                                  // the data directory: every channel's store and settings.bin
+    fn list(&mut self) -> Result<Vec<Box<dyn Store>>, StoreError>;
+    fn create(&mut self, channel_id: &[u8; 16]) -> Result<Box<dyn Store>, StoreError>;
+    fn remove(&mut self, name: &DirName) -> Result<(), StoreError>;
+    fn dir_name(&self, channel_id: &[u8; 16]) -> Result<DirName, StoreError>;
+    fn load_settings(&mut self) -> Result<Option<Settings>, StoreError>;
+    fn save_settings(&mut self, settings: &Settings) -> Result<(), StoreError>;
 }
 
 impl Config {
@@ -508,10 +520,8 @@ impl Channel {
     pub fn leave(self) -> Result<(), Error>;
 }
 
-impl Settings {                                                                 // settings.bin (ADR 0021)
-    pub fn load(store: &dyn Store) -> Result<Settings, Error>;                  // first open: DEFAULT_SERVER_URL
-    pub fn save(&self, store: &mut dyn Store) -> Result<(), Error>;
-}
+// Settings (settings.bin, ADR 0021) is loaded and saved through `Vault` (spec 020-store-files R22);
+// what the app reads and sets, and DEFAULT_SERVER_URL on first open, is spec 027-core-api's.
 
 impl Session {                                                                  // sans-I/O, ADR 0020; one per server
     pub fn new(server_url: &str, channels: Vec<Channel>) -> Session;             // all channels of one server (host and port)
