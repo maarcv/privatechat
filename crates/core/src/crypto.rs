@@ -314,7 +314,8 @@ pub(crate) fn secretbox_seal(
     }
 }
 
-/// Opens what `secretbox_seal` sealed (spec 010, R12).
+/// Opens what `secretbox_seal` sealed (spec 010, R12), into a buffer wiped on
+/// drop: every caller opens a secret (spec 020-store-files R2).
 ///
 /// # Errors
 ///
@@ -325,13 +326,13 @@ pub(crate) fn secretbox_open(
     key: &Secret<32>,
     nonce: &Nonce,
     sealed: &[u8],
-) -> Result<Vec<u8>, CryptoError> {
+) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
     init()?;
     let len = sealed
         .len()
         .checked_sub(TAG_LEN)
         .ok_or(CryptoError::Forged)?;
-    let mut plaintext = vec![0u8; len];
+    let mut plaintext = Zeroizing::new(vec![0u8; len]);
     if ffi::secretbox_open(key.expose(), &nonce.0, sealed, &mut plaintext) {
         Ok(plaintext)
     } else {

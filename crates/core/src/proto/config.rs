@@ -314,11 +314,10 @@ impl Config {
         let nonce = Nonce(region(bytes, NONCE_RANGE)?);
         let sealed = bytes.get(SEALED_AT..).ok_or(Error::BadConfig)?;
         // R14: a wrong password and a corrupted file are one error.
-        let opened = crypto::secretbox_open(key, &nonce, sealed).map_err(|error| match error {
+        let padded = crypto::secretbox_open(key, &nonce, sealed).map_err(|error| match error {
             CryptoError::Forged => Error::BadPassword,
             other => Error::from(other),
         })?;
-        let padded = Zeroizing::new(opened);
         let len = crypto::unpad(&padded, FILE_PAD_BLOCK).map_err(|error| match error {
             CryptoError::BadPadding => Error::BadConfig,
             other => Error::from(other),
