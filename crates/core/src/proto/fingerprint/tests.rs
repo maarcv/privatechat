@@ -164,6 +164,12 @@ fn s014_t08_r08_presentation_matches_its_parts() {
         (presentation.words.len(), presentation.short.len()),
         (12, 4)
     );
+    // `Debug` shows the short identifier and nothing else (AGENTS 19).
+    let shown = format!("{presentation:?}");
+    assert_eq!(
+        shown,
+        format!("Fingerprint {{ short: {:?}, .. }}", presentation.short)
+    );
 }
 
 /// The key of `fingerprint_reference` and `qr_reference`, the Ed25519 key

@@ -235,6 +235,9 @@ fn s017_t09_r09_test_schema_is_typed() {
 /// or to go back on the key order.
 #[test]
 fn s017_t11_r11_writer_never_grows() {
+    // A capacity doubling cannot reach from below, so a buffer that grew
+    // would show.
+    assert_eq!(Writer::with_capacity(21).finish().capacity(), 21);
     let mut writer = Writer::with_capacity(20);
     writer.u64(1, u64::MAX).unwrap();
     assert_eq!(writer.u8(1, 0), Err(KeyOrder));

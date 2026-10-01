@@ -32,7 +32,7 @@ from typing import Callable
 ROOT = Path(__file__).resolve().parent.parent.parent
 VECTORS_DIR = ROOT / "specs" / "vectors"
 # The repository files the script reads, as data (R4): its own source for the import check,
-# the published vectors of spec 010 for its self-tests and the word list of spec 014.
+# the published vectors of spec 010 for its self-tests and the word list of spec 011, shared by 014.
 VECTORS_010 = VECTORS_DIR / "010.json"
 WORD_LIST = ROOT / "crates" / "core" / "src" / "proto" / "bip39_english.txt"
 WORD_LIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"  # 011 R17
@@ -512,6 +512,8 @@ def raw_011(name: str, kind: str, origin: str, inputs: dict, expected: dict,
 
 
 def check_s011_t22_r22_section_produces_011_json() -> list[dict]:
+    require(canonical_password("Able\x1c\u00c9CRIT\x1fx") == "able\x1c\u00c9crit\x1fx".encode("utf-8"),
+            "011 R15: U+001C..=U+001F are kept and only ASCII letters fold")
     """The vectors of spec 011: each positive with its record, its QR text and the fields and
     identity it decodes to; each negative a one-rule edit of `config_no_invite` or
     `config_reference`, of its QR text or of the pinned file."""
@@ -647,6 +649,8 @@ def chatcfg_vectors(record: bytes, opened_record: bytes, now: U64) -> list[dict]
     require(all(word in listed for word in CHATCFG_PASSWORD.decode("ascii").split(" ")),
             "the fixed password is 7 list words")
     require(len(CHATCFG_REFERENCE) == CHATCFG_LEN, "a .chatcfg file is 1 085 bytes")
+    require(CHATCFG_REFERENCE[:45] == b"PCFG\x01" + CHATCFG_SALT + CHATCFG_NONCE,
+            "the pinned file begins with the header of 011 R13, which the mutations edit")
     inputs = {"record": record, "password": CHATCFG_PASSWORD, "salt": CHATCFG_SALT,
               "nonce": CHATCFG_NONCE, "now": now}
     vectors = [raw_011("chatcfg_reference", "positive",

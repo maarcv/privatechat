@@ -94,6 +94,8 @@ pub(crate) struct ChannelId(pub(crate) [u8; 16]);
 pub struct Config {
     k_ch: Secret<32>,
     server_url: String,
+    /// The host of `server_url`, parsed once when the config is built.
+    host: String,
     ttl_seconds: u32,
     created_at: u64,
     suggested_name: String,
@@ -363,9 +365,9 @@ impl Config {
     }
 
     /// The host of `server_url`, the string the subscription signature
-    /// covers (R6, spec 031). The URL was checked when the config was built.
+    /// covers (R6, spec 031), parsed once when the config was built.
     pub(crate) fn host(&self) -> &str {
-        url::parse(&self.server_url).unwrap_or_default()
+        &self.host
     }
 
     /// `K_ch`, for the derivations of specs 012 and 013 (R6).
@@ -411,9 +413,11 @@ impl Config {
         created_at: u64,
     ) -> Result<Config, Error> {
         let id = derive_channel_id(&k_ch, ttl_seconds)?;
+        let host = url::parse(server_url)?.to_owned();
         Ok(Config {
             k_ch,
             server_url: server_url.to_owned(),
+            host,
             ttl_seconds,
             created_at,
             suggested_name: suggested_name.to_owned(),

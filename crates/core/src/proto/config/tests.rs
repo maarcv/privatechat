@@ -108,6 +108,7 @@ fn unsupported() -> Vec<Vec<u8>> {
         with(0, &[0]),
         with(0, &[2]),
         with(1, &[2]),
+        [with(0, &[0]), field(8, b"x")].concat(),
         [with(0, &[2]), field(8, b"x")].concat(),
         [with(1, &[2]), field(8, b"x")].concat(),
         tail(2, 1),
@@ -174,6 +175,7 @@ fn bad_urls() -> Vec<String> {
     .map(String::from)
     .to_vec();
     urls.push(format!("ws://{}", onion(55, 'a')));
+    urls.push(format!("ws://{}", onion(57, 'a')));
     urls.push(format!("ws://{}.onion", "a".repeat(55) + "1"));
     urls.push(format!("ws://{}.onion", "a".repeat(55) + "8"));
     urls.push(format!("ws://{}", onion(56, 'A')));
@@ -563,6 +565,9 @@ fn s011_t15_r15_password_canonical_form() {
         );
     }
     assert!(canonical_password(&[b'a'; 256]).is_ok());
+    // U+001C..=U+001F are not White_Space, and only ASCII letters fold.
+    let kept = canonical_password("Able\u{1c}ÉCRIT\u{1f}x".as_bytes()).unwrap();
+    assert_eq!(kept.as_slice(), "able\u{1c}Écrit\u{1f}x".as_bytes());
     let spaced = [&b"able"[..], &[b' '; 1_020]].concat();
     assert_eq!(canonical_password(&spaced).unwrap().as_slice(), b"able");
 }
@@ -926,6 +931,9 @@ fn check_negative(vector: &Vector) {
                 vector.expected("canonical").bytes(),
                 "{name}"
             );
+        } else if name.starts_with("password_") {
+            // A bound, not a wrong password: the canonical form refuses it.
+            assert!(canonical_password(password).is_err(), "{name}");
         }
     }
     assert!(!errors.is_empty(), "{name}: no form to check");
