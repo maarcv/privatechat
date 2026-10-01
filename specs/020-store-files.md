@@ -318,7 +318,9 @@ The `testing` module compiles under `cfg(any(test, fuzzing, feature = "test-supp
 
 ## Open questions
 
-- 020-R26: a libsodium failure inside a seal, an open or a key derivation, which only a failed initialisation can cause once the lengths are fixed, has no variant of its own: slice (b3) maps it to `Corrupt`, next to the box that does not open (R7). The alternative is a seventh variant, `Internal`, as `core::Error` has. Recommendation: keep `Corrupt`, since `Device` then reports the channel and a working libsodium is a precondition of every other call.
+None.
+
+Decided with the human reviewer on 2026-09-30, during slice (b3): 020-R26: a libsodium failure inside a seal, an open or a key derivation, which only a failed initialisation can cause once the lengths are fixed, is `Corrupt`, next to the box that does not open (R7), and `StoreError` gains no seventh variant; `Device` then reports the channel, and a working libsodium is a precondition of every other call. The recommendation taken: keep `Corrupt`.
 
 Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/audit-log.md`, Audit J decisions): 020-R10: every commit rewrites `state.bin`, about 132 KiB with a full peer list and an empty `outbox`, up to 2.25 MiB with 32 large blobs waiting; spec 021-channel-session writes a cursor-only commit at most once a minute.; the recommendation taken: accept.
 
@@ -351,3 +353,4 @@ Decided on 2026-09-25: 020-R5, R9 and R18 (log header, generation and offset, ke
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): a later version reads and rewrites every earlier version of the files, and three golden version-1 files are committed for it
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the forward-read rule and the golden files move from R8 to their own R31, citing this spec's compaction (R15)
 - 2026-09-28 accepted (Marc Vilardebó)
+- 2026-09-30 open question 020-R26 decided with the human reviewer during slice (b3): a libsodium failure is `Corrupt`
