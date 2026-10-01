@@ -26,6 +26,24 @@ pub(crate) const FIELD_HEADER_LEN: usize = 5;
 /// Bytes of a list item before its value: the length (spec 020 R1).
 pub(crate) const ITEM_HEADER_LEN: usize = 4;
 
+/// The encoded length of a record whose present fields have these value
+/// lengths (R1), for a writer allocated at its exact size (spec 020 R25).
+/// Saturating: every caller checks each value's bound first, so it never
+/// saturates, and a writer given a wrong length refuses with `TooLong`.
+pub(crate) fn record_len(values: &[Option<usize>]) -> usize {
+    values.iter().flatten().fold(0, |sum, len| {
+        sum.saturating_add(FIELD_HEADER_LEN).saturating_add(*len)
+    })
+}
+
+/// The encoded length of a `list<T>` value of items of these lengths (spec
+/// 020 R1), saturating as [`record_len`].
+pub(crate) fn list_len(items: impl IntoIterator<Item = usize>) -> usize {
+    items.into_iter().fold(0, |sum, len| {
+        sum.saturating_add(ITEM_HEADER_LEN).saturating_add(len)
+    })
+}
+
 /// Why a record was rejected, one variant per rule of spec 017.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RecordError {
@@ -289,23 +307,25 @@ impl<'a> Reader<'a> {
 
     /// A nested record, decoded by `decode`, the decoder of its own schema,
     /// which checks its own maximum length and calls its own `end` (spec 020
-    /// R1).
+    /// R1). The decoder may return the error of the spec that owns the
+    /// schema, into which the codec's own errors convert.
     ///
     /// # Errors
     ///
     /// The framing errors of [`Reader::bytes`], then whatever `decode` returns.
-    pub(crate) fn record<T>(
+    pub(crate) fn record<T, E: From<RecordError>>(
         &mut self,
         key: u8,
-        decode: impl FnOnce(&'a [u8]) -> Result<T, RecordError>,
-    ) -> Result<Option<T>, RecordError> {
+        decode: impl FnOnce(&'a [u8]) -> Result<T, E>,
+    ) -> Result<Option<T>, E> {
         self.field(key)?.map(decode).transpose()
     }
 
     /// A `list<T>` value of at most `max_items` items of at most
     /// `max_item_len` bytes each, every item decoded by `decode` (spec 020
     /// R1). The items are framed and counted before the first is decoded, so
-    /// the list is allocated once at its exact length and never grows.
+    /// the list is allocated once at its exact length and never grows. The
+    /// errors are as in [`Reader::record`].
     ///
     /// # Errors
     ///
@@ -313,13 +333,13 @@ impl<'a> Reader<'a> {
     /// for bytes that do not complete an item header or an item, `TooLong` for
     /// an item above `max_item_len` or one item past `max_items`; then
     /// whatever `decode` returns.
-    pub(crate) fn list<T>(
+    pub(crate) fn list<T, E: From<RecordError>>(
         &mut self,
         key: u8,
         max_items: usize,
         max_item_len: usize,
-        mut decode: impl FnMut(&'a [u8]) -> Result<T, RecordError>,
-    ) -> Result<Option<Vec<T>>, RecordError> {
+        mut decode: impl FnMut(&'a [u8]) -> Result<T, E>,
+    ) -> Result<Option<Vec<T>>, E> {
         let Some(value) = self.field(key)? else {
             return Ok(None);
         };
@@ -331,7 +351,7 @@ impl<'a> Reader<'a> {
         for item in items() {
             item?;
             if count >= max_items {
-                return Err(RecordError::TooLong);
+                return Err(RecordError::TooLong.into());
             }
             count = count.checked_add(1).ok_or(RecordError::TooLong)?;
         }
