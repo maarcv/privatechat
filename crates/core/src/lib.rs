@@ -17,9 +17,7 @@
     )
 )]
 
-// The callers of `crypto` arrive with specs 011-014; until then every item of
-// the module is reachable only from its own tests.
-#[allow(dead_code, unused_imports)]
+#[allow(dead_code, reason = "reached through proto, spec 027-core-api")]
 mod crypto;
 
 mod error;
@@ -31,7 +29,6 @@ pub mod fuzz_entry;
 mod proto;
 
 #[cfg(test)]
-#[allow(dead_code, reason = "accessors used by specs 011–017")]
 mod vectors;
 
 pub use error::Error;

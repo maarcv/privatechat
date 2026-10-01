@@ -88,6 +88,11 @@ fn s015_t01_r01_rejects_every_broken_rule() {
         ),
         ("true", "{}", Broken::Shape("value")),
         (
+            r#""inputs": {"key": "00ff", "block": 1024, "flag": true, "list": ["00", "11"], "words": ["abandon"]}"#,
+            r#""inputs": []"#,
+            Broken::Shape("vector"),
+        ),
+        (
             r#""block": 1024"#,
             r#""block": 1024, "block": 1024"#,
             Broken::DuplicateKey,
@@ -109,6 +114,9 @@ fn s015_t01_r01_rejects_every_broken_rule() {
             "{from} -> {to}"
         );
     }
+    // A tab between tokens is JSON whitespace, unlike one inside a string.
+    let tabbed = one.replace(r#""00ff", "block""#, "\"00ff\",\t\"block\"");
+    assert!(parse("999", &tabbed).is_ok());
     let duplicate = file(&format!("{VECTOR}, {VECTOR}"));
     assert_eq!(parse("999", &duplicate).err(), Some(Broken::DuplicateName));
     assert_eq!(parse("999", &file("")).err(), Some(Broken::Empty));

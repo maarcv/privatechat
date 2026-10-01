@@ -21,7 +21,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// Fixed-size secret. Never `Clone`, `Default`, `Copy` or `PartialEq` by
 /// derive; never printed. `docs/spec.md` §8 "Logging", AGENTS 5.
 #[derive(Zeroize, ZeroizeOnDrop)]
-pub struct Secret<const N: usize>([u8; N]);
+pub(crate) struct Secret<const N: usize>([u8; N]);
 
 impl<const N: usize> Secret<N> {
     pub(crate) fn from_bytes(bytes: [u8; N]) -> Self { Self(bytes) }

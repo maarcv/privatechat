@@ -4,7 +4,7 @@ use core::fmt;
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use super::{CryptoError, ct_eq, random_bytes};
+use super::{CryptoError, ct_eq, ffi, init};
 
 /// Fixed-size secret: root, master, header and message keys, seeds, keys
 /// derived from a password (`Secret<32>`) and Ed25519 secret keys
@@ -38,10 +38,16 @@ impl<const N: usize> Secret<N> {
     ///
     /// `CryptoError::InitFailed` when libsodium cannot initialise.
     pub(crate) fn random() -> Result<Self, CryptoError> {
-        Ok(Self(random_bytes::<N>()?))
+        init()?;
+        // Drawn into the secret's own storage: an array returned by value
+        // would leave an unwiped copy behind (R18).
+        let mut secret = Self([0; N]);
+        ffi::random_bytes(&mut secret.0);
+        Ok(secret)
     }
 
-    /// The bytes, for the wrappers of this module and nothing else.
+    /// The bytes, for the wrappers of this module and for the encoders of
+    /// the records that carry a secret (`pub(crate)`, R3).
     pub(crate) fn expose(&self) -> &[u8; N] {
         &self.0
     }

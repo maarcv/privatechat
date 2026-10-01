@@ -163,6 +163,13 @@ fn s010_t04_r03_secret_has_no_forbidden_traits() {
     );
     assert!(source.contains("#[derive(Zeroize, ZeroizeOnDrop)]"));
     assert_eq!(source.matches("#[derive(").count(), 1);
+    // No other file of the crate implements a trait for `Secret` either.
+    for (name, source) in SOURCES {
+        let elsewhere = source
+            .lines()
+            .any(|line| line.trim_start().starts_with("impl") && line.contains(" for Secret<"));
+        assert!(name == "crypto/secret.rs" || !elsewhere, "{name}");
+    }
 }
 
 proptest! {
@@ -171,6 +178,43 @@ proptest! {
     fn s010_t05_r04_ct_eq_agrees_with_equality(a in any::<[u8; 32]>(), b in any::<[u8; 32]>()) {
         assert_eq!(ct_eq(&a, &b), a == b);
         assert!(ct_eq(&a, &a));
+        for at in [0, 15, 31] {
+            let mut flipped = a;
+            flipped[at] ^= 1;
+            assert!(!ct_eq(&a, &flipped), "byte {at}");
+        }
+    }
+}
+
+/// Spec 010, R4: the fixed-size public types compare every byte, the first
+/// and the last included, as the known-answer tests that rely on them need.
+#[test]
+fn s010_t05_r04_public_types_compare_every_byte() {
+    fn flips<const N: usize>(bytes: [u8; N]) -> [[u8; N]; 2] {
+        let (mut first, mut last) = (bytes, bytes);
+        first[0] ^= 1;
+        last[N - 1] ^= 1;
+        [first, last]
+    }
+    let base = [7u8; 64];
+    assert!(Signature(base) == Signature(base));
+    for other in flips(base) {
+        assert!(Signature(base) != Signature(other));
+    }
+    let key = [7u8; 32];
+    assert!(PublicKey(key) == PublicKey(key));
+    for other in flips(key) {
+        assert!(PublicKey(key) != PublicKey(other));
+    }
+    let nonce = [7u8; 24];
+    assert!(Nonce(nonce) == Nonce(nonce));
+    for other in flips(nonce) {
+        assert!(Nonce(nonce) != Nonce(other));
+    }
+    let salt = [7u8; 16];
+    assert!(Salt(salt) == Salt(salt));
+    for other in flips(salt) {
+        assert!(Salt(salt) != Salt(other));
     }
 }
 
@@ -178,11 +222,14 @@ proptest! {
 #[test]
 fn s010_t06_r05_random_bytes_differ() -> Result<(), CryptoError> {
     assert_ne!(random_bytes::<32>()?, random_bytes::<32>()?);
+    // Every byte is drawn, the last ones included.
+    let (first, second) = (random_bytes::<64>()?, random_bytes::<64>()?);
+    assert_ne!(first[32..], second[32..]);
     assert_ne!(Secret::<32>::random()?.expose(), &[0u8; 32]);
     Ok(())
 }
 
-/// Spec 010, R15: six unit variants, in the order the spec fixes.
+/// Spec 010, R15: seven unit variants, in the order the spec fixes.
 #[test]
 fn s010_t23_r15_error_variants_are_unit_and_ordered() {
     let names: Vec<String> = [
@@ -267,12 +314,12 @@ fn s010_t25_r16_manifest_pins_dependencies() {
             "{crate_name}"
         );
     }
-    assert!(
-        !declarations
-            .iter()
-            .any(|line| line.contains("use-pkg-config")),
-        "the feature is named in a comment that keeps it off, never enabled"
-    );
+    for feature in ["use-pkg-config", "minimal", "fetch-latest"] {
+        assert!(
+            !declarations.iter().any(|line| line.contains(feature)),
+            "{feature} is named in a comment that keeps it off, never enabled"
+        );
+    }
     assert!(section("[dev-dependencies]").contains("proptest"));
 }
 
@@ -395,6 +442,11 @@ fn s010_t09_r06_aead_mutation() -> Result<(), CryptoError> {
         aead_decrypt(&key, &other_nonce, &aad, &sealed),
         Err(CryptoError::Forged)
     );
+    // A ciphertext shorter than its tag is a forgery too.
+    assert_eq!(
+        aead_decrypt(&key, &nonce, &aad, &[0u8; 15]),
+        Err(CryptoError::Forged)
+    );
     Ok(())
 }
 
@@ -486,6 +538,12 @@ fn s010_t22_r14_wrapper_bounds_are_the_primitives() -> Result<(), CryptoError> {
 
     assert_eq!(check_password_len(0), Err(CryptoError::BadLength));
     assert_eq!(check_password_len(2048), Ok(()));
+    assert_eq!(ffi::password_max(), 4_294_967_295);
+    if let Ok(max) = usize::try_from(ffi::password_max()) {
+        assert_eq!(check_password_len(max), Ok(()));
+    }
+    let salt = Salt([17u8; 16]);
+    assert_eq!(password_key(b"", &salt).err(), Some(CryptoError::BadLength));
     let beyond_libsodium = usize::try_from(ffi::password_max())
         .ok()
         .and_then(|max| max.checked_add(1));
@@ -661,8 +719,10 @@ proptest! {
     }
 }
 
-/// Spec 010, R13: the padding vector, and the two buffers that carry no
-/// valid padding at all.
+/// Spec 010, R13: the padding vector, the two buffers that carry no valid
+/// padding at all, and a buffer that is not a whole number of blocks, which
+/// libsodium unpads from its last block: the length is the caller's to check
+/// (specs 011 and 013 do).
 #[test]
 fn s010_t21_r13_unpad_rejects_bad_padding() -> Result<(), CryptoError> {
     let vector = vectors::load("010", "pad_1024");
@@ -682,7 +742,10 @@ fn s010_t21_r13_unpad_rejects_bad_padding() -> Result<(), CryptoError> {
         ),
         Err(CryptoError::BadPadding)
     );
-    assert_eq!(unpad(&[0u8; 30], 16), Err(CryptoError::BadPadding));
+    assert_eq!(unpad(&[0u8; 15], 16), Err(CryptoError::BadPadding));
+    let mut not_a_multiple = [0u8; 30];
+    not_a_multiple[29] = 0x80;
+    assert_eq!(unpad(&not_a_multiple, 16), Ok(29));
     Ok(())
 }
 
@@ -723,6 +786,45 @@ fn ffi_rejects_a_buffer_of_the_wrong_size() {
     ));
     let mut buffer = [0u8; 16];
     assert!(!ffi::pad(&mut buffer, 17, 16));
+    // One byte too large, over a real seal, so that only the size check
+    // can refuse the call.
+    let plaintext = [7u8; 20];
+    let mut sealed = [0u8; 36];
+    assert!(ffi::aead_encrypt(
+        &key,
+        &nonce,
+        &[],
+        &plaintext,
+        &mut sealed
+    ));
+    assert!(!ffi::aead_encrypt(
+        &key,
+        &nonce,
+        &[],
+        &plaintext,
+        &mut [0u8; 37]
+    ));
+    assert!(!ffi::aead_decrypt(
+        &key,
+        &nonce,
+        &[],
+        &sealed,
+        &mut [0u8; 21]
+    ));
+    assert!(ffi::secretbox_seal(&key, &nonce, &plaintext, &mut sealed));
+    assert!(!ffi::secretbox_seal(
+        &key,
+        &nonce,
+        &plaintext,
+        &mut [0u8; 37]
+    ));
+    assert!(!ffi::secretbox_open(&key, &nonce, &sealed, &mut [0u8; 21]));
+    let mut wiped = [1u8; 32];
+    ffi::memzero(&mut wiped);
+    assert_eq!(wiped, [0u8; 32]);
+    // `bin2base64` needs room for the text and its terminator: 4 + 1 here.
+    assert!(!ffi::bin2base64(&mut [0u8; 4], b"foo"));
+    assert!(ffi::bin2base64(&mut [0u8; 5], b"foo"));
 }
 
 /// Spec 010, R19: libsodium's URL-safe base64 with no padding, strict: the

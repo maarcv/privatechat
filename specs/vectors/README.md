@@ -14,8 +14,8 @@ The reference script `scripts/reference/vectors.py` of spec 015-test-vectors pro
     {
       "name": "text_message_k1",
       "kind": "positive",
-      "source":   "published",
-      "origin":   "RFC 9999 section 7.1 TEST 1",
+      "source":   "derived",
+      "origin":   "docs/spec.md §4, the message format, from the inputs below",
       "inputs":   { "k_ch": "<hex>", "pk_u": "<hex>", "counter": "0000000000000000", "nonce": "<hex>", "payload": "<hex>" },
       "expected": { "blob": "<hex>", "mk": "<hex>" }
     },
