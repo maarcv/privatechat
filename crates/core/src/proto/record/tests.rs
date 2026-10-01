@@ -5,8 +5,10 @@ use proptest::collection::vec as bytes_of;
 use proptest::option::of as maybe;
 use proptest::prelude::{any, proptest};
 
-use super::test_schema::{MAX_BYTES, MAX_RECORD, MAX_TEXT, TestRecord};
-use super::{FIELD_HEADER_LEN, Reader, RecordError, UnknownKeys, Writer};
+use super::test_schema::{
+    MAX_BYTES, MAX_NUMBERS, MAX_RECORD, MAX_TEXT, MAX_TYPES_RECORD, TestRecord, TypesRecord,
+};
+use super::{FIELD_HEADER_LEN, ITEM_HEADER_LEN, Reader, RecordError, UnknownKeys, Writer};
 use crate::vectors::{self, Checker, Kind, Vector};
 
 use RecordError::{KeyOrder, Missing, TooLong, Truncated, UnknownKey, Utf8, Width};
@@ -253,6 +255,88 @@ fn s017_t11_r11_writer_never_grows() {
         let huge = vec![0u8; 1 << 32];
         assert_eq!(Writer::with_capacity(16).bytes(1, &huge), Err(TooLong));
     }
+}
+
+/// One list item: 4-byte big-endian length ‖ item (spec 020 R1).
+fn item(value: &[u8]) -> Vec<u8> {
+    let len = u32::try_from(value.len()).unwrap();
+    [&len.to_be_bytes()[..], value].concat()
+}
+
+/// The verdict of spec 020's codec schema on `buf`: `None` when it decodes.
+fn types_error(buf: &[u8]) -> Option<RecordError> {
+    TypesRecord::decode(buf, Reject).err()
+}
+
+/// Spec 020, R1: `bool`, a nested record and `list<T>`, read and written.
+#[test]
+fn s020_t01_r01_new_codec_types() {
+    assert_eq!(ITEM_HEADER_LEN, 4);
+    // `bool`: exactly one byte, 0x00 or 0x01.
+    for (byte, flag) in [(0x00, false), (0x01, true)] {
+        let buf = record(&[(0, &[1]), (1, &[byte])]);
+        let decoded = TypesRecord::decode(&buf, Reject).unwrap();
+        assert_eq!(decoded.flag, Some(flag));
+        assert_eq!(decoded.encode().unwrap().as_slice(), buf);
+    }
+    for value in [&[0x02][..], &[0x00, 0x01], &[]] {
+        assert_eq!(types_error(&record(&[(0, &[1]), (1, value)])), Some(Width));
+    }
+    // A nested record: its own schema, its own `end`.
+    let inner = record(&[(0, &[7]), (5, b"hi")]);
+    let buf = record(&[(0, &[1]), (2, &inner)]);
+    let decoded = TypesRecord::decode(&buf, Reject).unwrap();
+    let nested = decoded.nested.as_ref().unwrap();
+    assert_eq!((nested.small, nested.text), (7, Some("hi")));
+    assert_eq!(decoded.encode().unwrap().as_slice(), buf);
+    let trailing = [&inner[..], &[0]].concat();
+    assert_eq!(
+        types_error(&record(&[(0, &[1]), (2, &trailing)])),
+        Some(Truncated)
+    );
+    assert_eq!(types_error(&record(&[(0, &[1]), (2, &[])])), Some(Missing));
+    let too_long = record(&[(0, &[1]), (3, &[0; MAX_RECORD])]);
+    assert_eq!(
+        types_error(&record(&[(0, &[1]), (2, &too_long)])),
+        Some(TooLong)
+    );
+    // A list: at its maximum count, empty, one over, cut short, a wrong item.
+    let numbers: Vec<u64> = (1..=4).collect();
+    assert_eq!(numbers.len(), MAX_NUMBERS);
+    let full: Vec<u8> = numbers
+        .iter()
+        .flat_map(|n| item(&n.to_be_bytes()))
+        .collect();
+    for (value, expected) in [(&full[..], &numbers[..]), (&[], &[])] {
+        let buf = record(&[(0, &[1]), (3, value)]);
+        let decoded = TypesRecord::decode(&buf, Reject).unwrap();
+        assert_eq!(decoded.numbers.as_deref(), Some(expected));
+        assert_eq!(decoded.numbers.as_ref().unwrap().capacity(), expected.len());
+        assert_eq!(decoded.encode().unwrap().as_slice(), buf);
+    }
+    let one_more = [&full[..], &item(&[0; 8])].concat();
+    let short_header = [&full[..8 + ITEM_HEADER_LEN], &[0, 0]].concat();
+    let short_item = [&item(&[0; 8])[..], &[0, 0, 0, 8, 1]].concat();
+    let cases: [(&[u8], RecordError); 5] = [
+        (&one_more, TooLong),
+        (&short_header, Truncated),
+        (&short_item, Truncated),
+        (&item(&[0; 9]), TooLong),
+        (&item(&[0; 7]), Width),
+    ];
+    for (value, expected) in cases {
+        let buf = record(&[(0, &[1]), (3, value)]);
+        assert_eq!(types_error(&buf), Some(expected), "{value:?}");
+    }
+    // The writer's list: the same bytes, and nothing written on an error.
+    let mut writer = Writer::with_capacity(MAX_TYPES_RECORD);
+    writer.u8(0, 1).unwrap();
+    writer.list(3, &[[1u8; 2], [2; 2]]).unwrap();
+    assert_eq!(writer.list(4, &[[0u8; 2000]]), Err(TooLong));
+    assert_eq!(writer.list(2, &[[0u8; 1]]), Err(KeyOrder));
+    let written = writer.finish();
+    let expected = record(&[(0, &[1]), (3, &[item(&[1; 2]), item(&[2; 2])].concat())]);
+    assert_eq!(written.as_slice(), expected);
 }
 
 /// Checks one vector of `017.json`: a positive decodes to its values and,

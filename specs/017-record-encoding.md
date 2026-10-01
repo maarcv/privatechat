@@ -13,7 +13,7 @@ Apart from the envelope, every structure the project writes is a small record wi
 
 In plain words: a record is a list of fields, and each field is a number that says which field it is, a length, and the bytes of the value. The fields always come in increasing order of their number, and each number has a fixed type that the schema of the record decides. The decoder reads only what the schema expects and rejects anything else, so two implementations can never read one record in two different ways.
 
-This spec implements the six types the two phase 1 records use — `u8`, `u32`, `u64`, `bytes`, `bytesN` and `text` — and the framing rules. `docs/spec.md` §4 defines the full type list of the encoding; `bool`, nested records and `list<T>` arrive with the first schema that needs them (Out of scope).
+This spec implements the six types the two phase 1 records use — `u8`, `u32`, `u64`, `bytes`, `bytesN` and `text` — and the framing rules. `docs/spec.md` §4 defines the full type list of the encoding; `bool`, nested records and `list<T>` arrive with the first schema that needs them (Out of scope), and spec 020-store-files R1 adds them.
 
 **PR slices.** Two pull requests of at most 400 lines each (AGENTS 14), the spec marked `implemented` after the second: (a) `Reader`, `RecordError`, the test schema, the `check-cfg` entry and the decoding tests over hand-built bytes (R2–R9, R12); (b) `Writer`, the round trip, `017.json` with its reference-script section, and the dispatch test (R1, R10, R11, R13). `mod proto` carries `#[allow(dead_code, reason = "reached through Device, spec 027-core-api")]`, like `mod crypto` today, and spec 027-core-api removes both.
 
@@ -29,7 +29,7 @@ This spec fixes the codec. Which keys each record has, and which error a failure
 - R6 A mandatory key that is absent MUST return `RecordError::Missing`. An optional key that is absent reads as `None`; there is no null marker.
 - R7 A `Reader` MUST be built with a policy, `UnknownKeys::Ignore` or `UnknownKeys::Reject`, and MUST apply it to every field it walks, including the ones `end()` walks.
 - R8 `Reader::new` MUST return `RecordError::TooLong` for a buffer longer than the maximum its caller gives for the whole record, before reading any field.
-- R9 Decoding MUST be typed, one decoder per schema, and MUST NOT build a generic tree of values. A value is never a record and nothing nests, so no decoder recurses on input.
+- R9 Decoding MUST be typed, one decoder per schema, and MUST NOT build a generic tree of values. No schema is recursive, so no decoder recurses on input: a nested record or a list item is decoded by the decoder of its own named schema (amended by spec 020-store-files R1).
 - R10 The writer MUST produce the canonical encoding: keys in increasing order, each integer at its exact width, and no field for an absent optional key. Decoding what the writer produced MUST give back the same values, and, for a reader under `Reject` or a record with no unknown keys, encoding what the decoder accepted MUST give back the same bytes. Under `Ignore` a skipped key is not re-encoded; `docs/spec.md` §4 forbids a later key from changing what the known keys mean.
 - R11 `Writer::with_capacity(max)` MUST allocate `max` bytes once, hold them in `zeroize::Zeroizing<Vec<u8>>`, and return `RecordError::TooLong` instead of growing, so that no reallocation leaves an unwiped copy of a secret. It MUST also return `RecordError::KeyOrder` for a key not greater than the previous one, and `RecordError::TooLong` for a value longer than 2^32 − 1 bytes.
 - R12 The codec MUST NOT panic, overflow or read out of bounds on any input: every offset and length uses `checked_*` arithmetic and every failure is a `RecordError`.
@@ -48,7 +48,7 @@ This spec fixes the codec. Which keys each record has, and which error a failure
 | `u8`, `u32`, `u64` | exactly 1, 4, 8 bytes | `Width` |
 | Writer output | 0..=the capacity given | `TooLong` |
 
-The 4-byte length is wide enough for the largest value any record carries: a sealed blob of 64 673 bytes inside the `outbox` of `state.bin`. The real bound is always the smaller of the buffer and the caller's maximum.
+The 4-byte length is wide enough for the largest value any record carries: the `outbox` list of `state.bin` (spec 020-store-files), a value of at most 2 073 920 bytes. The real bound is always the smaller of the buffer and the caller's maximum.
 
 **Test schema.** The tests, the vectors and the fuzz target `record_decode` of spec 016-fuzz-harness decode by one fixed schema that uses every type this spec implements, compiled under `cfg(any(test, fuzzing))` so that both reach it, and so that no path of the codec depends on a later spec to be exercised: 0 `u8` mandatory; 1 `u32`; 2 `u64`; 3 `bytes` (max 64); 4 `bytes32`; 5 `text` (max 64). Every key but 0 is optional, and the whole record is at most 512 bytes. The test schema is written like production code — no `unwrap`, `get` instead of indexing, checked arithmetic — because it also compiles under `cfg(fuzzing)`, where the test relaxations of AGENTS 4 do not apply.
 
@@ -103,9 +103,9 @@ A schema decoder reads its keys in order and may check a value as soon as it is 
 - This is the first code that touches most bytes an attacker controls: a decrypted payload, a scanned config, a frame from the server, a file read back from disk. R2 and R12 are the requirements that matter most, and the fuzz target of spec 016-fuzz-harness exists for them.
 - One canonical encoding (R2, R3, R5, R10) closes the equivocation that a lax format allows, and no record can hide extra bytes. Under `Ignore` a record can carry a key an older client skips; `docs/spec.md` §4 keeps that from changing what a signed message means to that client.
 - A declared length is never trusted before it is compared with the bytes actually present (R2). A 4-byte length of 4 GiB costs the decoder nothing.
-- Nothing recurses on input (R9): a value is never a record and nothing nests.
+- Nothing recurses on input (R9): no schema is recursive.
 - The writer never grows (R11) because the config record carries `K_ch` and the state record carries `sk_u`: a `Vec` that reallocates frees its old copy without wiping it.
-- `store` and `server` never call the codec directly; each `pub` function of `core` that 020 or 028 adds to reach it has its own fuzz target (AGENTS 21).
+- `store` and `server` never call the codec directly; each `pub` function of `core` that 020 or 028 adds to reach it has its own fuzz target (AGENTS 21), except a sealed `open`, whose decoder is fuzzed on its own over the plaintext (spec 020-store-files R29).
 
 ## Public API changes
 
@@ -156,7 +156,7 @@ None. The codec is `pub(crate)`.
 - The schema of each record and the error each failure maps to (specs 011-config-format, 013-wire-message, 020-store-files, 030-ws-protocol).
 - The `pub` functions through which `store` and `server` reach records (specs 020-store-files, 030-ws-protocol).
 - The envelope, which is a fixed layout and not a record (spec 013-wire-message).
-- `bool`, nested records and `list<T>`, which `docs/spec.md` §4 defines and no phase 1 record uses: specs 020-store-files and 030-ws-protocol add a type the day their first schema needs it, with its vectors and its fuzz coverage.
+- `bool`, nested records and `list<T>`, which `docs/spec.md` §4 defines and no phase 1 record uses: spec 020-store-files R1 adds them, with their vectors and their fuzz coverage.
 - Any self-describing mode, generic value, or tool that prints records without their schema.
 
 ## Open questions
@@ -175,3 +175,4 @@ None. Decided in audit F (`docs/audit-log.md`):
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-09-28 revised after audit R (`docs/audit-log.md`), the code audit of both slices: text length checked before UTF-8 (R4); a getter asked out of order returns `KeyOrder` and when an absent key is decided (Interface); vector fields named; vectors `all_fields`, `record_at_limit` and `unknown_key_then_extra_byte`; T01 reads `u8_field` by hand; T02, T04, T05, T07 and T11 extended
 - 2026-09-29 implemented: slices (a) and (b) with the audit R fixes, reviewed (Marc Vilardebó)
+- 2026-09-30 amended by spec 020-store-files R1: `bool`, nested records and `list<T>` added; R9 and the Security lines say no schema is recursive; the largest value is the `outbox` list; a sealed `open` has its decoder fuzzed on its own
