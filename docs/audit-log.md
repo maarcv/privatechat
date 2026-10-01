@@ -45,6 +45,14 @@ Not changed: `padded_record`'s capacity, whose growth no test can see (Y2-G2B-3)
 | AY16 | Untested in spec 011: a name of 33 two-byte characters at `create`, `proto_version` 0, a file version of 0, a key 6 of the wrong width (Y3-G2B-1–Y3-G2B-4) | Low | One test |
 | AY17 | The reference script let DEL and the C1 controls through to a file the loader refuses; T15 of 011 did not say it checks every code point; a stale comment in the checker; this log's AY12 row (Y3-G1-1, Y3-G2-1, Y3-G2-2, Y3-G3) | Low | A `require`, the text |
 
+**Round 4**, a confirmation round of passes B in G1 and G2, the other passes having found nothing in round 3 (69 mutants, every round-3 gap dead). Nothing substantive; the last test gaps closed:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AY18 | A suggested name tested at 5 of the 65 Cc code points; a capitalised scheme, a percent sign and `!` in a host untested; a duplicate key the loader would catch only when adjacent (Y4-G2B-1, Y4-G2B-2, Y4-G1B-1) | Low | Every Cc code point; five URLs in T05; one row |
+
+Stopped after round 4: every pass of the last two rounds found nothing substantive, and what survives is equivalent or far-fetched.
+
 
 
 ## Phase 1 closed

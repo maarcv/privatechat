@@ -99,6 +99,11 @@ fn s015_t01_r01_rejects_every_broken_rule() {
             r#""block": 1024, "block": 1024"#,
             Broken::DuplicateKey,
         ),
+        (
+            r#""block": 1024"#,
+            r#""block": 1024, "x": 1, "block": 1024"#,
+            Broken::DuplicateKey,
+        ),
         ("a formula", r"a\nformula", Broken::Syntax),
         ("a formula", "a\tformula", Broken::Syntax),
         (r#""00ff", "block""#, r#""00ff" "block""#, Broken::Syntax),

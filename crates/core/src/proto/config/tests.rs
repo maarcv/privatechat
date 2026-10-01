@@ -179,6 +179,12 @@ fn bad_urls() -> Vec<String> {
     urls.push(format!("ws://{}-.onion", "a".repeat(55)));
     urls.push(format!("ws://{}.a.onion", "a".repeat(54)));
     urls.push(format!("ws://{}.ONION", "a".repeat(56)));
+    // The scheme is matched as written, and nothing is percent-decoded.
+    urls.push("WSS://host".to_owned());
+    urls.push("Wss://host".to_owned());
+    urls.push(format!("WS://{}", onion(56, 'a')));
+    urls.push("wss://ho%73t".to_owned());
+    urls.push("wss://host!".to_owned());
     urls.push(format!("ws://{}.onion", "a".repeat(55) + "1"));
     urls.push(format!("ws://{}.onion", "a".repeat(55) + "8"));
     urls.push(format!("ws://{}", onion(56, 'A')));
@@ -1086,4 +1092,18 @@ fn s011_t04_r04_edges_of_create_and_the_versions() {
     let mut file = keyed_file();
     file[4] = 0;
     assert_eq!(parse_file_header(&file), Err(Error::UnsupportedVersion));
+}
+
+/// Spec 011, R4: a suggested name holding any Cc character, at every one of
+/// its 65 code points, is out of range.
+#[test]
+fn s011_t04_r04_every_control_in_a_name() {
+    for control in ('\u{0}'..='\u{10ffff}').filter(|c| c.is_control()) {
+        let record = with(7, format!("a{control}b").as_bytes());
+        assert_eq!(
+            Config::parse(&record, NOW).err(),
+            Some(Error::BadConfig),
+            "{control:?}"
+        );
+    }
 }
