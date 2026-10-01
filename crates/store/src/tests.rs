@@ -7,10 +7,15 @@
     reason = "the one audited place of store I/O"
 )]
 
+mod files;
+mod golden;
+mod recovery;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use privatechat_core::{StorageKey, StoreError};
+use privatechat_core::testing::{batch, record, state_for};
+use privatechat_core::{ChannelState, LogRecord, StorageKey, Store, StoreError, Vault};
 
 use crate::DataDir;
 use crate::fs::Io;
@@ -40,6 +45,60 @@ impl Drop for TestDir {
 
 fn key() -> StorageKey {
     StorageKey::from_bytes(&mut [7u8; 32])
+}
+
+/// The data directory at `path` under the test key.
+fn open(path: &Path) -> DataDir {
+    DataDir::open(path, key()).expect("open the data directory")
+}
+
+/// The channel id of test channel `n`.
+fn id(n: u8) -> [u8; 16] {
+    [n; 16]
+}
+
+/// The directory of test channel `n` under the data directory `path`.
+fn channel_dir(path: &Path, n: u8) -> PathBuf {
+    path.join("channels").join(crate::hex(&dir_name(n)))
+}
+
+/// The directory name of test channel `n` under the test key.
+fn dir_name(n: u8) -> privatechat_core::DirName {
+    privatechat_core::dir_name(&key(), &id(n)).expect("dir name")
+}
+
+/// Commits to `store` a fresh state of channel `n` with one record per
+/// `purge_at`.
+fn commit(store: &mut dyn Store, n: u8, purge_at: &[u64]) -> Result<(), StoreError> {
+    let records: Vec<LogRecord> = purge_at.iter().map(|at| record(*at, 10)).collect();
+    store.commit(&batch(state_for(id(n)), records))
+}
+
+/// The `purge_at` of each record, which tells the records of these tests
+/// apart.
+fn purges(records: &[LogRecord]) -> Vec<u64> {
+    records.iter().map(LogRecord::purge_at).collect()
+}
+
+/// What a test sees of a `load`: the state's log position and the records'
+/// `purge_at`, `None` for a channel never committed.
+type Loaded = Result<Option<((u64, u32), Vec<u64>)>, StoreError>;
+
+/// What `load` returns, as the state's log position and the records'
+/// `purge_at`.
+fn loaded(store: &mut dyn Store) -> Loaded {
+    Ok(store
+        .load()?
+        .map(|(state, records): (ChannelState, Vec<LogRecord>)| {
+            (state.log_position(), purges(&records))
+        }))
+}
+
+/// The store of test channel `n` in a fresh `DataDir` of `path`, loaded.
+fn reopen(path: &Path, n: u8) -> Loaded {
+    let mut data = open(path);
+    let mut store = data.create(&id(n))?;
+    loaded(store.as_mut())
 }
 
 /// Runs the test `helper` of this binary in a child process with `env`, and
@@ -116,15 +175,14 @@ fn s020_t17_r17_open_existing_and_failing() {
     let dir = TestDir::new("t17b");
     drop(DataDir::open(dir.path(), key()).expect("create"));
     drop(DataDir::open(dir.path(), key()).expect("reopen"));
-    // Every system call of an `open` that creates nothing: the lock file
-    // and its lock; each failure is `Io`.
+    // Every system call of an `open` that creates nothing: the lock file,
+    // its lock, and the listing of R19, whose failure `open` ignores.
     let calls = {
-        let io = Io::new();
-        let probe = DataDir::open_with(dir.path(), key(), io).expect("probe");
+        let probe = DataDir::open_with(dir.path(), key(), Io::new()).expect("probe");
         probe.io.calls()
     };
-    assert_eq!(calls, 2);
-    for k in 1..=calls {
+    assert_eq!(calls, 3);
+    for k in 1..=2 {
         assert!(
             matches!(
                 DataDir::open_with(dir.path(), key(), Io::failing_at(k)),
@@ -133,6 +191,7 @@ fn s020_t17_r17_open_existing_and_failing() {
             "k={k}"
         );
     }
+    drop(DataDir::open_with(dir.path(), key(), Io::failing_at(3)).expect("R19 is best effort"));
     DataDir::open(dir.path(), key()).expect("no lock left behind");
 }
 

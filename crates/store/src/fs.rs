@@ -11,7 +11,7 @@
 )]
 
 use std::fs::{self, File, OpenOptions};
-use std::io;
+use std::io::{self, Read, Seek, Write};
 use std::path::Path;
 
 use privatechat_core::StoreError;
@@ -106,6 +106,118 @@ impl Io {
             Err(fs::TryLockError::WouldBlock) => Err(StoreError::Locked),
             Err(fs::TryLockError::Error(_)) => Err(StoreError::Io),
         }
+    }
+
+    /// The bytes of `path`, at most `limit + 1` of them, so that a file over
+    /// its limit is read no further than one byte past it (R6); `None` when
+    /// the file does not exist.
+    pub(crate) fn read_limited(
+        &self,
+        path: &Path,
+        limit: usize,
+    ) -> Result<Option<Vec<u8>>, StoreError> {
+        self.call()?;
+        let file = match File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(StoreError::Io),
+        };
+        let cap = limit.checked_add(1).ok_or(StoreError::Io)?;
+        self.call()?;
+        let size = file.metadata().map_err(|_| StoreError::Io)?.len();
+        let size = usize::try_from(size).unwrap_or(cap).min(cap);
+        let mut bytes = Vec::with_capacity(size);
+        let take = u64::try_from(cap).map_err(|_| StoreError::Io)?;
+        self.call()?;
+        file.take(take)
+            .read_to_end(&mut bytes)
+            .map_err(|_| StoreError::Io)?;
+        Ok(Some(bytes))
+    }
+
+    /// Writes `bytes` as the whole of `path`, creating or truncating it, and
+    /// `fsync`s it.
+    pub(crate) fn write_synced(&self, path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+        self.call()?;
+        let mut file = File::create(path).map_err(|_| StoreError::Io)?;
+        self.call()?;
+        file.write_all(bytes).map_err(|_| StoreError::Io)?;
+        self.sync(&file)
+    }
+
+    /// Cuts `path` to `at` bytes, writes `bytes` there and `fsync`s it, so
+    /// that stale bytes after a committed end are overwritten, never appended
+    /// after (R10 step 1).
+    pub(crate) fn write_at(&self, path: &Path, at: u64, bytes: &[u8]) -> Result<(), StoreError> {
+        self.call()?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .open(path)
+            .map_err(|_| StoreError::Io)?;
+        self.call()?;
+        file.set_len(at).map_err(|_| StoreError::Io)?;
+        self.call()?;
+        file.seek(io::SeekFrom::Start(at))
+            .map_err(|_| StoreError::Io)?;
+        self.call()?;
+        file.write_all(bytes).map_err(|_| StoreError::Io)?;
+        self.sync(&file)
+    }
+
+    /// Cuts `path` to `len` bytes and `fsync`s it (R12).
+    pub(crate) fn truncate(&self, path: &Path, len: u64) -> Result<(), StoreError> {
+        self.call()?;
+        let file = OpenOptions::new()
+            .write(true)
+            .open(path)
+            .map_err(|_| StoreError::Io)?;
+        self.call()?;
+        file.set_len(len).map_err(|_| StoreError::Io)?;
+        self.sync(&file)
+    }
+
+    /// Renames `from` over `to`, which the file system does in one step.
+    pub(crate) fn rename(&self, from: &Path, to: &Path) -> Result<(), StoreError> {
+        self.call()?;
+        fs::rename(from, to).map_err(|_| StoreError::Io)
+    }
+
+    /// Deletes the file `path`; a file already absent is not an error.
+    pub(crate) fn remove_file(&self, path: &Path) -> Result<(), StoreError> {
+        self.call()?;
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(StoreError::Io),
+        }
+    }
+
+    /// Deletes the directory `path` and everything under it; a directory
+    /// already absent is not an error.
+    pub(crate) fn remove_dir_all(&self, path: &Path) -> Result<(), StoreError> {
+        self.call()?;
+        match fs::remove_dir_all(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(StoreError::Io),
+        }
+    }
+
+    /// The entries of the directory `path` whose names are valid UTF-8, each
+    /// with whether it is a directory; sorted, so that callers see one order.
+    pub(crate) fn list_dir(&self, path: &Path) -> Result<Vec<(String, bool)>, StoreError> {
+        self.call()?;
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(path).map_err(|_| StoreError::Io)? {
+            let entry = entry.map_err(|_| StoreError::Io)?;
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            let is_dir = entry.file_type().map_err(|_| StoreError::Io)?.is_dir();
+            entries.push((name, is_dir));
+        }
+        entries.sort();
+        Ok(entries)
     }
 }
 
