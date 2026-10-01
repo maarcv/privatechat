@@ -5,8 +5,9 @@ use proptest::collection::vec as bytes_of;
 use proptest::prelude::{ProptestConfig, any, proptest};
 
 use super::{
-    QR_CHANNEL, config_parse_qr_verdict, config_parse_verdict, payload_decode_verdict,
-    receive_signed_verdict, receive_verdict, record_decode_verdict, verify_qr_parse_verdict,
+    QR_CHANNEL, config_parse_qr_verdict, config_parse_verdict, log_record_decode_verdict,
+    payload_decode_verdict, receive_signed_verdict, receive_verdict, record_decode_verdict,
+    settings_decode_verdict, state_decode_verdict, verify_qr_parse_verdict,
 };
 use crate::Error;
 use crate::crypto::{self, Nonce, PublicKey, Secret};
@@ -21,8 +22,8 @@ const ROOT_MANIFEST: &str = include_str!("../../../../Cargo.toml");
 const FUZZ_MANIFEST: &str = include_str!("../../fuzz/Cargo.toml");
 const FUZZ_WORKFLOW: &str = include_str!("../../../../.github/workflows/fuzz.yml");
 
-/// The seven targets of R2.
-const TARGETS: [&str; 7] = [
+/// The targets of R2, the last three added by spec 020-store-files.
+const TARGETS: [&str; 10] = [
     "record_decode",
     "config_parse",
     "config_parse_qr",
@@ -30,6 +31,9 @@ const TARGETS: [&str; 7] = [
     "receive",
     "receive_signed",
     "verify_qr_parse",
+    "state_decode",
+    "log_record_decode",
+    "settings_decode",
 ];
 
 /// The channel of `text_k1`, built here apart from `fuzz_entry`, so that an
@@ -359,4 +363,53 @@ fn s016_t11_r11_one_dependency_own_workspace() {
     assert!(include_str!("../../fuzz/Cargo.lock").contains("name = \"libfuzzer-sys\""));
     let ignored: Vec<&str> = include_str!("../../fuzz/.gitignore").lines().collect();
     assert_eq!(ignored, ["target/", "corpus/", "artifacts/", "coverage/"]);
+}
+
+/// Spec 020, R29: the three storage entries reach their decoders: the
+/// seeds `fuzz_seeds.py` writes from the records of `020.json` decode, and
+/// the negatives among them are `Corrupt`.
+#[test]
+fn s020_t29_r29_storage_entries_reach_their_decoders() {
+    type Verdict = fn(&[u8]) -> Result<(), crate::StoreError>;
+    let entries: [(&str, &str, Verdict); 5] = [
+        ("state_reference", "state_unknown_key", state_decode_verdict),
+        (
+            "log_message_reference",
+            "log_unknown_key",
+            log_record_decode_verdict,
+        ),
+        (
+            "log_seen_reference",
+            "log_unknown_key",
+            log_record_decode_verdict,
+        ),
+        (
+            "log_kept_signature_reference",
+            "log_unknown_key",
+            log_record_decode_verdict,
+        ),
+        (
+            "settings_reference",
+            "settings_bad_url",
+            settings_decode_verdict,
+        ),
+    ];
+    for (positive, negative, verdict) in entries {
+        let record = crate::vectors::load("020", positive);
+        assert_eq!(
+            verdict(record.input("record").bytes()),
+            Ok(()),
+            "{positive}"
+        );
+        let record = crate::vectors::load("020", negative);
+        let rejected = verdict(record.input("record").bytes());
+        assert_eq!(rejected, Err(crate::StoreError::Corrupt), "{negative}");
+    }
+    for verdict in [
+        state_decode_verdict,
+        log_record_decode_verdict,
+        settings_decode_verdict,
+    ] {
+        assert_eq!(verdict(&[]), Err(crate::StoreError::Corrupt));
+    }
 }

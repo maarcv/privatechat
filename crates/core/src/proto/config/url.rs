@@ -52,6 +52,16 @@ pub(crate) fn parse(url: &str) -> Result<&str, Error> {
     Ok(host)
 }
 
+/// Whether `text` is a SOCKS5 proxy of the app settings: a host by the
+/// grammar of R5 ‖ `:` ‖ a port within 1..=65535 with no leading zero, of at
+/// most [`MAX_URL`] bytes (spec 020-store-files, Limits).
+pub(crate) fn is_proxy(text: &str) -> bool {
+    text.len() <= MAX_URL
+        && text
+            .split_once(':')
+            .is_some_and(|(host, port)| is_tls_host(host) && parse_port(port).is_ok())
+}
+
 /// At least one byte of `a-z`, `0-9`, `-` and `.`.
 fn is_tls_host(host: &str) -> bool {
     !host.is_empty()

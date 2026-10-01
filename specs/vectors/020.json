@@ -171,6 +171,111 @@
       "expected": {
         "error": "Corrupt"
       }
+    },
+    {
+      "name": "log_message_reference",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 020: a received text message",
+      "inputs": {
+        "record": "000000000100010000000400000003020000000800000000000000090300000008000001a0c976c8000400000010101112131415161718191a1b1c1d1e1f0500000008000001a0c45b1a600600000020606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0700000008000000000000002a0800000001000900000007416e6e6120422e0a00000008000001a0c45a30000b00000011426f6e20646961206120746f74686f6d210c0000000100",
+        "schema": "log"
+      },
+      "expected": {
+        "body": "426f6e20646961206120746f74686f6d21",
+        "content": 0,
+        "counter": "000000000000002a",
+        "display_name": "416e6e6120422e",
+        "generation": 3,
+        "kind": 0,
+        "offset": "0000000000000009",
+        "own": false,
+        "purge_at": "000001a0c976c800",
+        "received_at": "000001a0c45b1a60",
+        "sender_pk": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "sent_at": "000001a0c45a3000",
+        "server_id": "101112131415161718191a1b1c1d1e1f"
+      }
+    },
+    {
+      "name": "log_kept_signature_reference",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 020: a kept signature of one's own message",
+      "inputs": {
+        "record": "000000000103010000000400000003020000000800000000000000090300000008000001a0c976c8000a00000008000001a0c45686800d00000010a0a1a2a3a4a5a6a7a8a9aaabacadaeaf0e00000040b0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeef0f0000000400000002",
+        "schema": "log"
+      },
+      "expected": {
+        "client_ref": "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+        "epoch": 2,
+        "generation": 3,
+        "kind": 3,
+        "offset": "0000000000000009",
+        "purge_at": "000001a0c976c800",
+        "sent_at": "000001a0c4568680",
+        "signature": "b0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeef"
+      }
+    },
+    {
+      "name": "log_seen_reference",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 020: a message seen and not shown",
+      "inputs": {
+        "record": "000000000104010000000400000003020000000800000000000000090300000008000001a0c976c8000400000010303132333435363738393a3b3c3d3e3f0600000020808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f0700000008000000000000002b",
+        "schema": "log"
+      },
+      "expected": {
+        "counter": "000000000000002b",
+        "generation": 3,
+        "kind": 4,
+        "offset": "0000000000000009",
+        "purge_at": "000001a0c976c800",
+        "sender_pk": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "server_id": "303132333435363738393a3b3c3d3e3f"
+      }
+    },
+    {
+      "name": "log_unknown_key",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 020: log_message_reference and a key 16",
+      "inputs": {
+        "record": "000000000100010000000400000003020000000800000000000000090300000008000001a0c976c8000400000010101112131415161718191a1b1c1d1e1f0500000008000001a0c45b1a600600000020606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0700000008000000000000002a0800000001000900000007416e6e6120422e0a00000008000001a0c45a30000b00000011426f6e20646961206120746f74686f6d210c00000001001000000000",
+        "schema": "log"
+      },
+      "expected": {
+        "error": "Corrupt"
+      }
+    },
+    {
+      "name": "settings_reference",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 020: settings with every key",
+      "inputs": {
+        "record": "000000000101010000001b7773733a2f2f636861742e6578616d706c652e6f72673a3930303102000000040000012c030000000e3132372e302e302e313a39303530",
+        "schema": "settings"
+      },
+      "expected": {
+        "default_server_url": "7773733a2f2f636861742e6578616d706c652e6f72673a39303031",
+        "lock_timeout_seconds": 300,
+        "socks5_proxy": "3132372e302e302e313a39303530"
+      }
+    },
+    {
+      "name": "settings_bad_url",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 020: settings_reference with a path in the URL",
+      "inputs": {
+        "record": "000000000101010000001b7773733a2f2f636861742e6578616d706c652e6f72672f7061746802000000040000012c030000000e3132372e302e302e313a39303530",
+        "schema": "settings"
+      },
+      "expected": {
+        "error": "Corrupt"
+      }
     }
   ]
 }

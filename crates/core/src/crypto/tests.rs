@@ -17,7 +17,7 @@ use crate::vectors::{self, Kind};
 
 /// Every `.rs` file of the crate. `core` does no I/O (AGENTS 10), so the test
 /// cannot walk the directory: a new file is added to this list by hand.
-const SOURCES: [(&str, &str); 34] = [
+const SOURCES: [(&str, &str); 44] = [
     ("lib.rs", include_str!("../lib.rs")),
     ("crypto.rs", include_str!("../crypto.rs")),
     ("crypto/ffi.rs", include_str!("ffi.rs")),
@@ -82,10 +82,32 @@ const SOURCES: [(&str, &str); 34] = [
     ("storage.rs", include_str!("../storage.rs")),
     ("storage/tests.rs", include_str!("../storage/tests.rs")),
     ("storage/state.rs", include_str!("../storage/state.rs")),
+    ("storage/log.rs", include_str!("../storage/log.rs")),
+    (
+        "storage/log/tests.rs",
+        include_str!("../storage/log/tests.rs"),
+    ),
+    (
+        "storage/settings.rs",
+        include_str!("../storage/settings.rs"),
+    ),
+    (
+        "storage/settings/tests.rs",
+        include_str!("../storage/settings/tests.rs"),
+    ),
     (
         "storage/state/items.rs",
         include_str!("../storage/state/items.rs"),
     ),
+    ("testing.rs", include_str!("../testing.rs")),
+    (
+        "testing/builders.rs",
+        include_str!("../testing/builders.rs"),
+    ),
+    ("testing/compare.rs", include_str!("../testing/compare.rs")),
+    ("testing/faults.rs", include_str!("../testing/faults.rs")),
+    ("testing/memory.rs", include_str!("../testing/memory.rs")),
+    ("testing/tests.rs", include_str!("../testing/tests.rs")),
     ("proto/payload.rs", include_str!("../proto/payload.rs")),
     (
         "proto/payload/tests.rs",

@@ -1179,6 +1179,17 @@ OUTBOX_SCHEMA = {
     "signature": (4, "bytes64"), "under_retired_key": (5, "bool"), "counter": (6, "u64"),
 }
 OLD_KEY_SCHEMA = {"pk": (0, "bytes32"), "retired_at": (1, "u64")}
+LOG_SCHEMA = {
+    "kind": (0, "u8"), "generation": (1, "u32"), "offset": (2, "u64"), "purge_at": (3, "u64"),
+    "server_id": (4, "bytes16"), "received_at": (5, "u64"), "sender_pk": (6, "bytes32"),
+    "counter": (7, "u64"), "content": (8, "u8"), "display_name": (9, "bytes"),
+    "sent_at": (10, "u64"), "body": (11, "bytes"), "own": (12, "bool"),
+    "client_ref": (13, "bytes16"), "signature": (14, "bytes64"), "epoch": (15, "u32"),
+}
+SETTINGS_SCHEMA = {
+    "settings_version": (0, "u8"), "default_server_url": (1, "text"),
+    "lock_timeout_seconds": (2, "u32"), "socks5_proxy": (3, "text"),
+}
 STATE_SCHEMA = {
     "state_version": (0, "u8"), "channel_id": (1, "bytes16"), "config": (2, "bytes"),
     "identity_seed": (3, "bytes32"), "identity_epoch": (4, "u32"), "send_counter": (5, "u64"),
@@ -1210,7 +1221,8 @@ def encode_020(schema: dict, values: dict) -> bytes:
 
 def check_s020_t30_r30_section_produces_020_json() -> list[dict]:
     """The vectors of spec 020: the codec types of R1 over the schema of the codec vectors, and
-    one plaintext state record with fixed values, positive and with an unknown key."""
+    one plaintext record of each schema with fixed values, and the negatives of the Vectors
+    table, each a one-rule edit of a positive."""
     def raw(name: str, kind: str, origin: str, inputs: dict, expected: dict) -> dict:
         return {"name": name, "kind": kind, "source": "derived", "origin": f"spec 020: {origin}",
                 "inputs": inputs, "expected": expected}
@@ -1282,6 +1294,40 @@ def check_s020_t30_r30_section_produces_020_json() -> list[dict]:
             {"schema": "state", "record": record}, expected),
         raw("state_unknown_key", "negative", "state_reference and a key 19",
             {"schema": "state", "record": record + record_field(19, b"")}, {"error": "Corrupt"}),
+    ]
+    head = {"generation": 3, "offset": U64(9), "purge_at": U64(1_790_086_400_000)}
+    logs = [
+        ("log_message_reference", "a received text message", {
+            **head, "kind": 0, "server_id": bytes(range(0x10, 0x20)),
+            "received_at": U64(1_790_000_700_000), "sender_pk": bytes(range(0x60, 0x80)),
+            "counter": U64(42), "content": 0, "display_name": "Anna B.".encode("utf-8"),
+            "sent_at": U64(1_790_000_640_000), "body": "Bon dia a tothom!".encode("utf-8"),
+            "own": False}),
+        ("log_kept_signature_reference", "a kept signature of one's own message", {
+            **head, "kind": 3, "sent_at": U64(1_790_000_400_000),
+            "client_ref": bytes(range(0xa0, 0xb0)), "signature": bytes(range(0xb0, 0xf0)),
+            "epoch": 2}),
+        ("log_seen_reference", "a message seen and not shown", {
+            **head, "kind": 4, "server_id": bytes(range(0x30, 0x40)),
+            "sender_pk": bytes(range(0x80, 0xa0)), "counter": U64(43)}),
+    ]
+    for name, origin, values in logs:
+        vectors.append(raw(name, "positive", origin,
+                           {"schema": "log", "record": encode_020(LOG_SCHEMA, values)}, values))
+    message = encode_020(LOG_SCHEMA, logs[0][2])
+    settings = {"settings_version": 1, "default_server_url": "wss://chat.example.org:9001",
+                "lock_timeout_seconds": 300, "socks5_proxy": "127.0.0.1:9050"}
+    bad_url = {**settings, "default_server_url": "wss://chat.example.org/path"}
+    vectors += [
+        raw("log_unknown_key", "negative", "log_message_reference and a key 16",
+            {"schema": "log", "record": message + record_field(16, b"")}, {"error": "Corrupt"}),
+        raw("settings_reference", "positive", "settings with every key",
+            {"schema": "settings", "record": encode_020(SETTINGS_SCHEMA, settings)},
+            {name: value.encode("utf-8") if isinstance(value, str) else value
+             for name, value in settings.items() if name != "settings_version"}),
+        raw("settings_bad_url", "negative", "settings_reference with a path in the URL",
+            {"schema": "settings", "record": encode_020(SETTINGS_SCHEMA, bad_url)},
+            {"error": "Corrupt"}),
     ]
     return vectors
 

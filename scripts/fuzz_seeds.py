@@ -73,6 +73,11 @@ TARGETS: dict[str, tuple[str, Callable[[dict], bool], Seed]] = {
                        lambda v: field(v, "counter") + field(v, "nonce") + times(v)
                        + padded_payload(v)),
     "verify_qr_parse": ("014", lambda v: field(v, "qr") is not None, lambda v: field(v, "qr")),
+    "state_decode": ("020", lambda v: v["inputs"]["schema"] == "state", lambda v: field(v, "record")),
+    "log_record_decode": ("020", lambda v: v["inputs"]["schema"] == "log",
+                          lambda v: field(v, "record")),
+    "settings_decode": ("020", lambda v: v["inputs"]["schema"] == "settings",
+                        lambda v: field(v, "record")),
 }
 
 
@@ -100,14 +105,16 @@ def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
                 "received_at": field(v, "received_at"), "now": field(v, "now"),
                 "padded": field(v, "padded")}
     whole = {"config_parse": "record", "config_parse_qr": "qr", "payload_decode": "payload",
-             "verify_qr_parse": "qr"}[target]
+             "verify_qr_parse": "qr", "state_decode": "record", "log_record_decode": "record",
+             "settings_decode": "record"}[target]
     return {"whole": field(v, whole)}
 
 
 # How many vectors seed each target, counted once by hand from the frozen files: the filters of
 # `TARGETS` are checked against it, so that a narrowed filter that drops seeds fails here.
 SEED_COUNTS = {"record_decode": 23, "config_parse": 27, "config_parse_qr": 32,
-               "payload_decode": 17, "receive": 30, "receive_signed": 18, "verify_qr_parse": 6}
+               "payload_decode": 17, "receive": 30, "receive_signed": 18, "verify_qr_parse": 6,
+               "state_decode": 2, "log_record_decode": 4, "settings_decode": 2}
 
 
 def check_s016_t08_r08_corpus_is_seeded() -> None:

@@ -21,7 +21,7 @@ use crate::proto::record::test_schema::TypesRecord;
 use crate::vectors::{self, Checker, Kind, Vector};
 
 /// One field: key ‖ 4-byte big-endian length ‖ value (spec 017 R1).
-fn field(key: u8, value: &[u8]) -> Vec<u8> {
+pub(super) fn field(key: u8, value: &[u8]) -> Vec<u8> {
     let len = u32::try_from(value.len()).unwrap();
     [&[key][..], &len.to_be_bytes(), value].concat()
 }
@@ -336,7 +336,7 @@ fn s020_t27_r27_state_within_limits() {
 }
 
 /// A storage key of `byte`, repeated.
-fn key(byte: u8) -> StorageKey {
+pub(super) fn key(byte: u8) -> StorageKey {
     StorageKey::from_bytes(&mut [byte; 32])
 }
 
@@ -450,6 +450,17 @@ fn s020_t27_r27_largest_state_seals_and_opens() {
         over.seal(&storage_key, &name, 9, 0).err(),
         Some(StoreError::OutboxFull)
     );
+}
+
+/// Spec 020, R28 (`core`'s half): a store, a vault and what a commit takes
+/// can move to another thread, so `Device` can live behind a `Mutex`.
+#[test]
+fn s020_t28_r28_send() {
+    fn is_send<T: Send + ?Sized>() {}
+    is_send::<Box<dyn super::Store>>();
+    is_send::<Box<dyn super::Vault>>();
+    is_send::<super::WriteBatch>();
+    is_send::<super::StorageKey>();
 }
 
 /// Checks a codec vector of `020.json`: a positive decodes to its values and
@@ -590,6 +601,17 @@ fn s020_vectors_dispatch() {
         .collect();
     for name in ["state_reference", "state_unknown_key"] {
         entries.push((name, check_state_vector));
+    }
+    for name in [
+        "log_message_reference",
+        "log_kept_signature_reference",
+        "log_seen_reference",
+        "log_unknown_key",
+    ] {
+        entries.push((name, super::log::tests::check_vector));
+    }
+    for name in ["settings_reference", "settings_bad_url"] {
+        entries.push((name, super::settings::tests::check_vector));
     }
     vectors::check_all("020", &entries);
 }

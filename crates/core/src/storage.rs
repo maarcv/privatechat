@@ -14,7 +14,15 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::crypto::{self, CryptoError, Nonce, Secret, TAG_LEN};
 use crate::proto::record::RecordError;
 
-mod state;
+mod log;
+mod settings;
+pub(crate) mod state;
+
+pub use self::log::LogRecord;
+#[cfg(any(test, fuzzing, feature = "test-support"))]
+pub(crate) use self::log::{Content, LogEntry, Message};
+pub use self::settings::Settings;
+pub use self::state::ChannelState;
 
 #[cfg(test)]
 mod tests;
@@ -23,6 +31,10 @@ mod tests;
 /// local name, a peer's last display name (spec 020 Limits). Specs 021, 022
 /// and 027 use it.
 pub(crate) const MAX_NAME: usize = 64;
+
+/// The largest `messages.log` (Limits): a commit past it is `LogFull`
+/// (R16), and spec 021-channel-session keeps its headroom below it.
+pub const MAX_LOG_LEN: u64 = 67_108_864;
 
 /// Why the storage failed, one variant per condition of spec 020 (R26). No
 /// variant carries an OS error, a path or a byte of a file.
@@ -42,6 +54,121 @@ pub enum StoreError {
     LogFull,
     /// More `outbox` entries than a state holds (R27).
     OutboxFull,
+}
+
+/// The files of one channel: its state and its log (`docs/spec.md` §9). The
+/// `store` crate implements it over a directory and `core::testing` in
+/// memory; every change to a channel is one `commit` (AGENTS 23).
+pub trait Store: Send {
+    /// The directory this store writes (R18).
+    fn name(&self) -> &DirName;
+
+    /// The last commit, `None` for a channel never committed (R12–R14).
+    ///
+    /// # Errors
+    ///
+    /// `Corrupt`, `UnsupportedVersion` or `Io` as R7, R12 and R14 say.
+    fn load(&mut self) -> Result<Option<(ChannelState, Vec<LogRecord>)>, StoreError>;
+
+    /// Appends the batch's records and writes its state, all or nothing
+    /// (R10, R11, R16).
+    ///
+    /// # Errors
+    ///
+    /// `LogFull` past the log limit, `OutboxFull` and `Corrupt` from the
+    /// seal (R27), `Io` for a failed system call or a poisoned store.
+    fn commit(&mut self, batch: &WriteBatch) -> Result<(), StoreError>;
+
+    /// Rewrites the log without the records whose `purge_at` is below
+    /// `now`, returning how many it dropped (R15).
+    ///
+    /// # Errors
+    ///
+    /// As [`Store::commit`].
+    fn compact(&mut self, state: &ChannelState, now: u64) -> Result<u32, StoreError>;
+
+    /// The committed length of the log (R16).
+    fn log_len(&self) -> u64;
+
+    /// Deletes the channel's directory (R21).
+    ///
+    /// # Errors
+    ///
+    /// `Io` for a failure before the directory is renamed away.
+    fn destroy(&mut self) -> Result<(), StoreError>;
+}
+
+/// The data directory: every channel's store and the settings (R17–R22).
+pub trait Vault: Send {
+    /// One store per channel directory (R20).
+    ///
+    /// # Errors
+    ///
+    /// `Locked` for a directory whose store is alive, `Io` for a failed
+    /// system call.
+    fn list(&mut self) -> Result<Vec<Box<dyn Store>>, StoreError>;
+
+    /// The store of `channel_id`, its directory created when absent (R20).
+    ///
+    /// # Errors
+    ///
+    /// As [`Vault::list`].
+    fn create(&mut self, channel_id: &[u8; 16]) -> Result<Box<dyn Store>, StoreError>;
+
+    /// Deletes the directory of a store that could not be loaded (R21).
+    ///
+    /// # Errors
+    ///
+    /// `Locked` for a directory whose store is alive, `Io` for a failure
+    /// before the rename.
+    fn remove(&mut self, name: &DirName) -> Result<(), StoreError>;
+
+    /// The directory name of `channel_id` (R18).
+    ///
+    /// # Errors
+    ///
+    /// `Corrupt` when libsodium fails.
+    fn dir_name(&self, channel_id: &[u8; 16]) -> Result<DirName, StoreError>;
+
+    /// The settings, `None` when none were saved (R22).
+    ///
+    /// # Errors
+    ///
+    /// `Corrupt`, `UnsupportedVersion` or `Io` as R7 says.
+    fn load_settings(&mut self) -> Result<Option<Settings>, StoreError>;
+
+    /// Writes the settings, all or nothing (R22).
+    ///
+    /// # Errors
+    ///
+    /// `Corrupt` from the seal, `Io` for a failed system call.
+    fn save_settings(&mut self, settings: &Settings) -> Result<(), StoreError>;
+}
+
+/// One logical change to a channel: its new state and the records to
+/// append (AGENTS 23). Built only inside `core` (spec 021-channel-session),
+/// and committed by reference, so that `Channel` moves its parts into memory
+/// after `Ok` and can retry after `LogFull`; the store keeps no copy.
+pub struct WriteBatch {
+    state: ChannelState,
+    records: Vec<LogRecord>,
+}
+
+impl WriteBatch {
+    /// A batch of `state` and `records`.
+    pub(crate) fn new(state: ChannelState, records: Vec<LogRecord>) -> WriteBatch {
+        WriteBatch { state, records }
+    }
+
+    /// The state the commit writes.
+    pub fn state(&self) -> &ChannelState {
+        &self.state
+    }
+
+    /// The records the commit appends, in order.
+    pub fn records(&self) -> &[LogRecord] {
+        &self.records
+    }
 }
 
 /// Every codec failure of a stored record is `Corrupt` (R7).
@@ -99,7 +226,7 @@ impl fmt::Debug for StorageKey {
 
 /// The name of a channel directory: the first 16 bytes of a keyed hash of its
 /// `channel_id` (R18), which the store writes as 32 lowercase hex characters.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DirName(pub [u8; 16]);
 
 /// The directory name of `channel_id` under `key` (R18).

@@ -18,6 +18,7 @@ use crate::proto::fingerprint;
 use crate::proto::payload::{MAX_BLOCKS, PAD_BLOCK, Payload};
 use crate::proto::record::UnknownKeys;
 use crate::proto::record::test_schema::decode_test_record;
+use crate::storage::{ChannelState, LogRecord, Settings, StoreError};
 
 #[cfg(test)]
 mod tests;
@@ -72,6 +73,24 @@ pub fn receive_signed(data: &[u8]) {
 /// `config_reference`.
 pub fn verify_qr_parse(data: &[u8]) {
     let _ = verify_qr_parse_verdict(data);
+}
+
+/// `state_decode`: a plaintext state record of spec 020-store-files, the
+/// part of `ChannelState::open` after the box (020 R29).
+pub fn state_decode(data: &[u8]) {
+    let _ = state_decode_verdict(data);
+}
+
+/// `log_record_decode`: a plaintext log record of spec 020, the part of
+/// `LogRecord::open` after the box.
+pub fn log_record_decode(data: &[u8]) {
+    let _ = log_record_decode_verdict(data);
+}
+
+/// `settings_decode`: a plaintext settings record of spec 020, the part of
+/// `Settings::open` after the box.
+pub fn settings_decode(data: &[u8]) {
+    let _ = settings_decode_verdict(data);
 }
 
 /// The verdict of `record_decode`; `None` for an input with no policy byte.
@@ -132,6 +151,21 @@ pub(crate) fn receive_signed_verdict(data: &[u8]) -> Option<Result<Opened, Error
 /// The verdict of `verify_qr_parse`.
 pub(crate) fn verify_qr_parse_verdict(data: &[u8]) -> Result<(), Error> {
     fingerprint::parse_verify_qr(data, &QR_CHANNEL).map(|_| ())
+}
+
+/// The verdict of `state_decode`.
+pub(crate) fn state_decode_verdict(data: &[u8]) -> Result<(), StoreError> {
+    ChannelState::decode(data).map(|_| ())
+}
+
+/// The verdict of `log_record_decode`.
+pub(crate) fn log_record_decode_verdict(data: &[u8]) -> Result<(), StoreError> {
+    LogRecord::decode(data).map(|_| ())
+}
+
+/// The verdict of `settings_decode`.
+pub(crate) fn settings_decode_verdict(data: &[u8]) -> Result<(), StoreError> {
+    Settings::decode(data).map(|_| ())
 }
 
 /// `verify`, then `open`, in the channel `ctx`.
