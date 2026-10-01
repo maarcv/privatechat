@@ -44,9 +44,9 @@ fn log_generation(log: &[u8]) -> Option<u32> {
 
 /// Whether a directory with no state holds nothing a commit made durable:
 /// its log is absent, short, or a bare header of generation 0 (R13, R19).
-fn is_unborn(files: &Files) -> bool {
-    files.state.is_none()
-        && files.log.as_deref().is_none_or(|log| {
+fn is_unborn(state: Option<&[u8]>, log: Option<&[u8]>) -> bool {
+    state.is_none()
+        && log.is_none_or(|log| {
             log_generation(log).is_none_or(|generation| generation == 0)
                 && log.len() <= LOG_HEADER_LEN
         })
@@ -127,7 +127,7 @@ impl Vault for MemoryVault {
         let names: Vec<DirName> = lock(&self.shared)
             .dirs
             .iter()
-            .filter(|(_, files)| !is_unborn(files))
+            .filter(|(_, files)| !is_unborn(files.state.as_deref(), files.log.as_deref()))
             .map(|(name, _)| *name)
             .collect();
         Ok(names
@@ -198,18 +198,12 @@ impl MemoryStore {
         }
     }
 
-    /// The state and the log as the last commit left them, `None` for a
-    /// directory never committed (R12–R14, without the recovery a crash
-    /// needs: memory has none).
-    fn open(&self) -> Result<Option<(ChannelState, Vec<LogRecord>)>, StoreError> {
+    /// The last committed state and the log up to its committed length,
+    /// checked as R12 checks them, `None` for a directory never committed.
+    fn committed(&self) -> Result<Option<(ChannelState, Vec<u8>)>, StoreError> {
         let (state, log) = self.with_files(|files| (files.state.clone(), files.log.clone()));
         let Some(state) = state else {
-            let files = Files {
-                state: None,
-                log,
-                ..Files::default()
-            };
-            return if is_unborn(&files) {
+            return if is_unborn(None, log.as_deref()) {
                 Ok(None)
             } else {
                 Err(StoreError::Corrupt)
@@ -221,13 +215,27 @@ impl MemoryStore {
             return Err(StoreError::Corrupt);
         }
         let (committed_len, generation) = state.log_position();
-        let log = log.ok_or(StoreError::Corrupt)?;
+        let mut log = log.ok_or(StoreError::Corrupt)?;
         if log_generation(&log) != Some(generation) {
             return Err(StoreError::Corrupt);
         }
         let committed_len = usize::try_from(committed_len).map_err(|_| StoreError::Corrupt)?;
-        let committed = log.get(..committed_len).ok_or(StoreError::Corrupt)?;
-        let records = entries(committed)?
+        if log.len() < committed_len {
+            return Err(StoreError::Corrupt);
+        }
+        log.truncate(committed_len);
+        Ok(Some((state, log)))
+    }
+
+    /// The state and the records as the last commit left them (R12–R14,
+    /// without the recovery a crash needs: memory has none).
+    fn open(&self) -> Result<Option<(ChannelState, Vec<LogRecord>)>, StoreError> {
+        let Some((state, log)) = self.committed()? else {
+            return Ok(None);
+        };
+        let key = fixed_key();
+        let (_, generation) = state.log_position();
+        let records = entries(&log)?
             .into_iter()
             .map(|(offset, entry)| LogRecord::open(&key, &self.name, entry, generation, offset))
             .collect::<Result<Vec<_>, _>>()?;
@@ -296,18 +304,14 @@ fn len_of(log: &[u8]) -> Result<u64, StoreError> {
 
 /// Whether the commit of `new` over `old` counts under AGENTS 23: records
 /// appended, or a change beyond `cursor` and `synced_at`.
-fn counts(
-    old: Option<&ChannelState>,
-    new: &ChannelState,
-    appended: bool,
-) -> Result<bool, StoreError> {
+fn counts(old: Option<&ChannelState>, new: &ChannelState, appended: bool) -> bool {
     let Some(old) = old else {
-        return Ok(true);
+        return true;
     };
-    let mut same_clock = new.duplicate()?;
+    let mut same_clock = new.duplicate();
     same_clock.cursor = old.cursor;
     same_clock.synced_at = old.synced_at;
-    Ok(appended || !super::state_eq(old, &same_clock))
+    appended || !super::state_eq(old, &same_clock)
 }
 
 impl Store for MemoryStore {
@@ -320,31 +324,22 @@ impl Store for MemoryStore {
     }
 
     fn commit(&mut self, batch: &WriteBatch) -> Result<(), StoreError> {
-        let previous = self.open()?;
+        // R10 reads no entry: only the state and the committed length.
+        let previous = self.committed()?;
         let (mut log, generation) = match &previous {
-            Some((state, _)) => {
-                let (len, generation) = state.log_position();
-                let len = usize::try_from(len).map_err(|_| StoreError::Corrupt)?;
-                let log = self
-                    .with_files(|files| files.log.clone())
-                    .unwrap_or_default();
-                (
-                    log.get(..len).ok_or(StoreError::Corrupt)?.to_vec(),
-                    generation,
-                )
-            }
+            Some((state, log)) => (log.clone(), state.log_position().1),
             None => (log_header(0), 0),
         };
         append(&mut log, &self.name, batch.records(), generation)?;
         if len_of(&log)? > MAX_LOG_LEN {
             return Err(StoreError::LogFull);
         }
-        let state = batch
+        let sealed = batch
             .state()
             .seal(&fixed_key(), &self.name, len_of(&log)?, generation)?;
         let old = previous.as_ref().map(|(state, _)| state);
-        let counted = counts(old, batch.state(), !batch.records().is_empty())?;
-        self.write(state, log, counted);
+        let counted = counts(old, batch.state(), !batch.records().is_empty());
+        self.write(sealed, log, counted);
         Ok(())
     }
 

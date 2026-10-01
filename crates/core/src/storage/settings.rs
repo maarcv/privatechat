@@ -4,9 +4,9 @@
 
 use zeroize::Zeroizing;
 
-use super::{StorageKey, StoreError, open_box, seal_box, settings_key};
+use super::{StorageKey, StoreError, open_box, required, seal_box, settings_key};
 use crate::proto::config::url::{self, MAX_URL};
-use crate::proto::record::{Reader, RecordError, UnknownKeys, Writer, record_len};
+use crate::proto::record::{Reader, U8_LEN, U32_LEN, UnknownKeys, Writer, record_len};
 
 /// The version of the settings schema, key 0 (R8).
 const SETTINGS_VERSION: u8 = 1;
@@ -64,16 +64,12 @@ impl Settings {
     /// Decodes a settings record under `Reject`, key 0 first (R8).
     pub(crate) fn decode(buf: &[u8]) -> Result<Settings, StoreError> {
         let mut reader = Reader::new(buf, MAX_SETTINGS_RECORD, UnknownKeys::Reject)?;
-        let missing = || RecordError::Missing;
-        if reader.u8(KEY_SETTINGS_VERSION)?.ok_or_else(missing)? != SETTINGS_VERSION {
+        if required(reader.u8(KEY_SETTINGS_VERSION))? != SETTINGS_VERSION {
             return Err(StoreError::UnsupportedVersion);
         }
         let settings = Settings {
-            default_server_url: reader
-                .text(KEY_DEFAULT_SERVER_URL, MAX_URL)?
-                .ok_or_else(missing)?
-                .to_owned(),
-            lock_timeout_seconds: reader.u32(KEY_LOCK_TIMEOUT_SECONDS)?.ok_or_else(missing)?,
+            default_server_url: required(reader.text(KEY_DEFAULT_SERVER_URL, MAX_URL))?.to_owned(),
+            lock_timeout_seconds: required(reader.u32(KEY_LOCK_TIMEOUT_SECONDS))?,
             socks5_proxy: reader.text(KEY_SOCKS5_PROXY, MAX_URL)?.map(str::to_owned),
         };
         reader.end()?;
@@ -85,9 +81,9 @@ impl Settings {
     pub(crate) fn encode(&self) -> Result<Zeroizing<Vec<u8>>, StoreError> {
         self.check()?;
         let len = record_len(&[
-            Some(1),
+            Some(U8_LEN),
             Some(self.default_server_url.len()),
-            Some(4),
+            Some(U32_LEN),
             self.socks5_proxy.as_ref().map(String::len),
         ]);
         let mut writer = Writer::with_capacity(len);

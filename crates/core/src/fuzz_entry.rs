@@ -17,7 +17,7 @@ use crate::proto::envelope::{self, ChannelCtx, Content, Opened, SenderKey, text_
 use crate::proto::fingerprint;
 use crate::proto::payload::{MAX_BLOCKS, PAD_BLOCK, Payload};
 use crate::proto::record::UnknownKeys;
-use crate::proto::record::test_schema::decode_test_record;
+use crate::proto::record::test_schema::{TypesRecord, decode_test_record};
 use crate::storage::{ChannelState, LogRecord, Settings, StoreError};
 
 #[cfg(test)]
@@ -33,8 +33,9 @@ const QR_CHANNEL: ChannelId = ChannelId([
     0x26, 0xb0, 0x66, 0x31, 0xaa, 0x61, 0xcb, 0x8f, 0x91, 0xc3, 0x49, 0x8b, 0x1c, 0x59, 0xc2, 0xc7,
 ]);
 
-/// `record_decode`: the test schema of spec 017 under the policy of the
-/// first byte (R3).
+/// `record_decode`: the test schema of spec 017 and the codec schema of spec
+/// 020, which nests a record and a list, under the policy of the first byte
+/// (R3).
 pub fn record_decode(data: &[u8]) {
     let _ = record_decode_verdict(data);
 }
@@ -101,6 +102,8 @@ pub(crate) fn record_decode_verdict(data: &[u8]) -> Option<Result<(), Error>> {
     } else {
         UnknownKeys::Reject
     };
+    // The types of spec 020 R1 ride the same bytes; the verdict stays 017's.
+    let _ = TypesRecord::decode(record, policy);
     Some(decode_test_record(record, policy))
 }
 

@@ -4,7 +4,7 @@
 use zeroize::Zeroizing;
 
 use crate::crypto::{PublicKey, Secret};
-use crate::storage::{ChannelState, Content, LogEntry, LogRecord, Message, WriteBatch};
+use crate::storage::{ChannelState, Content, LogEntry, LogRecord, Message, Settings, WriteBatch};
 
 /// A fresh state of `channel_id`: no peer, nothing waiting, no optional
 /// field, a fixed seed and a stand-in config.
@@ -44,7 +44,7 @@ pub fn record(purge_at: u64, body_len: usize) -> LogRecord {
             content: Content::Text(Zeroizing::new(vec![b'm'; body_len])),
             display_name: None,
             sent_at: None,
-            own: None,
+            own_client_ref: None,
         }),
     }
 }
@@ -52,4 +52,18 @@ pub fn record(purge_at: u64, body_len: usize) -> LogRecord {
 /// A batch of `state` and `records`.
 pub fn batch(state: ChannelState, records: Vec<LogRecord>) -> WriteBatch {
     WriteBatch::new(state, records)
+}
+
+/// Settings of these values, which spec 027-core-api will let the app set;
+/// `seal` refuses them if they break the grammars of spec 020 R8.
+pub fn settings(
+    default_server_url: &str,
+    lock_timeout_seconds: u32,
+    socks5_proxy: Option<&str>,
+) -> Settings {
+    Settings {
+        default_server_url: default_server_url.to_owned(),
+        lock_timeout_seconds,
+        socks5_proxy: socks5_proxy.map(str::to_owned),
+    }
 }

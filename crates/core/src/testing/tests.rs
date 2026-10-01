@@ -28,8 +28,8 @@ fn peer() -> PeerRecord {
 #[test]
 fn s020_t29_r29_comparisons_see_every_field() {
     let state = state_for([1; 16]);
-    assert!(state_eq(&state, &state.duplicate().unwrap()));
-    let mut moved = state.duplicate().unwrap();
+    assert!(state_eq(&state, &state.duplicate()));
+    let mut moved = state.duplicate();
     moved.log_committed_len = 99;
     moved.log_generation = 7;
     assert!(state_eq(&state, &moved));
@@ -44,7 +44,7 @@ fn s020_t29_r29_comparisons_see_every_field() {
         |s| s.peers.push(peer()),
     ];
     for (at, change) in changes.iter().enumerate() {
-        let mut changed = state.duplicate().unwrap();
+        let mut changed = state.duplicate();
         change(&mut changed);
         assert!(!state_eq(&state, &changed), "change {at}");
     }

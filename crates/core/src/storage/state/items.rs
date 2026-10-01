@@ -5,25 +5,13 @@
 
 use zeroize::Zeroizing;
 
-use super::super::{MAX_NAME, StoreError};
+use super::super::{ID_LEN, KEY_LEN, MAX_NAME, SIGNATURE_LEN, StoreError, required, within};
 use crate::crypto::{PublicKey, Signature};
 use crate::proto::envelope::BLOB_OVERHEAD;
 use crate::proto::payload::{MAX_BLOCKS, PAD_BLOCK};
 use crate::proto::record::{
-    FIELD_HEADER_LEN, Reader, RecordError, UnknownKeys, Writer, record_len,
+    BOOL_LEN, FIELD_HEADER_LEN, Reader, U8_LEN, U64_LEN, UnknownKeys, Writer, record_len,
 };
-
-/// Bytes of a public key, a `bytes32`.
-const PK_LEN: usize = 32;
-
-/// Bytes of a `client_ref`, a `bytes16`.
-const CLIENT_REF_LEN: usize = 16;
-
-/// Bytes of an Ed25519 signature, a `bytes64`.
-const SIGNATURE_LEN: usize = 64;
-
-/// Bytes of a `u64`.
-const U64_LEN: usize = 8;
 
 /// The largest sealed blob, of 63 padding blocks (spec 013-wire-message):
 /// 64 673 bytes.
@@ -31,23 +19,20 @@ pub(crate) const MAX_BLOB: usize = BLOB_OVERHEAD + PAD_BLOCK * MAX_BLOCKS;
 
 /// The largest peer record: every field present at its maximum.
 pub(crate) const MAX_PEER_RECORD: usize =
-    9 * FIELD_HEADER_LEN + PK_LEN + MAX_NAME + 1 + 1 + 4 * U64_LEN + MAX_NAME;
+    9 * FIELD_HEADER_LEN + KEY_LEN + MAX_NAME + 2 * BOOL_LEN + 4 * U64_LEN + MAX_NAME;
 
 /// The largest `outbox` entry.
-pub(crate) const MAX_OUTBOX_ENTRY: usize =
-    7 * FIELD_HEADER_LEN + CLIENT_REF_LEN + 1 + U64_LEN + MAX_BLOB + SIGNATURE_LEN + 1 + U64_LEN;
+pub(crate) const MAX_OUTBOX_ENTRY: usize = 7 * FIELD_HEADER_LEN
+    + ID_LEN
+    + U8_LEN
+    + U64_LEN
+    + MAX_BLOB
+    + SIGNATURE_LEN
+    + BOOL_LEN
+    + U64_LEN;
 
 /// The largest old-key record.
-pub(crate) const MAX_OLD_KEY: usize = 2 * FIELD_HEADER_LEN + PK_LEN + U64_LEN;
-
-/// `Corrupt` unless `len` is within `max`: what open refuses, seal refuses
-/// too (R27).
-fn within(len: usize, max: usize) -> Result<(), StoreError> {
-    if len > max {
-        return Err(StoreError::Corrupt);
-    }
-    Ok(())
-}
+pub(crate) const MAX_OLD_KEY: usize = 2 * FIELD_HEADER_LEN + KEY_LEN + U64_LEN;
 
 /// One peer of the channel (spec 022-peers-tofu).
 #[derive(Clone)]
@@ -81,13 +66,13 @@ impl PeerRecord {
     pub(crate) fn decode(buf: &[u8]) -> Result<PeerRecord, StoreError> {
         let mut reader = Reader::new(buf, MAX_PEER_RECORD, UnknownKeys::Reject)?;
         let peer = PeerRecord {
-            pk: PublicKey(*reader.bytes_n::<PK_LEN>(0)?.ok_or(RecordError::Missing)?),
+            pk: PublicKey(*required(reader.bytes_n::<KEY_LEN>(0))?),
             label: reader.text(1, MAX_NAME)?.map(str::to_owned),
-            verified: reader.bool(2)?.ok_or(RecordError::Missing)?,
-            muted: reader.bool(3)?.ok_or(RecordError::Missing)?,
+            verified: required(reader.bool(2))?,
+            muted: required(reader.bool(3))?,
             retired_at: reader.u64(4)?,
-            first_seen: reader.u64(5)?.ok_or(RecordError::Missing)?,
-            last_seen: reader.u64(6)?.ok_or(RecordError::Missing)?,
+            first_seen: required(reader.u64(5))?,
+            last_seen: required(reader.u64(6))?,
             max_counter: reader.u64(7)?,
             last_display_name: reader.bytes(8, MAX_NAME)?.map(<[u8]>::to_vec),
         };
@@ -98,10 +83,10 @@ impl PeerRecord {
     /// The exact length of [`PeerRecord::encode`]'s output.
     pub(crate) fn encoded_len(&self) -> usize {
         record_len(&[
-            Some(PK_LEN),
+            Some(KEY_LEN),
             self.label.as_ref().map(String::len),
-            Some(1),
-            Some(1),
+            Some(BOOL_LEN),
+            Some(BOOL_LEN),
             self.retired_at.map(|_| U64_LEN),
             Some(U64_LEN),
             Some(U64_LEN),
@@ -152,11 +137,34 @@ pub(crate) enum OutboxKind {
     KeyRetired,
 }
 
+impl OutboxKind {
+    /// The kind of key 1.
+    ///
+    /// # Errors
+    ///
+    /// `Corrupt` for a byte other than 0 and 1.
+    fn from_byte(byte: u8) -> Result<OutboxKind, StoreError> {
+        match byte {
+            0 => Ok(OutboxKind::Text),
+            1 => Ok(OutboxKind::KeyRetired),
+            _ => Err(StoreError::Corrupt),
+        }
+    }
+
+    /// Key 1 of this kind.
+    fn to_byte(self) -> u8 {
+        match self {
+            OutboxKind::Text => 0,
+            OutboxKind::KeyRetired => 1,
+        }
+    }
+}
+
 /// One sealed message waiting to leave (spec 021-channel-session).
 #[derive(Clone)]
 pub(crate) struct OutboxEntry {
     /// Key 0.
-    pub(crate) client_ref: [u8; CLIENT_REF_LEN],
+    pub(crate) client_ref: [u8; ID_LEN],
     /// Key 1.
     pub(crate) kind: OutboxKind,
     /// Key 2.
@@ -181,20 +189,13 @@ impl OutboxEntry {
     pub(crate) fn decode(buf: &[u8]) -> Result<OutboxEntry, StoreError> {
         let mut reader = Reader::new(buf, MAX_OUTBOX_ENTRY, UnknownKeys::Reject)?;
         let entry = OutboxEntry {
-            client_ref: *reader.bytes_n(0)?.ok_or(RecordError::Missing)?,
-            kind: match reader.u8(1)?.ok_or(RecordError::Missing)? {
-                0 => OutboxKind::Text,
-                1 => OutboxKind::KeyRetired,
-                _ => return Err(StoreError::Corrupt),
-            },
-            sent_at: reader.u64(2)?.ok_or(RecordError::Missing)?,
-            blob: reader
-                .bytes(3, MAX_BLOB)?
-                .ok_or(RecordError::Missing)?
-                .to_vec(),
-            signature: Signature(*reader.bytes_n(4)?.ok_or(RecordError::Missing)?),
-            under_retired_key: reader.bool(5)?.ok_or(RecordError::Missing)?,
-            counter: reader.u64(6)?.ok_or(RecordError::Missing)?,
+            client_ref: *required(reader.bytes_n(0))?,
+            kind: OutboxKind::from_byte(required(reader.u8(1))?)?,
+            sent_at: required(reader.u64(2))?,
+            blob: required(reader.bytes(3, MAX_BLOB))?.to_vec(),
+            signature: Signature(*required(reader.bytes_n(4))?),
+            under_retired_key: required(reader.bool(5))?,
+            counter: required(reader.u64(6))?,
         };
         reader.end()?;
         Ok(entry)
@@ -203,12 +204,12 @@ impl OutboxEntry {
     /// The exact length of [`OutboxEntry::encode`]'s output.
     pub(crate) fn encoded_len(&self) -> usize {
         record_len(&[
-            Some(CLIENT_REF_LEN),
-            Some(1),
+            Some(ID_LEN),
+            Some(U8_LEN),
             Some(U64_LEN),
             Some(self.blob.len()),
             Some(SIGNATURE_LEN),
-            Some(1),
+            Some(BOOL_LEN),
             Some(U64_LEN),
         ])
     }
@@ -222,13 +223,7 @@ impl OutboxEntry {
         within(self.blob.len(), MAX_BLOB)?;
         let mut writer = Writer::with_capacity(self.encoded_len());
         writer.bytes(0, &self.client_ref)?;
-        writer.u8(
-            1,
-            match self.kind {
-                OutboxKind::Text => 0,
-                OutboxKind::KeyRetired => 1,
-            },
-        )?;
+        writer.u8(1, self.kind.to_byte())?;
         writer.u64(2, self.sent_at)?;
         writer.bytes(3, &self.blob)?;
         writer.bytes(4, &self.signature.0)?;
@@ -256,8 +251,8 @@ impl OldKey {
     pub(crate) fn decode(buf: &[u8]) -> Result<OldKey, StoreError> {
         let mut reader = Reader::new(buf, MAX_OLD_KEY, UnknownKeys::Reject)?;
         let old_key = OldKey {
-            pk: PublicKey(*reader.bytes_n(0)?.ok_or(RecordError::Missing)?),
-            retired_at: reader.u64(1)?.ok_or(RecordError::Missing)?,
+            pk: PublicKey(*required(reader.bytes_n(0))?),
+            retired_at: required(reader.u64(1))?,
         };
         reader.end()?;
         Ok(old_key)

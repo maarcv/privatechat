@@ -709,7 +709,7 @@ proptest! {
         let decoded = ChannelState::decode(&encoded).unwrap();
         assert_eq!(decoded.log_position(), (log_len, generation));
         assert_eq!(encode(&decoded).unwrap(), encoded);
-        assert_eq!(encode(&decoded.duplicate().unwrap()).unwrap(), encoded);
+        assert_eq!(encode(&decoded.duplicate()).unwrap(), encoded);
     }
 
     /// Spec 020, R29 (the state record): the decoder never panics on

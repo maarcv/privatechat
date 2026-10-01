@@ -27,6 +27,15 @@ pub use self::state::ChannelState;
 #[cfg(test)]
 mod tests;
 
+/// Bytes of an identifier: a `channel_id`, a `server_id`, a `client_ref`.
+pub(crate) const ID_LEN: usize = 16;
+
+/// Bytes of a public key or a seed.
+pub(crate) const KEY_LEN: usize = 32;
+
+/// Bytes of an Ed25519 signature.
+pub(crate) const SIGNATURE_LEN: usize = 64;
+
 /// The longest stored name: a label, one's own display name, a channel's
 /// local name, a peer's last display name (spec 020 Limits). Specs 021, 022
 /// and 027 use it.
@@ -35,6 +44,22 @@ pub(crate) const MAX_NAME: usize = 64;
 /// The largest `messages.log` (Limits): a commit past it is `LogFull`
 /// (R16), and spec 021-channel-session keeps its headroom below it.
 pub const MAX_LOG_LEN: u64 = 67_108_864;
+
+/// The magic and version `store` writes before the `nonce ‖ box` of
+/// `state.bin` and `settings.bin` (R4); the bytes are its own, the count is
+/// what the file limits below need.
+const FILE_HEADER_LEN: usize = 5;
+
+/// The largest `state.bin`, 2 359 341 bytes (Limits): header, nonce, the
+/// largest state record and its tag. `store` reads no more (R6).
+pub const MAX_STATE_FILE: usize = FILE_HEADER_LEN + MIN_SEALED + state::MAX_STATE_RECORD;
+
+/// The largest `settings.bin`, 1 069 bytes (Limits).
+pub const MAX_SETTINGS_FILE: usize = FILE_HEADER_LEN + MIN_SEALED + settings::MAX_SETTINGS_RECORD;
+
+/// The largest `len` of a log entry, 65 576 bytes (Limits): nonce, the
+/// largest log record and its tag.
+pub const MAX_LOG_ENTRY: usize = MIN_SEALED + log::MAX_LOG_RECORD;
 
 /// Why the storage failed, one variant per condition of spec 020 (R26). No
 /// variant carries an OS error, a path or a byte of a file.
@@ -185,6 +210,25 @@ impl From<CryptoError> for StoreError {
     fn from(_: CryptoError) -> StoreError {
         StoreError::Corrupt
     }
+}
+
+/// `Corrupt` unless `len` is within `max`: what open refuses, seal refuses
+/// too (R27).
+pub(crate) fn within(len: usize, max: usize) -> Result<(), StoreError> {
+    if len > max {
+        return Err(StoreError::Corrupt);
+    }
+    Ok(())
+}
+
+/// A mandatory key: absent or malformed, the record is `Corrupt` (R7). A
+/// list's items decode to `StoreError` already, every other value to
+/// `RecordError`.
+pub(crate) fn required<T, E>(value: Result<Option<T>, E>) -> Result<T, StoreError>
+where
+    StoreError: From<E>,
+{
+    value?.ok_or(StoreError::Corrupt)
 }
 
 /// The domain tag of a channel's file key (R3).

@@ -8,10 +8,15 @@ use zeroize::Zeroizing;
 use self::items::{
     MAX_OLD_KEY, MAX_OUTBOX_ENTRY, MAX_PEER_RECORD, OldKey, OutboxEntry, PeerRecord,
 };
-use super::{DirName, MAX_NAME, StorageKey, StoreError, open_box, seal_box, store_key};
+use super::{
+    DirName, ID_LEN, KEY_LEN, MAX_NAME, StorageKey, StoreError, open_box, required, seal_box,
+    store_key, within,
+};
 use crate::crypto::Secret;
 use crate::proto::config;
-use crate::proto::record::{Reader, RecordError, UnknownKeys, Writer, list_len, record_len};
+use crate::proto::record::{
+    BOOL_LEN, Reader, U8_LEN, U32_LEN, U64_LEN, UnknownKeys, Writer, list_len, record_len,
+};
 
 pub(crate) mod items;
 
@@ -30,12 +35,6 @@ pub(crate) const MAX_OUTBOX: usize = 32;
 
 /// The most of one's own old keys (spec 025-identity-regen).
 pub(crate) const MAX_OLD_KEYS: usize = 16;
-
-/// Bytes of a `channel_id`.
-const CHANNEL_ID_LEN: usize = 16;
-
-/// Bytes of a seed.
-const SEED_LEN: usize = 32;
 
 /// The keys of the state record, in order.
 const KEY_STATE_VERSION: u8 = 0;
@@ -62,11 +61,11 @@ const KEY_TRUNCATED_AT: u8 = 18;
 /// holds the channel key inside `config` and one's own seeds, and
 /// [`ChannelState::duplicate`] is its one deep copy.
 pub struct ChannelState {
-    pub(crate) channel_id: [u8; CHANNEL_ID_LEN],
+    pub(crate) channel_id: [u8; ID_LEN],
     /// The config record of spec 011-config-format without key 6; it holds
     /// `K_ch`.
     pub(crate) config: Zeroizing<Vec<u8>>,
-    pub(crate) identity_seed: Secret<SEED_LEN>,
+    pub(crate) identity_seed: Secret<KEY_LEN>,
     pub(crate) identity_epoch: u32,
     /// `2^64 − 1` means exhausted.
     pub(crate) send_counter: u64,
@@ -75,7 +74,7 @@ pub struct ChannelState {
     pub(crate) local_name: Option<String>,
     pub(crate) peers: Vec<PeerRecord>,
     pub(crate) outbox: Vec<OutboxEntry>,
-    pub(crate) retiring_seed: Option<Secret<SEED_LEN>>,
+    pub(crate) retiring_seed: Option<Secret<KEY_LEN>>,
     pub(crate) own_old_keys: Vec<OldKey>,
     pub(crate) own_key_used_elsewhere: bool,
     pub(crate) read_only: bool,
@@ -85,14 +84,6 @@ pub struct ChannelState {
     pub(crate) log_generation: u32,
     pub(crate) synced_at: Option<u64>,
     pub(crate) truncated_at: Option<u64>,
-}
-
-/// `Corrupt` unless `len` is within `max` (R27).
-fn within(len: usize, max: usize) -> Result<(), StoreError> {
-    if len > max {
-        return Err(StoreError::Corrupt);
-    }
-    Ok(())
 }
 
 impl ChannelState {
@@ -139,18 +130,14 @@ impl ChannelState {
 
     /// The channel this state belongs to, which names its directory (R12,
     /// R18).
-    pub fn channel_id(&self) -> [u8; CHANNEL_ID_LEN] {
+    pub fn channel_id(&self) -> [u8; ID_LEN] {
         self.channel_id
     }
 
     /// The one deep copy of a state, its secrets through
     /// `Secret::copy_from`.
-    ///
-    /// # Errors
-    ///
-    /// None today; the signature leaves room for a copy that can fail.
-    pub(crate) fn duplicate(&self) -> Result<ChannelState, StoreError> {
-        Ok(ChannelState {
+    pub(crate) fn duplicate(&self) -> ChannelState {
+        ChannelState {
             channel_id: self.channel_id,
             config: Zeroizing::new(self.config.to_vec()),
             identity_seed: Secret::copy_from(self.identity_seed.expose()),
@@ -172,7 +159,7 @@ impl ChannelState {
             log_generation: self.log_generation,
             synced_at: self.synced_at,
             truncated_at: self.truncated_at,
-        })
+        }
     }
 
     /// Decodes a state record under `Reject`, key 0 first (R8).
@@ -183,49 +170,45 @@ impl ChannelState {
     /// other key is read; `Corrupt` for any other break of the schema.
     pub(crate) fn decode(buf: &[u8]) -> Result<ChannelState, StoreError> {
         let mut reader = Reader::new(buf, MAX_STATE_RECORD, UnknownKeys::Reject)?;
-        if reader.u8(KEY_STATE_VERSION)?.ok_or(RecordError::Missing)? != STATE_VERSION {
+        if required(reader.u8(KEY_STATE_VERSION))? != STATE_VERSION {
             return Err(StoreError::UnsupportedVersion);
         }
-        let missing = || RecordError::Missing;
         let state = ChannelState {
-            channel_id: *reader.bytes_n(KEY_CHANNEL_ID)?.ok_or_else(missing)?,
+            channel_id: *required(reader.bytes_n(KEY_CHANNEL_ID))?,
             config: Zeroizing::new(
-                reader
-                    .bytes(KEY_CONFIG, config::MAX_RECORD)?
-                    .ok_or_else(missing)?
-                    .to_vec(),
+                required(reader.bytes(KEY_CONFIG, config::MAX_RECORD))?.to_vec(),
             ),
-            identity_seed: Secret::copy_from(
-                reader.bytes_n(KEY_IDENTITY_SEED)?.ok_or_else(missing)?,
-            ),
-            identity_epoch: reader.u32(KEY_IDENTITY_EPOCH)?.ok_or_else(missing)?,
-            send_counter: reader.u64(KEY_SEND_COUNTER)?.ok_or_else(missing)?,
+            identity_seed: Secret::copy_from(required(reader.bytes_n(KEY_IDENTITY_SEED))?),
+            identity_epoch: required(reader.u32(KEY_IDENTITY_EPOCH))?,
+            send_counter: required(reader.u64(KEY_SEND_COUNTER))?,
             cursor: reader.u64(KEY_CURSOR)?,
             own_display_name: reader
                 .text(KEY_OWN_DISPLAY_NAME, MAX_NAME)?
                 .map(str::to_owned),
             local_name: reader.text(KEY_LOCAL_NAME, MAX_NAME)?.map(str::to_owned),
-            peers: reader
-                .list(KEY_PEERS, MAX_PEERS, MAX_PEER_RECORD, PeerRecord::decode)?
-                .ok_or_else(missing)?,
-            outbox: reader
-                .list(
-                    KEY_OUTBOX,
-                    MAX_OUTBOX,
-                    MAX_OUTBOX_ENTRY,
-                    OutboxEntry::decode,
-                )?
-                .ok_or_else(missing)?,
+            peers: required(reader.list(
+                KEY_PEERS,
+                MAX_PEERS,
+                MAX_PEER_RECORD,
+                PeerRecord::decode,
+            ))?,
+            outbox: required(reader.list(
+                KEY_OUTBOX,
+                MAX_OUTBOX,
+                MAX_OUTBOX_ENTRY,
+                OutboxEntry::decode,
+            ))?,
             retiring_seed: reader.bytes_n(KEY_RETIRING_SEED)?.map(Secret::copy_from),
-            own_old_keys: reader
-                .list(KEY_OWN_OLD_KEYS, MAX_OLD_KEYS, MAX_OLD_KEY, OldKey::decode)?
-                .ok_or_else(missing)?,
-            own_key_used_elsewhere: reader
-                .bool(KEY_OWN_KEY_USED_ELSEWHERE)?
-                .ok_or_else(missing)?,
-            read_only: reader.bool(KEY_READ_ONLY)?.ok_or_else(missing)?,
-            log_committed_len: reader.u64(KEY_LOG_COMMITTED_LEN)?.ok_or_else(missing)?,
-            log_generation: reader.u32(KEY_LOG_GENERATION)?.ok_or_else(missing)?,
+            own_old_keys: required(reader.list(
+                KEY_OWN_OLD_KEYS,
+                MAX_OLD_KEYS,
+                MAX_OLD_KEY,
+                OldKey::decode,
+            ))?,
+            own_key_used_elsewhere: required(reader.bool(KEY_OWN_KEY_USED_ELSEWHERE))?,
+            read_only: required(reader.bool(KEY_READ_ONLY))?,
+            log_committed_len: required(reader.u64(KEY_LOG_COMMITTED_LEN))?,
+            log_generation: required(reader.u32(KEY_LOG_GENERATION))?,
             synced_at: reader.u64(KEY_SYNCED_AT)?,
             truncated_at: reader.u64(KEY_TRUNCATED_AT)?,
         };
@@ -245,41 +228,31 @@ impl ChannelState {
         log_len: u64,
         generation: u32,
     ) -> Result<Zeroizing<Vec<u8>>, StoreError> {
-        if self.outbox.len() > MAX_OUTBOX {
-            return Err(StoreError::OutboxFull);
-        }
-        within(self.peers.len(), MAX_PEERS)?;
-        within(self.own_old_keys.len(), MAX_OLD_KEYS)?;
-        within(self.config.len(), config::MAX_RECORD)?;
-        within(
-            self.own_display_name.as_ref().map_or(0, String::len),
-            MAX_NAME,
-        )?;
-        within(self.local_name.as_ref().map_or(0, String::len), MAX_NAME)?;
+        self.check_limits()?;
         let peers = encode_all(&self.peers, PeerRecord::encode)?;
         let outbox = encode_all(&self.outbox, OutboxEntry::encode)?;
         let own_old_keys = encode_all(&self.own_old_keys, OldKey::encode)?;
         let lens = |items: &[Zeroizing<Vec<u8>>]| list_len(items.iter().map(|item| item.len()));
         let len = record_len(&[
-            Some(1),
-            Some(CHANNEL_ID_LEN),
+            Some(U8_LEN),
+            Some(ID_LEN),
             Some(self.config.len()),
-            Some(SEED_LEN),
-            Some(4),
-            Some(8),
-            self.cursor.map(|_| 8),
+            Some(KEY_LEN),
+            Some(U32_LEN),
+            Some(U64_LEN),
+            self.cursor.map(|_| U64_LEN),
             self.own_display_name.as_ref().map(String::len),
             self.local_name.as_ref().map(String::len),
             Some(lens(&peers)),
             Some(lens(&outbox)),
-            self.retiring_seed.as_ref().map(|_| SEED_LEN),
+            self.retiring_seed.as_ref().map(|_| KEY_LEN),
             Some(lens(&own_old_keys)),
-            Some(1),
-            Some(1),
-            Some(8),
-            Some(4),
-            self.synced_at.map(|_| 8),
-            self.truncated_at.map(|_| 8),
+            Some(BOOL_LEN),
+            Some(BOOL_LEN),
+            Some(U64_LEN),
+            Some(U32_LEN),
+            self.synced_at.map(|_| U64_LEN),
+            self.truncated_at.map(|_| U64_LEN),
         ]);
         within(len, MAX_STATE_RECORD)?;
         let mut writer = Writer::with_capacity(len);
@@ -315,6 +288,22 @@ impl ChannelState {
             writer.u64(KEY_TRUNCATED_AT, truncated_at)?;
         }
         Ok(writer.finish())
+    }
+}
+
+impl ChannelState {
+    /// The bounds of the Limits table on the state's own fields and list
+    /// counts, which `open` applies too (R27); each item checks its own.
+    fn check_limits(&self) -> Result<(), StoreError> {
+        if self.outbox.len() > MAX_OUTBOX {
+            return Err(StoreError::OutboxFull);
+        }
+        within(self.peers.len(), MAX_PEERS)?;
+        within(self.own_old_keys.len(), MAX_OLD_KEYS)?;
+        within(self.config.len(), config::MAX_RECORD)?;
+        let name_len = |name: &Option<String>| name.as_ref().map_or(0, String::len);
+        within(name_len(&self.own_display_name), MAX_NAME)?;
+        within(name_len(&self.local_name), MAX_NAME)
     }
 }
 

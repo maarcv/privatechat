@@ -22,9 +22,9 @@ fn message(body_len: usize) -> LogRecord {
             sender_pk: PublicKey([4; 32]),
             counter: 5,
             content: Content::Text(Zeroizing::new(vec![b'b'; body_len])),
-            display_name: Some(b"Anna".to_vec()),
+            display_name: Some(Zeroizing::new(b"Anna".to_vec())),
             sent_at: Some(6),
-            own: None,
+            own_client_ref: None,
         }),
     }
 }
@@ -41,7 +41,7 @@ fn every_kind() -> Vec<LogRecord> {
             content,
             display_name: None,
             sent_at: None,
-            own,
+            own_client_ref: own,
         }),
     };
     let record = |entry| LogRecord {
@@ -173,7 +173,7 @@ fn s020_t27_r27_log_within_limits() {
     }
     let mut longest = message(MAX_PAYLOAD);
     if let LogEntry::Message(message) = &mut longest.entry {
-        message.display_name = Some(vec![b'n'; MAX_NAME]);
+        message.display_name = Some(Zeroizing::new(vec![b'n'; MAX_NAME]));
     }
     let buf = longest.encode(u32::MAX, u64::MAX).unwrap();
     assert!(buf.len() <= MAX_LOG_RECORD, "{}", buf.len());
@@ -184,7 +184,7 @@ fn s020_t27_r27_log_within_limits() {
     );
     let mut long_name = message(3);
     if let LogEntry::Message(message) = &mut long_name.entry {
-        message.display_name = Some(vec![b'n'; MAX_NAME + 1]);
+        message.display_name = Some(Zeroizing::new(vec![b'n'; MAX_NAME + 1]));
     }
     assert_eq!(long_name.encode(1, 9).err(), Some(StoreError::Corrupt));
 }
@@ -229,14 +229,14 @@ pub(in crate::storage) fn check_vector(vector: &Vector) {
             };
             assert_eq!(content, expected("content").number());
             assert_eq!(body, optional(vector, "body").map(Value::bytes));
-            let name = message.display_name.as_deref();
+            let name = message.display_name.as_ref().map(|name| name.as_slice());
             assert_eq!(name, optional(vector, "display_name").map(Value::bytes));
             assert_eq!(
                 message.sent_at,
                 optional(vector, "sent_at").map(Value::u64_hex)
             );
-            assert_eq!(message.own.is_some(), expected("own").flag());
-            let client_ref = message.own.map(|id| id.to_vec());
+            assert_eq!(message.own_client_ref.is_some(), expected("own").flag());
+            let client_ref = message.own_client_ref.map(|id| id.to_vec());
             assert_eq!(
                 client_ref.as_deref(),
                 optional(vector, "client_ref").map(Value::bytes)
@@ -294,9 +294,9 @@ proptest! {
                 sender_pk: PublicKey([1; 32]),
                 counter,
                 content: Content::Text(Zeroizing::new(body)),
-                display_name,
+                display_name: display_name.map(Zeroizing::new),
                 sent_at,
-                own,
+                own_client_ref: own,
             }),
         });
         for record in records {

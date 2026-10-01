@@ -138,7 +138,8 @@ impl<'a> TypesRecord<'a> {
 
 /// The verdict of the test schema on `buf`, for the fuzz target
 /// `record_decode` of spec 016-fuzz-harness: every `RecordError` is
-/// `BadPayload`, so that `RecordError` never leaves `proto`.
+/// `BadPayload`, so that `RecordError` does not leave the core's decoders
+/// (spec 011-config-format, Interface).
 pub(crate) fn decode_test_record(buf: &[u8], unknown: UnknownKeys) -> Result<(), Error> {
     TestRecord::decode(buf, unknown)
         .map(|_| ())
