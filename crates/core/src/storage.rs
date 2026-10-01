@@ -32,6 +32,10 @@ mod tests;
 /// and 027 use it.
 pub(crate) const MAX_NAME: usize = 64;
 
+/// The largest `messages.log` (Limits): a commit past it is `LogFull`
+/// (R16), and spec 021-channel-session keeps its headroom below it.
+pub const MAX_LOG_LEN: u64 = 67_108_864;
+
 /// Why the storage failed, one variant per condition of spec 020 (R26). No
 /// variant carries an OS error, a path or a byte of a file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -222,7 +226,7 @@ impl fmt::Debug for StorageKey {
 
 /// The name of a channel directory: the first 16 bytes of a keyed hash of its
 /// `channel_id` (R18), which the store writes as 32 lowercase hex characters.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DirName(pub [u8; 16]);
 
 /// The directory name of `channel_id` under `key` (R18).

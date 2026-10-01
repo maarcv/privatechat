@@ -8,9 +8,11 @@
 
 mod builders;
 mod compare;
+mod memory;
 
 pub use self::builders::{batch, record, state_for};
 pub use self::compare::{records_eq, state_eq};
+pub use self::memory::{MemoryStore, MemoryVault};
 
 #[cfg(test)]
 mod tests;

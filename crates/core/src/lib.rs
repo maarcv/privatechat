@@ -41,8 +41,8 @@ pub use error::Error;
 pub use proto::config::Config;
 pub use proto::fingerprint::Fingerprint;
 pub use storage::{
-    ChannelState, DirName, LogRecord, Settings, StorageKey, Store, StoreError, Vault, WriteBatch,
-    dir_name,
+    ChannelState, DirName, LogRecord, MAX_LOG_LEN, Settings, StorageKey, Store, StoreError, Vault,
+    WriteBatch, dir_name,
 };
 
 /// Default exchange server of a fresh installation (`docs/spec.md` §8, ADR 0022).
