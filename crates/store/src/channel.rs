@@ -99,6 +99,11 @@ impl ChannelFiles {
         if log.len() < committed {
             return Err(StoreError::Corrupt);
         }
+        // A commit never writes past the limit (R16): a longer log was
+        // written by someone else (R7).
+        if u64::try_from(log.len()).map_or(true, |len| len > MAX_LOG_LEN) {
+            return Err(StoreError::Corrupt);
+        }
         if log.len() > committed {
             // What a commit cut short appended after the committed end.
             self.io.truncate(&self.path(LOG_FILE), committed_len)?;
@@ -202,6 +207,12 @@ impl Store for ChannelFiles {
         let key = self.shared.key();
         let header_len = u64::try_from(frame::LOG_HEADER_LEN).map_err(|_| StoreError::Io)?;
         let position = self.committed_position()?;
+        if position.is_none() && !batch.records().is_empty() {
+            // A first commit is a header and a state, never an entry: a crash
+            // between them would leave a log of entries with no state, which
+            // R19 keeps and `load` reports as `Corrupt` (R13).
+            return Err(StoreError::Corrupt);
+        }
         let (base, generation) = position.unwrap_or((header_len, 0));
         let appended = frame::seal_entries(batch.records(), key, &self.name, generation, base)?;
         let end = u64::try_from(appended.len())
@@ -245,7 +256,10 @@ impl Store for ChannelFiles {
             .into_iter()
             .filter(|record| record.purge_at() >= now)
             .collect();
-        let dropped = before.saturating_sub(kept.len());
+        // Counted before anything is written, so that nothing fails after
+        // the renames.
+        let dropped =
+            u32::try_from(before.saturating_sub(kept.len())).map_err(|_| StoreError::Corrupt)?;
         if dropped == 0 {
             return Ok(0);
         }
@@ -280,7 +294,7 @@ impl Store for ChannelFiles {
         }
         renamed?;
         self.position = Some((end, next));
-        u32::try_from(dropped).map_err(|_| StoreError::Corrupt)
+        Ok(dropped)
     }
 
     fn log_len(&self) -> u64 {

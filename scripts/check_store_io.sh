@@ -7,6 +7,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 WORDS='std::fs|std::io::Write|OpenOptions|File|std::process'
+# A grouped import (`use std::{fs, io::Write}`) names them without the path.
+GROUPED='std::[{]'
 
 # The offending lines under `src`: every `.rs` but `fs.rs` and the test modules.
 offenders() {
@@ -14,7 +16,7 @@ offenders() {
   find "$src" -name '*.rs' ! -name 'fs.rs' ! -name 'tests.rs' ! -path '*/tests/*' -print0 |
     sort -z |
     while IFS= read -r -d '' file; do
-      sed -e 's#//.*$##' "$file" | grep -nwE "$WORDS" | sed "s#^#$file:#" || true
+      sed -e 's#//.*$##' "$file" | grep -nE "(^|[^[:alnum:]_])($WORDS)($|[^[:alnum:]_])|$GROUPED" | sed "s#^#$file:#" || true
     done
 }
 
@@ -32,12 +34,17 @@ s020_t23_r23_io_in_one_module() {
     echo "check_store_io: the self-test flags an allowed place"; return 1
   fi
   for line in 'pub fn g() { let _ = std::fs::rename("a", "b"); }' 'use std::io::Write;' \
-              'let o = OpenOptions::new();' 'fn h(_: File) {}' 'fn e() { std::process::exit(1) }'; do
+              'let o = OpenOptions::new();' 'fn h(_: File) {}' 'fn e() { std::process::exit(1) }' \
+              'use std::{fs, io::Write as W};'; do
     printf '%s\n' "$line" > "$tmp/src/other.rs"
     if [ -z "$(offenders "$tmp/src")" ]; then
       echo "check_store_io: the self-test accepts: $line"; return 1
     fi
   done
+  # The whole script, not only its search, fails on such a tree.
+  if "$0" "$tmp/src" > /dev/null; then
+    echo "check_store_io: the script passes a tree with a call outside fs.rs"; return 1
+  fi
 }
 
 if [ $# -eq 0 ]; then

@@ -54,6 +54,9 @@ pub(crate) struct Shared {
     /// Held, never read: dropping the last `Arc` releases the lock (R17).
     _lock: fs::LockFile,
     live: Mutex<HashSet<DirName>>,
+    /// Fast mode, which the stores of a fast `DataDir` take too.
+    #[cfg(test)]
+    fast: bool,
 }
 
 impl Shared {
@@ -147,6 +150,8 @@ impl DataDir {
                 key,
                 _lock: lock,
                 live: Mutex::new(HashSet::new()),
+                #[cfg(test)]
+                fast: io.is_fast(),
             }),
             io,
         };
@@ -158,6 +163,8 @@ impl DataDir {
     /// directory whose first commit never became durable. A failure here
     /// never fails `open`.
     fn clean_leftovers(&self) {
+        // A settings save cut before its rename (R22).
+        let _ = self.io.remove_file(&self.path.join(SETTINGS_TMP));
         let Ok(entries) = self.io.list_dir(self.shared.channels()) else {
             return;
         };
@@ -181,8 +188,18 @@ impl DataDir {
         Ok(Box::new(ChannelFiles::new(
             Arc::clone(&self.shared),
             name,
-            fs::Io::new(),
+            self.store_io(),
         )))
+    }
+
+    /// The I/O of a store this directory hands out: fast when the directory
+    /// is (spec 020, "Crash points and faults").
+    fn store_io(&self) -> fs::Io {
+        #[cfg(test)]
+        if self.shared.fast {
+            return fs::Io::fast();
+        }
+        fs::Io::new()
     }
 }
 
@@ -205,9 +222,8 @@ impl Vault for DataDir {
             .filter(|(_, is_dir)| *is_dir)
             .filter_map(|(entry, _)| parse_hex(&entry))
             .collect();
-        if names.iter().any(|name| self.shared.is_live(name)) {
-            return Err(StoreError::Locked);
-        }
+        // A live name fails its `claim`, and the stores built before it
+        // release theirs as they are dropped.
         names.into_iter().map(|name| self.store(name)).collect()
     }
 

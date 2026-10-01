@@ -18,8 +18,8 @@ use privatechat_core::testing::{batch, record, state_for};
 use privatechat_core::{ChannelState, LogRecord, StorageKey, Store, StoreError, Vault};
 
 use crate::DataDir;
-use crate::fs::Io;
 use crate::fs::test::{CRASH_STATUS, CRASH_VAR, crash_point};
+use crate::fs::{Call, Io};
 
 /// A directory of its own for one test, `temp_dir()/privatechat-<pid>-<name>`,
 /// removed when the test ends.
@@ -47,9 +47,28 @@ fn key() -> StorageKey {
     StorageKey::from_bytes(&mut [7u8; 32])
 }
 
-/// The data directory at `path` under the test key.
+/// The data directory at `path` under the test key. A helper child that
+/// another test is starting can hold a copy of the lock for the moment
+/// between its fork and its exec, so a `Locked` is retried for a while.
 fn open(path: &Path) -> DataDir {
-    DataDir::open(path, key()).expect("open the data directory")
+    for _ in 0..200 {
+        match DataDir::open(path, key()) {
+            Err(StoreError::Locked) => std::thread::sleep(std::time::Duration::from_millis(10)),
+            opened => return opened.expect("open the data directory"),
+        }
+    }
+    DataDir::open(path, key()).expect("the data directory stays locked")
+}
+
+/// `DataDir::open_with` of a fresh `io`, retried as `open` retries.
+fn open_with(path: &Path, io: impl Fn() -> Io) -> Result<DataDir, StoreError> {
+    for _ in 0..200 {
+        match DataDir::open_with(path, key(), io()) {
+            Err(StoreError::Locked) => std::thread::sleep(std::time::Duration::from_millis(10)),
+            opened => return opened,
+        }
+    }
+    DataDir::open_with(path, key(), io())
 }
 
 /// The channel id of test channel `n`.
@@ -72,6 +91,13 @@ fn dir_name(n: u8) -> privatechat_core::DirName {
 fn commit(store: &mut dyn Store, n: u8, purge_at: &[u64]) -> Result<(), StoreError> {
     let records: Vec<LogRecord> = purge_at.iter().map(|at| record(*at, 10)).collect();
     store.commit(&batch(state_for(id(n)), records))
+}
+
+/// A new channel `n` in `store`: its first commit, which carries no record
+/// (R13), then one with a record per `purge_at`.
+fn seed(store: &mut dyn Store, n: u8, purge_at: &[u64]) -> Result<(), StoreError> {
+    commit(store, n, &[])?;
+    commit(store, n, purge_at)
 }
 
 /// The `purge_at` of each record, which tells the records of these tests
@@ -141,7 +167,7 @@ fn s020_t17_r17_lock_probe_helper() {
 fn s020_t17_r17_single_process_lock() {
     let dir = TestDir::new("t17");
     let path = dir.path().join("nested").join("data");
-    let first = DataDir::open(&path, key()).expect("first open");
+    let first = open(&path);
     assert!(path.join("channels").is_dir());
     assert!(path.join("LOCK").is_file());
     assert!(matches!(
@@ -156,9 +182,23 @@ fn s020_t17_r17_single_process_lock() {
         ),
         Some(PROBE_LOCKED)
     );
+    // A store keeps the lock after its `DataDir` is gone.
+    let mut first = first;
+    let store = first.create(&id(1)).expect("create");
     drop(first);
-    let again = DataDir::open(&path, key()).expect("open after drop");
-    drop(again);
+    assert!(matches!(
+        DataDir::open(&path, key()),
+        Err(StoreError::Locked)
+    ));
+    assert_eq!(
+        run_helper(
+            "tests::s020_t17_r17_lock_probe_helper",
+            &[(LOCK_PROBE_VAR, probe)]
+        ),
+        Some(PROBE_LOCKED)
+    );
+    drop(store);
+    drop(open(&path));
     assert_eq!(
         run_helper(
             "tests::s020_t17_r17_lock_probe_helper",
@@ -173,26 +213,34 @@ fn s020_t17_r17_single_process_lock() {
 #[test]
 fn s020_t17_r17_open_existing_and_failing() {
     let dir = TestDir::new("t17b");
-    drop(DataDir::open(dir.path(), key()).expect("create"));
-    drop(DataDir::open(dir.path(), key()).expect("reopen"));
-    // Every system call of an `open` that creates nothing: the lock file,
-    // its lock, and the listing of R19, whose failure `open` ignores.
-    let calls = {
-        let probe = DataDir::open_with(dir.path(), key(), Io::new()).expect("probe");
-        probe.io.calls()
-    };
-    assert_eq!(calls, 3);
-    for k in 1..=2 {
-        assert!(
-            matches!(
-                DataDir::open_with(dir.path(), key(), Io::failing_at(k)),
-                Err(StoreError::Io)
-            ),
-            "k={k}"
-        );
+    drop(open(dir.path()));
+    drop(open(dir.path()));
+    // Every system call of an `open` that creates nothing: the lock file
+    // and its lock, whose failure is `Io`, then the cleanup of R19 and R22,
+    // whose failure `open` ignores.
+    let kinds = open_with(dir.path(), Io::new).expect("probe").io.kinds();
+    assert_eq!(kinds, [Call::Lock, Call::Lock, Call::Remove, Call::List]);
+    for (k, kind) in (1..).zip(&kinds) {
+        let opened = open_with(dir.path(), || Io::failing_at(k));
+        if *kind == Call::Lock {
+            assert!(matches!(opened, Err(StoreError::Io)), "k={k}");
+        } else {
+            assert!(opened.is_ok(), "k={k} is best effort");
+        }
     }
-    drop(DataDir::open_with(dir.path(), key(), Io::failing_at(3)).expect("R19 is best effort"));
-    DataDir::open(dir.path(), key()).expect("no lock left behind");
+    drop(open(dir.path()));
+}
+
+/// Spec 020, R26: an I/O failure says `Io` and nothing else, no path.
+#[test]
+fn s020_t26_r26_io_error_has_no_path() {
+    let dir = TestDir::new("t26");
+    std::fs::create_dir(dir.path()).expect("test directory");
+    let file = dir.path().join("a-file");
+    std::fs::write(&file, b"x").expect("file");
+    let error = DataDir::open(&file.join("data"), key()).expect_err("under a file");
+    assert_eq!(error, StoreError::Io);
+    assert_eq!(format!("{error:?}"), "Io");
 }
 
 /// Spec 020, R23: the fault injector counts the calls of its own instance, so
@@ -204,13 +252,46 @@ fn s020_t23_r23_faults_and_fast_mode_per_instance() {
     std::fs::create_dir(dir.path()).expect("test directory");
     let path = dir.path().join("a").join("b");
     // Creating `a`, `b` and `channels`: a create and a parent sync each.
-    let created = DataDir::open_with(&path, key(), Io::fast()).expect("fast open");
+    let created = open_with(&path, Io::fast).expect("fast open");
     assert_eq!(created.io.skipped_syncs(), 3);
     drop(created);
+    // The stores a fast directory hands out are fast too.
+    let fast = open_with(&path, Io::fast).expect("fast open");
+    assert!(fast.store_io().is_fast());
+    assert!(!open(&dir.path().join("slow")).store_io().is_fast());
+    drop(fast);
+    // Each durable step syncs once: a commit its log, its copy and the
+    // directory; a compaction its new log, its copy and the directory twice;
+    // a destroy the directory of channels; a settings save its copy and
+    // the directory.
+    let mut fast = open_with(&path, Io::fast).expect("fast open");
+    drop(fast.create(&id(1)).expect("create"));
+    let mut store = fast.store_with(dir_name(1), Io::fast()).expect("store");
+    commit(&mut store, 1, &[]).expect("first commit");
+    let first = store.io().skipped_syncs();
+    commit(&mut store, 1, &[1, 2]).expect("commit");
+    assert_eq!((first, store.io().skipped_syncs() - first), (3, 3));
+    let state = state_for(id(1));
+    let before = store.io().skipped_syncs();
+    assert_eq!(store.compact(&state, 2), Ok(1));
+    assert_eq!(store.io().skipped_syncs() - before, 4);
+    let before = store.io().skipped_syncs();
+    store.destroy().expect("destroy");
+    assert_eq!(store.io().skipped_syncs() - before, 1);
+    drop(store);
+    let before = fast.io.skipped_syncs();
+    fast.save_settings(&privatechat_core::testing::settings(
+        "wss://example.org",
+        1,
+        None,
+    ))
+    .expect("save");
+    assert_eq!(fast.io.skipped_syncs() - before, 2);
+    drop(fast);
     let other = TestDir::new("t23-other");
-    let failing = DataDir::open_with(other.path(), key(), Io::failing_at(1));
+    let failing = open_with(other.path(), || Io::failing_at(1));
     assert!(matches!(failing, Err(StoreError::Io)));
-    DataDir::open_with(&path, key(), Io::new()).expect("another instance is healthy");
+    open_with(&path, Io::new).expect("another instance is healthy");
 }
 
 /// The child of `s020_t23_r23_crash_points`: passes `after_append` three

@@ -8,10 +8,11 @@ use privatechat_core::{Store, StoreError, Vault};
 
 use super::{
     CRASH_STATUS, CRASH_VAR, TestDir, channel_dir, commit, dir_name, id, loaded, open, reopen,
-    run_helper,
+    run_helper, seed,
 };
+use crate::DataDir;
 use crate::frame::{self, LOG_HEADER_LEN};
-use crate::fs::Io;
+use crate::fs::{Call, Io};
 
 /// The variables through which the crash helper learns its directory and
 /// what to do.
@@ -59,7 +60,7 @@ fn crash(path: &Path, step: &str, point: &str) {
 fn committed_two(path: &Path) {
     let mut data = open(path);
     let mut store = data.create(&id(1)).expect("create");
-    commit(store.as_mut(), 1, &[1, 2]).expect("commit");
+    seed(store.as_mut(), 1, &[1, 2]).expect("seed");
 }
 
 /// Spec 020, R9: an entry read at another place, or repeated, does not load.
@@ -105,6 +106,14 @@ fn s020_t10_r10_commit_order() {
         let log = channel_dir(dir.path(), 1).join("messages.log");
         let before = read(&log).len();
         crash(dir.path(), "commit", point);
+        // Where each point stops: after the entries, then after the copy.
+        assert!(read(&log).len() > before, "{point}");
+        let tmp = channel_dir(dir.path(), 1).join("state.bin.tmp");
+        assert_eq!(
+            tmp.exists(),
+            point.starts_with("after_state_tmp"),
+            "{point}"
+        );
         let ((len, _), records) = reopen(dir.path(), 1).expect("load").expect("committed");
         assert_eq!(
             (len, records),
@@ -137,12 +146,24 @@ fn check_fault(
     mut store: crate::channel::ChannelFiles,
     previous: &[u64],
     new: &[u64],
-) -> (bool, bool) {
+) -> bool {
     let channel = channel_dir(path, 1);
+    // Before anything reads the directory again, which would delete them.
+    let leftovers = [
+        channel.join("state.bin.tmp").exists(),
+        channel.join("messages.log.new").exists(),
+    ];
     let poisoned = matches!(store.load(), Err(StoreError::Io));
     if poisoned {
-        assert!(commit(&mut store, 1, &[9]).is_err(), "k={k}");
+        assert_eq!(commit(&mut store, 1, &[9]), Err(StoreError::Io), "k={k}");
+        assert_eq!(
+            store.compact(&state_for(id(1)), 9),
+            Err(StoreError::Io),
+            "k={k}"
+        );
+        assert_eq!(store.destroy(), Err(StoreError::Io), "k={k}");
     } else {
+        assert_eq!(leftovers, [false, false], "k={k}");
         assert_eq!(
             loaded(&mut store).expect("usable").map(|(_, r)| r),
             Some(previous.to_vec()),
@@ -155,16 +176,28 @@ fn check_fault(
         assert!(after == previous || after == new, "k={k}: {after:?}");
     } else {
         assert_eq!(after, previous, "k={k}");
-        assert!(!channel.join("state.bin.tmp").exists(), "k={k}");
-        assert!(!channel.join("messages.log.new").exists(), "k={k}");
     }
-    (!poisoned, poisoned)
+    poisoned
+}
+
+/// A data directory at `path` whose channel 1 committed `records`, and a
+/// store of it whose system calls go through `io`.
+fn faulty(path: &Path, records: &[u64], io: Io) -> (DataDir, crate::channel::ChannelFiles) {
+    {
+        let mut data = open(path);
+        let mut store = data.create(&id(1)).expect("create");
+        seed(store.as_mut(), 1, records).expect("seed");
+    }
+    let data = open(path);
+    let store = data.store_with(dir_name(1), io).expect("store");
+    (data, store)
 }
 
 /// Spec 020, R11: a fault at each system call of a commit and of a
-/// compaction: before the state's rename the call fails and nothing changes;
-/// at or after it the store is poisoned and a fresh one sees one commit or
-/// the other, never a mix.
+/// compaction. Before the state's rename the call fails, the store stays
+/// usable and nothing changes; at the rename or after it the store is
+/// poisoned and a fresh one sees one commit or the other, never a mix; a
+/// fault in a best-effort delete is ignored.
 #[test]
 fn s020_t11_r11_failure_and_poison() {
     for compaction in [false, true] {
@@ -173,37 +206,40 @@ fn s020_t11_r11_failure_and_poison() {
         } else {
             (&[1, 2], &[1, 2, 3])
         };
-        let (mut before, mut after) = (false, false);
-        for k in 1.. {
-            let dir = TestDir::new(&format!("t11-{compaction}-{k}"));
-            {
-                let mut data = open(dir.path());
-                let mut store = data.create(&id(1)).expect("create");
-                commit(store.as_mut(), 1, previous).expect("commit");
-            }
-            let data = open(dir.path());
-            let mut store = data
-                .store_with(dir_name(1), Io::failing_at(k))
-                .expect("store");
-            let state = state_for(id(1));
-            let result = if compaction {
-                store.compact(&state, 2).map(|_| ())
+        let run = |store: &mut crate::channel::ChannelFiles| {
+            if compaction {
+                store.compact(&state_for(id(1)), 2).map(|_| ())
             } else {
-                commit(&mut store, 1, &[3])
-            };
-            if result.is_ok() {
-                // Past the last call, or swallowed by a best-effort delete.
-                if store.io().calls() < k {
-                    break;
-                }
+                commit(store, 1, &[3])
+            }
+        };
+        // The calls of a fault-free run, where the faults below land.
+        let probe = TestDir::new(&format!("t11-{compaction}-probe"));
+        let (data, mut store) = faulty(probe.path(), previous, Io::failing_at(0));
+        run(&mut store).expect("fault-free run");
+        let kinds = store.io().kinds();
+        drop((store, data));
+        let rename = kinds
+            .iter()
+            .position(|kind| *kind == Call::Rename)
+            .expect("a rename");
+        let rename = u32::try_from(rename).expect("small") + 1;
+        for (k, kind) in (1..).zip(&kinds) {
+            let dir = TestDir::new(&format!("t11-{compaction}-{k}"));
+            let (data, mut store) = faulty(dir.path(), previous, Io::failing_at(k));
+            let result = run(&mut store);
+            drop(data);
+            if *kind == Call::Remove {
+                assert_eq!(result, Ok(()), "k={k} best effort");
+                drop(store);
+                let after = reopen(dir.path(), 1).expect("load").expect("committed").1;
+                assert_eq!(after, new, "k={k}");
                 continue;
             }
-            drop(data);
-            let (failed_before, failed_after) = check_fault(dir.path(), k, store, previous, new);
-            before |= failed_before;
-            after |= failed_after;
+            assert_eq!(result, Err(StoreError::Io), "k={k}");
+            let poisoned = check_fault(dir.path(), k, store, previous, new);
+            assert_eq!(poisoned, k >= rename, "k={k} {kind:?}");
         }
-        assert!(before && after, "compaction={compaction}");
     }
 }
 
@@ -224,6 +260,17 @@ fn s020_t12_r12_load_checks() {
     assert!(!channel.join("state.bin.tmp").exists());
     write(&log, &committed[..committed.len() - 1]);
     assert_eq!(reopen(dir.path(), 1), Err(StoreError::Corrupt));
+    // Cut at the boundary of the last entry: whole entries are missing.
+    let first_len = u32::from_be_bytes(committed[9..13].try_into().expect("len")) as usize;
+    write(&log, &committed[..13 + first_len]);
+    assert_eq!(reopen(dir.path(), 1), Err(StoreError::Corrupt));
+    // The last entry's `len`, outside the box, raised by one.
+    let mut longer = committed.clone();
+    let last = 13 + first_len;
+    let len = u32::from_be_bytes(longer[last..last + 4].try_into().expect("len"));
+    longer[last..last + 4].copy_from_slice(&(len + 1).to_be_bytes());
+    write(&log, &longer);
+    assert_eq!(reopen(dir.path(), 1), Err(StoreError::Corrupt));
     let mut flipped = committed.clone();
     flipped[LOG_HEADER_LEN + 30] ^= 1;
     write(&log, &flipped);
@@ -239,6 +286,7 @@ fn s020_t14_r14_interrupted_compaction() {
     committed_two(dir.path());
     crash(dir.path(), "compact", "after_compact_state:1");
     let channel = channel_dir(dir.path(), 1);
+    assert!(channel.join("messages.log.new").exists());
     let ((_, generation), records) = reopen(dir.path(), 1).expect("load").expect("committed");
     assert_eq!((generation, records), (1, vec![2]));
     assert!(!channel.join("messages.log.new").exists());
@@ -270,7 +318,7 @@ fn s020_t15_r15_compaction() {
     let dir = TestDir::new("t15");
     let mut data = open(dir.path());
     let mut store = data.create(&id(1)).expect("create");
-    commit(store.as_mut(), 1, &[1, 5, 2, 7]).expect("commit");
+    seed(store.as_mut(), 1, &[1, 5, 2, 7]).expect("seed");
     let (state, _) = store.load().expect("load").expect("committed");
     let channel = channel_dir(dir.path(), 1);
     let files = || {
@@ -294,4 +342,17 @@ fn s020_t15_r15_compaction() {
     drop((store, data));
     let ((_, generation), records) = reopen(dir.path(), 1).expect("load").expect("committed");
     assert_eq!((generation, records), (2, vec![5, 7]));
+    // A commit straight after a compaction, with no load between, appends
+    // at the new end under the new generation.
+    let mut data = open(dir.path());
+    let mut store = data.create(&id(1)).expect("create");
+    let (state, _) = store.load().expect("load").expect("committed");
+    commit(store.as_mut(), 1, &[1]).expect("commit");
+    assert_eq!(store.compact(&state, 2), Ok(1));
+    let log = channel.join("messages.log");
+    assert_eq!(store.log_len(), u64::try_from(read(&log).len()).unwrap());
+    commit(store.as_mut(), 1, &[8]).expect("commit after compaction");
+    drop((store, data));
+    let ((_, generation), records) = reopen(dir.path(), 1).expect("load").expect("committed");
+    assert_eq!((generation, records), (3, vec![5, 7, 8]));
 }

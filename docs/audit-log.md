@@ -2,6 +2,30 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AA
+
+**2026-10-01 — Audit AA, the code audit of the `store` crate of spec 020-store-files (branch `020-store`, slices (e1)–(g)), in rounds of three passes (A: structure and logic; B: the local CI and hand mutants; C: conformance with spec 020).**
+
+**Round 1.** CI green; no defect in commit, load, compaction or recovery: every crash point and fault traced leaves the previous commit or the new one. 172 mutants, 98 killed; the survivors equivalent, far-fetched, or these:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AA1 | T11 checked the leftovers only after a `load` that deletes them itself, accepted a poisoning at any call, and stopped its fault loop at the first `Ok`, which a best-effort delete gives (AA1-A-1, AA1-A-2, AA1-B-5–AA1-B-7, AA1-C-1) | Medium | Each call's kind recorded under test: before the rename usable and clean, from it poisoned, a best-effort delete ignored and the commit standing |
+| AA2 | The store tests failed about once in 40 runs: a helper child holds a copy of another test's lock between its fork and its exec (AA1-B-17) | Medium | The tests retry a `Locked` open for up to 2 s; 60 runs clean |
+| AA3 | A first commit with records, which spec 021 never makes, would leave a channel `Corrupt` after a crash between its entries and its state (AA1-A, known gap) | Medium | Refused before any write (AA-Q1); R13, T13 |
+| AA4 | No test of: a commit straight after a compaction, a log cut at an entry boundary, an entry's `len` raised, `remove` of a live store, the stores of a fast `DataDir` (which were not fast), a store keeping the lock after its `DataDir` is dropped, a foreign or unreadable directory surviving R19, the cleanup under the lock, a fault in a settings save, the syncs of each step, the crash points' places (AA1-B-1–AA1-B-4, AA1-B-8–AA1-B-15, AA1-C-2, AA1-C-3, AA1-C-5) | Medium | Tests for each; a fast `DataDir` hands out fast stores |
+| AA5 | A log over 64 MiB was cut back instead of `Corrupt`; an `Io` was not shown to carry no path; `compact` could fail after its renames (AA1-C-4, AA1-C-6, AA1-A-5) | Low | `Corrupt` before any truncation; T26 in `store`; the count taken before the writes |
+| AA6 | `check_store_io.sh` passed a grouped `use std::{fs, …}` and its self-test never ran the whole script (AA1-B-16) | Low | `std::{` refused; the self-test runs the script; R23 |
+| AA7 | The golden files were not marked binary; T21 never faulted the final delete; a leftover `settings.bin.tmp` was never deleted; dead test lines (AA1-A-3, AA1-A-4, AA1-A-6–AA1-A-8, AA1-C-12) | Low | `.gitattributes`; T21 to k = 5; deleted at open (AA-Q2); removed |
+| AA8 | Text: §10 had no phase 2 CI line, CONTRIBUTING no golden check, spec 001 no word of later jobs; R15 and R16 against what reading the log does and what `log_len` returns before a load; the test directory's name (AA1-C-7–AA1-C-10) | Low | Rewritten |
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AA-Q1 | A first commit that carries records (AA1-A Q1) | Refuse it with `Corrupt` | R13, T13 |
+| AA-Q2 | A leftover `settings.bin.tmp` (AA1-A Q2) | Deleted at `DataDir::open` | R22, T22 |
+
+Not changed: F13, a state file between the settings limit and its own, which `core::testing` cannot build (a state that large needs the builders of spec 021); a host that spawns processes can see the brief `Locked` of AA2 too, which `Device` (spec 027) will meet with a retry or not at all.
+
 ## Audit Z
 
 **2026-10-01 — Audit Z, the first code audit of phase 0 (branch `phase0-audit` from `mvp` at 2136de2): specs 000–003 and what implements them — the CI workflows, `doc_lint`, `check_requirements`, `deny.toml`, the workspace lints and toolchain — in rounds of three passes (A: structure and logic; B: the local CI, 131 mutants and crafted git histories against `adr-guard` and `commit-lint`; C: conformance with the specs, AGENTS and `docs/spec.md`).** Audits A–D had reviewed documents, not this code.

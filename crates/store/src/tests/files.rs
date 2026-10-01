@@ -4,9 +4,9 @@
 use std::path::Path;
 
 use privatechat_core::testing::{batch, record, settings, settings_eq, state_for};
-use privatechat_core::{ChannelState, DirName, MAX_STATE_FILE, Store, StoreError, Vault};
+use privatechat_core::{DirName, MAX_STATE_FILE, Store, StoreError, Vault};
 
-use super::{TestDir, channel_dir, commit, dir_name, id, key, loaded, open, reopen};
+use super::{TestDir, channel_dir, commit, dir_name, id, key, loaded, open, seed};
 use crate::DataDir;
 use crate::frame::{self, LOG_HEADER_LEN};
 use crate::fs::Io;
@@ -51,7 +51,7 @@ fn s020_t05_r05_log_layout() {
     let dir = TestDir::new("t05");
     let mut data = open(dir.path());
     let mut store = data.create(&id(1)).expect("create");
-    commit(store.as_mut(), 1, &[1, 2, 3]).expect("commit");
+    seed(store.as_mut(), 1, &[1, 2, 3]).expect("seed");
     let log = read(&channel_dir(dir.path(), 1).join("messages.log"));
     assert_eq!(log.get(..LOG_HEADER_LEN), Some(&frame::log_header(0)[..]));
     let mut at = LOG_HEADER_LEN;
@@ -98,6 +98,11 @@ fn s020_t07_r07_open_check_order() {
     let valid = state_file(1, 9, 0);
     let open_state = |bytes: &[u8]| frame::open_state(bytes, &key(), &name).map(|_| ());
     assert_eq!(open_state(&valid[..44]), Err(StoreError::Corrupt));
+    // The minimum size comes before the version.
+    assert_eq!(
+        open_state(&[&b"PSTA\x02"[..], &[0x5a; 39]].concat()),
+        Err(StoreError::Corrupt)
+    );
     let mut magic = valid.clone();
     magic[0] = b'X';
     assert_eq!(open_state(&magic), Err(StoreError::Corrupt));
@@ -126,7 +131,7 @@ fn s020_t07_r07_open_check_order() {
     let dir = TestDir::new("t07");
     let mut data = open(dir.path());
     let mut store = data.create(&id(1)).expect("create");
-    commit(store.as_mut(), 1, &[1]).expect("commit");
+    seed(store.as_mut(), 1, &[1]).expect("seed");
     drop(store);
     let log = channel_dir(dir.path(), 1).join("messages.log");
     let committed = read(&log);
@@ -135,6 +140,14 @@ fn s020_t07_r07_open_check_order() {
     let mut newer = committed.clone();
     newer[4] = 2;
     write(&log, &newer);
+    assert_eq!(reopen_in(&mut data, 1), Err(StoreError::Corrupt));
+    // A log over its limit, which no commit writes.
+    write(&log, &committed);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&log)
+        .and_then(|file| file.set_len(privatechat_core::MAX_LOG_LEN + 1))
+        .expect("grow");
     assert_eq!(reopen_in(&mut data, 1), Err(StoreError::Corrupt));
 }
 
@@ -165,6 +178,10 @@ fn s020_t13_r13_first_commit() {
         assert!(store.load().expect("load").is_none(), "{unborn:?}");
     }
     std::fs::remove_file(&log).expect("remove");
+    // A first commit that carries records writes nothing.
+    assert_eq!(commit(store.as_mut(), 1, &[1]), Err(StoreError::Corrupt));
+    assert!(!log.exists());
+    assert!(!channel_dir(dir.path(), 1).join("state.bin").exists());
     commit(store.as_mut(), 1, &[]).expect("first commit");
     assert_eq!(read(&log), frame::log_header(0));
     assert_eq!(store.log_len(), LOG_HEADER_LEN as u64);
@@ -177,7 +194,7 @@ fn s020_t16_r16_log_full() {
     let dir = TestDir::new("t16");
     let mut data = open(dir.path());
     let mut store = data.create(&id(1)).expect("create");
-    commit(store.as_mut(), 1, &[1]).expect("commit");
+    seed(store.as_mut(), 1, &[1]).expect("seed");
     let channel = channel_dir(dir.path(), 1);
     let before = (
         read(&channel.join("state.bin")),
@@ -195,7 +212,7 @@ fn s020_t16_r16_log_full() {
         read(&channel.join("messages.log")),
     );
     assert_eq!(before, after);
-    commit(store.as_mut(), 1, &[1, 2]).expect("commit");
+    seed(store.as_mut(), 1, &[1, 2]).expect("seed");
     assert_eq!(
         store.log_len(),
         read(&channel.join("messages.log")).len() as u64
@@ -228,17 +245,9 @@ fn s020_t18_r18_directory_name_is_keyed() {
     );
     assert!(!name.contains("abababab"));
     assert_eq!(name, &crate::hex(&data.dir_name(&id(0xab)).expect("name")));
-    let other = privatechat_core::dir_name(&StorageKeyOther::key(), &id(0xab)).expect("name");
+    let other_key = privatechat_core::StorageKey::from_bytes(&mut [8u8; 32]);
+    let other = privatechat_core::dir_name(&other_key, &id(0xab)).expect("name");
     assert_ne!(crate::hex(&other), *name);
-}
-
-/// A second key, for R18.
-struct StorageKeyOther;
-
-impl StorageKeyOther {
-    fn key() -> privatechat_core::StorageKey {
-        privatechat_core::StorageKey::from_bytes(&mut [8u8; 32])
-    }
 }
 
 /// Spec 020, R19: `open` deletes `.leaving` directories and channels whose
@@ -257,23 +266,31 @@ fn s020_t19_r19_open_cleans_leftovers() {
         write(&channel_dir(dir.path(), n).join("messages.log"), &log);
     }
     let mut store = data.create(&id(4)).expect("create");
-    commit(store.as_mut(), 4, &[1]).expect("commit");
+    seed(store.as_mut(), 4, &[1]).expect("seed");
     drop(store);
     std::fs::remove_file(channel_dir(dir.path(), 4).join("state.bin")).expect("lose the state");
     let leaving = dir.path().join("channels").join("x.leaving");
     std::fs::create_dir_all(leaving.join("inside")).expect("leaving");
+    // A `state.bin` that cannot be read: nothing is deleted on doubt.
+    drop(data.create(&id(5)).expect("create"));
+    std::fs::create_dir(channel_dir(dir.path(), 5).join("state.bin")).expect("unreadable");
+    // Not a name R20 lists: never deleted, whatever it holds.
+    let backup = dir.path().join("channels").join("backup");
+    std::fs::create_dir(&backup).expect("backup");
     drop(data);
     let mut data = open(dir.path());
     assert!(!channel_dir(dir.path(), 1).exists());
     assert!(!channel_dir(dir.path(), 2).exists());
     assert!(!leaving.exists());
+    assert!(backup.is_dir());
+    assert!(channel_dir(dir.path(), 5).is_dir());
     let listed: Vec<DirName> = data
         .list()
         .expect("list")
         .iter()
         .map(|store| *store.name())
         .collect();
-    let mut expected = vec![dir_name(3), dir_name(4)];
+    let mut expected = vec![dir_name(3), dir_name(4), dir_name(5)];
     expected.sort();
     let mut listed = listed;
     listed.sort();
@@ -281,6 +298,15 @@ fn s020_t19_r19_open_cleans_leftovers() {
     for n in [3, 4] {
         assert_eq!(reopen_in(&mut data, n), Err(StoreError::Corrupt), "n={n}");
     }
+    // The cleanup runs under the lock: an `open` that gets `Locked` deletes
+    // nothing.
+    let held = dir.path().join("channels").join("held.leaving");
+    std::fs::create_dir(&held).expect("leaving");
+    assert!(matches!(
+        DataDir::open(dir.path(), key()),
+        Err(StoreError::Locked)
+    ));
+    assert!(held.exists());
 }
 
 /// Spec 020, R19: a `.leaving` directory that cannot be deleted does not
@@ -317,6 +343,8 @@ fn s020_t20_r20_one_store_per_directory() {
     assert_eq!(stores.len(), 3);
     assert!(matches!(data.create(&id(1)), Err(StoreError::Locked)));
     assert!(matches!(data.list(), Err(StoreError::Locked)));
+    assert_eq!(data.remove(&dir_name(1)), Err(StoreError::Locked));
+    assert!(channel_dir(dir.path(), 1).exists());
     drop(stores);
     let mut store = data.create(&id(1)).expect("create after drop");
     assert!(store.load().expect("load").is_some());
@@ -329,16 +357,17 @@ fn s020_t21_r21_destroy_and_remove() {
     let dir = TestDir::new("t21");
     let mut data = open(dir.path());
     let mut store = data.create(&id(1)).expect("create");
-    commit(store.as_mut(), 1, &[1]).expect("commit");
+    seed(store.as_mut(), 1, &[1]).expect("seed");
     store.destroy().expect("destroy");
     assert!(!channel_dir(dir.path(), 1).exists());
     drop(store);
     assert_eq!(data.dir_name(&id(1)), Ok(dir_name(1)));
-    // A fault at each call of a destroy: the leftover delete, the rename,
-    // then the directory's sync and the final delete.
-    for k in 1..=4 {
+    // A fault at each call of a destroy: the leftover delete and the rename
+    // (1, 2), then the directory's open and sync (3, 4) and the final delete
+    // (5), whose `.leaving` the next `open` removes.
+    for k in 1..=5 {
         let mut store = data.create(&id(2)).expect("create");
-        commit(store.as_mut(), 2, &[1]).expect("commit");
+        seed(store.as_mut(), 2, &[1]).expect("seed");
         drop(store);
         let mut faulty = data
             .store_with(dir_name(2), Io::failing_at(k))
@@ -367,7 +396,7 @@ fn s020_t21_r21_destroy_and_remove() {
     }
     // A channel that does not load is removed by name.
     let mut store = data.create(&id(3)).expect("create");
-    commit(store.as_mut(), 3, &[1]).expect("commit");
+    seed(store.as_mut(), 3, &[1]).expect("seed");
     drop(store);
     write(&channel_dir(dir.path(), 3).join("state.bin"), b"garbage");
     assert_eq!(reopen_in(&mut data, 3), Err(StoreError::Corrupt));
@@ -398,6 +427,44 @@ fn s020_t22_r22_settings_file() {
     let loaded = data.load_settings().expect("load").expect("present");
     assert!(settings_eq(&loaded, &saved));
     assert!(!dir.path().join("settings.bin.tmp").exists());
+    drop(data);
+    // A save cut before its rename: the copy goes at the next open.
+    write(&dir.path().join("settings.bin.tmp"), b"leftover");
+    drop(open(dir.path()));
+    assert!(!dir.path().join("settings.bin.tmp").exists());
+    // A fault at each call of a save: before the rename the old settings
+    // stand and no copy remains; from the rename on, either may.
+    let newer = settings("wss://newer.example.org", 30, None);
+    let opening = super::open_with(dir.path(), || Io::failing_at(0))
+        .expect("probe")
+        .io
+        .calls();
+    let mut data = super::open_with(dir.path(), || Io::failing_at(0)).expect("probe");
+    data.save_settings(&saved).expect("save");
+    let kinds = data.io.kinds();
+    drop(data);
+    for (k, kind) in (1..).zip(&kinds).skip(opening as usize) {
+        let mut data = super::open_with(dir.path(), || Io::failing_at(k)).expect("open");
+        let result = data.save_settings(&newer);
+        let tmp_left = dir.path().join("settings.bin.tmp").exists();
+        drop(data);
+        let now = open(dir.path())
+            .load_settings()
+            .expect("load")
+            .expect("present");
+        let renamed = kinds[..k as usize].contains(&crate::fs::Call::Rename);
+        if *kind == crate::fs::Call::Remove {
+            assert_eq!(result, Ok(()), "k={k}");
+        } else {
+            assert_eq!(result, Err(StoreError::Io), "k={k}");
+        }
+        if !renamed {
+            assert!(settings_eq(&now, &saved), "k={k}");
+            assert!(!tmp_left, "k={k}");
+        }
+        let mut data = open(dir.path());
+        data.save_settings(&saved).expect("restore");
+    }
 }
 
 /// Spec 020, R28: the data directory and its stores can move between
@@ -408,6 +475,4 @@ fn s020_t28_r28_send() {
     send::<DataDir>();
     send::<crate::channel::ChannelFiles>();
     send::<Box<dyn Store>>();
-    let _: fn(&ChannelState) = |_| {};
-    let _ = reopen;
 }
