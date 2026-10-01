@@ -125,8 +125,9 @@ impl ChannelState {
         seal_box(&store_key(key, name)?, &record)
     }
 
-    /// The committed length and the generation of the log, as the store
-    /// last sealed them (R10).
+    /// The committed length and the generation of the log, as `open` read
+    /// them (R10). A state kept in memory keeps them while the store moves
+    /// on, so a store never takes its log position from its caller (R15).
     pub fn log_position(&self) -> (u64, u32) {
         (self.log_committed_len, self.log_generation)
     }

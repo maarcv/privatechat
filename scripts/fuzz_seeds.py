@@ -22,8 +22,10 @@ PAD_BLOCK = 1_024  # spec 013 R10
 POLICY_BYTE = {"ignore": b"\x00", "reject": b"\x01"}  # spec 016 R3
 
 
-def load(spec: str) -> list[dict]:
-    return json.loads((VECTORS / f"{spec}.json").read_text(encoding="utf-8"))["vectors"]
+def load(specs: str) -> list[dict]:
+    """The vectors of the files named, separated by spaces."""
+    return [vector for spec in specs.split()
+            for vector in json.loads((VECTORS / f"{spec}.json").read_text(encoding="utf-8"))["vectors"]]
 
 
 def field(vector: dict, name: str) -> bytes | None:
@@ -63,7 +65,7 @@ def times(v: dict) -> bytes:
 # the seed of such a vector in the layout of the target's entry (R3–R5).
 Seed = Callable[[dict], bytes]
 TARGETS: dict[str, tuple[str, Callable[[dict], bool], Seed]] = {
-    "record_decode": ("017", lambda v: True,
+    "record_decode": ("017 020", lambda v: v["inputs"].get("schema") in ("test", "types"),
                       lambda v: POLICY_BYTE[v["inputs"]["policy"]] + field(v, "record")),
     "config_parse": ("011", lambda v: "record" in v["inputs"], lambda v: field(v, "record")),
     "config_parse_qr": ("011", lambda v: "qr" in v["inputs"], lambda v: field(v, "qr")),

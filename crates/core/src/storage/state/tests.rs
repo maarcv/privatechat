@@ -28,7 +28,7 @@ pub(in crate::storage) fn full_peer(name_len: usize) -> PeerRecord {
         first_seen: 3,
         last_seen: 4,
         max_counter: Some(5),
-        last_display_name: Some(vec![b'n'; name_len]),
+        last_display_name: Some(zeroize::Zeroizing::new(vec![b'n'; name_len])),
     }
 }
 
@@ -91,11 +91,67 @@ fn s020_t27_r27_list_items_within_limits() {
         let error = PeerRecord::decode(&peer(key, &over)).err();
         assert_eq!(error, Some(StoreError::Corrupt), "key {key}");
     }
-    let mut long_blob = entry(MAX_BLOB).encode().unwrap().to_vec();
-    long_blob.splice(24..24, [0]);
-    long_blob[20..24].copy_from_slice(&u32::try_from(MAX_BLOB + 1).unwrap().to_be_bytes());
+    // A blob one byte over, planted at key 3; the entry's own bound refuses
+    // it as well, since every other key is fixed-width.
+    let buf = entry(MAX_BLOB).encode().unwrap().to_vec();
+    let long_blob = replaced(&buf, 3, &vec![8; MAX_BLOB + 1]);
+    assert_eq!(long_blob.len(), buf.len() + 1);
     let error = OutboxEntry::decode(&long_blob).err();
     assert_eq!(error, Some(StoreError::Corrupt));
+}
+
+/// Spec 020, R8 (the items of the three lists): each key lands in its own
+/// field, over records built by hand with a distinct value per key, so that
+/// an encoder and a decoder that swapped two fields alike would fail.
+#[test]
+fn s020_t08_r08_list_items_by_key() {
+    let peer = [
+        field(0, &[1; 32]),
+        field(1, b"label"),
+        field(2, &[1]),
+        field(3, &[0]),
+        field(4, &4u64.to_be_bytes()),
+        field(5, &5u64.to_be_bytes()),
+        field(6, &6u64.to_be_bytes()),
+        field(7, &7u64.to_be_bytes()),
+        field(8, b"name"),
+    ]
+    .concat();
+    let decoded = PeerRecord::decode(&peer).unwrap();
+    assert_eq!(decoded.pk.0, [1; 32]);
+    assert_eq!(decoded.label.as_deref(), Some("label"));
+    assert_eq!((decoded.verified, decoded.muted), (true, false));
+    assert_eq!(decoded.retired_at, Some(4));
+    assert_eq!((decoded.first_seen, decoded.last_seen), (5, 6));
+    assert_eq!(decoded.max_counter, Some(7));
+    let name = decoded
+        .last_display_name
+        .as_ref()
+        .map(|name| name.as_slice());
+    assert_eq!(name, Some(&b"name"[..]));
+    assert_eq!(decoded.encode().unwrap().as_slice(), peer);
+    let entry = [
+        field(0, &[2; 16]),
+        field(1, &[1]),
+        field(2, &2u64.to_be_bytes()),
+        field(3, b"blob"),
+        field(4, &[4; 64]),
+        field(5, &[1]),
+        field(6, &6u64.to_be_bytes()),
+    ]
+    .concat();
+    let decoded = OutboxEntry::decode(&entry).unwrap();
+    assert_eq!(decoded.client_ref, [2; 16]);
+    assert_eq!(decoded.kind, OutboxKind::KeyRetired);
+    assert_eq!((decoded.sent_at, decoded.counter), (2, 6));
+    assert_eq!(decoded.blob, b"blob");
+    assert_eq!(decoded.signature.0, [4; 64]);
+    assert!(decoded.under_retired_key);
+    assert_eq!(decoded.encode().unwrap().as_slice(), entry);
+    let old_key = [field(0, &[3; 32]), field(1, &1u64.to_be_bytes())].concat();
+    let decoded = OldKey::decode(&old_key).unwrap();
+    assert_eq!((decoded.pk.0, decoded.retired_at), ([3; 32], 1));
+    assert_eq!(decoded.encode().unwrap().as_slice(), old_key);
 }
 
 /// Spec 020, R8 (the items of the three lists): each decodes under `Reject`
@@ -294,6 +350,18 @@ fn s020_t08_r08_mandatory_keys() {
             assert_eq!(decode(&without(buf, *key)), None, "key {key}");
         }
     }
+}
+
+/// Spec 020, R10: `duplicate` keeps the log position, which `state_eq`
+/// leaves out.
+#[test]
+fn s020_t10_r10_duplicate_keeps_the_log_position() {
+    let state = ChannelState {
+        log_committed_len: 123,
+        log_generation: 4,
+        ..full_state()
+    };
+    assert_eq!(state.duplicate().log_position(), (123, 4));
 }
 
 /// Spec 020, R25 (the state record): the writer's buffer is allocated at the
@@ -551,7 +619,7 @@ proptest! {
             first_seen,
             last_seen,
             max_counter,
-            last_display_name,
+            last_display_name: last_display_name.map(zeroize::Zeroizing::new),
         };
         let encoded = peer.encode().unwrap();
         assert_eq!((encoded.len(), encoded.capacity()), (peer.encoded_len(), peer.encoded_len()));

@@ -207,6 +207,41 @@ fn s020_t09_r09_keys_of_each_kind() {
     }
 }
 
+/// Spec 020, R9: the kinds no vector carries decode each key into its own
+/// field, over records built by hand with a distinct value per key.
+#[test]
+fn s020_t09_r09_acked_and_not_delivered_by_key() {
+    let head = |kind: u8| {
+        let fields = [
+            field(0, &[kind]),
+            field(1, &[0; 4]),
+            field(2, &[0; 8]),
+            field(3, &[0; 8]),
+        ];
+        fields.concat()
+    };
+    let acked = [
+        head(1),
+        field(4, &[4; 16]),
+        field(5, &5u64.to_be_bytes()),
+        field(13, &[13; 16]),
+    ]
+    .concat();
+    let (record, _, _) = LogRecord::decode(&acked).unwrap();
+    let expected = ([4; 16], 5, [13; 16]);
+    assert!(matches!(
+        &record.entry,
+        LogEntry::Acked { server_id, received_at, client_ref }
+            if (*server_id, *received_at, *client_ref) == expected
+    ));
+    assert_eq!(record.encode(0, 0).unwrap().as_slice(), acked);
+    let not_delivered = [head(2), field(13, &[13; 16])].concat();
+    let (record, _, _) = LogRecord::decode(&not_delivered).unwrap();
+    assert!(
+        matches!(record.entry, LogEntry::NotDelivered { client_ref } if client_ref == [13; 16])
+    );
+}
+
 /// Spec 020, R9: a record carries its generation and offset, and opens only
 /// where it was sealed, in the directory it was sealed for.
 #[test]

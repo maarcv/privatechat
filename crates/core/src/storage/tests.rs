@@ -79,6 +79,19 @@ pub(super) fn list_value(items: &[Vec<u8>]) -> Vec<u8> {
     items.iter().flat_map(framed).collect()
 }
 
+/// Spec 020, Limits: the numbers `store` checks before it reads a file, and
+/// the record maxima they come from, as the table writes them.
+#[test]
+fn s020_t06_r06_file_limits_are_the_table() {
+    assert_eq!(super::MAX_STATE_FILE, 2_359_341);
+    assert_eq!(super::MAX_SETTINGS_FILE, 1_069);
+    assert_eq!(super::MAX_LOG_ENTRY, 65_576);
+    assert_eq!(super::MAX_LOG_LEN, 67_108_864);
+    assert_eq!(super::state::MAX_STATE_RECORD, 2_359_296);
+    assert_eq!(super::log::MAX_LOG_RECORD, 65_536);
+    assert_eq!(super::settings::MAX_SETTINGS_RECORD, 1_024);
+}
+
 /// A storage key of `byte`, repeated.
 pub(super) fn key(byte: u8) -> StorageKey {
     StorageKey::from_bytes(&mut [byte; 32])
@@ -224,6 +237,19 @@ fn check_types_vector(vector: &Vector) {
     if vector.kind() == Kind::Negative {
         let error = format!("{:?}", decoded.unwrap_err());
         assert_eq!(error, vector.expected("error").text(), "{}", vector.name());
+        // Each negative is key 0 and the one field that breaks its rule.
+        let numbers: Vec<Vec<u8>> = (0u64..5).map(|n| n.to_be_bytes().to_vec()).collect();
+        let broken = match vector.name() {
+            "bool_two" => field(1, &[2]),
+            "list_item_truncated" => field(3, &[0, 0, 0, 8, 0, 0, 0]),
+            _ => field(3, &list_value(&numbers)),
+        };
+        assert_eq!(
+            record,
+            [field(0, &[1]), broken].concat(),
+            "{}",
+            vector.name()
+        );
         return;
     }
     let decoded = decoded.unwrap();

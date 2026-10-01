@@ -200,19 +200,22 @@ real server binary in Docker with a fake clock.
 
 ## 5. Encrypt: reserve before you emit (`docs/spec.md` §4 "Send counter")
 
+A sketch; spec 021-channel-session is normative.
+
 ```rust
-pub fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> Result<(ClientRef, Vec<u8>), Error> {
+pub fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> Result<ClientRef, Error> {
     let payload = Payload::text(body, display_name, now)?; // the core builds and validates it
-    let counter = self.send_counter;
+    let counter = self.state.send_counter;
     let next = counter.checked_add(1).ok_or(Error::CounterExhausted)?;
-    let client_ref = ClientRef::random();
+    let client_ref = ClientRef::random()?;
     let sealed = self.seal(&payload, counter, now)?;        // draws the nonce, derives mk, encrypts, signs and masks the signature (013 R16)
-    let mut batch = WriteBatch::default();
-    batch.send_counter = Some(next);
-    batch.outbox_add.push((client_ref, sealed.blob.clone(), sealed.signature));
-    self.store.commit(batch)?;                               // if this fails, no blob leaves
-    self.send_counter = next;
-    Ok((client_ref, sealed.blob))
+    let mut state = self.state.duplicate();                 // the whole new state, not a diff
+    state.send_counter = next;
+    state.outbox.push(OutboxEntry::text(client_ref, now, counter, sealed));
+    let batch = WriteBatch::new(state, Vec::new());
+    self.store.commit(&batch)?;                             // if this fails, no blob leaves and memory is unchanged
+    self.state = batch.into_state();                        // only after `Ok` does memory move on
+    Ok(client_ref)                                          // the blob leaves only through outbox()
 }
 ```
 

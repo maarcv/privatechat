@@ -1167,7 +1167,6 @@ SECTIONS["014"] = check_s014_t07_r07_section_produces_014_json
 TYPES_SCHEMA = {"small": (0, "u8"), "flag": (1, "bool"), "nested": (2, "record"),
                 "numbers": (3, "list")}
 TYPES_MAX_NUMBERS = 4
-ITEM_HEADER_LEN = 4  # the `len` before each list item (020 R1)
 # The schemas of 020, in key order. A `list` value is its items, already encoded.
 PEER_SCHEMA = {
     "pk": (0, "bytes32"), "label": (1, "text"), "verified": (2, "bool"), "muted": (3, "bool"),

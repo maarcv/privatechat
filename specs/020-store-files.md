@@ -46,7 +46,7 @@ AGENTS 23 says every state write goes through `commit`; `compact` (R15) is the o
 - R12 `load` MUST delete a leftover `state.bin.tmp` (best effort: a failed deletion is ignored, since the next commit replaces it), read `state.bin`, check that the stored `channel_id` gives this directory's name under R18, else `Corrupt`, apply R14, check that the `generation` of `messages.log` equals `log_generation`, truncate the log to `log_committed_len` when it is longer and `fsync` it, return `Corrupt` when it is shorter, and open every entry up to `log_committed_len` by R7 and R9, returning `Corrupt` for any entry that fails.
 - R13 `load` of a directory without `state.bin` whose `messages.log` is absent, shorter than 9 bytes, or 9 bytes that are not a valid header of a generation ≥ 1 (a first commit cut before its header was durable), MUST return `Ok(None)`; the first commit of a channel MUST write `messages.log` with the header of generation 0 and no entry, `fsync` it, and then write `state.bin` by R10 step 2.
 - R14 When `state.bin` names generation `g + 1` and `messages.log` carries `g`, `load` MUST rename a `messages.log.new` of generation `g + 1` over `messages.log`; any other mismatch MUST return `Corrupt`; and any `messages.log.new` this rule does not rename MUST be deleted, best effort (a failed deletion is ignored, since the next compaction overwrites it).
-- R15 `compact(state, now)` MUST write `messages.log.new` with the header of generation `log_generation + 1` and every committed record whose `purge_at` is not below `now`, re-sealed with a fresh nonce at its new offset and its new generation, `fsync` it; then write `state` by R10 step 2 with the new generation and length; then `rename` `messages.log.new` over `messages.log` and `fsync` the directory; and return the number of records dropped. With nothing to drop it MUST write nothing and return 0.
+- R15 `compact(state, now)` MUST write `messages.log.new` with the header of generation `g + 1`, where `g` is the store's current generation — that of the `state.bin` it last loaded or wrote, never the log position `state` carries, which a state kept in memory does not follow, so that no generation repeats — and every committed record whose `purge_at` is not below `now`, re-sealed with a fresh nonce at its new offset and its new generation, and `fsync` it; then write the other fields of `state` by R10 step 2 with the new generation and length; then `rename` `messages.log.new` over `messages.log` and `fsync` the directory; and return the number of records dropped. With nothing to drop it MUST write nothing and return 0.
 - R16 A commit whose appended records would take `messages.log` beyond 67 108 864 bytes MUST write nothing and return `StoreError::LogFull`; `log_len()` MUST return the committed length, so that spec 021-channel-session can keep its headroom.
 
 **Data directory**
@@ -149,10 +149,14 @@ Old-key record: 0 `pk` bytes32; 1 `retired_at` u64.
 ```
 crates/core/src/storage.rs                 Store, Vault, WriteBatch, StorageKey, StoreError
 crates/core/src/storage/state.rs           the state record and its seal/open
+crates/core/src/storage/state/items.rs     the peer, outbox and old-key records of its lists
 crates/core/src/storage/log.rs             the log record and its seal/open
 crates/core/src/storage/settings.rs        the settings record and its seal/open
-crates/core/src/storage/tests.rs           s020_* tests of the records
-crates/core/src/testing.rs                 MemoryStore, MemoryVault, FailingStore, state_eq, settings; cfg(any(test, fuzzing, feature = "test-support"))
+crates/core/src/storage/tests.rs           s020_* tests of the keys, the errors and the vector dispatch
+crates/core/src/storage/{state,log,settings}/tests.rs   s020_* tests of each record
+crates/core/src/testing.rs                 cfg(any(test, fuzzing, feature = "test-support")); its files:
+crates/core/src/testing/{builders,compare,memory,faults}.rs   the builders, state_eq and the other comparisons, MemoryStore and MemoryVault, Faults and the failing doubles
+crates/core/src/testing/tests.rs           s020_* tests of the doubles
 crates/store/src/lib.rs                    DataDir, ChannelFiles
 crates/store/src/fs.rs                     every system call (R23), the crash points and the fault injector
 crates/store/src/tests.rs                  s020_* tests of the files
@@ -224,7 +228,7 @@ pub(crate) struct ChannelFiles { /* directory, Arc of the key and lock, poisoned
 impl Store for ChannelFiles { /* R10–R16, R21 */ }
 ```
 
-`WriteBatch` is built only inside `core` (spec 021-channel-session) and is committed by reference, so that `Channel` moves its parts into memory after `Ok` and can retry after `LogFull` (spec 023-ttl-purge); the store keeps no copy of the state. `ChannelState`, `LogRecord` and `WriteBatch` implement neither `Clone` nor `Debug`; `ChannelState::duplicate`, declared here, is the one deep copy, through `Secret::copy_from`. A message's body and display name come out of a log record in buffers wiped on drop, like the record itself (R25).
+`WriteBatch` is built only inside `core` (spec 021-channel-session) and is committed by reference, so that `Channel` moves its parts into memory after `Ok` and can retry after `LogFull` (spec 023-ttl-purge); the store keeps no copy of the state. `ChannelState`, `LogRecord` and `WriteBatch` implement neither `Clone` nor `Debug`; `ChannelState::duplicate`, declared here, is the one deep copy, through `Secret::copy_from`. A message's body and display name, and a peer's last display name, which is the same data, come out of their records in buffers wiped on drop, like the records themselves (R25); labels, one's own display name and a channel's local name are the user's own words, not secret, and stay plain strings.
 
 The `testing` module compiles under `cfg(any(test, fuzzing, feature = "test-support"))`, where the test relaxations of AGENTS 4 do not apply, so it is written like production code; `store` enables `test-support` only in its dev-dependency, and `store` has `privatechat-core` as its only dependency. Its doubles are handles over shared state (`Arc<Mutex<_>>`, which R2's rust-skill amendment allows in this module only), so that a test keeps a handle after giving a store or a vault away:
 
@@ -359,3 +363,4 @@ Decided on 2026-09-25: 020-R5, R9 and R18 (log header, generation and offset, ke
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-09-30 open question 020-R26 decided with the human reviewer during slice (b3): a libsodium failure is `Corrupt`
 - 2026-09-30 revised after audit X of slices (a)–(d3) (`docs/audit-log.md`), decisions of the human reviewer: an entry's offset is that of its `len` (R5, R9); `record_decode` also drives the codec schema (R29, 016 R3); core exports the four file limits (Interface); the doubles gain `settings` and `settings_eq`, and `state_eq` compares the config with `==` (Interface); `duplicate` returns the state; a message's display name is wiped like its body; the Limits sizes are framed
+- 2026-09-30 revised after audit X round 2 (`docs/audit-log.md`), decisions of the human reviewer: a compaction takes the store's generation, not the caller's (R15); a peer's last display name is wiped like a message's; the Interface lists every file

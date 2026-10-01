@@ -88,7 +88,7 @@ arithmetic compile errors. A panic in the decrypt path is a remote crash.
 
 **State lives in one place and changes in one commit** (AGENTS 23). Every
 logical operation (receive a message, send a message, retire a key) becomes
-exactly one `Store::commit(WriteBatch)`. A rejected message writes nothing
+exactly one `Store::commit(&WriteBatch)`. A rejected message writes nothing
 except the cursor, so its test asserts `commits == 0` with the cursor not
 counted. `encrypt` reserves the counter *before* it returns a blob. If you are
 writing to state in two places, you have invented a race.

@@ -344,7 +344,7 @@ impl Store for MemoryStore {
     }
 
     fn compact(&mut self, state: &ChannelState, now: u64) -> Result<u32, StoreError> {
-        let Some((_, records)) = self.open()? else {
+        let Some((stored, records)) = self.open()? else {
             return Ok(0);
         };
         let (kept, dropped): (Vec<LogRecord>, Vec<LogRecord>) = records
@@ -353,7 +353,9 @@ impl Store for MemoryStore {
         if dropped.is_empty() {
             return Ok(0);
         }
-        let (_, generation) = state.log_position();
+        // The generation is the store's own, never the caller's: a state in
+        // memory keeps the position it was loaded with (R15).
+        let (_, generation) = stored.log_position();
         let generation = generation.checked_add(1).ok_or(StoreError::Corrupt)?;
         let mut log = log_header(generation);
         append(&mut log, &self.name, &kept, generation)?;

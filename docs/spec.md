@@ -187,7 +187,7 @@ record = field*            field = key (u8) ‖ len (u32 BE) ‖ value (len byte
 ```
 
 - Keys are strictly increasing within a record: no duplicate and no reordering, so each value has exactly one encoding.
-- The schema of the record fixes the type of each key: `u8`, `u32` or `u64` (exactly 1, 4 or 8 bytes, big-endian), `bool` (1 byte, 0x00 or 0x01), `bytes` (any length within the schema's limit), `bytesN` (exactly N bytes), `text` (valid UTF-8), a nested record of a named schema, or `list<T>` (the value is a sequence of items, each `len` u32 BE ‖ item). Phase 1 implements `u8`, `u32`, `u64`, `bytes`, `bytesN` and `text` (spec 017-record-encoding); specs 020-store-files and 030-ws-protocol add `bool`, nested records and lists when their first schema needs them.
+- The schema of the record fixes the type of each key: `u8`, `u32` or `u64` (exactly 1, 4 or 8 bytes, big-endian), `bool` (1 byte, 0x00 or 0x01), `bytes` (any length within the schema's limit), `bytesN` (exactly N bytes), `text` (valid UTF-8), a nested record of a named schema, or `list<T>` (the value is a sequence of items, each `len` u32 BE ‖ item). Phase 1 implements `u8`, `u32`, `u64`, `bytes`, `bytesN` and `text` (spec 017-record-encoding); spec 020-store-files R1 adds `bool`, nested records and lists.
 - A record ends exactly at the end of its buffer, and each value is consumed exactly: no trailing byte anywhere.
 - A missing mandatory key is an error. An optional key is present or absent; there is no null.
 - Each schema says whether an unknown key is ignored (payload, client-server messages) or is an error (config, local files). An ignored key still obeys the framing and the order.
@@ -446,7 +446,7 @@ flowchart TD
 | Component | Technology | Reason |
 | --- | --- | --- |
 | `core` | Stable Rust pinned in `rust-toolchain.toml` (exact version in spec 000), `libsodium-sys-stable`, `zeroize`, and `unicode-normalization` and `unicode-security` for the name comparison of §7 (ADR 0036); nothing else (own record encoding, ADR 0023) | One implementation, controlled memory, no GC leaving keys on the heap |
-| `store` | Separate Rust crate: `std::fs` + `core::crypto` (secretbox). Implements the `Store` trait of `core` with two files per channel and atomic commit via `rename` (ADR 0021). No SQLite, no C outside libsodium | Outside `core` because it does I/O (AGENTS 10); a single implementation for the three platforms, fuzzable from Rust |
+| `store` | Separate Rust crate: `std::fs` and the seal and open functions of `core` (spec 020-store-files), never libsodium on its own. Implements the `Store` trait of `core` with two files per channel and atomic commit via `rename` (ADR 0021). No SQLite, no C outside libsodium | Outside `core` because it does I/O (AGENTS 10); a single implementation for the three platforms, fuzzable from Rust |
 | Mobile bindings | `uniffi` (proc macros; no UDL). `Config`, `Channel`, `Session` and `Settings` are opaque handles (uniffi `Object`); only `Received`, `Peer`, `Fingerprint`, `Gap` and `Event` are `Record`s. | Generates Kotlin and Swift; secrets do not cross the boundary by value |
 | Desktop | Tauri 2 + Svelte 5 + TypeScript; the core is linked in as a Rust crate, no wasm | Pinned and signed code, OS keychain, one more reproducible build |
 | Android | Kotlin, Jetpack Compose, minSdk 26. No Room or SQLite: storage belongs to the core | Current standard |

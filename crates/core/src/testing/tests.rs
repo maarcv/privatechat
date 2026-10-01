@@ -395,3 +395,99 @@ fn s020_t12_r12_memory_load_checks() {
     assert_eq!(store.compact(&state, 6).unwrap(), 1);
     assert_eq!(handle.all_commits(), before);
 }
+
+/// Spec 020, R15 (`MemoryStore`): a commit after a compaction appends under
+/// the new generation, and a second compaction handed the same stale state
+/// takes the store's generation, not the state's, so no generation repeats.
+#[test]
+fn s020_t15_r15_memory_compacts_twice() {
+    let (_, mut store) = memory();
+    assert_eq!(store.log_len(), 0);
+    let loaded = state_for([1; 16]);
+    store
+        .commit(&batch(
+            state_for([1; 16]),
+            vec![record(1, 5), record(10, 6)],
+        ))
+        .unwrap();
+    assert_eq!(store.compact(&loaded, 5).unwrap(), 1);
+    store
+        .commit(&batch(state_for([1; 16]), vec![record(2, 7)]))
+        .unwrap();
+    let (state, records) = store.load().unwrap().unwrap();
+    assert!(records_eq(&records, &[record(10, 6), record(2, 7)]));
+    assert_eq!(state.log_position().1, 1);
+    assert_eq!(store.compact(&loaded, 5).unwrap(), 1);
+    let (state, records) = store.load().unwrap().unwrap();
+    assert!(records_eq(&records, &[record(10, 6)]));
+    assert_eq!(state.log_position(), (store.log_len(), 2));
+}
+
+/// Spec 020, R11 (the doubles): each fault counts its own calls from when it
+/// was armed, re-arming restarts the count, and a call a switch blocked
+/// still counts.
+#[test]
+fn s020_t11_r11_faults_count_their_own_calls() {
+    let faults = Faults::new();
+    let mut vault = FailingVault::new(Box::new(MemoryVault::new()), faults.clone());
+    let mut store = vault.create(&[1; 16]).unwrap();
+    let commit = |store: &mut Box<dyn Store>| store.commit(&batch(state_for([1; 16]), vec![]));
+    faults.fail_at(5);
+    commit(&mut store).unwrap();
+    faults.fail_at(1);
+    assert!(matches!(commit(&mut store), Err(StoreError::Io)));
+    faults.fail_commits(true);
+    faults.fail_at(2);
+    assert!(matches!(commit(&mut store), Err(StoreError::Io)));
+    faults.fail_commits(false);
+    assert!(matches!(commit(&mut store), Err(StoreError::Io)));
+    commit(&mut store).unwrap();
+    faults.poison_after(5);
+    commit(&mut store).unwrap();
+    faults.poison_after(1);
+    faults.fail_at(1);
+    assert!(matches!(commit(&mut store), Err(StoreError::Io)));
+    assert!(store.load().is_ok());
+    faults.poison_after(1);
+    assert!(matches!(commit(&mut store), Err(StoreError::Io)));
+    assert!(matches!(store.load(), Err(StoreError::Io)));
+}
+
+/// Spec 020, Interface (the builders): `settings` sets each field it is
+/// given, and `settings_eq` sees a change in each.
+#[test]
+fn s020_t22_r22_settings_builder_and_comparison() {
+    let built = super::settings("wss://x.org", 5, Some("h:1"));
+    assert_eq!(built.default_server_url, "wss://x.org");
+    assert_eq!(built.lock_timeout_seconds, 5);
+    assert_eq!(built.socks5_proxy.as_deref(), Some("h:1"));
+    assert!(super::settings_eq(
+        &built,
+        &super::settings("wss://x.org", 5, Some("h:1"))
+    ));
+    for other in [
+        super::settings("wss://y.org", 5, Some("h:1")),
+        super::settings("wss://x.org", 6, Some("h:1")),
+        super::settings("wss://x.org", 5, None),
+    ] {
+        assert!(!super::settings_eq(&built, &other));
+    }
+}
+
+/// Spec 020, R12 (`MemoryStore`): a state with no log, and bytes inside the
+/// committed length that do not complete an entry, are `Corrupt`.
+#[test]
+fn s020_t12_r12_memory_state_without_its_log() {
+    let (vault, mut store) = memory();
+    let name = *store.name();
+    let sealed = |log_len: u64| {
+        state_for([1; 16])
+            .seal(&memory_key(), &name, log_len, 0)
+            .unwrap()
+    };
+    vault.put_raw(&name, Some(&sealed(9)), None);
+    assert!(matches!(store.load(), Err(StoreError::Corrupt)));
+    let log = [log_header(1, 0), vec![0; 3]].concat();
+    vault.put_raw(&name, Some(&sealed(12)), Some(&log));
+    assert!(matches!(store.load(), Err(StoreError::Corrupt)));
+}

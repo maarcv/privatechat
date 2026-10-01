@@ -140,6 +140,22 @@ Stopped after round 4: every pass of the last two rounds found nothing substanti
 | AX-Q6 | Wipe a message's display name like its body (X-A Q2) | Yes | Interface |
 | AX-Q7 | Constant time for the config inside `state_eq` (X-A Q3) | `==` in test code; the spec says so | Interface |
 
+**Round 2**, the same three passes over the fixed code (185 mutants, the 126 of round 1 re-expressed and 59 new; 36 survived, 12 of them equivalent). Findings and changes:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AX8 | `MemoryStore::compact` took the generation from the state it was handed, which a channel keeps in memory unchanged, so two compactions in one session would repeat a generation, what R15 and ADR 0035 exist to prevent; R15 did not say whose generation; nothing committed after a compaction or compacted twice (X2-A2, X2-C1, X2-B2) | Medium | The store's own generation (AX-Q8); `log_position`'s doc; a test of two compactions from one stale state |
+| AX9 | No test tied a field of a peer, `outbox` entry, old key or `acked` record to its key, so a swap made alike in encoder and decoder passed (X2-A1) | Medium | Records built by hand with a distinct value per key |
+| AX10 | The exported file limits and the record maxima were never pinned by value; the per-fault counters, the settings builder and comparison, two load checks and `duplicate`'s log position untested; the long-blob case broke the framing instead of the bound; two codec negatives not pinned to their edit (X2-B1, X2-B3–X2-B8) | Low | The tests; the case planted at key 3 |
+| AX11 | `record_decode` had no seed with a real `bool`, nested record or list (X2-C6) | Low | Seeded from the `types` vectors of `020.json` too (016 R8) |
+| AX12 | Stale text: `patterns.md` §5 and the architecture skill with the old `WriteBatch`, 027's list of `pub` items without the file limits, `docs/spec.md` on `store` and on who adds the codec types, 017's test-schema paragraph, the fuzz script's comment, 020's file table; 027 R17's wider reach check would flag the item decoders passed by path (X2-C2–X2-C5, X2-C7) | Low | Rewritten; 027 R17 excludes the three item decoders |
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AX-Q8 | Where a compaction takes its generation (X2-A Q1) | From the store, the `state.bin` it last loaded or wrote | R15 |
+| AX-Q9 | Wipe the names the state holds, after AX-Q6 (X2-A Q2) | A peer's last display name only, the data the log wipes; labels and local names stay plain | Interface |
+| AX-Q10 | AGENTS 23 on the old `commit(WriteBatch)` and a count that skipped only the cursor (X2-C Q1) | Reworded: `commit(&WriteBatch)`, and `commits` skips a commit that moves only the cursor or `synced_at` | AGENTS 23 |
+
 Not changed: the equivalent mutants (the size check before the box, which `secretbox_open` repeats; the record bound no valid state reaches; the vector values a test does not single out). Slices (b1), (b2) and (c) are above 400 net lines, with their reason in the commits; (c) is to be split between log and settings when it goes to a pull request. `020.json` is a new file: its pull request needs the reviewer's `adr-not-needed` label or an ADR, since `adr-guard` refuses any diff under `specs/vectors/` without one (AGENTS 18).
 
 ## Phase 1 closed

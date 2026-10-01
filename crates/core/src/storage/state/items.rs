@@ -54,7 +54,8 @@ pub(crate) struct PeerRecord {
     /// Key 7, the highest counter received from the peer.
     pub(crate) max_counter: Option<u64>,
     /// Key 8, the display name of the peer's last message, as sent.
-    pub(crate) last_display_name: Option<Vec<u8>>,
+    /// Wiped on drop like the name in the log record it came from.
+    pub(crate) last_display_name: Option<Zeroizing<Vec<u8>>>,
 }
 
 impl PeerRecord {
@@ -74,7 +75,9 @@ impl PeerRecord {
             first_seen: required(reader.u64(5))?,
             last_seen: required(reader.u64(6))?,
             max_counter: reader.u64(7)?,
-            last_display_name: reader.bytes(8, MAX_NAME)?.map(<[u8]>::to_vec),
+            last_display_name: reader
+                .bytes(8, MAX_NAME)?
+                .map(|name| Zeroizing::new(name.to_vec())),
         };
         reader.end()?;
         Ok(peer)
@@ -91,7 +94,7 @@ impl PeerRecord {
             Some(U64_LEN),
             Some(U64_LEN),
             self.max_counter.map(|_| U64_LEN),
-            self.last_display_name.as_ref().map(Vec::len),
+            self.last_display_name.as_ref().map(|name| name.len()),
         ])
     }
 
@@ -103,7 +106,7 @@ impl PeerRecord {
     pub(crate) fn encode(&self) -> Result<Zeroizing<Vec<u8>>, StoreError> {
         within(self.label.as_ref().map_or(0, String::len), MAX_NAME)?;
         within(
-            self.last_display_name.as_ref().map_or(0, Vec::len),
+            self.last_display_name.as_ref().map_or(0, |name| name.len()),
             MAX_NAME,
         )?;
         let mut writer = Writer::with_capacity(self.encoded_len());
