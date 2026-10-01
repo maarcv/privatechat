@@ -30,6 +30,9 @@ jobs:
           - receive
           - receive_signed
           - verify_qr_parse
+          - state_decode
+          - log_record_decode
+          - settings_decode
     steps:
       - uses: actions/checkout@v7
       - name: s016_t09_r09_install_nightly_and_cargo_fuzz

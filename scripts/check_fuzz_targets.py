@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The fuzz targets of spec 016-fuzz-harness, read from the sources.
 
-T02: the seven targets of R2 exist, and no other. T06: every `pub` parser of `core` that
+T02: the targets of R2 exist, and no other. T06: every `pub` parser of `core` that
 takes `&[u8]`, and every `pub` entry of `fuzz_entry`, is reached by a target or named with
 its reason in `fuzz_exclusions.txt`, and every exclusion names a function that exists
 (AGENTS 21). T07: each target is the one-call template, and each entry only calls its
@@ -27,7 +27,8 @@ EXCLUSIONS = ROOT / "scripts" / "fuzz_exclusions.txt"
 WORKFLOWS = ROOT / ".github" / "workflows"
 # R2, in its order.
 TARGETS = ("record_decode", "config_parse", "config_parse_qr", "payload_decode", "receive",
-           "receive_signed", "verify_qr_parse")
+           "receive_signed", "verify_qr_parse", "state_decode", "log_record_decode",
+           "settings_decode")
 # R7 and the Interface: every target is this file, with its name.
 TEMPLATE = """#![no_main]
 
@@ -88,7 +89,7 @@ def parse_exclusions(text: str, sources: dict[str, str]) -> tuple[set[str], list
     return names, errors
 
 
-def check_s016_t02_r02_the_seven_targets_exist(targets: dict[str, str]) -> list[str]:
+def check_s016_t02_r02_the_targets_exist(targets: dict[str, str]) -> list[str]:
     errors = [f"{name}: no fuzz_targets/{name}.rs" for name in TARGETS if name not in targets]
     errors += [f"{name}: not a target of R2" for name in targets if name not in TARGETS]
     errors += [f"{name}: does not call fuzz_entry::{name}" for name, source in targets.items()
@@ -155,9 +156,9 @@ def self_test(sources: dict[str, str], entry: str, targets: dict[str, str],
         {**sources, "fixture.rs": extra}, e, targets, ex)
     # Each case, and a word its report must contain.
     fixtures = [
-        ("a missing target", "no fuzz_targets/receive.rs", check_s016_t02_r02_the_seven_targets_exist(
+        ("a missing target", "no fuzz_targets/receive.rs", check_s016_t02_r02_the_targets_exist(
             {k: v for k, v in targets.items() if k != "receive"})),
-        ("an extra target", "extra: not a target", check_s016_t02_r02_the_seven_targets_exist(
+        ("an extra target", "extra: not a target", check_s016_t02_r02_the_targets_exist(
             {**targets, "extra": TEMPLATE.format(name="extra")})),
         ("a parse parser without a target", "Box::parse_new", reach(parser.format(name="parse_new"))),
         ("a decrypt parser without a target", "Box::decrypt_new",
@@ -227,7 +228,7 @@ def main() -> int:
     workflows = {path.name: path.read_text(encoding="utf-8")
                  for path in sorted(WORKFLOWS.glob("*.yml"))}
     errors = (self_test(sources, entry, targets, exclusions)
-              + check_s016_t02_r02_the_seven_targets_exist(targets)
+              + check_s016_t02_r02_the_targets_exist(targets)
               + check_s016_t06_r06_every_parser_is_reached(sources, entry, targets, exclusions)
               + check_s016_t07_r07_targets_are_small(targets, entry)
               + check_s016_t09_r09_only_the_fuzz_workflow_names_a_nightly(workflows)

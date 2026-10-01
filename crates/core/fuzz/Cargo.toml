@@ -66,3 +66,24 @@ path = "fuzz_targets/verify_qr_parse.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "state_decode"
+path = "fuzz_targets/state_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "log_record_decode"
+path = "fuzz_targets/log_record_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "settings_decode"
+path = "fuzz_targets/settings_decode.rs"
+test = false
+doc = false
+bench = false
