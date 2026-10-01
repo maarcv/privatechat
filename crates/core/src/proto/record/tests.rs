@@ -325,7 +325,11 @@ fn s020_t01_r01_new_codec_types() {
     // An item longer than both its bound and the bytes left: the bytes are
     // checked first, as R2 checks a field.
     let over_both = [0, 0, 0, 9, 0, 0, 0];
-    let cases: [(&[u8], RecordError); 6] = [
+    // Every item is framed before the first is decoded: a bad item ahead of
+    // a framing error gives the framing error.
+    let bad_then_cut = [&item(&[0; 7])[..], &[0, 0]].concat();
+    let cases: [(&[u8], RecordError); 7] = [
+        (&bad_then_cut, Truncated),
         (&one_more, TooLong),
         (&short_header, Truncated),
         (&short_item, Truncated),

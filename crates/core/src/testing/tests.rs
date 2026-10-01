@@ -81,12 +81,12 @@ fn s020_t29_r29_comparisons_see_every_field() {
     assert!(!records_eq(&records, &[record(2, 10), record(1, 10)]));
     assert!(!records_eq(&records, &[record(1, 10), record(2, 11)]));
     assert!(!records_eq(&records, &records[..1]));
-    let batch = batch(state, vec![record(3, 1)]);
+    let batch = batch(state, vec![record(3, 1), record(4, 2)]);
     assert!(state_eq(batch.state(), &state_for([1; 16])));
-    assert_eq!(batch.records().len(), 1);
+    assert_eq!(batch.records().len(), 2);
     let (state, records) = batch.into_parts();
     assert!(state_eq(&state, &state_for([1; 16])));
-    assert!(records_eq(&records, &[record(3, 1)]));
+    assert!(records_eq(&records, &[record(3, 1), record(4, 2)]));
 }
 
 /// A vault and the store of channel `[1; 16]` in it.
@@ -519,4 +519,31 @@ fn s020_t12_r12_memory_state_without_its_log() {
     let log = [log_header(1, 0), vec![0; 3]].concat();
     vault.put_raw(&name, Some(&sealed(12)), Some(&log));
     assert!(matches!(store.load(), Err(StoreError::Corrupt)));
+}
+
+/// Spec 020, R5, R12 and R13 (`MemoryStore`): a log laid out by hand as R5
+/// lays it out loads, its entry bound to the offset of its `len`; a
+/// committed length inside the header and a generation-0 header followed by
+/// a byte, with no state, are `Corrupt`, the second one listed.
+#[test]
+fn s020_t12_r12_memory_log_by_hand() {
+    let (vault, mut store) = memory();
+    let name = *store.name();
+    let sealed = record(5, 3).seal(&memory_key(), &name, 0, 9).unwrap();
+    let len = u32::try_from(sealed.len()).unwrap().to_be_bytes();
+    let log = [log_header(1, 0), len.to_vec(), sealed].concat();
+    let log_len = u64::try_from(log.len()).unwrap();
+    let state = state_for([1; 16])
+        .seal(&memory_key(), &name, log_len, 0)
+        .unwrap();
+    vault.put_raw(&name, Some(&state), Some(&log));
+    let (_, records) = store.load().unwrap().unwrap();
+    assert!(records_eq(&records, &[record(5, 3)]));
+    let inside_header = state_for([1; 16]).seal(&memory_key(), &name, 5, 0).unwrap();
+    vault.put_raw(&name, Some(&inside_header), Some(&log_header(1, 0)));
+    assert!(matches!(store.load(), Err(StoreError::Corrupt)));
+    vault.put_raw(&name, None, Some(&[log_header(1, 0), vec![0]].concat()));
+    assert!(matches!(store.load(), Err(StoreError::Corrupt)));
+    let mut listing = vault.clone();
+    assert_eq!(listing.list().unwrap().len(), 1);
 }

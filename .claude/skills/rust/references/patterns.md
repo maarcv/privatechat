@@ -212,10 +212,11 @@ pub fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> R
     let mut state = self.state.duplicate();                 // the whole new state, not a diff
     state.send_counter = next;
     state.outbox.push(outbox_entry(client_ref, now, counter, &sealed)); // spec 021 builds the entry
-    let batch = WriteBatch::new(state, Vec::new());
+    let batch = WriteBatch::new(state, vec![own_record(client_ref, counter, now, &payload)]); // 021 R8
     self.store.commit(&batch)?;                             // if this fails, no blob leaves and memory is unchanged
-    let (state, _) = batch.into_parts();                    // only after `Ok` does memory move on
+    let (state, records) = batch.into_parts();              // only after `Ok` does memory move on, both parts
     self.state = state;
+    self.records.extend(records);
     Ok(client_ref)                                          // the blob leaves only through outbox()
 }
 ```

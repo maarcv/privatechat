@@ -165,7 +165,14 @@ Stopped after round 4: every pass of the last two rounds found nothing substanti
 | AX15 | The `store` crate's T15 did not ask for two compactions from one stale state; `ChannelFiles` did not say it keeps its log position; `WriteBatch` had no way to give its parts back after `Ok` (021 R2); 027 R17 named three of the five decoders its wider check would flag; the commit count "other than the cursor" left in §10, the PR and spec templates and the rust skill, `commit(Batch)` in §12, `StoreError::TooLarge` in the skill (X3-C1–X3-C4) | Low | T15, the Interface and `WriteBatch::into_parts`, 027 R17's rule, the wording |
 | AX16 | The doubles do not model the live-store lock of R20 (X3-A Q1) | Low | The Interface says so; T20 checks it over the real store |
 
-Stopped after round 3: two passes found nothing substantive and the third only test gaps, all closed.
+**Round 4**, passes B and C only, A having found nothing in round 3 (83 mutants: round 3's gaps re-run, all dead, and 48 new). Both found nothing substantive: small test gaps and text left behind, closed.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AX17 | `into_parts` tested with one record; the memory log never planted by hand, so a layout changed alike in `append` and `entries` passed; a committed length inside the header, a generation-0 header with a byte after it and no state, and a bad list item ahead of a framing error untested (X4-B1–X4-B5) | Low | The tests |
+| AX18 | The vectors README kept the old commit count; the encrypt sketch of `patterns.md` dropped the records `into_parts` hands back (021 R2, R8); `fuzz_seeds.py`'s check read the files from the table it checks; History lines missing in 020 and 027 (X4-C1–X4-C4) | Low | Rewritten; the check names each decoder's files |
+
+Stopped after round 4: every pass of the last round found nothing substantive; the survivors left are equivalent or weaken a checker's own guard.
 
 Not changed: the equivalent mutants (the size check before the box, which `secretbox_open` repeats; the record bound no valid state reaches; the vector values a test does not single out). Slices (b1), (b2) and (c) are above 400 net lines, with their reason in the commits; (c) is to be split between log and settings when it goes to a pull request. `020.json` is a new file: its pull request needs the reviewer's `adr-not-needed` label or an ADR, since `adr-guard` refuses any diff under `specs/vectors/` without one (AGENTS 18).
 

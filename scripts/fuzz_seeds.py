@@ -148,8 +148,8 @@ def check_s016_t08_r08_corpus_is_seeded() -> None:
 # checked against something: the targets of R2 and, for the decoders, the vector schemas.
 R2_TARGETS = ROOT / "scripts" / "check_fuzz_targets.py"
 FUZZ_ENTRY = ROOT / "crates" / "core" / "src" / "fuzz_entry.rs"
-SCHEMAS = {"record_decode": {"test", "types"}, "state_decode": {"state"},
-           "log_record_decode": {"log"}, "settings_decode": {"settings"}}
+SCHEMAS = {"record_decode": ("017 020", {"test", "types"}), "state_decode": ("020", {"state"}),
+           "log_record_decode": ("020", {"log"}), "settings_decode": ("020", {"settings"})}
 
 
 def check_s016_t08_r08_rows_match_r2() -> None:
@@ -160,11 +160,11 @@ def check_s016_t08_r08_rows_match_r2() -> None:
     r2 = [name.strip().strip('"') for name in listed.replace("\n", " ").split(",") if name.strip()]
     if list(TARGETS) != r2:
         raise SystemExit(f"fuzz_seeds.py: the rows {list(TARGETS)} are not the targets of R2 {r2}")
-    for target, schemas in SCHEMAS.items():
+    for target, (files, schemas) in SCHEMAS.items():
         spec, carries, _ = TARGETS[target]
-        every = [v for v in load(spec) if v["inputs"].get("schema") in schemas]
+        every = [v for v in load(files) if v["inputs"].get("schema") in schemas]
         seeded = [v for v in load(spec) if carries(v)]
-        if not every or seeded != every:
+        if spec != files or not every or seeded != every:
             raise SystemExit(f"fuzz_seeds.py: {target}: not every vector of {sorted(schemas)}")
     if POLICY_BYTE["ignore"] != b"\x00" or "if *policy == 0" not in FUZZ_ENTRY.read_text(encoding="utf-8"):
         raise SystemExit("fuzz_seeds.py: the ignore byte is not the one fuzz_entry.rs reads")
