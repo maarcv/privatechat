@@ -114,9 +114,35 @@ fn s015_t01_r01_rejects_every_broken_rule() {
             "{from} -> {to}"
         );
     }
-    // A tab between tokens is JSON whitespace, unlike one inside a string.
-    let tabbed = one.replace(r#""00ff", "block""#, "\"00ff\",\t\"block\"");
-    assert!(parse("999", &tabbed).is_ok());
+    // A tab, CR or LF between tokens is JSON whitespace; a form feed or a
+    // vertical tab is not, and no escape or control character may sit in a
+    // string.
+    for between in ["\t", "\r\n"] {
+        let spaced = one.replace(
+            r#""00ff", "block""#,
+            &format!("\"00ff\",{between}\"block\""),
+        );
+        assert!(parse("999", &spaced).is_ok(), "{between:?}");
+    }
+    for between in ["\u{c}", "\u{b}"] {
+        let spaced = one.replace(
+            r#""00ff", "block""#,
+            &format!("\"00ff\",{between}\"block\""),
+        );
+        assert_eq!(
+            parse("999", &spaced).err(),
+            Some(Broken::Syntax),
+            "{between:?}"
+        );
+    }
+    for inside in [r"a\u0041", "a\u{7f}formula", "a\u{85}formula"] {
+        let edited = one.replace("a formula", inside);
+        assert_eq!(
+            parse("999", &edited).err(),
+            Some(Broken::Syntax),
+            "{inside:?}"
+        );
+    }
     let duplicate = file(&format!("{VECTOR}, {VECTOR}"));
     assert_eq!(parse("999", &duplicate).err(), Some(Broken::DuplicateName));
     assert_eq!(parse("999", &file("")).err(), Some(Broken::Empty));

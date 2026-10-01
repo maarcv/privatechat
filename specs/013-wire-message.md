@@ -100,11 +100,11 @@ impl Payload {
 }
 
 /// The record read up to key 2, where `open` runs the stale check (R12).
-pub(crate) struct PayloadHead<'a> { /* the reader, key 0 if present, key 1 as bytes */ pub(crate) sent_at: u64 }
+pub(super) struct PayloadHead<'a> { /* the reader, key 0 if present, key 1 as bytes */ pub(super) sent_at: u64 }   // visible in `proto` alone, so only `open` reads a payload in two steps
 
 impl<'a> PayloadHead<'a> {
-    pub(crate) fn read(bytes: &'a [u8]) -> Result<PayloadHead<'a>, Error>;   // keys 0–2; `BadPayload` before key 2 or without it
-    pub(crate) fn finish(self) -> Result<Payload, Error>;                     // key 3, `end()`, key 0 required, the filter of R9
+    pub(super) fn read(bytes: &'a [u8]) -> Result<PayloadHead<'a>, Error>;   // keys 0–2; `BadPayload` before key 2 or without it
+    pub(super) fn finish(self) -> Result<Payload, Error>;                     // key 3, `end()`, key 0 required, the filter of R9
 }
 
 /// What a channel needs to seal and verify: its identifier, its keys and its TTL.
@@ -283,4 +283,4 @@ None. Closed after audit H: the expiry of `Unreadable` messages is spec 023-ttl-
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-09-29 revised after audit U (`docs/audit-log.md`): an absent key 0 is judged after the stale check (R12, T16, vector `stale_missing_type`); `PayloadHead` in the Interface; the keystream is not wiped (Security); T02, T06 and T11 name what they prove. The three slices ship as one branch of 473, 1 035 and 614 net lines against the 400 of AGENTS 14, most of it tests, each excess stated in its commit (reviewer's decision)
 - 2026-09-29 implemented: three slices with the audit U fixes, reviewed (Marc Vilardebó)
-- 2026-10-01 revised after audit Y (`docs/audit-log.md`): R17 and the mutation table hold at times that pass step 2; `Payload::decode` is compiled for the tests and the fuzz target alone
+- 2026-10-01 revised after audit Y (`docs/audit-log.md`): R17 and the mutation table hold at times that pass step 2; `Payload::decode` is compiled for the tests and the fuzz target alone, and `PayloadHead` is visible in `proto` alone

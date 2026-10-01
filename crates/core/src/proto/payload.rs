@@ -169,11 +169,11 @@ impl Payload {
 
 /// A payload read up to and including `sent_at`, the point where `open`
 /// runs the stale check (R12).
-pub(crate) struct PayloadHead<'a> {
+pub(super) struct PayloadHead<'a> {
     reader: Reader<'a>,
     kind: Option<u8>,
     display_name: Option<&'a [u8]>,
-    pub(crate) sent_at: u64,
+    pub(super) sent_at: u64,
 }
 
 impl<'a> PayloadHead<'a> {
@@ -184,7 +184,7 @@ impl<'a> PayloadHead<'a> {
     /// `BadPayload` for a framing or width failure before `sent_at`, or a
     /// `sent_at` that is absent. An absent `type` fails in `finish`, after
     /// the stale check.
-    pub(crate) fn read(bytes: &'a [u8]) -> Result<PayloadHead<'a>, Error> {
+    pub(super) fn read(bytes: &'a [u8]) -> Result<PayloadHead<'a>, Error> {
         let mut reader =
             Reader::new(bytes, MAX_PAYLOAD, UnknownKeys::Ignore).map_err(bad_payload)?;
         let kind = reader.u8(KEY_TYPE).map_err(bad_payload)?;
@@ -206,7 +206,7 @@ impl<'a> PayloadHead<'a> {
     ///
     /// `BadPayload` for a missing `type` or `body`, or a framing failure
     /// after `sent_at`.
-    pub(crate) fn finish(mut self) -> Result<Payload, Error> {
+    pub(super) fn finish(mut self) -> Result<Payload, Error> {
         let body = required(self.reader.bytes(KEY_BODY, MAX_PAYLOAD))?;
         self.reader.end().map_err(bad_payload)?;
         let kind = PayloadKind::from_byte(self.kind.ok_or(Error::BadPayload)?);

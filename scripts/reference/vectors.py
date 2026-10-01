@@ -512,11 +512,13 @@ def raw_011(name: str, kind: str, origin: str, inputs: dict, expected: dict,
 
 
 def check_s011_t22_r22_section_produces_011_json() -> list[dict]:
-    require(canonical_password("Able\x1c\u00c9CRIT\x1fx") == "able\x1c\u00c9crit\x1fx".encode("utf-8"),
-            "011 R15: U+001C..=U+001F are kept and only ASCII letters fold")
     """The vectors of spec 011: each positive with its record, its QR text and the fields and
     identity it decodes to; each negative a one-rule edit of `config_no_invite` or
     `config_reference`, of its QR text or of the pinned file."""
+    require(WHITE_SPACE == {c for c in range(0x110000) if chr(c).isspace()} - set(range(0x1C, 0x20)),
+            "011 R15: White_Space is Python's isspace less U+001C..=U+001F")
+    require(canonical_password("Able\x1c\u00c9CRIT\x1fx") == "able\x1c\u00c9crit\x1fx".encode("utf-8"),
+            "011 R15: U+001C..=U+001F are kept and only ASCII letters fold")
     created_at = 1_790_000_000_000
     now = U64(created_at + 60_000)
     reference = {
@@ -942,6 +944,7 @@ def check_s013_t23_r18_section_produces_013_json() -> list[dict]:
                             "before now", blob, "Expired", signer=True, received_at=received_at))
     require(received_at + margin == k1["now"] - 1, "expired by one millisecond")
     require(EXPIRY_MARGIN_MS == 360_000, "the margin of 013 R13, which the vector sits one past")
+    require(margin == k1["ttl_seconds"] * 1_000 + 360_000, "ttl_ms + 360 000, written out (R13)")
 
     def flip(offset: int, value: int | None = None) -> bytes:
         edited = bytearray(blob)

@@ -87,6 +87,17 @@ proptest! {
 /// channel, and one of another channel is `WrongChannel`.
 #[test]
 fn s014_t04_r04_rejects_a_foreign_qr() {
+    // A channel that differs in its first or its last byte alone.
+    for at in [0, 15] {
+        let mut near = CHANNEL;
+        near.0[at] ^= 1;
+        let qr = verify_qr(&near, &PK).unwrap();
+        assert_eq!(
+            parse_verify_qr(&qr, &CHANNEL).err(),
+            Some(Error::WrongChannel),
+            "{at}"
+        );
+    }
     let qr = verify_qr(&CHANNEL, &PK).unwrap();
     let other = ChannelId([0x33; 16]);
     let foreign = verify_qr(&other, &PK).unwrap();

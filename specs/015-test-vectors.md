@@ -58,7 +58,7 @@ specs/vectors/NNN.json                 one file per spec, written by the script 
 pub(crate) struct Vector { /* name, kind, source, origin, inputs, expected */ }
 pub(crate) enum Value { Hex(Vec<u8>), Number(u32), Bool(bool), Text(String), List(Vec<Value>) }
 
-// `mod vectors` is `#[cfg(test)] #[allow(dead_code, reason = "accessors used by specs 011–017")]` until they land.
+// `mod vectors` is `#[cfg(test)]`; its `dead_code` allow went once specs 011–017 had landed (audit Y).
 pub(crate) fn load(spec: &str, name: &str) -> Vector;   // spec 010's tests only (R2, R3): no test outside crypto/tests.rs calls it
 pub(crate) type Checker = fn(&Vector);
 pub(crate) fn check_all(spec: &str, entries: &[(&str, Checker)]);   // R3

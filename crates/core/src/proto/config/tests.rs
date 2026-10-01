@@ -176,6 +176,9 @@ fn bad_urls() -> Vec<String> {
     .to_vec();
     urls.push(format!("ws://{}", onion(55, 'a')));
     urls.push(format!("ws://{}", onion(57, 'a')));
+    urls.push(format!("ws://{}-.onion", "a".repeat(55)));
+    urls.push(format!("ws://{}.a.onion", "a".repeat(54)));
+    urls.push(format!("ws://{}.ONION", "a".repeat(56)));
     urls.push(format!("ws://{}.onion", "a".repeat(55) + "1"));
     urls.push(format!("ws://{}.onion", "a".repeat(55) + "8"));
     urls.push(format!("ws://{}", onion(56, 'A')));
@@ -565,7 +568,30 @@ fn s011_t15_r15_password_canonical_form() {
         );
     }
     assert!(canonical_password(&[b'a'; 256]).is_ok());
-    // U+001C..=U+001F are not White_Space, and only ASCII letters fold.
+    // Exactly the 25 White_Space code points separate words; every other
+    // character is kept, U+001C..=U+001F included.
+    let white_space: Vec<u32> = [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0x85, 0xa0, 0x1680]
+        .into_iter()
+        .chain(0x2000..=0x200a)
+        .chain([0x2028, 0x2029, 0x202f, 0x205f, 0x3000])
+        .collect();
+    assert_eq!(white_space.len(), 25);
+    for c in (0..=0x10ffff).filter_map(char::from_u32) {
+        let typed = format!("a{c}b");
+        let canonical = canonical_password(typed.as_bytes()).unwrap();
+        let expected = if white_space.contains(&u32::from(c)) {
+            "a b".to_owned()
+        } else {
+            typed.to_ascii_lowercase()
+        };
+        assert_eq!(
+            canonical.as_slice(),
+            expected.as_bytes(),
+            "U+{:04X}",
+            u32::from(c)
+        );
+    }
+    // Only ASCII letters fold.
     let kept = canonical_password("Able\u{1c}ÉCRIT\u{1f}x".as_bytes()).unwrap();
     assert_eq!(kept.as_slice(), "able\u{1c}Écrit\u{1f}x".as_bytes());
     let spaced = [&b"able"[..], &[b' '; 1_020]].concat();

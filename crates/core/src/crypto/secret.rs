@@ -39,8 +39,8 @@ impl<const N: usize> Secret<N> {
     /// `CryptoError::InitFailed` when libsodium cannot initialise.
     pub(crate) fn random() -> Result<Self, CryptoError> {
         init()?;
-        // Drawn into the secret's own storage: an array returned by value
-        // would leave an unwiped copy behind (R18).
+        // Drawn straight into the secret, as `copy_from` does, rather than
+        // through an array `random_bytes` would hand back and leave (R18).
         let mut secret = Self([0; N]);
         ffi::random_bytes(&mut secret.0);
         Ok(secret)

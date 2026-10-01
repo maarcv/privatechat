@@ -107,7 +107,7 @@ Each row corresponds to the file `docs/adr/NNNN-*.md`; titles are copied verbati
 | 0039 | Open the desktop client's TLS connections with rustls, in a workspace of its own | superseded by 0040 | The server accepts TLS 1.3 only, the OS stack on macOS lacks it, and the web view cannot use a SOCKS5 proxy |
 | 0040 | Check the desktop client's certificates with no network request of their own | superseded by 0041 | The OS verifier fetches revocation data outside Tor; rustls in a workspace of its own, its WebPKI verifier over the OS roots |
 | 0041 | Open every client's server connections through one Rust host | accepted | One implementation of the sockets, the proxy and TLS for the three clients; Mozilla's roots, since iOS lists none |
-| 0042 | Prove strict Ed25519 with published cases a lax verifier accepts | accepted | `010.json` gains the ed25519-speccheck cases, which only a strict verifier rejects; it describes no format, so no version change |
+| 0042 | Prove strict Ed25519 with published cases a lax verifier accepts | accepted | `010.json` gains the ed25519-speccheck cases, half of which a lax verifier accepts and the rest pin the cofactorless equation; it describes no format, so no version change |
 
 ## 4. Cryptographic model
 
@@ -122,7 +122,7 @@ Everything comes from libsodium; no primitive of our own is implemented. All lit
 | Subkey derivation | `crypto_kdf_derive_from_key` (BLAKE2b) | 32 B; `ctx` of exactly 8 bytes; `subkey_id` = 0 always. The internal encoding of `subkey_id` is libsodium's, not the wire's |
 | Keyed hash | `crypto_generichash` (BLAKE2b, key) | `outlen = 32` |
 | Unkeyed hash | `crypto_generichash` (BLAKE2b) | `outlen = 32`. `X[0..16]` means "32 B and truncate to the first 16" |
-| Message and channel signature | `crypto_sign` (Ed25519) | pk 32 B, sk 64 B, sig 64 B. Verification with libsodium's `crypto_sign_verify_detached` compiled **without** `ED25519_COMPAT`: rejects S ≥ L, small-order `R`, small-order `pk` and non-canonical `pk`. The server verifies exclusively through `core::crypto` |
+| Message and channel signature | `crypto_sign` (Ed25519) | pk 32 B, sk 64 B, sig 64 B. Verification with libsodium's `crypto_sign_verify_detached` compiled **without** `ED25519_COMPAT`: rejects S ≥ L, small-order or non-canonical `R` or `pk`, and a signature only the cofactored equation accepts (ADR 0042). The server verifies exclusively through `core::crypto` |
 | Password → key (exported config) | `crypto_pwhash` (Argon2id13) | 32 B; `OPSLIMIT_INTERACTIVE`, `MEMLIMIT_INTERACTIVE` (64 MiB), fixed by `config_version = 1` |
 | Encryption of exported files | `crypto_secretbox` | key 32 B, nonce 24 B |
 | Fixed-size comparison | `sodium_memcmp` | Every comparison of `[u8; N]` in the production code of `core`, but public identifiers used as map keys or for ordering (AGENTS 22) |
@@ -319,7 +319,7 @@ Error codes: `bad_auth`, `nonce_expired`, `bad_ttl`, `not_subscribed`, `bad_blob
 sig = crypto_sign_detached(sk_ch, "privatechat/auth/v1" ‖ server_nonce(32) ‖ channel_id(16) ‖ BE32(ttl_seconds) ‖ host)
 ```
 
-where `host` is `url.host` per WHATWG: lowercase ASCII A-label, no trailing dot, no port, no brackets; IP literals as they appear in `server_url`. The server compares it with the `hostnames` list of its configuration, never with the `Host` header. The server checks the TTL range, recomputes `channel_id` from `(pk_ch, ttl_seconds)`, verifies the signature with `core::crypto` and returns the `channel_id` in `ok`. The credential proves having the config, is not reusable by whoever sees it (server, proxy, logs) and the server stores nothing. After 60 s → `error{nonce_expired}` and a new `hello`. Several `subscribe`s within the window reuse the nonce (each one binds a different `channel_id`).
+where `host` is `Config::host()`: the bytes of `server_url` between the scheme and the optional port, exactly as written under the grammar of spec 011-config-format R5 and R6; the server takes its own hosts the same way (spec 031-auth-channel-signature R8). The server compares it with the `hostnames` list of its configuration, never with the `Host` header. The server checks the TTL range, recomputes `channel_id` from `(pk_ch, ttl_seconds)`, verifies the signature with `core::crypto` and returns the `channel_id` in `ok`. The credential proves having the config, is not reusable by whoever sees it (server, proxy, logs) and the server stores nothing. After 60 s → `error{nonce_expired}` and a new `hello`. Several `subscribe`s within the window reuse the nonce (each one binds a different `channel_id`).
 
 **Version.** The client refuses to connect if `hello.proto_versions` does not include exactly the `proto_version` of the config; there is no downgrade negotiation. More than 8 elements → local error and disconnection.
 

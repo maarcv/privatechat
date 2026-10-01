@@ -110,7 +110,9 @@ def check_s016_t06_r06_every_parser_is_reached(sources: dict[str, str], entry: s
             if TAKES_BYTES.search(match.group(3)):
                 kind = owner(source, match.start(), match.group(1))
                 name = f"{kind}::{match.group(2)}" if kind else match.group(2)
-                wanted[name] = (reach_parser, rf"(?<![\w:]){name}\(")
+                # A free function may be called after a module path, never after a type.
+                path = "" if kind else r"(?:[a-z_]\w*::)*"
+                wanted[name] = (reach_parser, rf"(?<![\w:]){path}{name}\(")
     for name in ENTRY.findall(entry):
         wanted[f"fuzz_entry::{name}"] = (reach_entry, rf"\bfuzz_entry::{name}\(")
     return errors + [f"{name}: reached by no fuzz target and not excluded"
@@ -186,12 +188,23 @@ def self_test(sources: dict[str, str], entry: str, targets: dict[str, str],
                              ("Instant", "let t = Instant::now();"),
                              ("SystemTime", "let t = SystemTime::now();"),
                              ("OpenOptions", "let o = OpenOptions::new();"),
-                             ("sign_keypair", "let k = crypto::sign_keypair();")]],
+                             ("sign_keypair", "let k = crypto::sign_keypair();"),
+                             ("std::io", "let o = std::io::stdout();"),
+                             ("std::net", "let s = std::net::TcpStream::connect(a);"),
+                             ("std::process", "std::process::exit(0);"),
+                             ("std::thread", "std::thread::yield_now();"),
+                             ("std::time", "let d = std::time::Duration::ZERO;"),
+                             ("std::env", "let v = std::env::args();")]],
     ]
     errors = [f"the check accepts {case}" for case, word, found in fixtures
               if not any(word in error for error in found)]
     if any("parse_text" in error for error in reach("impl Box {\n    pub fn parse_text(text: &str) {")):
         errors.append("the check names a parser that takes no &[u8]")
+    called_by_path = check_s016_t06_r06_every_parser_is_reached(
+        {**sources, "fixture.rs": "pub fn parse_x(\n    b: &[u8],\n) {"},
+        entry + "\nfn reach() { let _ = fingerprint::parse_x(data); }", targets, exclusions)
+    if any("parse_x" in error for error in called_by_path):
+        errors.append("the check misses a free parser called after its module path")
     return errors
 
 

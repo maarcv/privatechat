@@ -246,3 +246,15 @@ fn s013_t18_r14_payload_debug_hides_content() {
                     sent_at: 1700000040000, body: [REDACTED] }";
     assert_eq!(debug, expected);
 }
+
+/// Spec 013, Interface: `Payload::decode`, which reads a payload without the
+/// stale check of `open` (R12), is compiled for the tests and the fuzz target
+/// alone, and `PayloadHead`, which `open` reads in two steps, is visible in
+/// `proto` alone. `proto` allows dead code until spec 027-core-api, so only
+/// the source can show a lost gate.
+#[test]
+fn s013_t10_r06_decode_is_not_in_the_product() {
+    let source = include_str!("../payload.rs");
+    assert!(source.contains("#[cfg(any(test, fuzzing))]\n    pub(crate) fn decode(bytes: &[u8])"));
+    assert!(source.contains("pub(super) struct PayloadHead<'a>"));
+}

@@ -14,6 +14,6 @@ Verification must be strict (`docs/spec.md` §4 "Primitives", spec 010-primitive
 - Raise `proto_version`: no byte any client sends changes, so a version bump would announce a format change that does not exist.
 
 ## Consequences
-- A verifier that skips the small-order, canonicity or `S < L` checks now fails T15 of spec 010 on the cases built to defeat it, and one that rejects a valid mixed-order signature fails case 3.
-- The Kotlin and Swift tests that read `010.json` (specs 040-uniffi and the platform specs) read the new names.
-- AGENTS 18, spec 010 (R10, T15, Vectors, Security), `specs/vectors/README.md` and `docs/spec.md` §4 are amended; the 011–017 vector files stay frozen.
+- A verifier that skips the small-order, canonicity or `S < L` checks now fails T15 of spec 010 on the cases built to defeat it (0–2, 6, 7, 11 and `signature_s_plus_l`); one that uses the cofactored equation or does not compare `R`'s encoding fails cases 4, 5 and 8–10; one that rejects a valid mixed-order signature fails case 3.
+- Only the Rust tests and the reference script's self-checks read `010.json`; no client platform does.
+- AGENTS 18, spec 010 (R10, T15, Vectors, Security), `specs/vectors/README.md` and `docs/spec.md` §3 and §4 are amended; the 011–017 vector files stay frozen.

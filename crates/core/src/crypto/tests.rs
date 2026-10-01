@@ -163,11 +163,15 @@ fn s010_t04_r03_secret_has_no_forbidden_traits() {
     );
     assert!(source.contains("#[derive(Zeroize, ZeroizeOnDrop)]"));
     assert_eq!(source.matches("#[derive(").count(), 1);
-    // No other file of the crate implements a trait for `Secret` either.
+    // No other file of the crate implements a trait for `Secret` either,
+    // written with a path or without.
     for (name, source) in SOURCES {
-        let elsewhere = source
-            .lines()
-            .any(|line| line.trim_start().starts_with("impl") && line.contains(" for Secret<"));
+        let elsewhere = source.lines().any(|line| {
+            line.trim_start().starts_with("impl")
+                && line
+                    .split_once(" for ")
+                    .is_some_and(|(_, rest)| rest.contains("Secret<"))
+        });
         assert!(name == "crypto/secret.rs" || !elsewhere, "{name}");
     }
 }
@@ -222,9 +226,16 @@ fn s010_t05_r04_public_types_compare_every_byte() {
 #[test]
 fn s010_t06_r05_random_bytes_differ() -> Result<(), CryptoError> {
     assert_ne!(random_bytes::<32>()?, random_bytes::<32>()?);
-    // Every byte is drawn, the last ones included.
+    // Every byte is drawn, the last ones included, also into a secret.
     let (first, second) = (random_bytes::<64>()?, random_bytes::<64>()?);
     assert_ne!(first[32..], second[32..]);
+    let (first, second) = (Secret::<64>::random()?, Secret::<64>::random()?);
+    assert_ne!(first.expose()[32..], second.expose()[32..]);
+    let mut last_bytes = 0u8;
+    for _ in 0..8 {
+        last_bytes |= Secret::<64>::random()?.expose()[63] | random_bytes::<64>()?[63];
+    }
+    assert_ne!(last_bytes, 0);
     assert_ne!(Secret::<32>::random()?.expose(), &[0u8; 32]);
     Ok(())
 }
@@ -328,7 +339,16 @@ fn s010_t25_r16_manifest_pins_dependencies() {
 #[test]
 fn s010_t26_r17_clippy_toml_disallows_clock_fs_net() {
     let clippy = include_str!("../../../../clippy.toml");
-    for method in [
+    // Each entry's path, read whole, so that `std::fs::read` is not found
+    // inside `std::fs::read_to_string`; each entry cites AGENTS 10.
+    let mut listed: Vec<&str> = Vec::new();
+    for line in clippy.lines().filter(|line| line.contains("{ path = ")) {
+        let path = line.split('"').nth(1).unwrap();
+        assert!(line.contains("AGENTS 10"), "{path}");
+        listed.push(path);
+    }
+    listed.sort_unstable();
+    let mut required = vec![
         "std::time::SystemTime::now",
         "std::time::Instant::now",
         "std::thread::sleep",
@@ -337,10 +357,21 @@ fn s010_t26_r17_clippy_toml_disallows_clock_fs_net() {
         "std::fs::File::open",
         "std::fs::File::create",
         "std::net::TcpStream::connect",
-    ] {
-        assert!(clippy.contains(method), "{method}");
-    }
-    assert!(clippy.contains("AGENTS 10"));
+        "std::time::SystemTime::elapsed",
+        "std::time::Instant::elapsed",
+        "std::fs::read_to_string",
+        "std::fs::read_dir",
+        "std::fs::create_dir_all",
+        "std::fs::remove_file",
+        "std::fs::rename",
+        "std::fs::File::options",
+        "std::fs::OpenOptions::open",
+        "std::net::TcpListener::bind",
+        "std::net::UdpSocket::bind",
+        "std::env::var",
+    ];
+    required.sort_unstable();
+    assert_eq!(listed, required);
 }
 
 /// Spec 010, R18: zeroizing leaves every byte at zero.
@@ -551,6 +582,22 @@ fn s010_t22_r14_wrapper_bounds_are_the_primitives() -> Result<(), CryptoError> {
         assert_eq!(check_password_len(len), Err(CryptoError::TooLong));
     }
 
+    // The edge lengths: an empty and a large buffer through the stream, and
+    // the BLAKE2b-256 of nothing, computed with Python's hashlib.
+    let stream_key = Secret::<32>::from_bytes([18u8; 32]);
+    for len in [0, 1024 * 1024] {
+        let mut buffer = vec![19u8; len];
+        stream_xor(&stream_key, &nonce, &mut buffer)?;
+        stream_xor(&stream_key, &nonce, &mut buffer)?;
+        assert_eq!(buffer, vec![19u8; len], "{len}");
+    }
+    let empty: [u8; 32] = core::array::from_fn(|at| {
+        let hex = "0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8";
+        u8::from_str_radix(&hex[2 * at..2 * at + 2], 16).unwrap()
+    });
+    assert_eq!(hash(b"")?, empty);
+    assert_ne!(keyed_hash(&stream_key, b"")?.expose(), &empty);
+
     let mut buffer = vec![0u8; 8];
     assert_eq!(pad(&mut buffer, 0), Err(CryptoError::BadLength));
     assert_eq!(unpad(&buffer, 0), Err(CryptoError::BadLength));
@@ -631,11 +678,11 @@ const SPECCHECK_REJECTED: [&str; 11] = [
 ];
 
 /// Spec 010, R10: verification is strict. Every malformed signature or key
-/// of the negative vectors is a forgery, never an accepted message: the
-/// published ed25519-speccheck cases hold small-order and non-canonical
-/// points and scalars above L that a verifier without those checks accepts
-/// (ADR 0042), and its case 3, a valid signature over mixed-order points,
-/// verifies.
+/// of the negative vectors is a forgery, never an accepted message. Of the
+/// published ed25519-speccheck cases, 0–2, 6, 7 and 11 are accepted by a
+/// common verifier without the strict checks, 4, 5 and 8–10 pin the
+/// cofactorless equation and the comparison of `R`, and case 3, a valid
+/// signature over mixed-order points, verifies (ADR 0042).
 #[test]
 fn s010_t15_r10_verify_rejects_malformed() {
     let named = [
@@ -811,7 +858,16 @@ fn ffi_rejects_a_buffer_of_the_wrong_size() {
         &sealed,
         &mut [0u8; 21]
     ));
+    // One byte too small too: a real seal, so the tag would verify.
+    assert!(!ffi::aead_decrypt(
+        &key,
+        &nonce,
+        &[],
+        &sealed,
+        &mut [0u8; 19]
+    ));
     assert!(ffi::secretbox_seal(&key, &nonce, &plaintext, &mut sealed));
+    assert!(!ffi::secretbox_open(&key, &nonce, &sealed, &mut [0u8; 19]));
     assert!(!ffi::secretbox_seal(
         &key,
         &nonce,

@@ -139,17 +139,11 @@ impl Config {
     /// `Internal` when libsodium fails.
     pub fn parse(bytes: &[u8], now: u64) -> Result<Config, Error> {
         let fields = decode(bytes)?;
-        check_ranges(fields.server_url, fields.ttl_seconds, fields.suggested_name)?;
+        let checked = check_ranges(fields.server_url, fields.ttl_seconds, fields.suggested_name)?;
         if fields.invite_expires_at.is_some_and(|expiry| expiry < now) {
             return Err(Error::InviteExpired);
         }
-        Config::from_checked(
-            Secret::copy_from(fields.k_ch),
-            fields.server_url,
-            fields.ttl_seconds,
-            fields.suggested_name,
-            fields.created_at,
-        )
+        Config::from_checked(Secret::copy_from(fields.k_ch), checked, fields.created_at)
     }
 
     /// The config of a scanned QR: the base64url of its record, as ASCII
@@ -256,8 +250,8 @@ impl Config {
         suggested_name: &str,
         created_at: u64,
     ) -> Result<Config, Error> {
-        check_ranges(server_url, ttl_seconds, suggested_name)?;
-        Config::from_checked(k_ch, server_url, ttl_seconds, suggested_name, created_at)
+        let checked = check_ranges(server_url, ttl_seconds, suggested_name)?;
+        Config::from_checked(k_ch, checked, created_at)
     }
 
     /// The file of R13 under the key Argon2id derives from `password`, which
@@ -407,20 +401,17 @@ impl Config {
     /// derivation last).
     fn from_checked(
         k_ch: Secret<32>,
-        server_url: &str,
-        ttl_seconds: u32,
-        suggested_name: &str,
+        checked: Checked<'_>,
         created_at: u64,
     ) -> Result<Config, Error> {
-        let id = derive_channel_id(&k_ch, ttl_seconds)?;
-        let host = url::parse(server_url)?.to_owned();
+        let id = derive_channel_id(&k_ch, checked.ttl_seconds)?;
         Ok(Config {
             k_ch,
-            server_url: server_url.to_owned(),
-            host,
-            ttl_seconds,
+            server_url: checked.server_url.to_owned(),
+            host: checked.host.to_owned(),
+            ttl_seconds: checked.ttl_seconds,
             created_at,
-            suggested_name: suggested_name.to_owned(),
+            suggested_name: checked.suggested_name.to_owned(),
             id,
         })
     }
@@ -529,15 +520,30 @@ fn decode(bytes: &[u8]) -> Result<Fields<'_>, Error> {
 }
 
 /// The ranges of R4 and R5, shared by `create` and every import.
-fn check_ranges(server_url: &str, ttl_seconds: u32, suggested_name: &str) -> Result<(), Error> {
+fn check_ranges<'a>(
+    server_url: &'a str,
+    ttl_seconds: u32,
+    suggested_name: &'a str,
+) -> Result<Checked<'a>, Error> {
     // `char::is_control` is exactly the general category Cc.
     let name_ok = suggested_name.len() <= MAX_NAME && !suggested_name.chars().any(char::is_control);
-    let url_ok = url::parse(server_url).is_ok();
-    if TTL_SECONDS.contains(&ttl_seconds) && name_ok && url_ok {
-        Ok(())
-    } else {
-        Err(Error::BadConfig)
+    match url::parse(server_url) {
+        Ok(host) if TTL_SECONDS.contains(&ttl_seconds) && name_ok => Ok(Checked {
+            server_url,
+            host,
+            ttl_seconds,
+            suggested_name,
+        }),
+        _ => Err(Error::BadConfig),
     }
+}
+
+/// The fields `check_ranges` let through, with the host it parsed once.
+struct Checked<'a> {
+    server_url: &'a str,
+    host: &'a str,
+    ttl_seconds: u32,
+    suggested_name: &'a str,
 }
 
 /// `sign_keypair_from_seed(kdf_derive(K_ch, "chauth__"))` (R8).
