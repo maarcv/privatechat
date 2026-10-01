@@ -3,9 +3,23 @@
 use super::{
     FailingVault, Faults, MemoryStore, MemoryVault, batch, record, records_eq, state_eq, state_for,
 };
+use crate::crypto::Signature;
 use crate::crypto::{PublicKey, Secret};
-use crate::storage::state::items::PeerRecord;
+use crate::storage::state::items::{OldKey, OutboxEntry, OutboxKind, PeerRecord};
 use crate::storage::{DirName, MAX_LOG_LEN, Settings, Store, StoreError, Vault};
+
+/// An entry waiting to leave.
+fn outbox_entry() -> OutboxEntry {
+    OutboxEntry {
+        client_ref: [5; 16],
+        kind: OutboxKind::Text,
+        sent_at: 0,
+        blob: vec![6; 10],
+        signature: Signature([7; 64]),
+        under_retired_key: false,
+        counter: 0,
+    }
+}
 
 /// A peer seen once.
 fn peer() -> PeerRecord {
@@ -33,15 +47,28 @@ fn s020_t29_r29_comparisons_see_every_field() {
     moved.log_committed_len = 99;
     moved.log_generation = 7;
     assert!(state_eq(&state, &moved));
-    let changes: [fn(&mut crate::storage::ChannelState); 8] = [
+    let changes: [fn(&mut crate::storage::ChannelState); 16] = [
         |s| s.channel_id = [2; 16],
         |s| s.config.push(0),
         |s| s.identity_seed = Secret::from_bytes([0x12; 32]),
+        |s| s.identity_epoch = 1,
         |s| s.send_counter = 1,
         |s| s.cursor = Some(0),
-        |s| s.retiring_seed = Some(Secret::from_bytes([0x11; 32])),
-        |s| s.read_only = true,
+        |s| s.own_display_name = Some(String::new()),
+        |s| s.local_name = Some(String::new()),
         |s| s.peers.push(peer()),
+        |s| s.outbox.push(outbox_entry()),
+        |s| s.retiring_seed = Some(Secret::from_bytes([0x11; 32])),
+        |s| {
+            s.own_old_keys.push(OldKey {
+                pk: PublicKey([4; 32]),
+                retired_at: 0,
+            })
+        },
+        |s| s.own_key_used_elsewhere = true,
+        |s| s.read_only = true,
+        |s| s.synced_at = Some(0),
+        |s| s.truncated_at = Some(0),
     ];
     for (at, change) in changes.iter().enumerate() {
         let mut changed = state.duplicate();
@@ -171,6 +198,23 @@ fn s020_t16_r16_memory_log_full() {
         Err(StoreError::LogFull)
     ));
     assert_eq!(store.log_len(), before);
+    // Up to the limit exactly is allowed; one byte more is not.
+    let entry_len = |body_len| 4 + 24 + 16 + record(0, body_len).encode(0, 0).unwrap().len();
+    let remaining = usize::try_from(MAX_LOG_LEN - before).unwrap();
+    let (mut full, mut last) = (remaining / entry_len(64_000), remaining % entry_len(64_000));
+    if last < entry_len(0) {
+        full -= 1;
+        last += entry_len(64_000);
+    }
+    let last = last - entry_len(0);
+    let mut fill: Vec<_> = (0..full)
+        .map(|at| record(u64::try_from(at).unwrap(), 64_000))
+        .collect();
+    fill.push(record(0, last));
+    store.commit(&batch(state_for([1; 16]), fill)).unwrap();
+    assert_eq!(store.log_len(), MAX_LOG_LEN);
+    let one_more = batch(state_for([1; 16]), vec![record(0, 0)]);
+    assert!(matches!(store.commit(&one_more), Err(StoreError::LogFull)));
 }
 
 /// Spec 020, R22 (`MemoryVault`): no settings until saved, then the saved
@@ -268,4 +312,86 @@ fn settings() -> Settings {
         lock_timeout_seconds: 0,
         socks5_proxy: None,
     }
+}
+
+/// Spec 020, R11 (the doubles): `destroy` goes through a healthy store and
+/// fails on `fail_at`, the commit switch leaves it alone, a failed commit
+/// does not become `last_committed`, and the stores `list` hands out carry
+/// the faults too.
+#[test]
+fn s020_t11_r11_failing_doubles_every_call() {
+    let faults = Faults::new();
+    let mut vault = FailingVault::new(Box::new(MemoryVault::new()), faults.clone());
+    let mut store = vault.create(&[1; 16]).unwrap();
+    let name = *store.name();
+    store.commit(&batch(state_for([1; 16]), vec![])).unwrap();
+    let mut refused = state_for([1; 16]);
+    refused.send_counter = 9;
+    refused.outbox = vec![outbox_entry(); 33];
+    assert!(matches!(
+        store.commit(&batch(refused, vec![])),
+        Err(StoreError::OutboxFull)
+    ));
+    assert_eq!(faults.last_committed(&name).unwrap().send_counter, 0);
+    let mut listed = vault.list().unwrap();
+    faults.fail_commits(true);
+    let listed_commit = listed[0].commit(&batch(state_for([1; 16]), vec![]));
+    assert!(matches!(listed_commit, Err(StoreError::Io)));
+    let mut other = vault.create(&[2; 16]).unwrap();
+    other.destroy().unwrap();
+    faults.fail_commits(false);
+    faults.fail_at(1);
+    assert!(matches!(store.destroy(), Err(StoreError::Io)));
+    store.destroy().unwrap();
+    assert!(vault.list().unwrap().is_empty());
+}
+
+/// The fixed key of the memory doubles, to plant files they open.
+fn memory_key() -> crate::storage::StorageKey {
+    crate::storage::StorageKey::from_bytes(&mut [0x42; 32])
+}
+
+/// A log header of `version` and `generation`, as R5 lays it out.
+fn log_header(version: u8, generation: u32) -> Vec<u8> {
+    [&b"PLOG"[..], &[version], &generation.to_be_bytes()].concat()
+}
+
+/// Spec 020, R12 and R13 (`MemoryStore`): a state of another channel, a log
+/// of another version or generation, or one shorter than committed are
+/// `Corrupt`; bytes after the committed end are cut before an append; a
+/// compaction is not a commit.
+#[test]
+fn s020_t12_r12_memory_load_checks() {
+    let (vault, mut store) = memory();
+    let name = *store.name();
+    let sealed = |channel: [u8; 16], log_len: u64, generation: u32| {
+        state_for(channel)
+            .seal(&memory_key(), &name, log_len, generation)
+            .unwrap()
+    };
+    let planted: [(Vec<u8>, Vec<u8>); 4] = [
+        (sealed([2; 16], 9, 0), log_header(1, 0)),
+        (sealed([1; 16], 9, 0), log_header(2, 0)),
+        (sealed([1; 16], 9, 0), log_header(1, 1)),
+        (sealed([1; 16], 10, 0), log_header(1, 0)),
+    ];
+    for (at, (state, log)) in planted.iter().enumerate() {
+        vault.put_raw(&name, Some(state), Some(log));
+        assert!(
+            matches!(store.load(), Err(StoreError::Corrupt)),
+            "case {at}"
+        );
+    }
+    let stale = [log_header(1, 0), vec![0xee; 30]].concat();
+    vault.put_raw(&name, Some(&sealed([1; 16], 9, 0)), Some(&stale));
+    store
+        .commit(&batch(state_for([1; 16]), vec![record(5, 3)]))
+        .unwrap();
+    let (_, records) = store.load().unwrap().unwrap();
+    assert!(records_eq(&records, &[record(5, 3)]));
+    let handle = MemoryStore::handle(&vault, name);
+    let before = handle.all_commits();
+    let (state, _) = store.load().unwrap().unwrap();
+    assert_eq!(store.compact(&state, 6).unwrap(), 1);
+    assert_eq!(handle.all_commits(), before);
 }

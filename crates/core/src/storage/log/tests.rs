@@ -5,11 +5,12 @@ use proptest::option::of as maybe;
 use proptest::prelude::{any, proptest};
 use zeroize::Zeroizing;
 
-use super::super::tests::{field, key};
+use super::super::tests::{field, key, replaced, without};
 use super::super::{DirName, MAX_NAME, StoreError};
 use super::{Content, LogEntry, LogRecord, MAX_LOG_RECORD, Message};
 use crate::crypto::{PublicKey, Signature};
 use crate::proto::payload::MAX_PAYLOAD;
+use crate::testing::records_eq;
 use crate::vectors::{Kind, Value, Vector};
 
 /// A received text message of `body_len` bytes, as spec 021 would write it.
@@ -79,11 +80,11 @@ fn encode(record: &LogRecord) -> Zeroizing<Vec<u8>> {
     record.encode(1, 9).unwrap()
 }
 
-/// Spec 020, R8 (the log record): key 0 fixes the keys a record has, so an
+/// Spec 020, R9 (the log record under `Reject`): key 0 fixes the keys a record has, so an
 /// unknown kind, a key of another kind, a text without its body, a body on a
 /// `key_retired`, or an own message without its `client_ref` is `Corrupt`.
 #[test]
-fn s020_t08_r08_log_schema() {
+fn s020_t09_r09_log_schema() {
     let decode = |buf: &[u8]| LogRecord::decode(buf).err();
     for record in every_kind() {
         let buf = encode(&record);
@@ -93,10 +94,15 @@ fn s020_t08_r08_log_schema() {
             Some(StoreError::Corrupt)
         );
     }
-    // Key 0 is the first field; its value sits at byte 5.
-    let mut unknown_kind = encode(&message(3)).to_vec();
-    unknown_kind[5] = 5;
-    assert_eq!(decode(&unknown_kind), Some(StoreError::Corrupt));
+    // Key 0 is the first field; its value sits at byte 5. A `not delivered`
+    // has no field an unknown kind would fail on.
+    for record in [message(3), every_kind().remove(4)] {
+        for kind in [5, 255] {
+            let mut unknown_kind = encode(&record).to_vec();
+            unknown_kind[5] = kind;
+            assert_eq!(decode(&unknown_kind), Some(StoreError::Corrupt), "{kind}");
+        }
+    }
     // A `not delivered` with a key 14 that only a kept signature has.
     let not_delivered = encode(&every_kind().remove(4));
     let with_signature = [&not_delivered[..], &field(14, &[0; 64])].concat();
@@ -144,6 +150,63 @@ fn s020_t08_r08_log_schema() {
     }
 }
 
+/// Spec 020, R9: each kind has exactly its keys: without one it needs, or
+/// with a well-formed one of another kind, a record is `Corrupt`.
+#[test]
+fn s020_t09_r09_keys_of_each_kind() {
+    // A value of the right width for each key that some kind allows.
+    let values: [(u8, &[u8]); 12] = [
+        (4, &[1; 16]),
+        (5, &[1; 8]),
+        (6, &[1; 32]),
+        (7, &[1; 8]),
+        (8, &[1]),
+        (9, b"nm"),
+        (10, &[1; 8]),
+        (11, b"hi"),
+        (12, &[0]),
+        (13, &[1; 16]),
+        (14, &[1; 64]),
+        (15, &[1; 4]),
+    ];
+    let kinds: [(usize, &[u8], &[u8]); 6] = [
+        (0, &[0, 1, 2, 3, 5, 6, 7, 8, 11, 12], &[4, 9, 10]),
+        (1, &[0, 1, 2, 3, 5, 6, 7, 8, 12, 13], &[]),
+        (3, &[0, 1, 2, 3, 4, 5, 13], &[]),
+        (4, &[0, 1, 2, 3, 13], &[]),
+        (5, &[0, 1, 2, 3, 10, 13, 14, 15], &[]),
+        (6, &[0, 1, 2, 3, 4, 6, 7], &[]),
+    ];
+    let allowed: [&[u8]; 7] = [
+        &[4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+        &[4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+        &[4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+        &[4, 5, 13],
+        &[13],
+        &[10, 13, 14, 15],
+        &[4, 6, 7],
+    ];
+    let records = every_kind();
+    for (at, mandatory, optional) in kinds {
+        let buf = encode(&records[at]).to_vec();
+        let decode = |buf: &[u8]| LogRecord::decode(buf).err();
+        for key in mandatory {
+            assert_eq!(
+                decode(&without(&buf, *key)),
+                Some(StoreError::Corrupt),
+                "{at} {key}"
+            );
+        }
+        for key in optional {
+            assert_eq!(decode(&without(&buf, *key)), None, "{at} {key}");
+        }
+        for (key, value) in values.iter().filter(|(key, _)| !allowed[at].contains(key)) {
+            let planted = replaced(&buf, *key, value);
+            assert_eq!(decode(&planted), Some(StoreError::Corrupt), "{at} {key}");
+        }
+    }
+}
+
 /// Spec 020, R9: a record carries its generation and offset, and opens only
 /// where it was sealed, in the directory it was sealed for.
 #[test]
@@ -187,6 +250,19 @@ fn s020_t27_r27_log_within_limits() {
         message.display_name = Some(Zeroizing::new(vec![b'n'; MAX_NAME + 1]));
     }
     assert_eq!(long_name.encode(1, 9).err(), Some(StoreError::Corrupt));
+    // The same bounds on open, planted in a valid message.
+    let buf = encode(&message(3)).to_vec();
+    let name = vec![b'n'; MAX_NAME];
+    let body = vec![b'b'; MAX_PAYLOAD];
+    for (key, at_limit) in [(9, name), (11, body)] {
+        assert!(
+            LogRecord::decode(&replaced(&buf, key, &at_limit)).is_ok(),
+            "key {key}"
+        );
+        let over = [&at_limit[..], b"x"].concat();
+        let error = LogRecord::decode(&replaced(&buf, key, &over)).err();
+        assert_eq!(error, Some(StoreError::Corrupt), "key {key}");
+    }
 }
 
 /// The value of `field` in a vector's expected values, if it has one.
@@ -203,6 +279,10 @@ pub(in crate::storage) fn check_vector(vector: &Vector) {
     if vector.kind() == Kind::Negative {
         let error = format!("{:?}", decoded.err().unwrap());
         assert_eq!(error, vector.expected("error").text(), "{}", vector.name());
+        // `Corrupt` says nothing of the rule: the bytes say which one broke.
+        let reference = crate::vectors::load("020", "log_message_reference");
+        let edited = [reference.input("record").bytes(), &field(16, &[])].concat();
+        assert_eq!(buf, edited.as_slice(), "{}", vector.name());
         return;
     }
     let (record, generation, offset) = decoded.unwrap();
@@ -299,12 +379,18 @@ proptest! {
                 own_client_ref: own,
             }),
         });
-        for record in records {
+        let (storage_key, name) = (key(1), DirName([2; 16]));
+        let mut opened = Vec::new();
+        for record in &records {
             let buf = record.encode(generation, offset).unwrap();
             let (decoded, read_generation, read_offset) = LogRecord::decode(&buf).unwrap();
             assert_eq!((read_generation, read_offset), (generation, offset));
             assert_eq!(decoded.encode(generation, offset).unwrap(), buf);
+            let sealed = record.seal(&storage_key, &name, generation, offset).unwrap();
+            opened.push(LogRecord::open(&storage_key, &name, &sealed, generation, offset).unwrap());
         }
+        // `open(seal(x))` gives `x`.
+        assert!(records_eq(&opened, &records));
     }
 
     /// Spec 020, R29 (the log record): the decoder never panics on arbitrary

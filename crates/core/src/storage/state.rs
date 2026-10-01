@@ -20,6 +20,9 @@ use crate::proto::record::{
 
 pub(crate) mod items;
 
+#[cfg(test)]
+pub(super) mod tests;
+
 /// The version of the state and log schemas, key 0 (R8).
 const STATE_VERSION: u8 = 1;
 
