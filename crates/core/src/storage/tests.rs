@@ -9,7 +9,10 @@ use super::state::items::{
     PeerRecord,
 };
 use super::state::{ChannelState, MAX_OLD_KEYS, MAX_OUTBOX, MAX_PEERS, MAX_STATE_RECORD};
-use super::{MAX_NAME, StoreError};
+use super::{
+    DirName, MAX_NAME, MIN_SEALED, StorageKey, StoreError, dir_name, open_box, seal_box,
+    settings_key, store_key,
+};
 use crate::crypto::{PublicKey, Secret, Signature};
 use crate::proto::config;
 use crate::proto::record::ITEM_HEADER_LEN;
@@ -330,6 +333,123 @@ fn s020_t27_r27_state_within_limits() {
     let new_len = len + u32::try_from(extra.len()).unwrap();
     buf[len_range].copy_from_slice(&new_len.to_be_bytes());
     assert_eq!(ChannelState::decode(&buf).err(), Some(StoreError::Corrupt));
+}
+
+/// A storage key of `byte`, repeated.
+fn key(byte: u8) -> StorageKey {
+    StorageKey::from_bytes(&mut [byte; 32])
+}
+
+/// Spec 020, R3: each directory's state is sealed under its own key, and
+/// neither opens under another directory's name nor as settings.
+#[test]
+fn s020_t03_r03_derived_keys() {
+    let storage_key = key(1);
+    let (a, b) = (DirName([2; 16]), DirName([3; 16]));
+    let state = small_state();
+    let sealed = state.seal(&storage_key, &a, 9, 0).unwrap();
+    assert!(ChannelState::open(&storage_key, &a, &sealed).is_ok());
+    assert_eq!(
+        ChannelState::open(&storage_key, &b, &sealed).err(),
+        Some(StoreError::Corrupt)
+    );
+    let as_settings = open_box(&settings_key(&storage_key).unwrap(), &sealed);
+    assert_eq!(as_settings.err(), Some(StoreError::Corrupt));
+    // No file key is `K_db` itself, and the two derived keys differ.
+    let own = store_key(&storage_key, &a).unwrap();
+    assert_ne!(own.expose(), &[1; 32]);
+    assert_ne!(own.expose(), settings_key(&storage_key).unwrap().expose());
+    assert!(open_box(&crate::crypto::Secret::from_bytes([1; 32]), &sealed).is_err());
+}
+
+/// Spec 020, R4 (`core`'s half): two seals of one state differ in their
+/// fresh 24-byte nonce and open to the same record.
+#[test]
+fn s020_t04_r04_seals_differ_in_their_nonce() {
+    let storage_key = key(1);
+    let name = DirName([2; 16]);
+    let state = small_state();
+    let first = state.seal(&storage_key, &name, 9, 0).unwrap();
+    let second = state.seal(&storage_key, &name, 9, 0).unwrap();
+    assert_eq!(first.len(), second.len());
+    assert_ne!(first[..24], second[..24]);
+    let record = encode(&state).unwrap();
+    for sealed in [first, second] {
+        assert_eq!(sealed.len(), 24 + 16 + record.len());
+        let opened = ChannelState::open(&storage_key, &name, &sealed).unwrap();
+        assert_eq!(encode(&opened).unwrap(), record);
+    }
+}
+
+/// Spec 020, R7 (`core`'s half): 39 bytes, a flipped byte anywhere in the
+/// box and a box that holds a broken record are all `Corrupt`.
+#[test]
+fn s020_t07_r07_open_check_order() {
+    let storage_key = key(1);
+    let name = DirName([2; 16]);
+    assert_eq!(MIN_SEALED, 40);
+    let open = |sealed: &[u8]| ChannelState::open(&storage_key, &name, sealed).err();
+    assert_eq!(open(&[0; 39]), Some(StoreError::Corrupt));
+    assert_eq!(open(&[0; 40]), Some(StoreError::Corrupt));
+    let sealed = small_state().seal(&storage_key, &name, 9, 0).unwrap();
+    for at in [0, 23, 24, 39, sealed.len() - 1] {
+        let mut flipped = sealed.clone();
+        flipped[at] ^= 1;
+        assert_eq!(open(&flipped), Some(StoreError::Corrupt), "byte {at}");
+    }
+    let file_key = store_key(&storage_key, &name).unwrap();
+    let broken = seal_box(&file_key, &[0, 0, 0, 0, 1]).unwrap();
+    assert_eq!(open(&broken), Some(StoreError::Corrupt));
+    let empty = seal_box(&file_key, &[]).unwrap();
+    assert_eq!(empty.len(), MIN_SEALED);
+    assert_eq!(open(&empty), Some(StoreError::Corrupt));
+}
+
+/// Spec 020, R18 (`core`'s half): the name is 16 bytes of a keyed hash, so it
+/// differs under two keys and does not hold the `channel_id`.
+#[test]
+fn s020_t18_r18_directory_name_is_keyed() {
+    let channel_id = [9; 16];
+    let first = dir_name(&key(1), &channel_id).unwrap();
+    assert_eq!(first, dir_name(&key(1), &channel_id).unwrap());
+    assert_ne!(first, dir_name(&key(2), &channel_id).unwrap());
+    assert_ne!(first, dir_name(&key(1), &[8; 16]).unwrap());
+    assert_ne!(first.0, channel_id);
+    assert!(!first.0.windows(4).any(|window| window == [9; 4]));
+}
+
+/// Spec 020, R24: the input array is zeros once the key has taken it.
+#[test]
+fn s020_t24_r24_storage_key_zeroes_input() {
+    let mut bytes = [7u8; 32];
+    let storage_key = StorageKey::from_bytes(&mut bytes);
+    assert_eq!(bytes, [0; 32]);
+    // The key still works: it was copied before the input was wiped.
+    let name = DirName([2; 16]);
+    let sealed = small_state().seal(&storage_key, &name, 9, 0).unwrap();
+    let under_sevens = ChannelState::open(&key(7), &name, &sealed);
+    assert!(under_sevens.is_ok());
+}
+
+/// Spec 020, R27 (the sealed state): the largest state seals, its record is
+/// within 2 359 296 bytes, and it opens.
+#[test]
+fn s020_t27_r27_largest_state_seals_and_opens() {
+    let storage_key = key(1);
+    let name = DirName([2; 16]);
+    let state = largest_state();
+    let sealed = state.seal(&storage_key, &name, 9, 0).unwrap();
+    assert!(sealed.len() - MIN_SEALED <= MAX_STATE_RECORD);
+    let opened = ChannelState::open(&storage_key, &name, &sealed).unwrap();
+    assert_eq!(encode(&opened).unwrap(), encode(&state).unwrap());
+    let over = ChannelState {
+        outbox: vec![entry(10); MAX_OUTBOX + 1],
+        ..small_state()
+    };
+    assert_eq!(
+        over.seal(&storage_key, &name, 9, 0).err(),
+        Some(StoreError::OutboxFull)
+    );
 }
 
 /// Checks a codec vector of `020.json`: a positive decodes to its values and

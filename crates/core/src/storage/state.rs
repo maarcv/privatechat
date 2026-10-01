@@ -8,7 +8,7 @@ use zeroize::Zeroizing;
 use self::items::{
     MAX_OLD_KEY, MAX_OUTBOX_ENTRY, MAX_PEER_RECORD, OldKey, OutboxEntry, PeerRecord,
 };
-use super::{MAX_NAME, StoreError};
+use super::{DirName, MAX_NAME, StorageKey, StoreError, open_box, seal_box, store_key};
 use crate::crypto::Secret;
 use crate::proto::config;
 use crate::proto::record::{Reader, RecordError, UnknownKeys, Writer, list_len, record_len};
@@ -96,6 +96,41 @@ fn within(len: usize, max: usize) -> Result<(), StoreError> {
 }
 
 impl ChannelState {
+    /// Opens the `nonce ‖ box` of a `state.bin` of directory `name`, which
+    /// `store` has taken out of its framing (R4, R7).
+    ///
+    /// # Errors
+    ///
+    /// `Corrupt` for fewer than 40 bytes, a box that does not open under this
+    /// directory's key, or a record that breaks the schema;
+    /// `UnsupportedVersion` for a newer `state_version` (R8).
+    pub fn open(
+        key: &StorageKey,
+        name: &DirName,
+        sealed: &[u8],
+    ) -> Result<ChannelState, StoreError> {
+        let record = open_box(&store_key(key, name)?, sealed)?;
+        ChannelState::decode(&record)
+    }
+
+    /// Seals the state of directory `name` as `nonce ‖ box`, with the log
+    /// position the store gives (R4, R10).
+    ///
+    /// # Errors
+    ///
+    /// `OutboxFull` and `Corrupt` as [`ChannelState::encode`] (R27), and
+    /// `Corrupt` when libsodium fails.
+    pub fn seal(
+        &self,
+        key: &StorageKey,
+        name: &DirName,
+        log_len: u64,
+        generation: u32,
+    ) -> Result<Vec<u8>, StoreError> {
+        let record = self.encode(log_len, generation)?;
+        seal_box(&store_key(key, name)?, &record)
+    }
+
     /// The committed length and the generation of the log, as the store
     /// last sealed them (R10).
     pub fn log_position(&self) -> (u64, u32) {
