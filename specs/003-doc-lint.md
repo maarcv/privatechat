@@ -76,4 +76,4 @@ DOC_LINT_BASE=<ref>            # optional; base commit for R6
 - 2026-09-20 draft · 2026-09-20 in review · 2026-09-20 accepted (Marc Vilardebó) · 2026-09-20 implemented
 - 2026-09-24 R6 amended: the header date must equal the date of the latest change to the file, so several changes on one day pass and a forgotten date still fails (audit G)
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): open question 003-R3 closed with its proposal
-- 2026-10-01 revised after audit Z (`docs/audit-log.md`): R8 adds the self-test that breaks each rule; R5 stops at the next section, not at a subheading; round 2: the self-test checks each rule's message
+- 2026-10-01 revised after audit Z (`docs/audit-log.md`): R8 adds the self-test that breaks each rule; R5 stops at the next section, not at a subheading; round 2: the self-test checks each rule's message; round 3: some fixtures must pass

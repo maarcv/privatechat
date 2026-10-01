@@ -185,8 +185,15 @@ mod tests {
             "lz4",
         ] {
             let line = entry(crate_name).expect("deny.toml bans every crate of the list");
+            // Any other key (`wrappers`, `deny-multiple-versions`) stops the outright ban.
+            let rest = line
+                .strip_prefix(&format!("{{ crate = \"{crate_name}\""))
+                .unwrap_or(line);
+            let reason_only = rest.starts_with(", reason = \"")
+                && rest.ends_with("\" },")
+                && rest.matches(" = ").count() == 1;
             assert!(
-                !line.contains("wrappers"),
+                rest == " }," || reason_only,
                 "{crate_name} is banned outright: {line}"
             );
         }
@@ -214,6 +221,24 @@ mod tests {
             let line = format!("{{ crate = \"{crate_name}\", wrappers = {wrappers} }},");
             assert_eq!(entry(crate_name), Some(line.as_str()), "{crate_name}");
         }
+        // No other table, so that no `[[licenses.exceptions]]` or `[sources.allow-org]` slips in.
+        let tables: Vec<&str> = deny
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with('['))
+            .collect();
+        assert_eq!(
+            tables,
+            [
+                "[graph]",
+                "[advisories]",
+                "[licenses]",
+                "[bans]",
+                "[bans.build]",
+                "[[bans.build.bypass]]",
+                "[sources]",
+            ]
+        );
         let wrapped = bans.iter().filter(|line| line.contains("wrappers")).count();
         assert_eq!(wrapped, 15, "a ban gained wrappers the test does not name");
         // Whole sections, so that an added exception or source fails too.

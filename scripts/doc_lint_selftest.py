@@ -121,8 +121,8 @@ def agents_range(root: Path) -> None:
     path.write_text(path.read_text(encoding="utf-8") + "\nSpecs 010–017.\n", encoding="utf-8")
 
 
-def example_in_requirements(root: Path) -> None:
-    replace(first_spec(root), "## Requirements\n", "## Requirements\n\n### Notes\n\n- R99 A key, for example 32 bytes.\n")
+def example_in_requirements(root: Path, phrase: str = "for example") -> None:
+    replace(first_spec(root), "## Requirements\n", f"## Requirements\n\n### Notes\n\n- R99 A key, {phrase} 32 bytes.\n")
 
 
 def spec_index_state(root: Path) -> None:
@@ -135,6 +135,35 @@ def spec_index_state(root: Path) -> None:
 
 def spec_phase(root: Path) -> None:
     replace(first_spec(root), "\nPhase: ", "\nStage: ")
+
+
+def row_of(path: Path, number: str) -> str:
+    return next(line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith(f"| {number} |"))
+
+
+def adr_superseded_bad(root: Path) -> None:
+    replace(first_adr(root), "Status: accepted", "Status: superseded by 42")
+    for path in (root / "docs" / "adr" / "README.md", root / "docs" / "spec.md"):
+        row = row_of(path, "0001")
+        replace(path, row, row.replace("| accepted |", "| superseded by 42 |", 1))
+
+
+def adr_spec_title(root: Path) -> None:
+    path = root / "docs" / "spec.md"
+    row = row_of(path, "0001")
+    replace(path, row, row.replace("| 0001 | ", "| 0001 | X", 1))
+
+
+def adr_ghost_row(root: Path) -> None:
+    path = root / "docs" / "adr" / "README.md"
+    row = row_of(path, "0001")
+    replace(path, row, row + "\n| 0999 | Ghost | 2026-01-01 | accepted |")
+
+
+def agents_spec_id(root: Path) -> None:
+    path = root / "AGENTS.md"
+    rule = next(line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("20. "))
+    replace(path, rule, rule.replace("027-core-api", "027"))
 
 
 def adr_index_state(root: Path) -> None:
@@ -197,19 +226,25 @@ BREAKS: dict[str, tuple[Callable[[Path], None], str]] = {
     "002 R1 heading number": (adr_heading_number, "the heading's number is 0002"),
     "002 R1 contiguous numbering": (adr_gap, "numbering has gaps"),
     "002 R3 ADR state": (adr_state, "invalid state 'withdrawn'"),
+    "002 R3 superseded by a bad number": (adr_superseded_bad, "invalid state 'superseded by 42'"),
     "002 R2 ADR index title": (adr_index_title, "ADR 0001 differs"),
     "002 R2 ADR index state": (adr_index_state, "ADR 0001 differs"),
+    "002 R2 ADR title in §3": (adr_spec_title, "ADR 0001 differs"),
+    "002 R2 index row with no file": (adr_ghost_row, "ADR 0999 differs"),
     "R3 unknown spec id": (unknown_spec_reference, "'999-no-such-spec' is referenced"),
     "R3 spec file not in the plan": (spec_not_in_plan, "specs/998-ghost.md is not listed"),
     "R3 spec dropped from the plan": (spec_missing_from_plan, "-primitives-wrapper.md is not listed"),
     "R4 range in AGENTS": (agents_range, "contains a spec range"),
     "R5 example in requirements": (example_in_requirements, "'for example' is not a fixed value"),
+    "R5 e.g. in requirements": (lambda root: example_in_requirements(root, "e.g."), "R99 A key, e.g."),
+    "R5 such as in requirements": (lambda root: example_in_requirements(root, "such as"), "R99 A key, such as"),
     "R7 spec index state": (spec_index_state, "specs index vs file for"),
     "R7 spec phase line": (spec_phase, "missing 'Phase: N' line"),
     "R7 spec phase number": (spec_phase_number, "specs index vs file for"),
     "R7 spec missing from the index": (spec_missing_from_index, "specs index vs file for"),
     "R7 spec state vocabulary": (spec_state_vocabulary, "invalid state 'shelved"),
     "027 R22 AGENTS 20": (agents_device, "AGENTS 20 must name"),
+    "027 R22 AGENTS 20 spec id": (agents_spec_id, "AGENTS 20 must name"),
     "027 R22 §5": (spec_imported, "§5 must say"),
     "027 R22 §9": (spec_device_in_9, "§9 must name"),
 }
@@ -265,6 +300,27 @@ def check_s003_t08_r08_every_rule_fires() -> list[str]:
         for i, (name, (header, commit, committed, message)) in enumerate(R6_CASES.items()):
             if not r6_case(base, Path(tmp) / f"R6_{i}", header, message, commit=commit, committed=committed):
                 errors.append(f"the lint accepts docs/spec.md with {name}")
+        # R6 takes two changes committed on the day the header says, whatever today is, but
+        # not an uncommitted change on top of them; a tree that leaves docs/spec.md alone
+        # passes under any header.
+        case = Path(tmp) / "R6_pass"
+        r6_case(base, case, "Version: mvp · Updated: 2026-01-02", R6_STALE)
+        spec = case / "docs" / "spec.md"
+        spec.write_text(spec.read_text(encoding="utf-8") + "y\n", encoding="utf-8")
+        git(case, "commit", "-qam", "same day", when="2026-01-02T18:00:00")
+        start = git(case, "rev-parse", "HEAD~2")
+        if lint(case, start)[0] != 0:
+            errors.append("the lint refuses docs/spec.md changed twice on the day its header says")
+        spec.write_text(spec.read_text(encoding="utf-8") + "z\n", encoding="utf-8")
+        if not fires(case, R6_STALE, start):
+            errors.append("the lint accepts an uncommitted change under a committed day's date")
+        case = Path(tmp) / "R6_untouched"
+        shutil.copytree(base, case, symlinks=True)
+        start = git(case, "rev-parse", "HEAD")
+        (case / "README.md").write_text("x\n", encoding="utf-8")
+        git(case, "commit", "-qam", "other file", when="2026-01-02T12:00:00")
+        if lint(case, start)[0] != 0:
+            errors.append("the lint refuses a change that leaves docs/spec.md alone")
     return errors
 
 

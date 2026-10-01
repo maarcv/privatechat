@@ -2,10 +2,12 @@
 name: ci
 
 # s001_t10_r10_triggers_and_permissions: push to main/mvp, every PR, read-only.
+# A label added or removed reruns it too: adr-guard reads the labels of the event.
 on:
   push:
     branches: [main, mvp]
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 concurrency:
   # s001_t05_r05_concurrency_cancels_previous_runs: one run per branch.
@@ -94,23 +96,9 @@ jobs:
       - name: s003_t08_r08_doc_lint_self_test
         run: python3 scripts/doc_lint_selftest.py
       - name: s000_t05_r05_inici_is_ignored
-        run: |
-          # One path at a time: with several, check-ignore succeeds when any one is ignored.
-          for p in inici/x .DS_Store target/x node_modules/x dist/x .env bindings/a/generated/x .claude/worktrees/x; do
-            git check-ignore -q --no-index "$p" || { echo "not ignored: $p"; exit 1; }
-          done
-          test "$(git ls-files inici | wc -l)" -eq 0
+        run: scripts/check_layout.sh ignored
       - name: s000_t06_r06_root_files_exist
-        run: |
-          for f in AGENTS.md CLAUDE.md README.md LICENSE .github/CONTRIBUTING.md .github/SECURITY.md .github/CODEOWNERS docs/assistant.example.md \
-                   Cargo.toml rust-toolchain.toml rustfmt.toml deny.toml .editorconfig .gitignore \
-                   docs/spec.md docs/threat-model.md docs/audit-log.md docs/adr/README.md docs/adr/TEMPLATE.md \
-                   specs/TEMPLATE.md specs/README.md specs/vectors/README.md \
-                   .claude/skills/architecture/SKILL.md .claude/skills/rust/SKILL.md \
-                   .claude/skills/kotlin/SKILL.md .claude/skills/swift/SKILL.md \
-                   .claude/skills/typescript-svelte/SKILL.md; do
-            test -f "$f" || { echo "missing $f"; exit 1; }
-          done
+        run: scripts/check_layout.sh files
 
   check-requirements:
     name: check-requirements
@@ -139,7 +127,7 @@ jobs:
           # both ends. The module roots `crypto.rs`, `proto.rs` and `storage.rs` are
           # the modules themselves.
           changed="$(git diff --no-renames --name-only "$BASE"...HEAD)"
-          protected="$(printf '%s\n' "$changed" | grep -E '^(crates/core/src/(proto|crypto|storage)(/|\.rs$)|specs/vectors/|specs/0(1[12347]|20|31)-)' || true)"
+          protected="$(printf '%s\n' "$changed" | grep -E '^(crates/core/src/(proto|crypto|storage)(/|\.rs$)|crates/store/src/|specs/vectors/|specs/0(1[12347]|20|31)-)' || true)"
           if [ -z "$protected" ]; then echo "no protected paths touched"; exit 0; fi
           case ",$LABELS," in *,adr-not-needed,*) echo "label adr-not-needed present"; exit 0;; esac
           # A new ADR is an added file with a number the base does not have: a

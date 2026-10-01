@@ -38,7 +38,7 @@ Before any line of product code we need a monorepo where the spec is the source 
 ├─ .github/{workflows/ci.yml, PULL_REQUEST_TEMPLATE.md, dependabot.yml, CONTRIBUTING.md, SECURITY.md, CODEOWNERS}
 ├─ docs/{spec.md, threat-model.md, audit-log.md, assistant.example.md, adr/}    specs/{TEMPLATE.md, README.md, NNN-*.md, vectors/}
 ├─ bindings/ · clients/ · deploy/   (README.md only; contents in phases 3–5)
-└─ scripts/{doc_lint.sh, doc_lint.py, doc_lint_selftest.py, check_requirements.sh, check_requirements.py}
+└─ scripts/{check_layout.sh, doc_lint.sh, doc_lint.py, doc_lint_selftest.py, check_requirements.sh, check_requirements.py}
 ```
 
 ```rust
@@ -61,8 +61,8 @@ pub const DEFAULT_SERVER_URL: &str = "wss://server.invalid";
 - T02 (covers R2): `cargo test --workspace` → exit 0 (CI step `s000_t02_r02_workspace_tests_pass`).
 - T03 (covers R3): `s000_t03_r03_workspace_lints_deny_unwrap_and_arithmetic` reads each line in its own TOML section, never from a comment: every workspace lint, `unsafe_code = "deny"`, `overflow-checks = true` under `[profile.release]`, `[lints] workspace = true` in each crate, `#![deny(unsafe_code)]` in `core` and `#![forbid(unsafe_code)]` in `store` and `server`.
 - T04 (covers R4): `s000_t04_r04_default_server_url_is_wss_placeholder`: the constant is `wss://server.invalid`; the "only" clause is a review grep until spec 027.
-- T05 (covers R5): CI step `s000_t05_r05_inici_is_ignored`: `git check-ignore --no-index` of a path under each entry of R5, and `git ls-files inici` empty.
-- T06 (covers R6): CI step `s000_t06_r06_root_files_exist`.
+- T05 (covers R5): `s000_t05_r05_inici_is_ignored` in `scripts/check_layout.sh`, a CI step of the same name: `git check-ignore --no-index` of a path under each entry of R5, and `git ls-files inici` empty.
+- T06 (covers R6): `s000_t06_r06_root_files_exist` in `scripts/check_layout.sh`, a CI step of the same name.
 - T07 (covers R7): `s000_t07_r07_toolchain_is_pinned` checks the channel and the components of `rust-toolchain.toml` and `edition = "2024"` of the workspace.
 - T08 (covers R8): `cargo deny check` green (step `s001_t03_r03_cargo_deny`) and `s000_t08_r08_deny_bans_crypto_crates`: every crate of R8 banned outright, each wrapped ban with exactly its wrappers and no other ban with any, exactly the allowed licences, and the source, yanked and wildcard rules.
 
@@ -88,4 +88,4 @@ pub const DEFAULT_SERVER_URL: &str = "wss://server.invalid";
 
 - 2026-09-20 draft · 2026-09-20 in review · 2026-09-20 accepted (Marc Vilardebó) · 2026-09-20 implemented
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): open question 000-R4 closed with its proposal
-- 2026-10-01 revised after audit Z (`docs/audit-log.md`): R1 and Out of scope no longer say the crates are empty; R5 adds `.claude/worktrees/`; R8 names the wrapped bans and the source rules; T03, T04, T05, T07 and T08 read each line in its section, pin the URL, check every ignored path, the edition and the exact bans; round 2: T08 reads only the `deny` list, compares the licence and source sections whole and names `sodiumoxide`; the tree lists `clippy.toml` and the self-test
+- 2026-10-01 revised after audit Z (`docs/audit-log.md`): R1 and Out of scope no longer say the crates are empty; R5 adds `.claude/worktrees/`; R8 names the wrapped bans and the source rules; T03, T04, T05, T07 and T08 read each line in its section, pin the URL, check every ignored path, the edition and the exact bans; round 2: T08 reads only the `deny` list, compares the licence and source sections whole and names `sodiumoxide`; the tree lists `clippy.toml` and the self-test; round 3: T05 and T06 live in `scripts/check_layout.sh`; T08 refuses any key but `reason` on an outright ban and any other table

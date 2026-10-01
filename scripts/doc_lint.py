@@ -190,7 +190,8 @@ def check_s003_t06_r06_spec_header_date_changes_with_content() -> None:
     """R6: when docs/spec.md differs from the base, its `Updated` date is the date of its latest change.
 
     The date of the latest change is today when the file has uncommitted changes,
-    otherwise the author date of the newest commit in base..HEAD that touches it.
+    otherwise the author date of the newest commit in base..HEAD that touches it,
+    merges left out: in a pull request HEAD is the merge GitHub made for the test.
     Comparing dates, not header strings, lets several changes land on one day.
     """
     base = os.environ.get("DOC_LINT_BASE")
@@ -206,7 +207,7 @@ def check_s003_t06_r06_spec_header_date_changes_with_content() -> None:
         if git("status", "--porcelain", "--", "docs/spec.md"):
             changed_on = date.today().isoformat()
         else:
-            changed_on = git("log", "-1", "--format=%as", f"{base}..HEAD", "--", "docs/spec.md") or date.today().isoformat()
+            changed_on = git("log", "-1", "--no-merges", "--format=%as", f"{base}..HEAD", "--", "docs/spec.md") or date.today().isoformat()
     except subprocess.CalledProcessError:
         return  # no base available (first commit): nothing to compare
     header = re.compile(r"^Version: .*Updated: (\d{4}-\d{2}-\d{2})", re.MULTILINE)
@@ -257,7 +258,7 @@ def check_s027_t22_r22_boundary_documented(spec: str) -> None:
         fail("AGENTS 20 must name `Device` as the one handle of spec 027-core-api")
     if "until the channel is imported" not in spec:
         fail("docs/spec.md §5 must say the client sends nothing until the channel is imported")
-    if spec_state("027") == "implemented" and "Device" not in spec[spec.find("## 9."):]:
+    if spec_state("027") == "implemented" and "Device" not in spec[spec.find("## 9."):spec.find("## 10.")]:
         fail("docs/spec.md §9 must name `Device` once spec 027 is implemented")
 
 

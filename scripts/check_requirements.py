@@ -63,7 +63,8 @@ def check_s001_t07_r07_the_gate_fires() -> list[str]:
     firing fails the script (spec 001 R7)."""
     spec = ("# 999\n\nStatus: {state}\nPhase: 9\n\n## Requirements\n\n- R1 One.\n"
             "- R2 Two.\n\n### Notes\n\n- R10 Ten, under a subheading of the section.\n\n"
-            "## Limits\n\n- R3 is not a requirement here.\n")
+            "## Limits\n\n- R3 is not a requirement here.\n\n"
+            "## Test cases\n\n- T02 `s999_t02_r02_described`, T10 `s999_t10_r10_described`.\n")
     every = "s999_t01_r01_a s999_t02_r02_b s999_t10_r10_c"
     cases = [
         # (what the case shows, the spec's state, the tracked test file, gate fails?)
@@ -83,9 +84,10 @@ def check_s001_t07_r07_the_gate_fires() -> list[str]:
             (root / "specs").mkdir()
             (root / "specs" / "999-fixture.md").write_text(spec.format(state=state), encoding="utf-8")
             (root / "tests.rs").write_text(tests + "\n", encoding="utf-8")
-            # A test named only in specs/ or docs/ is a description, never a test.
-            (root / "docs").mkdir()
-            (root / "docs" / "notes.md").write_text("s999_t02_r02_described\n", encoding="utf-8")
+            # A test named only in specs/, docs/, .claude/ or AGENTS.md is a description, never a test.
+            for described in ("docs/notes.md", ".claude/notes.md", "AGENTS.md"):
+                (root / described).parent.mkdir(exist_ok=True)
+                (root / described).write_text("s999_t02_r02_described s999_t10_r10_described\n", encoding="utf-8")
             subprocess.run(["git", "init", "-q"], cwd=root, check=True)
             subprocess.run(["git", "add", "-A"], cwd=root, check=True)
             if bool(missing_tests(root)) != should_fail:

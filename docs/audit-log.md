@@ -37,6 +37,21 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AZ12 | T08 left `sodiumoxide` out, read a ban from any `{ crate =` line, `skip` too, and the licence and source sections by containment; `section()` read past a `[[array]]` (Z2-A-4, Z2-A-5, Z2-B-4) | Low | `sodiumoxide`; bans from `deny = [ … ]`; both sections compared whole; `[[` closes a section |
 | AZ13 | §9 said `cargo deny` checks the core does no I/O; §10 named only 011–017 for `adr-not-needed`; 000's tree lacked `clippy.toml` and the self-test; the `Updated` date of `docs/spec.md` was stale since audit Y, which no pull request had checked (Z2-A-6) | Low | Rewritten |
 
+**Round 3.** CI green; 85 crafted histories and 251 mutants, every survivor equivalent, far-fetched or caught by another step but these:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ14 | Adding the `adr-not-needed` label started no run, and a rerun reads the old payload, so the label could never turn `adr-guard` green (Z3-A-1) | Medium | The workflow also runs on `labeled` and `unlabeled` |
+| AZ15 | The file framing of spec 020 goes into `crates/store/src/`, which `adr-guard` did not protect (Z3 question 1) | Medium | Protected (AZ-Q6); 001 R8, §10 |
+| AZ16 | Dropping `specs/`, `.claude/` or `AGENTS.md` from the exclusions of `check_requirements` left it green: every spec's own `T` lines would cover it (Z3-A-2) | Medium | The fixture names the tests in its spec, `.claude/` and `AGENTS.md` too |
+| AZ17 | T08 took `deny-multiple-versions`, which lifts an outright ban, a `[[licenses.exceptions]]` table and `[sources.allow-org]` (Z3-B-1) | Low | An outright ban has no key but `reason`; the list of tables is exact |
+| AZ18 | R6 read the date of the test merge GitHub makes, and had no case that must pass; §3 titles, an index row with no file, `superseded by` with a bad number, `e.g.` and `such as`, and the spec id in AGENTS 20 had no fixture; the §9 rule read to the end of the file (Z3-A-3–Z3-A-5, Z3-B-2–Z3-B-4) | Low | `--no-merges`; 34 fixtures, three that must pass; §9 ends at §10 |
+| AZ19 | The local CI list did not run the two layout steps, which is how AZ8 went unseen; §10 named phase 2 where only 020 and 031 are protected; the pull request template's count of commits (Z3-C-2) | Low | `scripts/check_layout.sh`, run by both; rewritten |
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AZ-Q6 | Protect `crates/store/src/`, or move the file framing into `core::storage` | Protect `crates/store/src/` | 001 R8 |
+
 ## Audit Y
 
 **2026-10-01 — Audit Y, a re-audit of phase 1 in rounds (branch `phase1-audit` from `mvp` at 107c578), after audits Q–W had run one round each.** Each round runs three passes (A: structure, simplicity and logic; B: the local CI run and hand mutants; C: conformance) over three groups (G1: specs 010, 015 and `core::Error`; G2: specs 011, 014, 017; G3: specs 012, 013, 016), nine agents in all. The human reviewer allowed specs to change, nothing being in production.
