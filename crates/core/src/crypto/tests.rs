@@ -4,7 +4,7 @@
 
 use proptest::collection::vec as bytes_of;
 use proptest::prelude::{any, proptest};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 use super::{
     CryptoError, KdfContext, Nonce, PublicKey, SECRET_TYPES, Salt, Secret, Signature, aead_decrypt,
@@ -306,20 +306,8 @@ fn s010_t24_r15_public_key_debug_is_prefix() {
 /// single dev dependency, and never asks libsodium of the host.
 #[test]
 fn s010_t25_r16_manifest_pins_dependencies() {
-    let manifest = include_str!("../../Cargo.toml");
-    let section = |name: &str| -> String {
-        let start = manifest.find(name).expect("section");
-        let rest = &manifest[start + name.len()..];
-        let end = rest.find("\n[").unwrap_or(rest.len());
-        rest[..end].to_owned()
-    };
-    // Comments are prose: what counts is what the manifest declares.
-    let dependencies = section("[dependencies]");
-    let declarations: Vec<&str> = dependencies
-        .lines()
-        .filter(|line| line.contains(" = ") && !line.trim_start().starts_with('#'))
-        .map(str::trim)
-        .collect();
+    let dependencies = manifest_section("[dependencies]");
+    let declarations = declarations(&dependencies);
     assert_eq!(declarations.len(), 2);
     for crate_name in ["libsodium-sys-stable", "zeroize"] {
         assert!(
@@ -333,7 +321,43 @@ fn s010_t25_r16_manifest_pins_dependencies() {
             "{feature} is named in a comment that keeps it off, never enabled"
         );
     }
-    assert!(section("[dev-dependencies]").contains("proptest"));
+    assert!(manifest_section("[dev-dependencies]").contains("proptest"));
+}
+
+/// The body of one section of `crates/core/Cargo.toml`.
+fn manifest_section(name: &str) -> String {
+    let manifest = include_str!("../../Cargo.toml");
+    let start = manifest.find(name).expect("section");
+    let rest = &manifest[start + name.len()..];
+    let end = rest.find("\n[").unwrap_or(rest.len());
+    rest[..end].to_owned()
+}
+
+/// The declarations of a manifest section. Comments are prose: what counts is
+/// what the manifest declares.
+fn declarations(section: &str) -> Vec<&str> {
+    section
+        .lines()
+        .filter(|line| line.contains(" = ") && !line.trim_start().starts_with('#'))
+        .map(str::trim)
+        .collect()
+}
+
+/// Spec 020, R2: `secretbox_open` hands its plaintext back in a buffer wiped
+/// on drop, and the one feature of `core`, `test-support`, enables nothing:
+/// no feature and no optional dependency, which would be a third dependency
+/// behind it (T25 still counts two).
+#[test]
+fn s020_t02_r02_amended_wrapper() -> Result<(), CryptoError> {
+    let key = Secret::<32>::from_bytes([17u8; 32]);
+    let nonce = Nonce([18u8; 24]);
+    let sealed = secretbox_seal(&key, &nonce, b"state")?;
+    let opened: Zeroizing<Vec<u8>> = secretbox_open(&key, &nonce, &sealed)?;
+    assert_eq!(opened.as_slice(), b"state");
+    let features = manifest_section("[features]");
+    assert_eq!(declarations(&features), ["test-support = []"]);
+    assert!(!manifest_section("[dependencies]").contains("optional"));
+    Ok(())
 }
 
 /// Spec 010, R17: the clock, the file system and the network are unreachable
@@ -518,7 +542,7 @@ fn s010_t18_r12_secretbox_known_answer() -> Result<(), CryptoError> {
     let plaintext = vector.input("plaintext").bytes();
     let sealed = vector.expected("sealed").bytes();
     assert_eq!(secretbox_seal(&key, &nonce, plaintext)?, sealed);
-    assert_eq!(secretbox_open(&key, &nonce, sealed)?, plaintext);
+    assert_eq!(secretbox_open(&key, &nonce, sealed)?.as_slice(), plaintext);
     Ok(())
 }
 
@@ -531,7 +555,7 @@ fn s010_t19_r12_secretbox_roundtrip_and_mutation() -> Result<(), CryptoError> {
     let plaintext = [13u8; 100];
     let sealed = secretbox_seal(&key, &nonce, &plaintext)?;
     assert_eq!(sealed.len(), plaintext.len() + 16);
-    assert_eq!(secretbox_open(&key, &nonce, &sealed)?, plaintext);
+    assert_eq!(secretbox_open(&key, &nonce, &sealed)?.as_slice(), plaintext);
 
     for at in [0, 15, 16, sealed.len() - 1] {
         let mut broken = sealed.clone();
@@ -560,7 +584,7 @@ fn s010_t22_r14_wrapper_bounds_are_the_primitives() -> Result<(), CryptoError> {
     let sealed = aead_encrypt(&key, &nonce, &[], &plaintext)?;
     assert_eq!(aead_decrypt(&key, &nonce, &[], &sealed)?, plaintext);
     let boxed = secretbox_seal(&key, &nonce, &plaintext)?;
-    assert_eq!(secretbox_open(&key, &nonce, &boxed)?, plaintext);
+    assert_eq!(secretbox_open(&key, &nonce, &boxed)?.as_slice(), plaintext);
 
     assert_eq!(checked_output_len(100, 16), Ok(116));
     assert_eq!(

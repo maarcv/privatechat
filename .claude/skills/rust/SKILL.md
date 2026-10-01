@@ -56,7 +56,9 @@ tightening, never a relaxation.
 - No lifetimes on `pub` types in `core` (the FFI surface); `pub(crate)`
   borrowing views like `Envelope<'a>` are preferred for parsers.
 - No `Rc<RefCell<_>>` or `Arc<Mutex<_>>` in `core`: state belongs in the
-  `Store` and changes in one commit (AGENTS 23).
+  `Store` and changes in one commit (AGENTS 23). The one exception is the
+  test doubles of `core::testing`, handles over shared state so that a test
+  keeps one after giving a store away (spec 020-store-files R2).
 
 ## Writing under the lints
 
@@ -112,8 +114,10 @@ AGENTS 12 fixes where `unsafe` may appear. Inside that one file:
 
 ## Concurrency
 
-`core` and `store` are single-threaded by design: no `tokio`, no threads, no
-`Send` bounds to think about. `server` uses `tokio`:
+`core` and `store` are single-threaded by design: no `tokio`, no threads. The
+one `Send` bound is on `Store` and `Vault`, so that the `Device` of spec
+027-core-api can live behind a `Mutex` in the bindings (spec 020-store-files
+R28). `server` uses `tokio`:
 
 - Bounded channels only (`mpsc::channel(N)`), never `unbounded_channel`. When a
   channel is full, the spec says what happens (`rate_limited`); an unbounded
@@ -195,5 +199,7 @@ AGENTS 12 fixes where `unsafe` may appear. Inside that one file:
 - `#[must_use]` on functions that return a value the caller must not drop
   (`encrypt` returns the reserved counter's blob — dropping it loses a counter).
 - No `impl Trait` in return position on public `core` API (uniffi cannot see
-  it). No feature flags in `core`: one build, one behaviour. No macros for
+  it). No feature flags in `core`: one build, one behaviour. The one feature,
+  `test-support`, only compiles the doubles of `core::testing` for the tests
+  of `store` (spec 020-store-files R2). No macros for
   anything a function can do.
