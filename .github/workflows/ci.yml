@@ -2,12 +2,13 @@
 name: ci
 
 # s001_t10_r10_triggers_and_permissions: push to main/mvp, every PR, read-only.
-# A label added or removed reruns it too: adr-guard reads the labels of the event.
+# A label added or removed reruns it too, since adr-guard reads the labels of the event, and
+# so does `edited`, which a change of base branch fires.
 on:
   push:
     branches: [main, mvp]
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
 
 concurrency:
   # s001_t05_r05_concurrency_cancels_previous_runs: one run per branch.
@@ -127,7 +128,7 @@ jobs:
           # both ends. The module roots `crypto.rs`, `proto.rs` and `storage.rs` are
           # the modules themselves.
           changed="$(git diff --no-renames --name-only "$BASE"...HEAD)"
-          protected="$(printf '%s\n' "$changed" | grep -E '^(crates/core/src/(proto|crypto|storage)(/|\.rs$)|crates/store/src/|specs/vectors/|specs/0(1[12347]|20|31)-)' || true)"
+          protected="$(printf '%s\n' "$changed" | grep -E '^(crates/core/src/(proto|crypto|storage)(/|\.rs$)|crates/store/(src|tests/golden)/|specs/vectors/|specs/0(1[12347]|20|31)-)' || true)"
           if [ -z "$protected" ]; then echo "no protected paths touched"; exit 0; fi
           case ",$LABELS," in *,adr-not-needed,*) echo "label adr-not-needed present"; exit 0;; esac
           # A new ADR is an added file with a number the base does not have: a

@@ -160,6 +160,23 @@ def adr_ghost_row(root: Path) -> None:
     replace(path, row, row + "\n| 0999 | Ghost | 2026-01-01 | accepted |")
 
 
+def spec_ghost_adr(root: Path) -> None:
+    path = root / "docs" / "spec.md"
+    row = row_of(path, "0001")
+    replace(path, row, row + "\n| 0999 | Ghost | accepted | x |")
+
+
+def spec_adr_state(root: Path) -> None:
+    path = root / "docs" / "spec.md"
+    row = row_of(path, "0001")
+    replace(path, row, row.replace("| accepted |", "| deprecated |", 1))
+
+
+def device_after_9(root: Path) -> None:
+    spec_device_in_9(root)
+    replace(root / "docs" / "spec.md", "## 10. SDD execution plan\n", "## 10. SDD execution plan\n\n`Device`.\n")
+
+
 def agents_spec_id(root: Path) -> None:
     path = root / "AGENTS.md"
     rule = next(line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("20. "))
@@ -231,12 +248,15 @@ BREAKS: dict[str, tuple[Callable[[Path], None], str]] = {
     "002 R2 ADR index state": (adr_index_state, "ADR 0001 differs"),
     "002 R2 ADR title in §3": (adr_spec_title, "ADR 0001 differs"),
     "002 R2 index row with no file": (adr_ghost_row, "ADR 0999 differs"),
+    "002 R2 §3 row with no file": (spec_ghost_adr, "ADR 0999 differs"),
+    "002 R2 ADR state in §3": (spec_adr_state, "ADR 0001 differs"),
     "R3 unknown spec id": (unknown_spec_reference, "'999-no-such-spec' is referenced"),
     "R3 spec file not in the plan": (spec_not_in_plan, "specs/998-ghost.md is not listed"),
     "R3 spec dropped from the plan": (spec_missing_from_plan, "-primitives-wrapper.md is not listed"),
     "R4 range in AGENTS": (agents_range, "contains a spec range"),
     "R5 example in requirements": (example_in_requirements, "'for example' is not a fixed value"),
     "R5 e.g. in requirements": (lambda root: example_in_requirements(root, "e.g."), "R99 A key, e.g."),
+    "R5 capitalised For example": (lambda root: example_in_requirements(root, "For example,"), "R99 A key, For example"),
     "R5 such as in requirements": (lambda root: example_in_requirements(root, "such as"), "R99 A key, such as"),
     "R7 spec index state": (spec_index_state, "specs index vs file for"),
     "R7 spec phase line": (spec_phase, "missing 'Phase: N' line"),
@@ -247,6 +267,7 @@ BREAKS: dict[str, tuple[Callable[[Path], None], str]] = {
     "027 R22 AGENTS 20 spec id": (agents_spec_id, "AGENTS 20 must name"),
     "027 R22 §5": (spec_imported, "§5 must say"),
     "027 R22 §9": (spec_device_in_9, "§9 must name"),
+    "027 R22 §9 ends at §10": (device_after_9, "§9 must name"),
 }
 
 
@@ -314,8 +335,31 @@ def check_s003_t08_r08_every_rule_fires() -> list[str]:
         spec.write_text(spec.read_text(encoding="utf-8") + "z\n", encoding="utf-8")
         if not fires(case, R6_STALE, start):
             errors.append("the lint accepts an uncommitted change under a committed day's date")
+        # A merge that joins two changes to docs/spec.md, as GitHub's test merge does, is not
+        # the latest change: the header keeps the date of the last commit that is not one.
+        case = Path(tmp) / "R6_merge"
+        shutil.copytree(base, case, symlinks=True)
+        start = git(case, "rev-parse", "HEAD")
+        trunk = git(case, "rev-parse", "--abbrev-ref", "HEAD")
+        spec = case / "docs" / "spec.md"
+        git(case, "checkout", "-qb", "side")
+        spec.write_text(spec.read_text(encoding="utf-8") + "side\n", encoding="utf-8")
+        git(case, "commit", "-qam", "side", when="2026-01-02T12:00:00")
+        git(case, "checkout", "-q", trunk)
+        lines = ["Version: mvp · Updated: 2026-01-02" if line.startswith("Version: ") else line
+                 for line in spec.read_text(encoding="utf-8").splitlines()]
+        spec.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        git(case, "commit", "-qam", "trunk", when="2026-01-02T13:00:00")
+        git(case, "merge", "-q", "--no-edit", "side", when="2026-01-05T12:00:00")
+        if lint(case, start)[0] != 0:
+            errors.append("the lint dates docs/spec.md by a merge commit")
         case = Path(tmp) / "R6_untouched"
         shutil.copytree(base, case, symlinks=True)
+        spec = case / "docs" / "spec.md"
+        lines = ["Version: mvp · Updated: 2000-01-01" if line.startswith("Version: ") else line
+                 for line in spec.read_text(encoding="utf-8").splitlines()]
+        spec.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        git(case, "commit", "-qam", "old header")
         start = git(case, "rev-parse", "HEAD")
         (case / "README.md").write_text("x\n", encoding="utf-8")
         git(case, "commit", "-qam", "other file", when="2026-01-02T12:00:00")

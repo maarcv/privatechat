@@ -191,7 +191,9 @@ def check_s003_t06_r06_spec_header_date_changes_with_content() -> None:
 
     The date of the latest change is today when the file has uncommitted changes,
     otherwise the author date of the newest commit in base..HEAD that touches it,
-    merges left out: in a pull request HEAD is the merge GitHub made for the test.
+    merges left out: in a pull request HEAD is the merge GitHub made for the test. A
+    branch that resolves a conflict in docs/spec.md inside its own merge therefore dates
+    the header by its last commit that is not a merge, or adds one.
     Comparing dates, not header strings, lets several changes land on one day.
     """
     base = os.environ.get("DOC_LINT_BASE")

@@ -52,6 +52,18 @@ Findings and applied changes of every audit of the specification, newest first; 
 | --- | --- | --- | --- |
 | AZ-Q6 | Protect `crates/store/src/`, or move the file framing into `core::storage` | Protect `crates/store/src/` | 001 R8 |
 
+**Round 4.** CI green; 103 crafted histories and 209 mutants, every survivor equivalent, far-fetched or caught by another step but these, after which the audit closed with nothing substantive left:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ20 | A pull request retargeted to `mvp` fires only `edited`, so its check from the old base stayed green (Z4-A-1) | Medium | `edited` among the triggers; 001 R10 |
+| AZ21 | The frozen files of spec 020 R31, `crates/store/tests/golden/`, are the store format and were not protected (Z4-A-2) | Medium | Protected; 001 R8, §10 |
+| AZ22 | T08 did not read `[graph]` or `[advisories]`, where `exclude` takes a banned crate out of every check (Z4-A-4, Z4-B-1) | Low | Both sections compared whole |
+| AZ23 | No fixture pinned `--no-merges`, the end of §9, a §3 row with no file, a §3 state, "For example", or an untouched spec under an old header (Z4-A-3, Z4-B-2, Z4-B-3) | Low | 38 fixtures; a branch resolving a docs/spec.md conflict in its own merge dates the header by a later commit that is not a merge |
+| AZ24 | §10 left out 027, whose exit test lives under the protected `crates/store/src/`; the template's command list lacked the layout script (Z4-C-1, Z4-C-2) | Low | Rewritten |
+
+The `labeled`, `unlabeled` and `edited` triggers stay a review item (001 T10) (Z4-B-4).
+
 ## Audit Y
 
 **2026-10-01 — Audit Y, a re-audit of phase 1 in rounds (branch `phase1-audit` from `mvp` at 107c578), after audits Q–W had run one round each.** Each round runs three passes (A: structure, simplicity and logic; B: the local CI run and hand mutants; C: conformance) over three groups (G1: specs 010, 015 and `core::Error`; G2: specs 011, 014, 017; G3: specs 012, 013, 016), nine agents in all. The human reviewer allowed specs to change, nothing being in production.

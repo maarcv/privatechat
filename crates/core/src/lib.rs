@@ -268,7 +268,12 @@ mod tests {
                 "allow-registry = [\"https://github.com/rust-lang/crates.io-index\"]",
             ]
         );
-        assert!(section(deny, "[advisories]").contains(&"yanked = \"deny\""));
+        // Whole too: `exclude` under `[graph]` would take a banned crate out of every check.
+        assert_eq!(section(deny, "[graph]"), ["all-features = true"]);
+        assert_eq!(
+            section(deny, "[advisories]"),
+            ["version = 2", "yanked = \"deny\"", "ignore = []"]
+        );
         assert!(section(deny, "[bans]").contains(&"wildcards = \"deny\""));
     }
 }
