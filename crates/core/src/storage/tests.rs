@@ -452,6 +452,17 @@ fn s020_t27_r27_largest_state_seals_and_opens() {
     );
 }
 
+/// Spec 020, R28 (`core`'s half): a store, a vault and what a commit takes
+/// can move to another thread, so `Device` can live behind a `Mutex`.
+#[test]
+fn s020_t28_r28_send() {
+    fn is_send<T: Send + ?Sized>() {}
+    is_send::<Box<dyn super::Store>>();
+    is_send::<Box<dyn super::Vault>>();
+    is_send::<super::WriteBatch>();
+    is_send::<super::StorageKey>();
+}
+
 /// Checks a codec vector of `020.json`: a positive decodes to its values and
 /// encodes back to its bytes, a negative returns its `RecordError`.
 fn check_types_vector(vector: &Vector) {
