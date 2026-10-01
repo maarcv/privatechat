@@ -109,7 +109,7 @@ Every function returns `Result` because each one may be the first libsodium call
 - Secrets: `Secret<32>` (root, master, header and message keys, seeds, password-derived keys) and `Secret<64>` (Ed25519 secret keys). Redacted `Debug`, no `Display`, zeroized on drop (R3, R18).
 - Nothing in this module logs, formats a secret or puts bytes in an error (R15). There is no logging dependency in `core`.
 - The wrapper rejects only what libsodium would abort on or what would overflow (R14); it holds no protocol number. Every size policy lives in the spec of the caller, so a bound that changes there never has to be mirrored here. libsodium performs the tag, signature and padding checks and the wrapper maps each failure to one variant.
-- Signature verification is strict by construction: `libsodium-sys-stable` builds libsodium from source without `ED25519_COMPAT` (R10, §4). The negative vectors of "Vectors" prove it at test time, so a future build change cannot silently weaken it.
+- Signature verification is strict by construction: `libsodium-sys-stable` builds libsodium from source without `ED25519_COMPAT` (R10, §4). The ed25519-speccheck cases and `signature_s_plus_l` prove it at test time: each is accepted by a verifier that skips one of the strict checks, so a future build change cannot silently weaken it (ADR 0042). The other negatives, a valid signature under the wrong key or message or a point that is not one, are rejected by any verifier.
 - Constant time: `ct_eq` for every fixed-size comparison (R4); tag and signature comparisons happen inside libsodium.
 
 ## Public API changes
@@ -129,7 +129,7 @@ Every test is in `crates/core/src/crypto/tests.rs` unless stated; every negative
 - T10 (covers R7): `s010_t10_r07_stream_xor_is_involution` proptest; `s010_t11_r07_stream_known_answer` on the stream vector.
 - T12 (covers R8): `s010_t12_r08_kdf_known_answer` on the KDF vectors; two different contexts give different subkeys.
 - T13 (covers R9): `s010_t13_r09_hash_known_answer` (unkeyed and keyed BLAKE2b vectors).
-- T14 (covers R10): `s010_t14_r10_sign_known_answer` (RFC 8032 vectors: seed → `pk`, message → signature); `s010_t15_r10_verify_rejects_malformed` on the negative vectors `signature_s_plus_l`, `pk_identity`, `pk_small_order`, `r_small_order`, `pk_non_canonical`, `wrong_message`, `wrong_pk` → `Forged`; `s010_t16_r10_sign_roundtrip` proptest.
+- T14 (covers R10): `s010_t14_r10_sign_known_answer` (RFC 8032 vectors: seed → `pk`, message → signature); `s010_t15_r10_verify_rejects_malformed` on the negative vectors `signature_s_plus_l`, `pk_order_4`, `pk_not_on_curve`, `r_wrong_point`, `pk_non_canonical`, `wrong_message`, `wrong_pk` and the eleven ed25519-speccheck cases libsodium rejects → `Forged`, and `speccheck_3`, a valid signature over mixed-order points, verifies (ADR 0042); `s010_t16_r10_sign_roundtrip` proptest.
 - T17 (covers R11): `s010_t17_r11_password_key_known_answer` on the Argon2id13 vector; a different salt gives a different key.
 - T18 (covers R12): `s010_t18_r12_secretbox_known_answer`; `s010_t19_r12_secretbox_roundtrip_and_mutation` (flip → `Forged`).
 - T20 (covers R13): `s010_t20_r13_pad_unpad_roundtrip` proptest over input 0..=4 096 B and block in {16, 1 024}; `s010_t21_r13_unpad_rejects_bad_padding`: a buffer of zeros and a buffer not a multiple of `block` → `BadPadding`.
@@ -152,10 +152,11 @@ Every test is in `crates/core/src/crypto/tests.rs` unless stated; every negative
 | `ed25519_rfc8032_test1`, `_test2`, `_test3` | positive | published | RFC 8032 §7.1, byte-identical to `test_data[0..2]` of libsodium `test/default/sign.c` (seed → `pk`, message → signature) |
 | `secretbox_easy` | positive | published | libsodium `test/default/secretbox_easy.c` and `.exp` (message of 131 bytes → output of 147) |
 | `signature_s_plus_l` | negative | published | libsodium `test/default/sign.c`, `add_l()` applied to the `S` half of the `ed25519_rfc8032_test1` signature |
-| `pk_identity` | negative | published | libsodium `test/default/sign.c`: 32 zero bytes as `pk` |
-| `pk_small_order` | negative | published | libsodium `test/default/sign.c`: `pk = 3eee494f…ab36` |
+| `pk_order_4` | negative | published | libsodium `test/default/sign.c`: 32 zero bytes as `pk`, the point of order 4 (renamed from `pk_identity`, ADR 0042) |
+| `pk_not_on_curve` | negative | published | libsodium `test/default/sign.c`: `pk = 3eee494f…ab36`, not a point of the curve (renamed from `pk_small_order`) |
 | `pk_non_canonical` | negative | published | libsodium `test/default/sign.c`, `non_canonical_p` (`f6ff…ff7f`) |
-| `r_small_order` | negative | published | libsodium `test/default/sign.c`: the `R` half set to `db ff … ff` |
+| `r_wrong_point` | negative | published | libsodium `test/default/sign.c`: the `R` half set to `db ff … ff`, a point of large order (renamed from `r_small_order`) |
+| `speccheck_0`–`speccheck_11` | negative, `speccheck_3` positive | published | ed25519-speccheck `cases.json` (Chalkias, Garillot, Nikolaenko, "Taming the many EdDSAs", 2020): small-order `A` and `R`, mixed orders, `S` ≥ `L`, non-canonical `R` and `A` (ADR 0042) |
 | `wrong_message`, `wrong_pk` | negative | derived | `ed25519_rfc8032_test1` with the message of `_test2` and with the `pk` of `_test2` |
 | `pad_1024` | positive | derived | ISO/IEC 7816-4, which `sodium_pad` implements: an input of 100 bytes becomes `input ‖ 0x80 ‖ 923 × 0x00` |
 | `unpad_all_zero` | negative | derived | a buffer of 1 024 zero bytes has no `0x80` marker → `BadPadding` |
@@ -212,3 +213,4 @@ A bump of `libsodium-sys-stable` moves three pinned values at once (the version 
 - 2026-09-24 documentation review: the error mapping is owned by spec 011 R20, not spec 027; closed open questions condensed
 - 2026-09-24 audit I (`docs/audit-log.md`): R16 also forbids the `minimal` and `fetch-latest` features and T25 asserts their absence; R5 written with its `Result` type; `Secret::copy_from` listed in the Interface as added by spec 011; the loader stays in `crypto/vectors.rs` until spec 015 moves it; open question 010-T04 closed as 010-R3; `Depends on` and `Blocks` in `NNN-name` form; the vectors of later specs are produced by the reference script, not by the core
 - 2026-09-29 amended by audit S of spec 011-config-format (`docs/audit-log.md`, AS-Q1): R19 adds the base64url codec, wrapping libsodium's constant-time `sodium_bin2base64` and `sodium_base642bin`, because the config QR carries `K_ch`; R15 gains `BadEncoding`, R14 and the Limits bound the encoder's output; T23 counts 7 variants; T30 and T31 added (Marc Vilardebó)
+- 2026-10-01 revised after audit Y (`docs/audit-log.md`, ADR 0042): T15 and the Vectors table gain the ed25519-speccheck cases and rename three negatives after what they hold; the Security section says which vectors prove strictness

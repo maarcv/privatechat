@@ -156,10 +156,10 @@
       }
     },
     {
-      "name": "pk_identity",
+      "name": "pk_order_4",
       "kind": "negative",
       "source": "published",
-      "origin": "libsodium 1.0.22, test/default/sign.c: 32 zero bytes as pk",
+      "origin": "libsodium 1.0.22, test/default/sign.c: 32 zero bytes as pk, the point of order 4, with the signature of ed25519_rfc8032_test1",
       "inputs": {
         "message": "",
         "pk": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -171,10 +171,10 @@
       }
     },
     {
-      "name": "pk_small_order",
+      "name": "pk_not_on_curve",
       "kind": "negative",
       "source": "published",
-      "origin": "libsodium 1.0.22, test/default/sign.c: pk = 3eee494f…ab36",
+      "origin": "libsodium 1.0.22, test/default/sign.c: pk = 3eee494f…ab36, which it calls an invalid public key: not a point of the curve",
       "inputs": {
         "message": "",
         "pk": "3eee494fb9eac773144e34b0c755affaf33ea782c0722e5ea8b150e61209ab36",
@@ -201,10 +201,10 @@
       }
     },
     {
-      "name": "r_small_order",
+      "name": "r_wrong_point",
       "kind": "negative",
       "source": "published",
-      "origin": "libsodium 1.0.22, test/default/sign.c: R half set to db ff … ff",
+      "origin": "libsodium 1.0.22, test/default/sign.c: the R half of the ed25519_rfc8032_test1 signature set to db ff … ff, a point of large order",
       "inputs": {
         "message": "",
         "pk": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
@@ -212,6 +212,174 @@
       },
       "expected": {
         "commits": 0,
+        "error": "Forged"
+      }
+    },
+    {
+      "name": "speccheck_0",
+      "kind": "negative",
+      "source": "published",
+      "origin": "ed25519-speccheck, cases.json case 0 (Chalkias, Garillot, Nikolaenko, Taming the many EdDSAs, 2020): small-order A and small-order R, S = 0; libsodium rejects it",
+      "inputs": {
+        "message": "8c93255d71dcab10e8f379c26200f3c7bd5f09d9bc3068d3ef4edeb4853022b6",
+        "pk": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+        "signature": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expected": {
+        "error": "Forged"
+      }
+    },
+    {
+      "name": "speccheck_1",
+      "kind": "negative",
+      "source": "published",
+      "origin": "ed25519-speccheck, cases.json case 1 (Chalkias, Garillot, Nikolaenko, Taming the many EdDSAs, 2020): small-order A, mixed-order R; libsodium rejects it",
+      "inputs": {
+        "message": "9bd9f44f4dcc75bd531b56b2cd280b0bb38fc1cd6d1230e14861d861de092e79",
+        "pk": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa",
+        "signature": "f7badec5b8abeaf699583992219b7b223f1df3fbbea919844e3f7c554a43dd43a5bb704786be79fc476f91d3f3f89b03984d8068dcf1bb7dfc6637b45450ac04"
+      },
+      "expected": {
+        "error": "Forged"
+      }
+    },
+    {
+      "name": "speccheck_2",
+      "kind": "negative",
+      "source": "published",
+      "origin": "ed25519-speccheck, cases.json case 2 (Chalkias, Garillot, Nikolaenko, Taming the many EdDSAs, 2020): mixed-order A, small-order R; libsodium rejects it",
+      "inputs": {
+        "message": "aebf3f2601a0c8c5d39cc7d8911642f740b78168218da8471772b35f9d35b9ab",
+        "pk": "f7badec5b8abeaf699583992219b7b223f1df3fbbea919844e3f7c554a43dd43",
+        "signature": "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa8c4bd45aecaca5b24fb97bc10ac27ac8751a7dfe1baff8b953ec9f5833ca260e"
+      },
+      "expected": {
+        "error": "Forged"
+      }
+    },
+    {
+      "name": "speccheck_3",
+      "kind": "positive",
+      "source": "published",
+      "origin": "ed25519-speccheck, cases.json case 3 (Chalkias, Garillot, Nikolaenko, Taming the many EdDSAs, 2020): mixed-order A and R, valid under both equations; libsodium accepts it",
+      "inputs": {
+        "message": "9bd9f44f4dcc75bd531b56b2cd280b0bb38fc1cd6d1230e14861d861de092e79",
+        "pk": "cdb267ce40c5cd45306fa5d2f29731459387dbf9eb933b7bd5aed9a765b88d4d",
+        "signature": "9046a64750444938de19f227bb80485e92b83fdb4b6506c160484c016cc1852f87909e14428a7a1d62e9f22f3d3ad7802db02eb2e688b6c52fcd6648a98bd009"
+      },
+      "expected": {
+        "valid": true
+      }
+    },
+    {
+      "name": "speccheck_4",
+      "kind": "negative",
+      "source": "published",
+      "origin": "ed25519-speccheck, cases.json case 4 (Chalkias, Garillot, Nikolaenko, Taming the many EdDSAs, 2020): mixed-order A and R, fails the cofactorless equation; libsodium rejects it",
+      "inputs": {
+        "message": "e47d62c63f830dc7a6851a0b1f33ae4bb2f507fb6cffec4011eaccd55b53f56c",
+        "pk": "cdb267ce40c5cd45306fa5d2f29731459387dbf9eb933b7bd5aed9a765b88d4d",
+        "signature": "160a1cb0dc9c0258cd0a7d23e94d8fa878bcb1925f2c64246b2dee1796bed5125ec6bc982a269b723e0668e540911a9a6a58921d6925e434ab10aa7940551a09"
+      },
+      "expected": {
+        "error": "Forged"
+      }
+    },
+    {
+      "name": "speccheck_5",
+      "kind": "negative",
+      "source": "published",
+      "origin": "ed25519-speccheck, cases.json case 5 (Chalkias, Garillot, Nikolaenko, Taming the many EdDSAs, 2020): a pre-reduced scalar that some cofactored verifiers mishandle; libsodium rejects it",
+      "inputs": {
+        "message": "e47d62c63f830dc7a6851a0b1f33ae4bb2f507fb6cffec4011eaccd55b53f56c",
+        "pk": "cdb267ce40c5cd45306fa5d2f29731459387dbf9eb933b7bd5aed9a765b88d4d",
+        "signature": "21122a84e0b5fca4052f5b1235c80a537878b38f3142356b2c2384ebad4668b7e40bc836dac0f71076f9abe3a53f9c03c1ceeeddb658d0030494ace586687405"
+      },
+      "expected": {
+        "error": "Forged"
+      }
+    },
+    {
+      "name": "speccheck_6",
+      "kind": "negative",
+      "source": "published",
+      "origin": "ed25519-speccheck, cases.json case 6 (Chalkias, Garillot, Nikolaenko, Taming the many EdDSAs, 2020): S above L; libsodium rejects it",
+      "inputs": {
+        "message": "85e241a07d148b41e47d62c63f830dc7a6851a0b1f33ae4bb2f507fb6cffec40",
+        "pk": "442aad9f089ad9e14647b1ef9099a1ff4798d78589e66f28eca69c11f582a623",
+        "signature": "e96f66be976d82e60150baecff9906684aebb1ef181f67a7189ac78ea23b6c0e547f7690a0e2ddcd04d87dbc3490dc19b3b3052f7ff0538cb68afb369ba3a514"
+      },
+      "expected": {
+        "error": "Forged"
+      }
+    },
+    {
+      "name": "speccheck_7",
+      "kind": "negative",
+      "source": "published",
+      "origin": "ed25519-speccheck, cases.json case 7 (Chalkias, Garillot, Nikolaenko, Taming the many EdDSAs, 2020): S far above L; libsodium rejects it",
+      "inputs": {
+        "message": "85e241a07d148b41e47d62c63f830dc7a6851a0b1f33ae4bb2f507fb6cffec40",
+        "pk": "442aad9f089ad9e14647b1ef9099a1ff4798d78589e66f28eca69c11f582a623",
+        "signature": "8ce5b96c8f26d0ab6c47958c9e68b937104cd36e13c33566acd2fe8d38aa19427e71f98a473474f2f13f06f97c20d58cc3f54b8bd0d272f42b695dd7e89a8c22"
+      },
+      "expected": {
+        "error": "Forged"
+      }
+    },
+    {
+      "name": "speccheck_8",
+      "kind": "negative",
+      "source": "published",
+      "origin": "ed25519-speccheck, cases.json case 8 (Chalkias, Garillot, Nikolaenko, Taming the many EdDSAs, 2020): a non-canonical R; libsodium rejects it",
+      "inputs": {
+        "message": "9bedc267423725d473888631ebf45988bad3db83851ee85c85e241a07d148b41",
+        "pk": "f7badec5b8abeaf699583992219b7b223f1df3fbbea919844e3f7c554a43dd43",
+        "signature": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff03be9678ac102edcd92b0210bb34d7428d12ffc5df5f37e359941266a4e35f0f"
+      },
+      "expected": {
+        "error": "Forged"
+      }
+    },
+    {
+      "name": "speccheck_9",
+      "kind": "negative",
+      "source": "published",
+      "origin": "ed25519-speccheck, cases.json case 9 (Chalkias, Garillot, Nikolaenko, Taming the many EdDSAs, 2020): a non-canonical R, another encoding; libsodium rejects it",
+      "inputs": {
+        "message": "9bedc267423725d473888631ebf45988bad3db83851ee85c85e241a07d148b41",
+        "pk": "f7badec5b8abeaf699583992219b7b223f1df3fbbea919844e3f7c554a43dd43",
+        "signature": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffca8c5b64cd208982aa38d4936621a4775aa233aa0505711d8fdcfdaa943d4908"
+      },
+      "expected": {
+        "error": "Forged"
+      }
+    },
+    {
+      "name": "speccheck_10",
+      "kind": "negative",
+      "source": "published",
+      "origin": "ed25519-speccheck, cases.json case 10 (Chalkias, Garillot, Nikolaenko, Taming the many EdDSAs, 2020): a non-canonical A; libsodium rejects it",
+      "inputs": {
+        "message": "e96b7021eb39c1a163b6da4e3093dcd3f21387da4cc4572be588fafae23c155b",
+        "pk": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "signature": "a9d55260f765261eb9b84e106f665e00b867287a761990d7135963ee0a7d59dca5bb704786be79fc476f91d3f3f89b03984d8068dcf1bb7dfc6637b45450ac04"
+      },
+      "expected": {
+        "error": "Forged"
+      }
+    },
+    {
+      "name": "speccheck_11",
+      "kind": "negative",
+      "source": "published",
+      "origin": "ed25519-speccheck, cases.json case 11 (Chalkias, Garillot, Nikolaenko, Taming the many EdDSAs, 2020): a non-canonical A, another encoding; libsodium rejects it",
+      "inputs": {
+        "message": "39a591f5321bbe07fd5a23dc2f39d025d74526615746727ceefd6e82ae65c06f",
+        "pk": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "signature": "a9d55260f765261eb9b84e106f665e00b867287a761990d7135963ee0a7d59dca5bb704786be79fc476f91d3f3f89b03984d8068dcf1bb7dfc6637b45450ac04"
+      },
+      "expected": {
         "error": "Forged"
       }
     },

@@ -107,6 +107,7 @@ Each row corresponds to the file `docs/adr/NNNN-*.md`; titles are copied verbati
 | 0039 | Open the desktop client's TLS connections with rustls, in a workspace of its own | superseded by 0040 | The server accepts TLS 1.3 only, the OS stack on macOS lacks it, and the web view cannot use a SOCKS5 proxy |
 | 0040 | Check the desktop client's certificates with no network request of their own | superseded by 0041 | The OS verifier fetches revocation data outside Tor; rustls in a workspace of its own, its WebPKI verifier over the OS roots |
 | 0041 | Open every client's server connections through one Rust host | accepted | One implementation of the sockets, the proxy and TLS for the three clients; Mozilla's roots, since iOS lists none |
+| 0042 | Prove strict Ed25519 with published cases a lax verifier accepts | accepted | `010.json` gains the ed25519-speccheck cases, which only a strict verifier rejects; it describes no format, so no version change |
 
 ## 4. Cryptographic model
 

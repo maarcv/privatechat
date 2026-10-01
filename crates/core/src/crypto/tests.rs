@@ -557,19 +557,39 @@ fn s010_t14_r10_sign_known_answer() -> Result<(), CryptoError> {
     Ok(())
 }
 
+/// The cases of ed25519-speccheck libsodium rejects: every one but case 3.
+const SPECCHECK_REJECTED: [&str; 11] = [
+    "speccheck_0",
+    "speccheck_1",
+    "speccheck_2",
+    "speccheck_4",
+    "speccheck_5",
+    "speccheck_6",
+    "speccheck_7",
+    "speccheck_8",
+    "speccheck_9",
+    "speccheck_10",
+    "speccheck_11",
+];
+
 /// Spec 010, R10: verification is strict. Every malformed signature or key
-/// of the negative vectors is a forgery, never an accepted message.
+/// of the negative vectors is a forgery, never an accepted message: the
+/// published ed25519-speccheck cases hold small-order and non-canonical
+/// points and scalars above L that a verifier without those checks accepts
+/// (ADR 0042), and its case 3, a valid signature over mixed-order points,
+/// verifies.
 #[test]
 fn s010_t15_r10_verify_rejects_malformed() {
-    for name in [
+    let named = [
         "signature_s_plus_l",
-        "pk_identity",
-        "pk_small_order",
+        "pk_order_4",
+        "pk_not_on_curve",
         "pk_non_canonical",
-        "r_small_order",
+        "r_wrong_point",
         "wrong_message",
         "wrong_pk",
-    ] {
+    ];
+    for name in named.into_iter().chain(SPECCHECK_REJECTED) {
         let vector = vectors::load("010", name);
         assert_eq!(vector.kind(), Kind::Negative);
         assert_eq!(vector.expected("error").text(), "Forged", "{name}");
@@ -581,6 +601,13 @@ fn s010_t15_r10_verify_rejects_malformed() {
             "{name}"
         );
     }
+    let valid = vectors::load("010", "speccheck_3");
+    assert_eq!(valid.kind(), Kind::Positive);
+    assert!(valid.expected("valid").flag());
+    let public_key = PublicKey(valid.input("pk").array());
+    let signature = Signature(valid.input("signature").array());
+    let message = valid.input("message").bytes();
+    assert_eq!(verify_detached(&public_key, message, &signature), Ok(()));
 }
 
 proptest! {
