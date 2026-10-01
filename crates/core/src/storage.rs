@@ -185,6 +185,12 @@ impl WriteBatch {
         WriteBatch { state, records }
     }
 
+    /// The state and the records, which `Channel` moves into memory once
+    /// the commit returned `Ok` (spec 021-channel-session R2).
+    pub(crate) fn into_parts(self) -> (ChannelState, Vec<LogRecord>) {
+        (self.state, self.records)
+    }
+
     /// The state the commit writes.
     pub fn state(&self) -> &ChannelState {
         &self.state

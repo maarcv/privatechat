@@ -80,7 +80,7 @@ let expires = received_at.checked_add(ttl_ms).ok_or(Error::Expired)?;
 let gap = counter.saturating_sub(max_counter.saturating_add(1));
 
 // Conversions: `try_from`, never `as`.
-let len = u32::try_from(record.len()).map_err(|_| StoreError::TooLarge)?;
+let len = u32::try_from(record.len()).map_err(|_| StoreError::Corrupt)?;
 ```
 
 A `get` or `try_into` that cannot fail after validation still maps to the
@@ -160,14 +160,15 @@ R28). `server` uses `tokio`:
       for len in [1184usize, 64_674, 1_200] {
           let blob = vec![0u8; len];
           assert!(matches!(channel.decrypt(&blob, 0, 0), Err(Error::BadLength)), "len={len}");
-          assert_eq!(store.commits(), 0); // commits other than the cursor (AGENTS 23)
+          assert_eq!(store.commits(), 0); // commits that move more than the cursor or synced_at (AGENTS 23)
       }
   }
   ```
 
 - Test modules live at `foo/tests.rs`, declared from `foo.rs` with
   `#[cfg(test)] mod tests;`.
-- The test `Store` counts commits other than the cursor's; every rejection
+- The test `Store` counts the commits that move more than the cursor or
+  `synced_at`; every rejection
   asserts `commits == 0` and every stateful spec has a `FailingStore` test
   (AGENTS 23, `references/patterns.md` §3).
 - Round-trip `proptest`s and fuzz targets: AGENTS 21. The spec's mutation

@@ -74,6 +74,26 @@ fn s020_t08_r08_settings_schema() {
             ..settings()
         },
         Settings {
+            socks5_proxy: Some(":9050".to_owned()),
+            ..settings()
+        },
+        Settings {
+            socks5_proxy: Some("LOCALHOST:9050".to_owned()),
+            ..settings()
+        },
+        Settings {
+            socks5_proxy: Some("host_x:9050".to_owned()),
+            ..settings()
+        },
+        Settings {
+            socks5_proxy: Some("127.0.0.1:65536".to_owned()),
+            ..settings()
+        },
+        Settings {
+            socks5_proxy: Some("127.0.0.1:+9050".to_owned()),
+            ..settings()
+        },
+        Settings {
             lock_timeout_seconds: MAX_LOCK_TIMEOUT_SECONDS + 1,
             ..settings()
         },
@@ -96,6 +116,12 @@ fn s020_t08_r08_settings_schema() {
         ..settings()
     };
     assert!(Settings::decode(&edge.encode().unwrap()).is_ok());
+    // An onion host is a host of the grammar too.
+    let onion = Settings {
+        socks5_proxy: Some(format!("{}.onion:9050", "a".repeat(56))),
+        ..settings()
+    };
+    assert!(Settings::decode(&onion.encode().unwrap()).is_ok());
 }
 
 /// Spec 020, R3 and R4 (the settings): sealed under `K_settings` with a

@@ -211,10 +211,11 @@ pub fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> R
     let sealed = self.seal(&payload, counter, now)?;        // draws the nonce, derives mk, encrypts, signs and masks the signature (013 R16)
     let mut state = self.state.duplicate();                 // the whole new state, not a diff
     state.send_counter = next;
-    state.outbox.push(OutboxEntry::text(client_ref, now, counter, sealed));
+    state.outbox.push(outbox_entry(client_ref, now, counter, &sealed)); // spec 021 builds the entry
     let batch = WriteBatch::new(state, Vec::new());
     self.store.commit(&batch)?;                             // if this fails, no blob leaves and memory is unchanged
-    self.state = batch.into_state();                        // only after `Ok` does memory move on
+    let (state, _) = batch.into_parts();                    // only after `Ok` does memory move on
+    self.state = state;
     Ok(client_ref)                                          // the blob leaves only through outbox()
 }
 ```

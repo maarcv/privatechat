@@ -84,6 +84,9 @@ fn s020_t29_r29_comparisons_see_every_field() {
     let batch = batch(state, vec![record(3, 1)]);
     assert!(state_eq(batch.state(), &state_for([1; 16])));
     assert_eq!(batch.records().len(), 1);
+    let (state, records) = batch.into_parts();
+    assert!(state_eq(&state, &state_for([1; 16])));
+    assert!(records_eq(&records, &[record(3, 1)]));
 }
 
 /// A vault and the store of channel `[1; 16]` in it.
@@ -448,9 +451,35 @@ fn s020_t11_r11_faults_count_their_own_calls() {
     faults.fail_at(1);
     assert!(matches!(commit(&mut store), Err(StoreError::Io)));
     assert!(store.load().is_ok());
-    faults.poison_after(1);
+    // The call `fail_at` fails still counts for `poison_after`.
+    faults.poison_after(2);
+    faults.fail_at(1);
+    assert!(matches!(commit(&mut store), Err(StoreError::Io)));
     assert!(matches!(commit(&mut store), Err(StoreError::Io)));
     assert!(matches!(store.load(), Err(StoreError::Io)));
+}
+
+/// Spec 020, R15, R16 and R21 (`MemoryStore`, `MemoryVault`): a store never
+/// committed compacts to nothing, `log_len` is the committed length however
+/// long the log, `remove` deletes the directory, and `fail_compactions`
+/// leaves `destroy` alone.
+#[test]
+fn s020_t15_r15_memory_edges() {
+    let (mut vault, mut store) = memory();
+    let name = *store.name();
+    assert_eq!(store.compact(&state_for([1; 16]), 5).unwrap(), 0);
+    let sealed = state_for([1; 16]).seal(&memory_key(), &name, 9, 0).unwrap();
+    let log = [log_header(1, 0), vec![0; 30]].concat();
+    vault.put_raw(&name, Some(&sealed), Some(&log));
+    assert_eq!(store.log_len(), 9);
+    vault.remove(&name).unwrap();
+    assert!(store.load().unwrap().is_none());
+    assert!(vault.list().unwrap().is_empty());
+    let faults = Faults::new();
+    let mut failing = FailingVault::new(Box::new(vault), faults.clone());
+    let mut other = failing.create(&[2; 16]).unwrap();
+    faults.fail_compactions(true);
+    other.destroy().unwrap();
 }
 
 /// Spec 020, Interface (the builders): `settings` sets each field it is

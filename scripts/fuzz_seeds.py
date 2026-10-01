@@ -144,7 +144,34 @@ def check_s016_t08_r08_corpus_is_seeded() -> None:
                 raise SystemExit(f"fuzz_seeds.py: {target}/{v['name']}: not its padded payload")
 
 
+# What each row must seed from, written apart from `TARGETS` so that an edit of the table is
+# checked against something: the targets of R2 and, for the decoders, the vector schemas.
+R2_TARGETS = ROOT / "scripts" / "check_fuzz_targets.py"
+FUZZ_ENTRY = ROOT / "crates" / "core" / "src" / "fuzz_entry.rs"
+SCHEMAS = {"record_decode": {"test", "types"}, "state_decode": {"state"},
+           "log_record_decode": {"log"}, "settings_decode": {"settings"}}
+
+
+def check_s016_t08_r08_rows_match_r2() -> None:
+    """The rows are exactly the targets of R2, as the reach check lists them; each decoder row
+    seeds every vector of its schemas and no other; the policy byte of an `ignore` seed is the
+    one `fuzz_entry.rs` reads as `Ignore`."""
+    listed = R2_TARGETS.read_text(encoding="utf-8").split("TARGETS = (", 1)[1].split(")", 1)[0]
+    r2 = [name.strip().strip('"') for name in listed.replace("\n", " ").split(",") if name.strip()]
+    if list(TARGETS) != r2:
+        raise SystemExit(f"fuzz_seeds.py: the rows {list(TARGETS)} are not the targets of R2 {r2}")
+    for target, schemas in SCHEMAS.items():
+        spec, carries, _ = TARGETS[target]
+        every = [v for v in load(spec) if v["inputs"].get("schema") in schemas]
+        seeded = [v for v in load(spec) if carries(v)]
+        if not every or seeded != every:
+            raise SystemExit(f"fuzz_seeds.py: {target}: not every vector of {sorted(schemas)}")
+    if POLICY_BYTE["ignore"] != b"\x00" or "if *policy == 0" not in FUZZ_ENTRY.read_text(encoding="utf-8"):
+        raise SystemExit("fuzz_seeds.py: the ignore byte is not the one fuzz_entry.rs reads")
+
+
 def main() -> int:
+    check_s016_t08_r08_rows_match_r2()
     counts = []
     for target, (spec, carries, seed) in TARGETS.items():
         directory = CORPUS / target

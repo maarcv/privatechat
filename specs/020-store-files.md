@@ -211,6 +211,8 @@ impl LogRecord {
 }
 impl ChannelState { pub(crate) fn duplicate(&self) -> ChannelState; }   // the one deep copy, secrets through Secret::copy_from; it cannot fail
 impl WriteBatch {
+    pub(crate) fn new(state: ChannelState, records: Vec<LogRecord>) -> WriteBatch;
+    pub(crate) fn into_parts(self) -> (ChannelState, Vec<LogRecord>);   // what Channel moves into memory after Ok (spec 021 R2)
     pub fn state(&self) -> &ChannelState;
     pub fn records(&self) -> &[LogRecord];
 }
@@ -224,7 +226,7 @@ pub fn dir_name(key: &StorageKey, channel_id: &[u8; 16]) -> Result<DirName, Stor
 pub struct DataDir { /* path, Arc of the fs::LockFile and the StorageKey, the live names */ }
 impl DataDir { pub fn open(path: &Path, key: StorageKey) -> Result<DataDir, StoreError>; }
 impl Vault for DataDir { /* R19–R22 */ }
-pub(crate) struct ChannelFiles { /* directory, Arc of the key and lock, poisoned flag */ }   // handed out as Box<dyn Store>
+pub(crate) struct ChannelFiles { /* directory, Arc of the key and lock, poisoned flag, the committed length and generation of its last load or write (R15, R16) */ }   // handed out as Box<dyn Store>
 impl Store for ChannelFiles { /* R10–R16, R21 */ }
 ```
 
@@ -232,7 +234,7 @@ impl Store for ChannelFiles { /* R10–R16, R21 */ }
 
 The `testing` module compiles under `cfg(any(test, fuzzing, feature = "test-support"))`, where the test relaxations of AGENTS 4 do not apply, so it is written like production code; `store` enables `test-support` only in its dev-dependency, and `store` has `privatechat-core` as its only dependency. Its doubles are handles over shared state (`Arc<Mutex<_>>`, which R2's rust-skill amendment allows in this module only), so that a test keeps a handle after giving a store or a vault away:
 
-- `MemoryStore` and `MemoryVault`, `Clone`, which seal and open through the same functions with a fixed key; `reopen()` gives a fresh store over the same bytes; `commits()` counts the commits that append a record or change the state beyond `cursor` and `synced_at` (the count of AGENTS 23), and `all_commits()` every successful commit, for the rate rules of spec 021-channel-session R20; `log_len()` counts bytes as R5 lays them out (9-byte header, then 4 + `len` per entry); `list` skips, and `load` returns `Ok(None)` for, a store with no state whose log is absent or short as R13 and R19 say, as they do; `put_raw(name, state_bytes, log_bytes)` and `put_settings_raw(bytes)` plant arbitrary bytes; `commit` applies R16 and returns `LogFull` for a log that would pass 67 108 864 bytes.
+- `MemoryStore` and `MemoryVault`, `Clone`, which seal and open through the same functions with a fixed key; `reopen()` gives a fresh store over the same bytes; `commits()` counts the commits that append a record or change the state beyond `cursor` and `synced_at` (the count of AGENTS 23), and `all_commits()` every successful commit, for the rate rules of spec 021-channel-session R20; `log_len()` counts bytes as R5 lays them out (9-byte header, then 4 + `len` per entry); `list` skips, and `load` returns `Ok(None)` for, a store with no state whose log is absent or short as R13 and R19 say, as they do; `put_raw(name, state_bytes, log_bytes)` and `put_settings_raw(bytes)` plant arbitrary bytes; `commit` applies R16 and returns `LogFull` for a log that would pass 67 108 864 bytes. They do not model the live-store lock of R20 — `Clone`, `handle` and `reopen` hand out several stores of one directory on purpose — which T20 checks over the real store.
 - `Faults`, a `Clone` handle shared by the test and the doubles, which counts calls from the moment a fault is armed, across every store sharing the handle: `fail_at(n)` fails the *n*-th `commit`, `compact` or `destroy` with `Io` before touching the store; `poison_after(n)` lets the *n*-th call through and then returns `Io` for it and for every later call of that one store instance, as a store poisoned after its rename (R11), while stores handed out afterwards are healthy; `fail_compactions(on)` fails every `compact` with `Io` before touching the store while on, leaving commits alone, and `fail_commits(on)` does the same for every `commit`, leaving loads and compactions alone; `fail_create(on)`, `fail_remove(on)`, `fail_list(on)`, `fail_load_settings(on)` and `fail_save_settings(on)` fail those `Vault` calls while on, `fail_create_at(n)` only the *n*-th `create`; `last_committed(&DirName)` returns a duplicate of the last state let through.
 - `FailingStore`, which wraps a `Box<dyn Store>` with a `Faults` handle, and `FailingVault`, which wraps a `Box<dyn Vault>` and every store it hands out.
 - The builders `state_for(channel_id)`, `record(purge_at, body_len)`, `batch(state, records)` and `settings(default_server_url, lock_timeout_seconds, socks5_proxy)`, with which the `store` tests commit and save chosen content; `Settings` has no other constructor until spec 027-core-api.
@@ -280,7 +282,7 @@ The `testing` module compiles under `cfg(any(test, fuzzing, feature = "test-supp
 - T12 (covers R12): `s020_t12_r12_load_checks`: extra bytes after `log_committed_len` are cut; a shorter log → `Corrupt`; a flipped byte inside the committed length → `Corrupt`; a leftover `state.bin.tmp` is deleted.
 - T13 (covers R13): `s020_t13_r13_first_commit`: a new directory → `None`; no `state.bin` and a 0-byte or 5-byte log, a 9-byte log of generation 0, or 9 bytes with a wrong magic → `None`, in the real store and in `MemoryStore`; after the first commit, a 9-byte log of generation 0.
 - T14 (covers R14): `s020_t14_r14_interrupted_compaction`: `after_compact_state:1` → reopening completes the rename; a `.new` left by a crash before the state write is deleted; generations two apart → `Corrupt`; a stray `messages.log.new` whose deletion fails → `load` still succeeds.
-- T15 (covers R15): `s020_t15_r15_compaction`: records below and above `now` → the dropped count, the survivors in order at new offsets, generation + 1; nothing to drop → byte-identical files.
+- T15 (covers R15): `s020_t15_r15_compaction`: records below and above `now` → the dropped count, the survivors in order at new offsets, generation + 1; nothing to drop → byte-identical files; a commit after a compaction and a second compaction, both handed the state loaded before the first, give generations g + 1 and g + 2 and a log that loads.
 - T16 (covers R16): `s020_t16_r16_log_full`: an append past 67 108 864 bytes → `LogFull`, files byte-identical; `log_len` equals the committed length after each commit.
 - T17 (covers R17): `s020_t17_r17_single_process_lock`: a second `DataDir::open`, from another process too → `Locked`; after every handle is dropped it succeeds.
 - T18 (covers R18): `s020_t18_r18_directory_name_is_keyed`: 32 hex characters, different under two keys, not containing the `channel_id` hex.

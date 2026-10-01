@@ -156,6 +156,17 @@ Stopped after round 4: every pass of the last two rounds found nothing substanti
 | AX-Q9 | Wipe the names the state holds, after AX-Q6 (X2-A Q2) | A peer's last display name only, the data the log wipes; labels and local names stay plain | Interface |
 | AX-Q10 | AGENTS 23 on the old `commit(WriteBatch)` and a count that skipped only the cursor (X2-C Q1) | Reworded: `commit(&WriteBatch)`, and `commits` skips a commit that moves only the cursor or `synced_at` | AGENTS 23 |
 
+**Round 3**, the same three passes (235 mutants: round 2's re-run, 50 new). Passes A and C found nothing substantive; B found test gaps only, no defect in shipped code. Changes:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AX13 | The proxy's host grammar was untested (an empty host, uppercase, `_`, port 65536, `+9050`, an onion host); the round-2 counter test re-armed a fault and so hid a shared counter; a never-committed compaction, `log_len` over stale bytes, `Vault::remove` and `fail_compactions` against `destroy` untested (X3-B1–X3-B4) | Low | The tests |
+| AX14 | `fuzz_seeds.py` checked itself against its own table, so a lost row or a wrong schema passed (X3-B5) | Low | Its rows checked against R2's list, each decoder against its schemas, the `ignore` byte against `fuzz_entry.rs` |
+| AX15 | The `store` crate's T15 did not ask for two compactions from one stale state; `ChannelFiles` did not say it keeps its log position; `WriteBatch` had no way to give its parts back after `Ok` (021 R2); 027 R17 named three of the five decoders its wider check would flag; the commit count "other than the cursor" left in §10, the PR and spec templates and the rust skill, `commit(Batch)` in §12, `StoreError::TooLarge` in the skill (X3-C1–X3-C4) | Low | T15, the Interface and `WriteBatch::into_parts`, 027 R17's rule, the wording |
+| AX16 | The doubles do not model the live-store lock of R20 (X3-A Q1) | Low | The Interface says so; T20 checks it over the real store |
+
+Stopped after round 3: two passes found nothing substantive and the third only test gaps, all closed.
+
 Not changed: the equivalent mutants (the size check before the box, which `secretbox_open` repeats; the record bound no valid state reaches; the vector values a test does not single out). Slices (b1), (b2) and (c) are above 400 net lines, with their reason in the commits; (c) is to be split between log and settings when it goes to a pull request. `020.json` is a new file: its pull request needs the reviewer's `adr-not-needed` label or an ADR, since `adr-guard` refuses any diff under `specs/vectors/` without one (AGENTS 18).
 
 ## Phase 1 closed

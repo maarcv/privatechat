@@ -43,7 +43,7 @@ New or changed signatures at the core boundary (`docs/spec.md` §9, spec 027). I
 Every test cites the requirement it covers and is named `sNNN_tTT_rRR_<description>`.
 
 - T01 (covers R1): input → expected output
-- T02 (covers R2): invalid input → `Error::X` · commits = 0 (commits other than the cursor)
+- T02 (covers R2): invalid input → `Error::X` · commits = 0 (commits other than those that move only the cursor or `synced_at`, AGENTS 23)
 - For every spec with state: a test with `FailingStore` that fails at commit *n* and checks that reopening yields the state prior to *n*.
 - For every format: the mutation table (in "Vectors") is a test.
 
