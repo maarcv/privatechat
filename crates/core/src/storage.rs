@@ -101,7 +101,8 @@ pub trait Store: Send {
     /// # Errors
     ///
     /// `LogFull` past the log limit, `OutboxFull` and `Corrupt` from the
-    /// seal (R27), `Io` for a failed system call or a poisoned store.
+    /// seal (R27), `Corrupt` for a first commit that carries records (R13),
+    /// `Io` for a failed system call or a poisoned store.
     fn commit(&mut self, batch: &WriteBatch) -> Result<(), StoreError>;
 
     /// Rewrites the log without the records whose `purge_at` is below

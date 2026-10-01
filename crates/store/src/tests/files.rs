@@ -141,8 +141,16 @@ fn s020_t07_r07_open_check_order() {
     newer[4] = 2;
     write(&log, &newer);
     assert_eq!(reopen_in(&mut data, 1), Err(StoreError::Corrupt));
-    // A log over its limit, which no commit writes.
+    // A log of exactly its limit loads, cut back to its committed end; one
+    // byte more, which no commit writes, does not.
     write(&log, &committed);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&log)
+        .and_then(|file| file.set_len(privatechat_core::MAX_LOG_LEN))
+        .expect("grow");
+    assert_eq!(reopen_in(&mut data, 1), Ok(()));
+    assert_eq!(read(&log), committed);
     std::fs::OpenOptions::new()
         .write(true)
         .open(&log)
@@ -274,6 +282,9 @@ fn s020_t19_r19_open_cleans_leftovers() {
     // A `state.bin` that cannot be read: nothing is deleted on doubt.
     drop(data.create(&id(5)).expect("create"));
     std::fs::create_dir(channel_dir(dir.path(), 5).join("state.bin")).expect("unreadable");
+    // No `state.bin` and a log that cannot be read: kept too.
+    drop(data.create(&id(6)).expect("create"));
+    std::fs::create_dir(channel_dir(dir.path(), 6).join("messages.log")).expect("unreadable");
     // Not a name R20 lists: never deleted, whatever it holds.
     let backup = dir.path().join("channels").join("backup");
     std::fs::create_dir(&backup).expect("backup");
@@ -284,13 +295,14 @@ fn s020_t19_r19_open_cleans_leftovers() {
     assert!(!leaving.exists());
     assert!(backup.is_dir());
     assert!(channel_dir(dir.path(), 5).is_dir());
+    assert!(channel_dir(dir.path(), 6).is_dir());
     let listed: Vec<DirName> = data
         .list()
         .expect("list")
         .iter()
         .map(|store| *store.name())
         .collect();
-    let mut expected = vec![dir_name(3), dir_name(4), dir_name(5)];
+    let mut expected = vec![dir_name(3), dir_name(4), dir_name(5), dir_name(6)];
     expected.sort();
     let mut listed = listed;
     listed.sort();
@@ -443,7 +455,9 @@ fn s020_t22_r22_settings_file() {
     data.save_settings(&saved).expect("save");
     let kinds = data.io.kinds();
     drop(data);
-    for (k, kind) in (1..).zip(&kinds).skip(opening as usize) {
+    // A save deletes nothing when it succeeds: every fault below fails it.
+    assert!(!kinds[opening as usize..].contains(&crate::fs::Call::Remove));
+    for k in (1..).take(kinds.len()).skip(opening as usize) {
         let mut data = super::open_with(dir.path(), || Io::failing_at(k)).expect("open");
         let result = data.save_settings(&newer);
         let tmp_left = dir.path().join("settings.bin.tmp").exists();
@@ -453,11 +467,7 @@ fn s020_t22_r22_settings_file() {
             .expect("load")
             .expect("present");
         let renamed = kinds[..k as usize].contains(&crate::fs::Call::Rename);
-        if *kind == crate::fs::Call::Remove {
-            assert_eq!(result, Ok(()), "k={k}");
-        } else {
-            assert_eq!(result, Err(StoreError::Io), "k={k}");
-        }
+        assert_eq!(result, Err(StoreError::Io), "k={k}");
         if !renamed {
             assert!(settings_eq(&now, &saved), "k={k}");
             assert!(!tmp_left, "k={k}");

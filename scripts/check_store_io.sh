@@ -4,11 +4,12 @@
 # words on code lines with comments stripped, appear in another non-test source of `store`.
 # With a directory argument it checks that tree instead; with none it first tests itself.
 set -euo pipefail
+self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")/.."
 
 WORDS='std::fs|std::io::Write|OpenOptions|File|std::process'
 # A grouped import (`use std::{fs, io::Write}`) names them without the path.
-GROUPED='std::[{]'
+GROUPED='std::(io::)?[{]|std::io::prelude'
 
 # The offending lines under `src`: every `.rs` but `fs.rs` and the test modules.
 offenders() {
@@ -35,21 +36,29 @@ s020_t23_r23_io_in_one_module() {
   fi
   for line in 'pub fn g() { let _ = std::fs::rename("a", "b"); }' 'use std::io::Write;' \
               'let o = OpenOptions::new();' 'fn h(_: File) {}' 'fn e() { std::process::exit(1) }' \
-              'use std::{fs, io::Write as W};'; do
+              'use std::{fs, io::Write as W};' 'use std::io::{stdout, Write};' 'use std::io::prelude::*;'; do
     printf '%s\n' "$line" > "$tmp/src/other.rs"
     if [ -z "$(offenders "$tmp/src")" ]; then
       echo "check_store_io: the self-test accepts: $line"; return 1
     fi
   done
   # The whole script, not only its search, fails on such a tree.
-  if "$0" "$tmp/src" > /dev/null; then
-    echo "check_store_io: the script passes a tree with a call outside fs.rs"; return 1
-  fi
+  local out
+  out="$("$self" "$tmp/src" || true)"
+  case "$out" in
+    *"outside fs.rs"*) ;;
+    *) echo "check_store_io: the script passes a tree with a call outside fs.rs"; return 1 ;;
+  esac
 }
 
 if [ $# -eq 0 ]; then
   s020_t23_r23_io_in_one_module
   set -- crates/store/src
+fi
+# A tree with no source is a wrong path, not a clean crate.
+if [ -z "$(find "$1" -name '*.rs' -print)" ]; then
+  echo "check_store_io: no Rust source under $1"
+  exit 1
 fi
 found="$(offenders "$1")"
 if [ -n "$found" ]; then

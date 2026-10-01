@@ -287,6 +287,13 @@ fn s020_t14_r14_interrupted_compaction() {
     crash(dir.path(), "compact", "after_compact_state:1");
     let channel = channel_dir(dir.path(), 1);
     assert!(channel.join("messages.log.new").exists());
+    // The recovery's rename is made durable: one directory sync.
+    {
+        let data = open(dir.path());
+        let mut store = data.store_with(dir_name(1), Io::fast()).expect("store");
+        assert!(store.load().expect("load").is_some());
+        assert_eq!(store.io().skipped_syncs(), 1);
+    }
     let ((_, generation), records) = reopen(dir.path(), 1).expect("load").expect("committed");
     assert_eq!((generation, records), (1, vec![2]));
     assert!(!channel.join("messages.log.new").exists());

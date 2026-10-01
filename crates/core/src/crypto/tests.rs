@@ -431,6 +431,16 @@ fn s010_t26_r17_clippy_toml_disallows_clock_fs_net() {
         "std::net::TcpListener::bind",
         "std::net::UdpSocket::bind",
         "std::env::var",
+        "std::fs::remove_dir_all",
+        "std::fs::create_dir",
+        "std::fs::metadata",
+        "std::path::Path::exists",
+        "std::path::Path::try_exists",
+        "std::path::Path::is_dir",
+        "std::path::Path::is_file",
+        "std::path::Path::metadata",
+        "std::path::Path::read_dir",
+        "std::path::Path::canonicalize",
     ];
     required.sort_unstable();
     assert_eq!(listed, required);

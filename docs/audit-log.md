@@ -24,6 +24,15 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AA-Q1 | A first commit that carries records (AA1-A Q1) | Refuse it with `Corrupt` | R13, T13 |
 | AA-Q2 | A leftover `settings.bin.tmp` (AA1-A Q2) | Deleted at `DataDir::open` | R22, T22 |
 
+**Round 2.** CI green; 116 mutants, 81 killed, 0 failures in 100 runs of the store tests; the survivors equivalent, far-fetched, or these:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AA9 | `MemoryStore` took the first commit with records the real store refuses, so a spec 021 bug would pass every test in memory and fail on disk (AA2-C-1) | Medium | Refused there too; T13 for `MemoryStore`, the trait's `# Errors`; the tests seed with a record-free commit |
+| AA10 | `check_store_io.sh` passed `use std::io::{stdout, Write}` and `std::io::prelude`, a path with no source, and its self-run passed whenever the child failed for any reason, such as a wrong `$0` (AA2-A-1, AA2-B-4–AA2-B-6) | Low | Both refused; no source fails; the self-run by absolute path, judged by its message; R23 |
+| AA11 | The `Path` methods that reach the disk (`exists`, `is_dir`, `read_dir`, …), `remove_dir_all`, `create_dir` and `fs::metadata` passed both the script and clippy outside `fs.rs` (AA2-B-7) | Low | Ten more entries in `clippy.toml`; spec 010 R17, T26 |
+| AA12 | Untested: a log that cannot be read surviving R19, the sync of a recovery's rename, a log of exactly 64 MiB; a dead branch in T22; the fast `DataDir` absent from the spec's body (AA2-B-1–AA2-B-3, AA2-A-2, AA2-C-2) | Low | Tests; removed; the Fast mode bullet |
+
 Not changed: F13, a state file between the settings limit and its own, which `core::testing` cannot build (a state that large needs the builders of spec 021); a host that spawns processes can see the brief `Locked` of AA2 too, which `Device` (spec 027) will meet with a retry or not at all.
 
 ## Audit Z
