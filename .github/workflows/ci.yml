@@ -51,6 +51,13 @@ jobs:
       - name: s016_t12_r12_clippy_under_cfg_fuzzing
         # `fuzz_entry` compiles only under `--cfg fuzzing` outside tests (spec 016).
         run: RUSTFLAGS="--cfg fuzzing" cargo clippy -p privatechat-core -- -D warnings
+      - name: s010_t26_r17_clippy_paths_resolve
+        # A `disallowed-methods` path clippy cannot resolve guards nothing, and clippy only
+        # warns of it even under -D warnings; `touch` makes it lint `core` again.
+        run: |
+          touch crates/core/src/lib.rs
+          out="$(cargo clippy -p privatechat-core -- -D warnings 2>&1)"
+          if printf '%s\n' "$out" | grep 'does not refer to'; then exit 1; fi
 
   test:
     name: test

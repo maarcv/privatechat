@@ -33,6 +33,20 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AA11 | The `Path` methods that reach the disk (`exists`, `is_dir`, `read_dir`, …), `remove_dir_all`, `create_dir` and `fs::metadata` passed both the script and clippy outside `fs.rs` (AA2-B-7) | Low | Ten more entries in `clippy.toml`; spec 010 R17, T26 |
 | AA12 | Untested: a log that cannot be read surviving R19, the sync of a recovery's rename, a log of exactly 64 MiB; a dead branch in T22; the fast `DataDir` absent from the spec's body (AA2-B-1–AA2-B-3, AA2-A-2, AA2-C-2) | Low | Tests; removed; the Fast mode bullet |
 
+**Round 3.** CI green; 77 mutants, 0 failures in 50 runs; no defect in the store's behaviour or its tests. The deny-lists were still short:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AA13 | Each round found another name past `check_store_io.sh` (`std::io::{…}`, `io::Write::write_all`, `std::os`), and its self-test judged the child by its message alone, so a script that reported but never failed passed (AA3-A-1, AA3-B-1, AA3-B-4) | Low | An allow-list: outside `fs.rs` only the modules of `std` that make no system call (AA-Q3); the self-test asks for a failure and its message, on an offending tree and on an empty one |
+| AA14 | `clippy.toml`, `core`'s only I/O guard, lacked `Path::is_symlink`, `symlink_metadata`, `read_link`, `std::fs::exists`, `copy`, `remove_dir`, `std::process::Command::new`, `std::env::var_os` and others, and a path clippy cannot resolve is only a warning (AA3-C-1, AA3-B-2, AA3-B-3) | Low | Fourteen more entries, spec 010 R17 and T26; a CI step fails on clippy's "does not refer to" |
+| AA15 | `DataDir::open` of a relative path whose every part is missing tried to create `""` and failed with `Io` (AA3-A-2) | Low | The empty ancestor is the current directory; a test |
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AA-Q3 | Keep chasing banned names, or list what the store may name (AA3-A Q1) | The allow-list | 020 R23 |
+
+Closed after round 3: the store's behaviour had no defect in any round, and what the last round found was breadth in two lists, now replaced by an allow-list.
+
 Not changed: F13, a state file between the settings limit and its own, which `core::testing` cannot build (a state that large needs the builders of spec 021); a host that spawns processes can see the brief `Locked` of AA2 too, which `Device` (spec 027) will meet with a retry or not at all.
 
 ## Audit Z

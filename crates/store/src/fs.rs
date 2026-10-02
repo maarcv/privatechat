@@ -43,7 +43,12 @@ impl Io {
     /// Creates `path` and every missing parent, then `fsync`s the parent of
     /// each directory it created (R17).
     pub(crate) fn create_dirs(&self, path: &Path) -> Result<(), StoreError> {
-        let missing: Vec<&Path> = path.ancestors().take_while(|dir| !dir.exists()).collect();
+        // A relative path ends in an empty one, which is the current
+        // directory and is never created.
+        let missing: Vec<&Path> = path
+            .ancestors()
+            .take_while(|dir| !dir.as_os_str().is_empty() && !dir.exists())
+            .collect();
         for dir in missing.into_iter().rev() {
             self.call(Call::Create)?;
             match fs::create_dir(dir) {

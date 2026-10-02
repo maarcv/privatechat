@@ -231,6 +231,18 @@ fn s020_t17_r17_open_existing_and_failing() {
     drop(open(dir.path()));
 }
 
+/// Spec 020, R17: a relative path whose every component is missing is
+/// created from the current directory.
+#[test]
+fn s020_t17_r17_relative_path() {
+    let relative = PathBuf::from(format!("privatechat-relative-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&relative);
+    let path = relative.join("data");
+    drop(open(&path));
+    assert!(path.join("channels").is_dir());
+    std::fs::remove_dir_all(&relative).expect("clean");
+}
+
 /// Spec 020, R26: an I/O failure says `Io` and nothing else, no path.
 #[test]
 fn s020_t26_r26_io_error_has_no_path() {
