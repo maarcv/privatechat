@@ -11,7 +11,7 @@
 )]
 
 use std::fs::{self, File, OpenOptions};
-use std::io;
+use std::io::{self, Read, Seek, Write};
 use std::path::Path;
 
 use privatechat_core::StoreError;
@@ -31,19 +31,26 @@ impl Io {
         Io::default()
     }
 
-    /// Counts one system call, and fails it when it is the injected one.
-    fn call(&self) -> Result<(), StoreError> {
+    /// Counts one system call of `kind`, and fails it when it is the
+    /// injected one.
+    #[cfg_attr(not(test), allow(unused_variables, reason = "the kind is a test hook"))]
+    fn call(&self, kind: Call) -> Result<(), StoreError> {
         #[cfg(test)]
-        self.test.call()?;
+        self.test.call(kind)?;
         Ok(())
     }
 
     /// Creates `path` and every missing parent, then `fsync`s the parent of
     /// each directory it created (R17).
     pub(crate) fn create_dirs(&self, path: &Path) -> Result<(), StoreError> {
-        let missing: Vec<&Path> = path.ancestors().take_while(|dir| !dir.exists()).collect();
+        // A relative path ends in an empty one, which is the current
+        // directory and is never created.
+        let missing: Vec<&Path> = path
+            .ancestors()
+            .take_while(|dir| !dir.as_os_str().is_empty() && !dir.exists())
+            .collect();
         for dir in missing.into_iter().rev() {
-            self.call()?;
+            self.call(Call::Create)?;
             match fs::create_dir(dir) {
                 Ok(()) => {}
                 // Created meanwhile by someone else: what was asked holds.
@@ -62,7 +69,7 @@ impl Io {
         if cfg!(windows) {
             return Ok(());
         }
-        self.call()?;
+        self.call(Call::Open)?;
         let handle = File::open(dir).map_err(|_| StoreError::Io)?;
         self.sync(&handle)
     }
@@ -73,7 +80,7 @@ impl Io {
         if self.test.skip_sync() {
             return Ok(());
         }
-        self.call()?;
+        self.call(Call::Sync)?;
         match file.sync_all() {
             Ok(()) => Ok(()),
             // A file system that cannot sync a directory (R23).
@@ -92,7 +99,7 @@ impl Io {
     /// Opens or creates `path` and takes an exclusive lock on it, held until
     /// the returned file is dropped (R17).
     pub(crate) fn lock(&self, path: &Path) -> Result<LockFile, StoreError> {
-        self.call()?;
+        self.call(Call::Lock)?;
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -100,13 +107,140 @@ impl Io {
             .truncate(false)
             .open(path)
             .map_err(|_| StoreError::Io)?;
-        self.call()?;
+        self.call(Call::Lock)?;
         match file.try_lock() {
             Ok(()) => Ok(LockFile { _file: file }),
             Err(fs::TryLockError::WouldBlock) => Err(StoreError::Locked),
             Err(fs::TryLockError::Error(_)) => Err(StoreError::Io),
         }
     }
+
+    /// The bytes of `path`, at most `limit + 1` of them, so that a file over
+    /// its limit is read no further than one byte past it (R6); `None` when
+    /// the file does not exist.
+    pub(crate) fn read_limited(
+        &self,
+        path: &Path,
+        limit: usize,
+    ) -> Result<Option<Vec<u8>>, StoreError> {
+        self.call(Call::Read)?;
+        let file = match File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(StoreError::Io),
+        };
+        let cap = limit.checked_add(1).ok_or(StoreError::Io)?;
+        self.call(Call::Read)?;
+        let size = file.metadata().map_err(|_| StoreError::Io)?.len();
+        let size = usize::try_from(size).unwrap_or(cap).min(cap);
+        let mut bytes = Vec::with_capacity(size);
+        let take = u64::try_from(cap).map_err(|_| StoreError::Io)?;
+        self.call(Call::Read)?;
+        file.take(take)
+            .read_to_end(&mut bytes)
+            .map_err(|_| StoreError::Io)?;
+        Ok(Some(bytes))
+    }
+
+    /// Writes `bytes` as the whole of `path`, creating or truncating it, and
+    /// `fsync`s it.
+    pub(crate) fn write_synced(&self, path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
+        self.call(Call::Write)?;
+        let mut file = File::create(path).map_err(|_| StoreError::Io)?;
+        self.call(Call::Write)?;
+        file.write_all(bytes).map_err(|_| StoreError::Io)?;
+        self.sync(&file)
+    }
+
+    /// Cuts `path` to `at` bytes, writes `bytes` there and `fsync`s it, so
+    /// that stale bytes after a committed end are overwritten, never appended
+    /// after (R10 step 1).
+    pub(crate) fn write_at(&self, path: &Path, at: u64, bytes: &[u8]) -> Result<(), StoreError> {
+        self.call(Call::Write)?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .open(path)
+            .map_err(|_| StoreError::Io)?;
+        self.call(Call::Write)?;
+        file.set_len(at).map_err(|_| StoreError::Io)?;
+        self.call(Call::Write)?;
+        file.seek(io::SeekFrom::Start(at))
+            .map_err(|_| StoreError::Io)?;
+        self.call(Call::Write)?;
+        file.write_all(bytes).map_err(|_| StoreError::Io)?;
+        self.sync(&file)
+    }
+
+    /// Cuts `path` to `len` bytes and `fsync`s it (R12).
+    pub(crate) fn truncate(&self, path: &Path, len: u64) -> Result<(), StoreError> {
+        self.call(Call::Write)?;
+        let file = OpenOptions::new()
+            .write(true)
+            .open(path)
+            .map_err(|_| StoreError::Io)?;
+        self.call(Call::Write)?;
+        file.set_len(len).map_err(|_| StoreError::Io)?;
+        self.sync(&file)
+    }
+
+    /// Renames `from` over `to`, which the file system does in one step.
+    pub(crate) fn rename(&self, from: &Path, to: &Path) -> Result<(), StoreError> {
+        self.call(Call::Rename)?;
+        fs::rename(from, to).map_err(|_| StoreError::Io)
+    }
+
+    /// Deletes the file `path`; a file already absent is not an error.
+    pub(crate) fn remove_file(&self, path: &Path) -> Result<(), StoreError> {
+        self.call(Call::Remove)?;
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(StoreError::Io),
+        }
+    }
+
+    /// Deletes the directory `path` and everything under it; a directory
+    /// already absent is not an error.
+    pub(crate) fn remove_dir_all(&self, path: &Path) -> Result<(), StoreError> {
+        self.call(Call::Remove)?;
+        match fs::remove_dir_all(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(StoreError::Io),
+        }
+    }
+
+    /// The entries of the directory `path` whose names are valid UTF-8, each
+    /// with whether it is a directory; sorted, so that callers see one order.
+    pub(crate) fn list_dir(&self, path: &Path) -> Result<Vec<(String, bool)>, StoreError> {
+        self.call(Call::List)?;
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(path).map_err(|_| StoreError::Io)? {
+            let entry = entry.map_err(|_| StoreError::Io)?;
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            let is_dir = entry.file_type().map_err(|_| StoreError::Io)?.is_dir();
+            entries.push((name, is_dir));
+        }
+        entries.sort();
+        Ok(entries)
+    }
+}
+
+/// What a system call does, which a fault test reads back to know where a
+/// fault landed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Call {
+    Create,
+    Open,
+    Sync,
+    Lock,
+    Read,
+    Write,
+    Rename,
+    Remove,
+    List,
 }
 
 /// The open `LOCK` file of a data directory; the lock goes with it.
@@ -128,13 +262,13 @@ pub(crate) mod test {
     //! The fault injector, fast mode and crash points (spec 020, "Crash
     //! points and faults"), compiled only under `cfg(test)`.
 
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::collections::HashMap;
     use std::sync::Mutex;
 
     use privatechat_core::StoreError;
 
-    use super::Io;
+    use super::{Call, Io};
 
     /// The environment variable of a crash test, `<point>:<k>`.
     pub(crate) const CRASH_VAR: &str = "PRIVATECHAT_STORE_CRASH";
@@ -153,12 +287,15 @@ pub(crate) mod test {
         fast: bool,
         /// Syncs skipped by fast mode.
         skipped: Cell<u32>,
+        /// The kind of each call, in order.
+        kinds: RefCell<Vec<Call>>,
     }
 
     impl Hooks {
-        pub(super) fn call(&self) -> Result<(), StoreError> {
+        pub(super) fn call(&self, kind: Call) -> Result<(), StoreError> {
             let call = self.calls.get().saturating_add(1);
             self.calls.set(call);
+            self.kinds.borrow_mut().push(kind);
             if self.fail_at == Some(call) {
                 return Err(StoreError::Io);
             }
@@ -194,9 +331,19 @@ pub(crate) mod test {
             }
         }
 
+        /// Whether this `Io` is in fast mode.
+        pub(crate) fn is_fast(&self) -> bool {
+            self.test.fast
+        }
+
         /// The system calls made so far.
         pub(crate) fn calls(&self) -> u32 {
             self.test.calls.get()
+        }
+
+        /// The kind of each call made so far, the first at index 0.
+        pub(crate) fn kinds(&self) -> Vec<Call> {
+            self.test.kinds.borrow().clone()
         }
 
         /// The syncs fast mode skipped.

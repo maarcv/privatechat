@@ -326,6 +326,10 @@ impl Store for MemoryStore {
     fn commit(&mut self, batch: &WriteBatch) -> Result<(), StoreError> {
         // R10 reads no entry: only the state and the committed length.
         let previous = self.committed()?;
+        if previous.is_none() && !batch.records().is_empty() {
+            // A first commit carries no record, as on disk (R13).
+            return Err(StoreError::Corrupt);
+        }
         let (mut log, generation) = match &previous {
             Some((state, log)) => (log.clone(), state.log_position().1),
             None => (log_header(0), 0),
