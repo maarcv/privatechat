@@ -104,6 +104,8 @@ fn s020_t10_r10_memory_commit() {
     let (vault, mut store) = memory();
     let name = *store.name();
     let handle = MemoryStore::handle(&vault, name);
+    // A first commit carries no record (R13).
+    store.commit(&batch(state_for([1; 16]), vec![])).unwrap();
     store
         .commit(&batch(state_for([1; 16]), vec![record(5, 10)]))
         .unwrap();
@@ -122,18 +124,19 @@ fn s020_t10_r10_memory_commit() {
     moved.cursor = Some(7);
     moved.synced_at = Some(8);
     store.commit(&batch(moved, vec![])).unwrap();
-    assert_eq!((handle.commits(), handle.all_commits()), (2, 3));
+    assert_eq!((handle.commits(), handle.all_commits()), (3, 4));
     let mut changed = state_for([1; 16]);
     changed.send_counter = 1;
     store.commit(&batch(changed, vec![])).unwrap();
-    assert_eq!((handle.commits(), handle.all_commits()), (3, 4));
+    assert_eq!((handle.commits(), handle.all_commits()), (4, 5));
     let reopened = handle.reopen();
     assert_eq!(reopened.log_len(), store.log_len());
 }
 
 /// Spec 020, R13 (`MemoryStore`): a directory that no commit made durable
 /// loads as `None` and `list` skips it; a log with an entry and no state is
-/// `Corrupt`; the first commit writes the header of generation 0.
+/// `Corrupt`; a first commit that carries a record is `Corrupt` and writes
+/// nothing; the first commit writes the header of generation 0.
 #[test]
 fn s020_t13_r13_memory_first_commit() {
     let (vault, mut store) = memory();
@@ -163,6 +166,11 @@ fn s020_t13_r13_memory_first_commit() {
         assert_eq!(listing.list().unwrap().len(), 1);
     }
     vault.put_raw(&name, None, None);
+    assert!(matches!(
+        store.commit(&batch(state_for([1; 16]), vec![record(1, 1)])),
+        Err(StoreError::Corrupt)
+    ));
+    assert!(store.load().unwrap().is_none());
     store.commit(&batch(state_for([1; 16]), vec![])).unwrap();
     assert_eq!(store.log_len(), 9);
     let (state, records) = store.load().unwrap().unwrap();
@@ -176,6 +184,8 @@ fn s020_t13_r13_memory_first_commit() {
 fn s020_t15_r15_memory_compaction() {
     let (_, mut store) = memory();
     let records = vec![record(1, 5), record(10, 6), record(2, 7), record(20, 8)];
+    // A first commit carries no record (R13).
+    store.commit(&batch(state_for([1; 16]), vec![])).unwrap();
     store.commit(&batch(state_for([1; 16]), records)).unwrap();
     let (state, _) = store.load().unwrap().unwrap();
     assert_eq!(store.compact(&state, 1).unwrap(), 0);
@@ -193,6 +203,8 @@ fn s020_t16_r16_memory_log_full() {
     assert_eq!(MAX_LOG_LEN, 67_108_864);
     let (_, mut store) = memory();
     let big: Vec<_> = (0..1_000).map(|at| record(at, 64_000)).collect();
+    // A first commit carries no record (R13).
+    store.commit(&batch(state_for([1; 16]), vec![])).unwrap();
     store.commit(&batch(state_for([1; 16]), big)).unwrap();
     let before = store.log_len();
     let more: Vec<_> = (0..60).map(|at| record(at, 64_000)).collect();
@@ -245,6 +257,8 @@ fn s020_t11_r11_failing_doubles() {
     let mut store = vault.create(&[1; 16]).unwrap();
     let name = *store.name();
     let first = batch(state_for([1; 16]), vec![record(1, 1)]);
+    // A first commit carries no record (R13).
+    store.commit(&batch(state_for([1; 16]), vec![])).unwrap();
     store.commit(&first).unwrap();
     assert!(state_eq(
         &faults.last_committed(&name).unwrap(),
@@ -407,6 +421,8 @@ fn s020_t15_r15_memory_compacts_twice() {
     let (_, mut store) = memory();
     assert_eq!(store.log_len(), 0);
     let loaded = state_for([1; 16]);
+    // A first commit carries no record (R13).
+    store.commit(&batch(state_for([1; 16]), vec![])).unwrap();
     store
         .commit(&batch(
             state_for([1; 16]),

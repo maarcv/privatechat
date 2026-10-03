@@ -2,6 +2,66 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Reading of spec 020 R10–R15
+
+**2026-10-03 — The second reading the acceptance criterion of spec 020-store-files asks for: that every interruption of a commit, a compaction or a recovery leaves the previous commit or the new one.** The human reviewer read R10–R15 and found them sound; two agents read them independently, one from the spec's text and one from the code, under a model where a crash keeps any subset of the unsynced directory operations, in any order.
+
+| # | Finding | Change |
+| --- | --- | --- |
+| R1 | A first commit created `messages.log` and renamed `state.bin` with no directory sync between: a crash could keep the state and lose the log's name, leaving `Corrupt` (both readings) | The directory synced after the header (R13) |
+| R2 | A compaction did the same with `messages.log.new`, and a load's R14 rename followed by a second compaction could lose that rename under a state two generations ahead (both readings) | The directory synced after the new log (R15), which also makes R14's rename durable; R14 syncs after its rename |
+| R3 | A destroy whose `channels/` sync failed still deleted, so a crash losing the rename brought the channel back half emptied, `Corrupt` (spec reading) | Nothing deleted until that sync succeeds (R21) |
+| R4 | Text: a failed `fsync` stops the store only from the rename on; `F_FULLFSYNC` on Apple platforms, which `File::sync_all` already issues (confirmed in the disassembly); a compaction at generation `u32::MAX`; a commit with no load before it (both readings) | Security, R10, R15 |
+
+With these, both readings conclude that every interruption leaves the previous commit, the new one, or `None` for a channel never committed. Spec 020 is `implemented`.
+
+## Audit AA
+
+**2026-10-01 — Audit AA, the code audit of the `store` crate of spec 020-store-files (branch `020-store`, slices (e1)–(g)), in rounds of three passes (A: structure and logic; B: the local CI and hand mutants; C: conformance with spec 020).**
+
+**Round 1.** CI green; no defect in commit, load, compaction or recovery: every crash point and fault traced leaves the previous commit or the new one. 172 mutants, 98 killed; the survivors equivalent, far-fetched, or these:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AA1 | T11 checked the leftovers only after a `load` that deletes them itself, accepted a poisoning at any call, and stopped its fault loop at the first `Ok`, which a best-effort delete gives (AA1-A-1, AA1-A-2, AA1-B-5–AA1-B-7, AA1-C-1) | Medium | Each call's kind recorded under test: before the rename usable and clean, from it poisoned, a best-effort delete ignored and the commit standing |
+| AA2 | The store tests failed about once in 40 runs: a helper child holds a copy of another test's lock between its fork and its exec (AA1-B-17) | Medium | The tests retry a `Locked` open for up to 2 s; 60 runs clean |
+| AA3 | A first commit with records, which spec 021 never makes, would leave a channel `Corrupt` after a crash between its entries and its state (AA1-A, known gap) | Medium | Refused before any write (AA-Q1); R13, T13 |
+| AA4 | No test of: a commit straight after a compaction, a log cut at an entry boundary, an entry's `len` raised, `remove` of a live store, the stores of a fast `DataDir` (which were not fast), a store keeping the lock after its `DataDir` is dropped, a foreign or unreadable directory surviving R19, the cleanup under the lock, a fault in a settings save, the syncs of each step, the crash points' places (AA1-B-1–AA1-B-4, AA1-B-8–AA1-B-15, AA1-C-2, AA1-C-3, AA1-C-5) | Medium | Tests for each; a fast `DataDir` hands out fast stores |
+| AA5 | A log over 64 MiB was cut back instead of `Corrupt`; an `Io` was not shown to carry no path; `compact` could fail after its renames (AA1-C-4, AA1-C-6, AA1-A-5) | Low | `Corrupt` before any truncation; T26 in `store`; the count taken before the writes |
+| AA6 | `check_store_io.sh` passed a grouped `use std::{fs, …}` and its self-test never ran the whole script (AA1-B-16) | Low | `std::{` refused; the self-test runs the script; R23 |
+| AA7 | The golden files were not marked binary; T21 never faulted the final delete; a leftover `settings.bin.tmp` was never deleted; dead test lines (AA1-A-3, AA1-A-4, AA1-A-6–AA1-A-8, AA1-C-12) | Low | `.gitattributes`; T21 to k = 5; deleted at open (AA-Q2); removed |
+| AA8 | Text: §10 had no phase 2 CI line, CONTRIBUTING no golden check, spec 001 no word of later jobs; R15 and R16 against what reading the log does and what `log_len` returns before a load; the test directory's name (AA1-C-7–AA1-C-10) | Low | Rewritten |
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AA-Q1 | A first commit that carries records (AA1-A Q1) | Refuse it with `Corrupt` | R13, T13 |
+| AA-Q2 | A leftover `settings.bin.tmp` (AA1-A Q2) | Deleted at `DataDir::open` | R22, T22 |
+
+**Round 2.** CI green; 116 mutants, 81 killed, 0 failures in 100 runs of the store tests; the survivors equivalent, far-fetched, or these:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AA9 | `MemoryStore` took the first commit with records the real store refuses, so a spec 021 bug would pass every test in memory and fail on disk (AA2-C-1) | Medium | Refused there too; T13 for `MemoryStore`, the trait's `# Errors`; the tests seed with a record-free commit |
+| AA10 | `check_store_io.sh` passed `use std::io::{stdout, Write}` and `std::io::prelude`, a path with no source, and its self-run passed whenever the child failed for any reason, such as a wrong `$0` (AA2-A-1, AA2-B-4–AA2-B-6) | Low | Both refused; no source fails; the self-run by absolute path, judged by its message; R23 |
+| AA11 | The `Path` methods that reach the disk (`exists`, `is_dir`, `read_dir`, …), `remove_dir_all`, `create_dir` and `fs::metadata` passed both the script and clippy outside `fs.rs` (AA2-B-7) | Low | Ten more entries in `clippy.toml`; spec 010 R17, T26 |
+| AA12 | Untested: a log that cannot be read surviving R19, the sync of a recovery's rename, a log of exactly 64 MiB; a dead branch in T22; the fast `DataDir` absent from the spec's body (AA2-B-1–AA2-B-3, AA2-A-2, AA2-C-2) | Low | Tests; removed; the Fast mode bullet |
+
+**Round 3.** CI green; 77 mutants, 0 failures in 50 runs; no defect in the store's behaviour or its tests. The deny-lists were still short:
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AA13 | Each round found another name past `check_store_io.sh` (`std::io::{…}`, `io::Write::write_all`, `std::os`), and its self-test judged the child by its message alone, so a script that reported but never failed passed (AA3-A-1, AA3-B-1, AA3-B-4) | Low | An allow-list: outside `fs.rs` only the modules of `std` that make no system call (AA-Q3); the self-test asks for a failure and its message, on an offending tree and on an empty one |
+| AA14 | `clippy.toml`, `core`'s only I/O guard, lacked `Path::is_symlink`, `symlink_metadata`, `read_link`, `std::fs::exists`, `copy`, `remove_dir`, `std::process::Command::new`, `std::env::var_os` and others, and a path clippy cannot resolve is only a warning (AA3-C-1, AA3-B-2, AA3-B-3) | Low | Fourteen more entries, spec 010 R17 and T26; a CI step fails on clippy's "does not refer to" |
+| AA15 | `DataDir::open` of a relative path whose every part is missing tried to create `""` and failed with `Io` (AA3-A-2) | Low | The empty ancestor is the current directory; a test |
+
+| # | Question | Decision | Change |
+| --- | --- | --- | --- |
+| AA-Q3 | Keep chasing banned names, or list what the store may name (AA3-A Q1) | The allow-list | 020 R23 |
+
+Closed after round 3: the store's behaviour had no defect in any round, and what the last round found was breadth in two lists, now replaced by an allow-list.
+
+Not changed: F13, a state file between the settings limit and its own, which `core::testing` cannot build (a state that large needs the builders of spec 021); a host that spawns processes can see the brief `Locked` of AA2 too, which `Device` (spec 027) will meet with a retry or not at all.
+
 ## Audit Z
 
 **2026-10-01 — Audit Z, the first code audit of phase 0 (branch `phase0-audit` from `mvp` at 2136de2): specs 000–003 and what implements them — the CI workflows, `doc_lint`, `check_requirements`, `deny.toml`, the workspace lints and toolchain — in rounds of three passes (A: structure and logic; B: the local CI, 131 mutants and crafted git histories against `adr-guard` and `commit-lint`; C: conformance with the specs, AGENTS and `docs/spec.md`).** Audits A–D had reviewed documents, not this code.
