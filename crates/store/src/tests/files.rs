@@ -393,6 +393,13 @@ fn s020_t21_r21_destroy_and_remove() {
         } else {
             assert_eq!(result, Ok(()), "k={k}");
             assert!(!channel.exists());
+            // A failed sync of `channels/` deletes nothing, and a failed
+            // delete leaves it too: R19 finishes either (R21).
+            let leaving = dir
+                .path()
+                .join("channels")
+                .join(format!("{}.leaving", crate::hex(&dir_name(2))));
+            assert!(leaving.exists(), "k={k}");
         }
         drop(faulty);
         drop(data);

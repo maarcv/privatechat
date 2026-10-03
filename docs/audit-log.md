@@ -2,6 +2,19 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Reading of spec 020 R10–R15
+
+**2026-10-03 — The second reading the acceptance criterion of spec 020-store-files asks for: that every interruption of a commit, a compaction or a recovery leaves the previous commit or the new one.** The human reviewer read R10–R15 and found them sound; two agents read them independently, one from the spec's text and one from the code, under a model where a crash keeps any subset of the unsynced directory operations, in any order.
+
+| # | Finding | Change |
+| --- | --- | --- |
+| R1 | A first commit created `messages.log` and renamed `state.bin` with no directory sync between: a crash could keep the state and lose the log's name, leaving `Corrupt` (both readings) | The directory synced after the header (R13) |
+| R2 | A compaction did the same with `messages.log.new`, and a load's R14 rename followed by a second compaction could lose that rename under a state two generations ahead (both readings) | The directory synced after the new log (R15), which also makes R14's rename durable; R14 syncs after its rename |
+| R3 | A destroy whose `channels/` sync failed still deleted, so a crash losing the rename brought the channel back half emptied, `Corrupt` (spec reading) | Nothing deleted until that sync succeeds (R21) |
+| R4 | Text: a failed `fsync` stops the store only from the rename on; `F_FULLFSYNC` on Apple platforms, which `File::sync_all` already issues (confirmed in the disassembly); a compaction at generation `u32::MAX`; a commit with no load before it (both readings) | Security, R10, R15 |
+
+With these, both readings conclude that every interruption leaves the previous commit, the new one, or `None` for a channel never committed. Spec 020 is `implemented`.
+
 ## Audit AA
 
 **2026-10-01 — Audit AA, the code audit of the `store` crate of spec 020-store-files (branch `020-store`, slices (e1)–(g)), in rounds of three passes (A: structure and logic; B: the local CI and hand mutants; C: conformance with spec 020).**

@@ -109,9 +109,12 @@ impl Shared {
         let leaving = self.leaving(name);
         io.remove_dir_all(&leaving)?;
         io.rename(&self.dir(name), &leaving)?;
-        // Past the rename R19 finishes what fails here.
-        let _ = io.sync_dir(&self.channels);
-        let _ = io.remove_dir_all(&leaving);
+        // Past the rename R19 finishes what fails here. Until the rename is
+        // durable nothing is deleted: a crash that lost it would bring back
+        // the directory half emptied, so `Corrupt`, instead of whole.
+        if io.sync_dir(&self.channels).is_ok() {
+            let _ = io.remove_dir_all(&leaving);
+        }
         Ok(())
     }
 }

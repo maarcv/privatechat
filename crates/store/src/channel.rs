@@ -230,6 +230,9 @@ impl Store for ChannelFiles {
             // The first commit: a header of generation 0 alone, durable
             // before the state names it (R13).
             self.io.write_synced(&log, &frame::log_header(0))?;
+            // The log's name durable before a state names it, so no crash
+            // keeps the state and loses the log (R13).
+            self.io.sync_dir(&self.shared.dir(&self.name))?;
         }
         if !appended.is_empty() {
             self.io.write_at(&log, base, &appended)?;
@@ -271,7 +274,13 @@ impl Store for ChannelFiles {
         let end = u64::try_from(new_log.len()).map_err(|_| StoreError::LogFull)?;
         let sealed = state.seal(key, &self.name, end, next)?;
         let new = self.path(LOG_NEW);
-        if let Err(error) = self.io.write_synced(&new, &new_log) {
+        // The new log's name durable before a state names its generation
+        // (R15); the same sync makes an earlier R14 rename durable.
+        let written = self
+            .io
+            .write_synced(&new, &new_log)
+            .and_then(|()| self.io.sync_dir(&self.shared.dir(&self.name)));
+        if let Err(error) = written {
             let _ = self.io.remove_file(&new);
             return Err(error);
         }

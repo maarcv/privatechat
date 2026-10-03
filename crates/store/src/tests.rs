@@ -272,8 +272,10 @@ fn s020_t23_r23_faults_and_fast_mode_per_instance() {
     assert!(fast.store_io().is_fast());
     assert!(!open(&dir.path().join("slow")).store_io().is_fast());
     drop(fast);
-    // Each durable step syncs once: a commit its log, its copy and the
-    // directory; a compaction its new log, its copy and the directory twice;
+    // Each durable step syncs once: a first commit its header, the directory,
+    // its copy and the directory again; a commit its log, its copy and the
+    // directory; a compaction its new log and the directory, its copy and
+    // the directory, and the directory after the log's rename;
     // a destroy the directory of channels; a settings save its copy and
     // the directory.
     let mut fast = open_with(&path, Io::fast).expect("fast open");
@@ -282,11 +284,11 @@ fn s020_t23_r23_faults_and_fast_mode_per_instance() {
     commit(&mut store, 1, &[]).expect("first commit");
     let first = store.io().skipped_syncs();
     commit(&mut store, 1, &[1, 2]).expect("commit");
-    assert_eq!((first, store.io().skipped_syncs() - first), (3, 3));
+    assert_eq!((first, store.io().skipped_syncs() - first), (4, 3));
     let state = state_for(id(1));
     let before = store.io().skipped_syncs();
     assert_eq!(store.compact(&state, 2), Ok(1));
-    assert_eq!(store.io().skipped_syncs() - before, 4);
+    assert_eq!(store.io().skipped_syncs() - before, 5);
     let before = store.io().skipped_syncs();
     store.destroy().expect("destroy");
     assert_eq!(store.io().skipped_syncs() - before, 1);
