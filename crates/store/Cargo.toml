@@ -13,6 +13,10 @@ name = "privatechat_store"
 path = "src/lib.rs"
 
 [dependencies]
+# The only dependency of `store` (spec 020-store-files): every byte it encrypts or
+# encodes goes through `core`. A version as well as the path, so `cargo deny`
+# does not take it for a wildcard.
+privatechat-core = { path = "../core", version = "0.0.0" }
 
 [dev-dependencies]
 
