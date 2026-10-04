@@ -1,0 +1,70 @@
+//! The log headroom of spec 021 R18: room for a maximal entry and a
+//! reserve before `encrypt` and `decrypt` append anything, and the one
+//! compaction that may restore it, at most every ten minutes.
+
+use super::Channel;
+use crate::error::Error;
+use crate::session::expiry::ExpiryIndex;
+use crate::storage::{MAX_LOG_LEN, StoreError};
+
+/// A maximal log entry with its 4-byte `len` (65 580 bytes) and the
+/// reserve of 1 048 576 for the commits that add no message (R18).
+const HEADROOM: u64 = 1_114_156;
+
+/// The reserve alone, the least a compaction must free.
+const RESERVE: u64 = 1_048_576;
+
+/// The least time between two compactions of one channel.
+const COMPACTION_INTERVAL_MS: u64 = 600_000;
+
+impl Channel {
+    /// Compacts the log when what expired before `now` restores the
+    /// headroom and the last attempt is ten minutes old (R18): `Ok(true)`
+    /// when it compacted, `Ok(false)` when it did not try.
+    ///
+    /// # Errors
+    ///
+    /// The compaction's `Store` error, memory left as it was.
+    pub(crate) fn relieve_headroom(&mut self, now: u64) -> Result<bool, Error> {
+        self.latest_now = Some(now);
+        // A clock set back must not hold compactions off until it catches up.
+        let last = self.last_compaction.map(|last| last.min(now));
+        self.last_compaction = last;
+        let held_off = last.is_some_and(|last| now.saturating_sub(last) < COMPACTION_INTERVAL_MS);
+        let excess = self
+            .store
+            .log_len()
+            .saturating_add(HEADROOM)
+            .saturating_sub(MAX_LOG_LEN);
+        if held_off || self.expiry.expired_bytes(now) < RESERVE.max(excess) {
+            return Ok(false);
+        }
+        self.last_compaction = Some(now);
+        self.store.compact(&self.state, now)?;
+        self.records.retain(|record| record.purge_at() >= now);
+        self.expiry = ExpiryIndex::of(&self.records);
+        Ok(true)
+    }
+
+    /// Whether the log has room for a maximal entry and the reserve.
+    pub(super) fn has_headroom(&self) -> bool {
+        self.store.log_len().saturating_add(HEADROOM) <= MAX_LOG_LEN
+    }
+
+    /// The check `encrypt` and `decrypt` make first (R18).
+    ///
+    /// # Errors
+    ///
+    /// The compaction's `Store` error when it failed, and otherwise
+    /// `Store(LogFull)` while the headroom is missing.
+    pub(super) fn check_headroom(&mut self, now: u64) -> Result<(), Error> {
+        if !self.has_headroom() {
+            self.relieve_headroom(now)?;
+        }
+        if self.has_headroom() {
+            Ok(())
+        } else {
+            Err(Error::Store(StoreError::LogFull))
+        }
+    }
+}

@@ -14,11 +14,22 @@ use crate::error::Error;
 use crate::proto::config::Config;
 use crate::storage::{ChannelState, DirName, LogRecord, Store, StoreError, WriteBatch};
 
+mod headroom;
+mod send;
+
 #[cfg(test)]
 mod tests;
 
 /// A peer's `pk_u` (`docs/spec.md` §9); used by specs 022–027.
 pub type PeerId = [u8; 32];
+
+/// The identifier of one `outbox` entry, used for every publish of it
+/// (R8): public, compared as a map key (AGENTS 22).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ClientRef {
+    /// 16 bytes from `random_bytes`.
+    pub bytes: [u8; 16],
+}
 
 /// The messages missing from one sender in this session (R24).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
