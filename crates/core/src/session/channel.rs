@@ -270,11 +270,11 @@ impl Channel {
     ///
     /// As [`Channel::create`].
     #[cfg(any(test, fuzzing))]
-    pub(crate) fn for_fuzzing(config: &Config, seed: Secret<32>) -> Result<Channel, Error> {
+    pub(crate) fn for_fuzzing(config: &Config, seed: &Secret<32>) -> Result<Channel, Error> {
         use crate::storage::Vault;
         use crate::testing::MemoryVault;
         let store = MemoryVault::new().create(&config.channel_id())?;
-        Channel::first_commit(config, store, seed)
+        Channel::first_commit(config, store, Secret::copy_from(seed.expose()))
     }
 
     /// The channel `store` holds (R6).
