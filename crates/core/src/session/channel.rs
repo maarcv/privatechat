@@ -19,6 +19,8 @@ use crate::storage::{ChannelState, DirName, LogRecord, Store, StoreError, WriteB
 mod headroom;
 mod outbox;
 mod send;
+mod status;
+mod sync;
 
 #[cfg(test)]
 mod tests;
@@ -96,7 +98,43 @@ pub(crate) struct SessionCarry {
     /// The ignored keys of spec 026-peer-limits R6.
     ignored_keys: BTreeSet<PeerId>,
     /// The device-clock warning of R25.
-    clock_off: bool,
+    clock_off: ClockOff,
+}
+
+/// Whether the device clock looks off, and which kind of sample said so
+/// (R25): a backlog sample clears only a flag a backlog sample set.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ClockOff {
+    #[default]
+    No,
+    /// Set by a live sample.
+    Live,
+    /// Set by a backlog sample with this `received_at`.
+    Backlog(u64),
+}
+
+/// What a client shows about a channel (R25).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChannelStatus {
+    /// Another device used one's own key (R14).
+    pub own_key_used_elsewhere: bool,
+    /// One's own key was retired elsewhere (spec 024-key-retired).
+    pub read_only: bool,
+    /// A `key_retired` is pending (spec 025-identity-regen R6).
+    pub retirement_pending: bool,
+    /// The log headroom of R18 is missing.
+    pub storage_full: bool,
+    /// Distinct keys refused or evicted in this session (spec
+    /// 026-peer-limits R6).
+    pub ignored_keys: u32,
+    /// A new key would be refused (spec 026-peer-limits R6).
+    pub unknown_limit_reached: bool,
+    /// The labelled budget is spent (spec 026-peer-limits R6).
+    pub labelled_limit_reached: bool,
+    /// The device clock differs from the server's (R25).
+    pub clock_off: bool,
+    /// Messages before this time may be missing (R24, R25).
+    pub truncated_before: Option<u64>,
 }
 
 /// One channel and its store. It implements neither `Clone` nor `Debug`:

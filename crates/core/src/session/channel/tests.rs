@@ -1,7 +1,7 @@
 //! Tests of spec 021 over `MemoryStore`, each requirement checked through the
 //! calls of `Channel` and the state a reopened store holds.
 
-use super::{Channel, Gap, SessionCarry};
+use super::{Channel, ClockOff, Gap, SessionCarry};
 use crate::Error;
 use crate::crypto::Secret;
 use crate::proto::config::Config;
@@ -13,6 +13,8 @@ use crate::testing::{
 mod headroom;
 mod outbox;
 mod send;
+mod status;
+mod sync;
 
 const K_CH: [u8; 32] = [0xa5; 32];
 const SERVER: &str = "wss://example.org";
@@ -93,7 +95,7 @@ fn s021_t01_r01_in_session_values() {
     };
     channel.carry.gaps.insert(gap.peer, gap);
     channel.carry.ignored_keys.insert([9; 32]);
-    channel.carry.clock_off = true;
+    channel.carry.clock_off = ClockOff::Live;
     let carry = channel.session_carry();
     drop(channel);
     let mut next = reopened(&handle);
