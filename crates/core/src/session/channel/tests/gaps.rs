@@ -143,8 +143,10 @@ fn s021_t09_r09_retiring_key() {
         }
     }
 
-    // The echo of a superseded `key_retired` copy keeps the pending one.
-    let (mut channel, _, _, old_seed, _) = retiring();
+    // The echo of a superseded `key_retired` copy keeps the pending one;
+    // it reads as a thief's, so the old entries go as not delivered
+    // (open question 025-R2).
+    let (mut channel, _, _, old_seed, entries) = retiring();
     let retired = Payload {
         kind: PayloadKind::KeyRetired,
         display_name: None,
@@ -160,6 +162,12 @@ fn s021_t09_r09_retiring_key() {
     );
     assert_eq!(channel.state.outbox.len(), 1);
     assert!(channel.status().retirement_pending);
+    let gone: Vec<ClientRef> = channel
+        .take_outcomes()
+        .iter()
+        .map(|o| o.client_ref)
+        .collect();
+    assert_eq!(gone, entries);
 
     let (mut channel, _, faults, old_seed, entries) = retiring();
     let thief = text_from(&channel, old_seed, 301, NOW);

@@ -195,19 +195,28 @@ fn s021_t09_r09_own_key_clauses() {
 #[test]
 fn s021_t14_r14_stale_repeat_commits_nothing() {
     let (mut channel, handle, _) = with_entries(10, 1);
-    let ahead = own_text(&channel, 11, NOW + HOUR_MS + 420_000);
+    // Stale at `NOW` and a minute later, within reach.
+    let ahead = own_text(&channel, 11, NOW + HOUR_MS + 480_000);
     assert_eq!(
         channel.decrypt(&ahead, sid(1), NOW, NOW),
         Err(Error::Expired)
     );
-    let commits = handle.commits();
+    let all = handle.all_commits();
     for n in 2..20 {
         assert_eq!(
             channel.decrypt(&ahead, sid(n), NOW, NOW),
             Err(Error::Expired)
         );
     }
-    assert_eq!(handle.commits(), commits);
+    assert_eq!(handle.all_commits(), all);
+    // In a new minute it still moves and commits the cursor, alone.
+    let later = NOW + 60_000;
+    assert_eq!(
+        channel.decrypt(&ahead, sid(20), later, later),
+        Err(Error::Expired)
+    );
+    assert_eq!(handle.all_commits(), all + 1);
+    assert_eq!(reopened(&handle).cursor(), Some(later));
 }
 
 /// Spec 021, R15: after a regeneration, the echo of a blob kept under the

@@ -53,7 +53,7 @@ fn s021_t16_r16_unknown_ack() {
     let outcome = channel.acked(unknown, SERVER_ID, NOW, NOW).unwrap();
     assert_eq!(outcome.outcome, AckOutcome::Ignored);
     assert_eq!(outcome.sent_at, None);
-    assert_eq!(handle.commits(), 1);
+    assert_eq!(handle.all_commits(), 1);
 }
 
 /// Spec 021, R17: in time → `Delivered` with an acked record at the
@@ -221,10 +221,10 @@ fn s021_t22_r22_outbox() {
     let fresh: Vec<ClientRef> = (0..3)
         .map(|_| channel.encrypt("fresh", None, later).unwrap())
         .collect();
-    let commits = handle.commits();
+    let commits = handle.all_commits();
     let step = channel.outbox(NOW + 1, &[in_flight], false).unwrap();
     assert!(step.not_delivered.is_empty());
-    assert_eq!(handle.commits(), commits);
+    assert_eq!(handle.all_commits(), commits);
     let order: Vec<ClientRef> = step.publish.iter().map(|(c, _)| *c).collect();
     assert_eq!(order, [&[stale][..], &fresh].concat());
     assert_eq!(step.publish[0].1, channel.state.outbox[0].blob);
@@ -272,11 +272,11 @@ fn s021_t31_r31_abandon() {
     assert_eq!(channel.abandon(sent), Ok(Some(NOW)));
     let new: Vec<&LogRecord> = channel.records.iter().skip(1).collect();
     assert!(is_kept_signature(new[0]) && is_not_delivered(new[1], sent));
-    let commits = handle.commits();
+    let commits = handle.all_commits();
     for client_ref in [ClientRef { bytes: [0xee; 16] }, sent] {
         assert_eq!(channel.abandon(client_ref), Ok(None));
     }
-    assert_eq!(handle.commits(), commits);
+    assert_eq!(handle.all_commits(), commits);
     assert_eq!(channel.state.outbox.len(), 1);
 }
 
