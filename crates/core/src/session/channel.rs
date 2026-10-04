@@ -6,6 +6,7 @@
 //! spec 021; the peers, the message list, retirement, regeneration and the
 //! peer limits are specs 022–026's.
 
+use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::expiry::ExpiryIndex;
@@ -18,6 +19,8 @@ use crate::storage::{ChannelState, DirName, LogRecord, Store, StoreError, WriteB
 
 mod headroom;
 mod outbox;
+mod own_key;
+mod receive;
 mod send;
 mod status;
 mod sync;
@@ -37,6 +40,68 @@ pub type PeerId = [u8; 32];
 pub struct ClientRef {
     /// 16 bytes from `random_bytes`.
     pub bytes: [u8; 16],
+}
+
+/// Who sent a message (R12, spec 023-ttl-purge).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sender {
+    /// Another member.
+    Peer {
+        /// The sender's `pk_u`.
+        pk: PeerId,
+    },
+    /// This device.
+    Own,
+    /// One's own key, sealed on another device (R14).
+    OwnKeyElsewhere {
+        /// One's own `pk_u`.
+        pk: PeerId,
+    },
+}
+
+/// What a received message holds (R12). No `Display`, and a `Debug` that
+/// names the variant alone: it is content (AGENTS 19).
+#[derive(PartialEq, Eq)]
+pub enum MessageContent {
+    /// A text and the name it was signed with.
+    Text {
+        /// The text.
+        body: String,
+        /// The sender's name, when it gave one.
+        display_name: Option<String>,
+    },
+    /// The sender retired its key (spec 024-key-retired).
+    KeyRetired,
+    /// A message this version cannot read.
+    Unreadable,
+}
+
+/// A message `decrypt` consumed and listed (R12); its `Debug` hides the
+/// content.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Received {
+    /// The server's identifier.
+    pub server_id: [u8; 16],
+    /// Who sent it.
+    pub sender: Sender,
+    /// The time it is listed at (R11).
+    pub received_at: u64,
+    /// The signed send time, when it could be read.
+    pub sent_at: Option<u64>,
+    /// When it leaves the screen (R26).
+    pub expires_at: u64,
+    /// What it holds.
+    pub content: MessageContent,
+}
+
+impl fmt::Debug for MessageContent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            MessageContent::Text { .. } => "Text([REDACTED])",
+            MessageContent::KeyRetired => "KeyRetired",
+            MessageContent::Unreadable => "Unreadable",
+        })
+    }
 }
 
 /// What became of a message this device sent (R16, R17, R22).

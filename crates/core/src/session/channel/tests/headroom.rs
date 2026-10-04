@@ -57,8 +57,9 @@ fn s021_t18_r18_headroom_constants() {
     assert!(channel.encrypt("fits", None, NOW).is_ok());
 }
 
-/// Spec 021, R18: a live log within the headroom refuses `encrypt` with no
-/// compaction and no commit; so does one with only 100 expired bytes.
+/// Spec 021, R18: a live log within the headroom refuses `encrypt` and
+/// `decrypt` with no compaction, no commit and the cursor unchanged; so
+/// does one with only 100 expired bytes.
 #[test]
 fn s021_t18_r18_headroom_live_log() {
     for expired in [0, record(0, 0).entry_len()] {
@@ -66,6 +67,10 @@ fn s021_t18_r18_headroom_live_log() {
         let commits = handle.commits();
         let result = channel.encrypt("hi", None, NOW);
         assert_eq!(result, Err(Error::Store(StoreError::LogFull)));
+        // `decrypt` refuses before reading a byte of the blob.
+        let result = channel.decrypt(&[], [1; 16], NOW, NOW);
+        assert_eq!(result, Err(Error::Store(StoreError::LogFull)));
+        assert_eq!(channel.cursor(), None);
         assert_eq!(handle.commits(), commits);
         assert_eq!(channel.store.log_len(), FULL - HEADROOM + 1);
         assert_eq!(channel.relieve_headroom(NOW), Ok(false));
@@ -118,7 +123,7 @@ fn s021_t18_r18_failed_compaction() {
     assert_eq!(channel.records.len(), records);
     assert_eq!(channel.expiry.expired_bytes(NOW), MIB);
     // Faults still on: an attempt would be `Io`.
-    let result = channel.encrypt("hi", None, NOW + 599_999);
+    let result = channel.decrypt(&[], [1; 16], NOW + 599_999, NOW + 599_999);
     assert_eq!(result, Err(Error::Store(StoreError::LogFull)));
     assert_eq!(channel.relieve_headroom(NOW + 599_999), Ok(false));
     let result = channel.relieve_headroom(NOW + 600_000);

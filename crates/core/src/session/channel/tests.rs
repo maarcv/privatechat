@@ -12,6 +12,7 @@ use crate::testing::{
 
 mod headroom;
 mod outbox;
+mod receive;
 mod send;
 mod status;
 mod sync;
