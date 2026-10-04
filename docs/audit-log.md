@@ -2,6 +2,17 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AC
+
+**2026-10-04 — Audit AC, a subtraction audit of the state layer before spec 021-channel-session is implemented.** Sixteen audits had added rules to specs 020–028 and removed none. Read-only passes looked for rules that cost more than they protect: store failure, the own echo and the `sent_at` windows (name comparison is Audit AB). The human reviewer took every recommendation. Each change removes a rule; none adds a defence.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AC1 | On a store error other than `LogFull`, the channel held the own-key alert, the counter bump, `read_only` and the overtaken counters in memory and carried them to the reopened instance (`HeldOwnKey`), and `outbox` handed out entries and a `key_retired` re-sealed in memory for 600 000 ms. A failing disk is not an adversary of the threat model, and the alert's remedy, `regenerate_identity`, needs a commit anyway | Low | The channel is frozen until the probe of spec 027 R12: no `decrypt`, `check_own_key`, publish or commit; the push is fetched again after it. 021 R3, R13, R19, R20, R22, R23, Security; 025 R1, R4, R5; 027 R12, R14; 028 R10, R12, R14 |
+| AC2 | R19's `LogFull` fallback and spec 025 R1's retry-once guarded a commit that cannot meet `LogFull`: while R18's check fails nothing but the reserve's commits appends, at most three records per `outbox` entry, and `Store::commit` refuses before writing (spec 020) | Low | The bound stated in R18 and tested in T19; a `LogFull` there is `Error::Internal` |
+| AC3 | The last compaction time, carried over a reopen, only moved the first retry after a failed compaction from the 60 000 ms probe to 600 000 ms | Low | `last_compaction` and `set_last_compaction` removed; 021 R18, Security; 027 R14, R15 |
+| AC4 | 021 R18 restated spec 020 R11 | Low | Cited |
+
 ## Audit AB: name comparison
 
 **2026-10-04 — Audit AB, a subtraction audit of the state layer before spec 021 is implemented: four read-only agents looked for rules that can be removed without weakening security, one area each. This section is the name comparison of ADR 0036; the human reviewer approved the recommendation.** Names are not what authenticates a member: every unknown key is drawn grey, quoted, with the unknown mark and its own short identifier, and only the 12 words or the QR verify it (`docs/spec.md` §7). The look-alike pipeline added a warning on top of that mark at the cost of two Unicode crates on the impersonator's path, a fuzz target and three High findings of audit J. None of spec 022 was implemented, so the change is to text only.
