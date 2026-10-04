@@ -56,3 +56,4 @@ One decision per file, template in `TEMPLATE.md`. The documentation lint (spec 0
 | 0041 | Open every client's server connections through one Rust host | 2026-09-27 | accepted |
 | 0042 | Prove strict Ed25519 with published cases a lax verifier accepts | 2026-10-01 | accepted |
 | 0043 | Compare names by lowercase with white space and invisible characters removed | 2026-10-04 | accepted |
+| 0044 | Measure a message's life in the client from its signed send time alone | 2026-10-04 | accepted |
