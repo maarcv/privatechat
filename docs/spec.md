@@ -101,13 +101,14 @@ Each row corresponds to the file `docs/adr/NNNN-*.md`; titles are copied verbati
 | 0033 | Seal every `key_retired` with the last counter | accepted | A thief cannot make a retirement `Replay` by writing first |
 | 0034 | Publish no stale `outbox` entry, and re-seal a pending `key_retired` | accepted | No message leaves already stale; a retirement written offline still arrives |
 | 0035 | Bind every log entry to its place and name channel directories by a keyed hash | accepted | No entry can be moved, repeated or carried over; a seized disk does not name its channels |
-| 0036 | Compare names with the unicode-rs normalisation and confusable tables | accepted | The impersonation check needs Unicode data that hand-written tables would get wrong |
+| 0036 | Compare names with the unicode-rs normalisation and confusable tables | superseded by 0043 | The impersonation check needs Unicode data that hand-written tables would get wrong |
 | 0037 | Expose one `Device` handle at the core boundary | accepted | The clients' bindings cannot move or borrow objects; one handle called by id can |
 | 0038 | Allow a plain `ws://` server URL for `.onion` hosts only | accepted | An onion service already encrypts and authenticates; a `.onion` certificate is out of reach for most operators |
 | 0039 | Open the desktop client's TLS connections with rustls, in a workspace of its own | superseded by 0040 | The server accepts TLS 1.3 only, the OS stack on macOS lacks it, and the web view cannot use a SOCKS5 proxy |
 | 0040 | Check the desktop client's certificates with no network request of their own | superseded by 0041 | The OS verifier fetches revocation data outside Tor; rustls in a workspace of its own, its WebPKI verifier over the OS roots |
 | 0041 | Open every client's server connections through one Rust host | accepted | One implementation of the sockets, the proxy and TLS for the three clients; Mozilla's roots, since iOS lists none |
 | 0042 | Prove strict Ed25519 with published cases a lax verifier accepts | accepted | `010.json` gains the ed25519-speccheck cases, half of which a lax verifier accepts and the rest pin the cofactorless equation; it describes no format, so no version change |
+| 0043 | Compare names by lowercase with white space and invisible characters removed | accepted | Names are not what authenticates: look-alikes are left to the unknown mark and verification, and `core` needs no Unicode crate |
 
 ## 4. Cryptographic model
 
