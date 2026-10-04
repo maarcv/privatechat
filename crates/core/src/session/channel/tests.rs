@@ -3,8 +3,10 @@
 
 use super::{Channel, ClockOff, Gap, SessionCarry};
 use crate::Error;
-use crate::crypto::Secret;
+use crate::crypto::{Nonce, Secret};
 use crate::proto::config::Config;
+use crate::proto::envelope::{self, ChannelCtx, SenderKey, text_k1};
+use crate::proto::payload::{Payload, PayloadKind};
 use crate::storage::{Store, StoreError, Vault};
 use crate::testing::{
     FailingStore, Faults, MemoryStore, MemoryVault, batch, record, state_eq, state_for,
@@ -12,6 +14,7 @@ use crate::testing::{
 
 mod headroom;
 mod outbox;
+mod own_key;
 mod receive;
 mod send;
 mod status;
@@ -60,6 +63,60 @@ fn failing_channel(config: &Config) -> (Channel, MemoryStore, Faults) {
     let failing = Box::new(FailingStore::new(store, faults.clone()));
     let (channel, _) = Channel::create(config, failing).unwrap();
     (channel, handle, faults)
+}
+
+/// The channel of the 013 vectors, with `ttl_seconds`.
+fn vector_config(ttl_seconds: u32) -> Config {
+    let k_ch = Secret::from_bytes(text_k1::K_CH);
+    let name = text_k1::SUGGESTED_NAME;
+    Config::from_parts(
+        k_ch,
+        text_k1::SERVER_URL,
+        ttl_seconds,
+        name,
+        text_k1::CREATED_AT,
+    )
+    .unwrap()
+}
+
+/// A new channel of the 013 vectors with `ttl_seconds`, over a
+/// `FailingStore`; a handle to its store and its faults.
+fn receiver(ttl_seconds: u32) -> (Channel, MemoryStore, Faults) {
+    let config = vector_config(ttl_seconds);
+    let (store, handle) = store_for(&config);
+    let faults = Faults::new();
+    let failing = Box::new(FailingStore::new(store, faults.clone()));
+    let (channel, _) = Channel::create(&config, failing).unwrap();
+    (channel, handle, faults)
+}
+
+/// A text from the sender of `seed`, sealed for `channel`.
+fn text_from(channel: &Channel, seed: [u8; 32], counter: u64, sent_at: u64) -> Vec<u8> {
+    let payload = Payload {
+        kind: PayloadKind::Text,
+        display_name: Some("Bea".to_owned()),
+        sent_at,
+        body: b"hello".to_vec(),
+    };
+    seal(channel, seed, |ctx, sender, nonce| {
+        envelope::seal(ctx, sender, counter, nonce, &payload)
+    })
+}
+
+/// A blob of `seed` for `channel`, built by `build`.
+fn seal(
+    channel: &Channel,
+    seed: [u8; 32],
+    build: impl Fn(&ChannelCtx, &SenderKey, &Nonce) -> Result<envelope::Sealed, Error>,
+) -> Vec<u8> {
+    let ctx = ChannelCtx::from_config(channel.config()).unwrap();
+    let sender = SenderKey::from_seed(&Secret::from_bytes(seed)).unwrap();
+    build(&ctx, &sender, &Nonce([0x31; 24])).unwrap().blob
+}
+
+/// The `n`-th `server_id`.
+fn sid(n: u8) -> [u8; 16] {
+    [n; 16]
 }
 
 /// The channel the store of `handle` holds now.
