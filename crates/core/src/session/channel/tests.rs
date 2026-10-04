@@ -10,6 +10,9 @@ use crate::testing::{
     FailingStore, Faults, MemoryStore, MemoryVault, batch, record, state_eq, state_for,
 };
 
+mod headroom;
+mod send;
+
 const K_CH: [u8; 32] = [0xa5; 32];
 const SERVER: &str = "wss://example.org";
 
