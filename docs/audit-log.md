@@ -15,6 +15,20 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AC5 | An echo acknowledged an `outbox` entry whose `ack` was lost, or upgraded one already reported not delivered, under five conditions. That is delivery bookkeeping, not security, and the republish under the same `client_ref` (spec 030) already recovers a lost `ack` | Low | An echo is only `Replay`. 021 R3, R13, Security, T13; 028 R11, T11; `docs/spec.md` §4. Lost: one republished copy per lost `ack`, and an entry gone stale before the reconnect reads not delivered |
 | AC6 | Kept signatures were filtered by the `epoch` they were sealed under. That filter protects nothing: the echo of a retired key stops at step 5 first, and no blob of another key can carry a signature equal to one of them | Low | Every kept signature is compared, including those of `under_retired_key` entries. The record's `epoch` and `client_ref` (spec 020) are written but no longer read, until the next `store_version`. 021 R13, R15, R19, Security; 025 R3; `docs/spec.md` §4. The decisions of ADR 0029 and 0034 are unchanged, so no new ADR. The sentence in their Consequences saying these signatures are "dropped in the regeneration commit" now reads "never matched" |
 
+## Audit AB: name comparison
+
+**2026-10-04 — Audit AB, a subtraction audit of the state layer before spec 021 is implemented: four read-only agents looked for rules that can be removed without weakening security, one area each. This section is the name comparison of ADR 0036; the human reviewer approved the recommendation.** Names are not what authenticates a member: every unknown key is drawn grey, quoted, with the unknown mark and its own short identifier, and only the 12 words or the QR verify it (`docs/spec.md` §7). The look-alike pipeline added a warning on top of that mark at the cost of two Unicode crates on the impersonator's path, a fuzz target and three High findings of audit J. None of spec 022 was implemented, so the change is to text only.
+
+| # | Finding | Change |
+| --- | --- | --- |
+| AB-N1 | `name_key` ran NFKC, a UTS #39 skeleton twice, lowercase and three folds through `unicode-normalization` and `unicode-security`, for a warning the unknown mark already carries | ADR 0043 supersedes 0036: lowercase with white space and `INVISIBLE` removed, standard library only; look-alikes a stated residual (022 R4, Security, T04 pins the residual pairs as non-colliding; `docs/spec.md` §3, §7, §9) |
+| AB-N2 | `INVISIBLE` was tied to the Unicode version of a crate that is no longer a dependency, and pinned by a digest | The toolchain's `char::UNICODE_VERSION`, U+3164 and U+FFA0 listed directly since nothing normalises them, a range count and a version check (022 R5, T05) |
+| AB-N3 | The planned amendments of specs 010 (R16, T25) and 016 (R2, R8, R9) and the `name_key` fuzz target existed only for the two crates | Dropped; a property test stays, since `name_key` reads a `&str` the fuzzed payload decoder produced (022 R16, T16; 016 R2) |
+| AB-N4 | Without look-alike collisions, a label field filled from the suggested name would let the impersonator choose the bytes of the user's label | No label field is filled or completed from a suggested name (055 R15, T15) |
+| AB-N5 | 054 R17 `name_collides` and 026 refer to the comparison by reference | No text change in 054; 026's related ADR is 0043 |
+
+The `Unicode-3.0` licence stays in `deny.toml`: `unicode-ident`, through the proc macros of `zeroize_derive`, still needs it. The password rule of spec 011 R15 (`White_Space` as a separator) and the Cc rules are not name comparison and are unchanged.
+
 ## Reading of spec 020 R10–R15
 
 **2026-10-03 — The second reading the acceptance criterion of spec 020-store-files asks for: that every interruption of a commit, a compaction or a recovery leaves the previous commit or the new one.** The human reviewer read R10–R15 and found them sound; two agents read them independently, one from the spec's text and one from the code, under a model where a crash keeps any subset of the unsynced directory operations, in any order.

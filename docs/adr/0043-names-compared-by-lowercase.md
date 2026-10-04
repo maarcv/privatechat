@@ -1,0 +1,22 @@
+# ADR 0043 — Compare names by lowercase with white space and invisible characters removed
+
+Date: 2026-10-04 · Status: accepted · Supersedes: 0036
+
+## Context
+ADR 0036 made `core` depend on `unicode-normalization` and `unicode-security` so that `name_key` (spec 022-peers-tofu R4) could map look-alike names, such as "Аlice" with a Cyrillic А, "AIice" or "B0b", onto the name they imitate. Getting that pipeline right took three High findings in audit J (J-B3, J6-C1, J7-B2, `docs/audit-log.md`), and it still left a documented residual. The comparison decides no byte on the wire and authenticates nothing. It only raises the "claims to be" warning and the `LabelInUse` refusal of spec 022-peers-tofu R7, R13 and R14. What authenticates a member is the key. Every unknown key is already drawn in grey, quoted, with the "unknown key" mark and its own 4-word short identifier (`docs/spec.md` §7, spec 055-verify-ui R4), and only the 12 words or the QR make it verified. Audit AB, a subtraction audit of the state layer (`docs/audit-log.md`), weighed the pipeline against that and none of spec 022 is implemented yet.
+
+## Decision
+`name_key` is the Unicode lowercase mapping of the standard library (`str::to_lowercase`) of the text with every `White_Space` character (`char::is_whitespace`) and every character of the hand-written table `INVISIBLE` removed. `INVISIBLE` is General_Category Cf, `Default_Ignorable_Code_Point`, U+2028, U+2029, U+2800, U+3164 and U+FFA0, all of the Unicode version of the pinned toolchain (`char::UNICODE_VERSION`). `core` gains no dependency for names. Look-alike names in other scripts or forms are a stated residual, covered by the unknown mark, the short identifier and verification.
+
+## Alternatives considered
+- Keep ADR 0036: it catches the look-alikes of UTS #39 at the price of four crates on the path an impersonator controls, a seven-step pipeline that three audit rounds had to repair, a fuzz target and keys that change with the crates' Unicode version. It only adds a warning on top of a mark that already says "unknown".
+- Lowercase after NFKC, with `unicode-normalization` alone: it also catches full-width letters ("ＡＬＩＣＥ"). It brings back one dependency and its own Unicode version for one class of look-alike that the unknown mark already covers.
+- Byte-exact comparison: "alice" and "Alice", or a name with a zero-width space inside, would not collide. Those are the cases a user produces without meaning to, or an impostor produces with no effort.
+- No name comparison at all: it removes the `LabelInUse` rule of ADR 0006 ("must not reuse an existing label for an unverified key"), which is the main defence when a new key appears.
+
+## Consequences
+- `core` keeps its two runtime dependencies (`libsodium-sys-stable`, `zeroize`). Specs 010-primitives-wrapper R16 and T25 and 016-fuzz-harness R2, R8 and R9 are not amended for names. The function reads a `&str` that the fuzzed payload decoder has already produced, so it has a property test and no fuzz target (AGENTS 21 covers the functions that read external bytes).
+- An unknown key whose suggested name imitates a known one with letters from another script, full-width forms, digits for letters or combining marks no longer raises "Someone claims to be X". It still shows as an unknown with different words. Such a name can also be typed as a label by the user, which `LabelInUse` no longer stops. Spec 055-verify-ui therefore never fills the label field from a suggested name, so the attacker never chooses the label's bytes.
+- `clean_name` still strips the characters of `INVISIBLE` before any client draws a name. It is the rendering defence against bidi overrides, zero-width characters and fake line breaks, and it is independent of the comparison.
+- A toolchain bump that changes `char::UNICODE_VERSION` fails a test of spec 022-peers-tofu, so the table is re-read in a reviewed diff.
+- Affected specs: 016-fuzz-harness (the list of amending specs), 022-peers-tofu, 026-peer-limits, 054-qr-invite (its `name_collides` follows R4 by reference), 055-verify-ui; `docs/spec.md` §3, §7 and §9.
