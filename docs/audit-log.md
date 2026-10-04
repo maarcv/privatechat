@@ -20,6 +20,15 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AD10 | Duplications: the acceptance window in seven places, R11's listed time in `acked`, `acked` cloning a 64 KiB blob, the headroom constant redeclared in the tests, helpers copied across seven test files | Low | `accept_window`, `listed_time` shared, fields copied, the real `HEADROOM` and `RESERVE` pinned, helpers in `channel/tests.rs` |
 | AD11 | The no-logger step matched only `log` and `tracing*` | Low | It also matches `slog*`, `env_logger`, `log4rs` and `fern` |
 
+**Round 2.** Two passes: a fresh reading of R1–R33 with the round-1 fixes, which found them correct and no new defect; and 133 hand mutants of `session/`, 100 killed, 7 equivalent or untestable, 26 test gaps and no production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AD12 | `MemoryStore::commits()` does not count a commit that changes nothing, so every "commits nothing" assertion let an empty commit through, AD5's own test included | Medium | Those assertions count every commit (`all_commits`) |
+| AD13 | 26 mutants survived: the retiring key's own copy, a retired peer or the current key's entries treated as a thief's; `acked` on the `key_retired`; `max_counter` equality; the display-expiry edge; an unknown's `key_retired`; names and `last_seen`; peers-changed fields; the truncation window's edges; a compaction at a record's `purge_at`; and more | Medium | One test per gap (`channel/tests/edges.rs`); the five security-relevant mutants re-run and killed |
+| AD14 | The echo of a superseded `key_retired` copy reads as a thief's and reports delivered old-key entries as not delivered; `under_retired_key` stands for "the same key" across two regenerations | Low | Open questions 025-R2 and 025-R1, decided with spec 025; T09 pins today's behaviour |
+| AD15 | `for_fuzzing` took the seed by value against the Interface | Nit | By reference, as the Interface says |
+
 Left as they are: the linear scans of the log per push (about 0.5–1 ms at a full 64 MiB log; an index only if spec 028's budget asks for it); `Received`, `Gap` and `Sender` derive a `Debug` that prints a whole `pk` (the core writes no log; clients must not log them); the Consequences of ADR 0029 and 0034 say a retired key's kept signatures are dropped at regeneration, while 021 R15 and §4 keep them until their purge (the specs govern; the ADRs are history); a stale pending `key_retired` is handed out unchanged until spec 025 brings its re-seal.
 
 ## Audit AC
