@@ -6,7 +6,7 @@
 //! nothing, and a crate-internal `_verdict` twin that returns what the input
 //! reached, for the tests of this spec. Each calls the real function with
 //! fixed inputs: the channel and the sender of the 013 vector `text_k1` for
-//! the envelope, `now = 0` for the config, the channel of 011
+//! the envelope and the channel, `now = 0` for the config, the channel of 011
 //! `config_reference` for the verification QR. None adds logic of its own;
 //! the only sealing, for `receive_signed`, is spec 013's `seal_padded`.
 
@@ -18,6 +18,7 @@ use crate::proto::fingerprint;
 use crate::proto::payload::{MAX_BLOCKS, PAD_BLOCK, Payload};
 use crate::proto::record::UnknownKeys;
 use crate::proto::record::test_schema::{TypesRecord, decode_test_record};
+use crate::session::channel::{Channel, Received};
 use crate::storage::{ChannelState, LogRecord, Settings, StoreError};
 
 #[cfg(test)]
@@ -92,6 +93,14 @@ pub fn log_record_decode(data: &[u8]) {
 /// `Settings::open` after the box.
 pub fn settings_decode(data: &[u8]) {
     let _ = settings_decode_verdict(data);
+}
+
+/// `channel_decrypt`: `BE64(received_at) ‖ BE64(now) ‖ server_id ‖ blob`,
+/// through `decrypt` of a new channel of `text_k1` whose own key is the
+/// sender of `text_k1`, so that the own-key branch is reached (spec
+/// 021-channel-session R29).
+pub fn channel_decrypt(data: &[u8]) {
+    let _ = channel_decrypt_verdict(data);
 }
 
 /// The verdict of `record_decode`; `None` for an input with no policy byte.
@@ -171,6 +180,20 @@ pub(crate) fn settings_decode_verdict(data: &[u8]) -> Result<(), StoreError> {
     Settings::decode(data).map(|_| ())
 }
 
+/// The verdict of `channel_decrypt`; `None` for an input shorter than its
+/// two times and its `server_id`.
+pub(crate) fn channel_decrypt_verdict(data: &[u8]) -> Option<Result<Option<Received>, Error>> {
+    let (received_at, rest) = data.split_first_chunk::<8>()?;
+    let (now, rest) = rest.split_first_chunk::<8>()?;
+    let (server_id, blob) = rest.split_first_chunk::<16>()?;
+    let (received_at, now) = (u64::from_be_bytes(*received_at), u64::from_be_bytes(*now));
+    Some(text_k1_config().and_then(|config| {
+        let own = Secret::from_bytes(text_k1::SENDER_SEED);
+        let mut channel = Channel::for_fuzzing(&config, &own)?;
+        channel.decrypt(blob, *server_id, received_at, now)
+    }))
+}
+
 /// `verify`, then `open`, in the channel `ctx`.
 fn verify_and_open(
     ctx: &ChannelCtx,
@@ -183,12 +206,16 @@ fn verify_and_open(
 
 /// The channel of the 013 vector `text_k1`.
 fn context() -> Result<ChannelCtx, Error> {
-    let config = Config::from_parts(
+    ChannelCtx::from_config(&text_k1_config()?)
+}
+
+/// The config of the 013 vector `text_k1`.
+fn text_k1_config() -> Result<Config, Error> {
+    Config::from_parts(
         Secret::from_bytes(text_k1::K_CH),
         text_k1::SERVER_URL,
         text_k1::TTL_SECONDS,
         text_k1::SUGGESTED_NAME,
         text_k1::CREATED_AT,
-    )?;
-    ChannelCtx::from_config(&config)
+    )
 }

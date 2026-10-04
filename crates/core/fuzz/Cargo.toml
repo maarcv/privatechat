@@ -87,3 +87,10 @@ path = "fuzz_targets/settings_decode.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "channel_decrypt"
+path = "fuzz_targets/channel_decrypt.rs"
+test = false
+doc = false
+bench = false
