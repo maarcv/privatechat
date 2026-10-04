@@ -2,7 +2,7 @@
 
 Status: accepted
 Phase: 2
-Related ADRs: 0006, 0036
+Related ADRs: 0006, 0043
 Depends on: 021-channel-session, 022-peers-tofu, 024-key-retired
 Blocks: 027-core-api, 055-verify-ui
 Human reviewer: Marc Vilardebó · Accepted on: 2026-09-28
@@ -113,3 +113,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-09-25 open questions decided with the human reviewer, recommendations accepted (`docs/audit-log.md`)
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the card counts point to spec 055
 - 2026-09-28 accepted (Marc Vilardebó)
+- 2026-10-04 ADR 0036 superseded by ADR 0043 (`docs/audit-log.md`, audit AB): the name comparison of spec 022-peers-tofu R4 is lowercase with white space and invisible characters removed
