@@ -2,6 +2,26 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AD
+
+**2026-10-04 — Audit AD, the code audit of spec 021-channel-session (branches `021-a1` to `021-e`, PRs #19–#27), round 1 of three read-only passes (A: R1–R12, R18, R20, R21, R24, R26, R33; B: the own key and the `outbox`, R9 step 5, R13–R17, R19, R22, R23, R25, R31; C: code quality, tests, fuzz and property).** No blocker; no path found by which a server or a thief raises a false alarm while a signature is kept, shortens a signature's retention, removes the pending `key_retired`, or leaves memory and disk out of step. The human reviewer took every recommendation of the four decisions (AD1–AD4).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AD1 | 016 R10 forbade randomness in a target, while the `MemoryStore` that 021 R29 requires draws sealing nonces; the verdict never depends on them | Low | 016 R10 bounds what decides the verdict (decision) |
+| AD2 | R9's step-5 removal for the key being retired was bounded only by "within reach"; T09 asked an old blob to remove nothing, and an old-key entry dropped as stale but stored by the server would echo as a "thief" | Medium | R9, R19: also not past one `ttl_ms + 360 000`, as R14; an AEAD that does not open is `RetiredKey`; T09 restated against `now` (decision) |
+| AD3 | A stale message's type is never read (013 R12), so "every entry for a `key_retired`" cannot apply to a stale one; T19 passed only because it sealed at `2^64 − 1` | Low | R14, R19, T19: every entry only for a readable, not stale `key_retired` (decision) |
+| AD4 | AGENTS 22 allowed `==` on public identifiers "as map keys or for ordering"; the code also looks them up linearly | Low | AGENTS 22: "as map keys, in lookups or for ordering" (decision) |
+| AD5 | A stale foreign own-key blob committed the full state on every push even when nothing changed, and it leaves no seen record, so a server could make the device write without bound | Medium | R14: a stale own-key blob that changes nothing commits nothing; test of 19 repeated pushes |
+| AD6 | A rejected push could commit a waiting `synced_at` (R3 says only the cursor) | Low | `decrypt` commits only when the cursor's minute changed; test |
+| AD7 | A backlog sample could turn a live sample's `clock_off` into its own and clear it later (R25) | Low | Only a live sample changes a live sample's flag |
+| AD8 | `check_own_key` turned a libsodium failure in `verify` into `false` | Low | `Internal` passes through |
+| AD9 | Tests that a mutant survived: `max_counter`, the cursor's `max`, `storage_full`, a plain `RetiredKey`, the `truncated_at` clamp in the gaps, R5's other `channel_id`, R7's headroom order, R17's same key, R22's edge, the thief's far-future and counter bounds, a `key_retired` below its entries, the pending cursor in `check_own_key`, the R15 echo after a regeneration, the R14 verdicts, the `clock_off` margins, and the R30 failure that never had to fire | Medium | Each clause tested; the property asserts that its one failure fired |
+| AD10 | Duplications: the acceptance window in seven places, R11's listed time in `acked`, `acked` cloning a 64 KiB blob, the headroom constant redeclared in the tests, helpers copied across seven test files | Low | `accept_window`, `listed_time` shared, fields copied, the real `HEADROOM` and `RESERVE` pinned, helpers in `channel/tests.rs` |
+| AD11 | The no-logger step matched only `log` and `tracing*` | Low | It also matches `slog*`, `env_logger`, `log4rs` and `fern` |
+
+Left as they are: the linear scans of the log per push (about 0.5–1 ms at a full 64 MiB log; an index only if spec 028's budget asks for it); `Received`, `Gap` and `Sender` derive a `Debug` that prints a whole `pk` (the core writes no log; clients must not log them); the Consequences of ADR 0029 and 0034 say a retired key's kept signatures are dropped at regeneration, while 021 R15 and §4 keep them until their purge (the specs govern; the ADRs are history); a stale pending `key_retired` is handed out unchanged until spec 025 brings its re-seal.
+
 ## Audit AC
 
 **2026-10-04 — Audit AC, a subtraction audit of the state layer before spec 021-channel-session is implemented.** Sixteen audits had added rules to specs 020–028 and removed none. Read-only passes looked for rules that cost more than they protect: store failure, the own echo and the `sent_at` windows (name comparison is Audit AB). The human reviewer took every recommendation. Each change removes a rule; none adds a defence.
