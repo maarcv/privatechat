@@ -7,7 +7,7 @@ use zeroize::Zeroizing;
 use super::{Channel, ClientRef};
 use crate::crypto::{self, Nonce, Signature};
 use crate::error::Error;
-use crate::proto::envelope::{self, ChannelCtx, EXPIRY_MARGIN_MS, SenderKey, ttl_ms};
+use crate::proto::envelope::{self, ChannelCtx, SenderKey};
 use crate::proto::payload::{Payload, PayloadKind};
 use crate::storage::state::MAX_OUTBOX;
 use crate::storage::state::items::{OutboxEntry, OutboxKind};
@@ -22,9 +22,6 @@ const EXHAUSTED: u64 = u64::MAX;
 
 /// `sent_at` is a whole minute (spec 013-wire-message R8).
 const MINUTE_MS: u64 = 60_000;
-
-/// The minute of grace an entry in flight gets for its `ack` (R22).
-const ACK_GRACE_MS: u64 = 60_000;
 
 impl Channel {
     /// Seals `body` with the next counter and commits the counter, the
@@ -118,28 +115,5 @@ impl Channel {
             .map(|entry| ClientRef {
                 bytes: entry.client_ref,
             })
-    }
-
-    /// The `outbox` entries that are not the `key_retired`.
-    fn ordinary_outbox(&self) -> impl Iterator<Item = &OutboxEntry> {
-        self.state
-            .outbox
-            .iter()
-            .filter(|entry| entry.kind == OutboxKind::Text)
-    }
-
-    /// `ttl_ms` of the channel (R21).
-    pub(super) fn ttl_ms(&self) -> u64 {
-        ttl_ms(self.config.ttl_seconds())
-    }
-
-    /// The `purge_at` of one's own message (R26): reported not delivered at
-    /// the latest moment R22 allows, it stays visible as failed one more
-    /// TTL.
-    fn own_purge_at(&self, sent_at: u64) -> u64 {
-        sent_at
-            .saturating_add(self.ttl_ms().saturating_mul(2))
-            .saturating_add(EXPIRY_MARGIN_MS)
-            .saturating_add(ACK_GRACE_MS)
     }
 }

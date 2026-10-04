@@ -11,6 +11,7 @@ use crate::testing::{
 };
 
 mod headroom;
+mod outbox;
 mod send;
 
 const K_CH: [u8; 32] = [0xa5; 32];
@@ -22,10 +23,20 @@ fn config_on(server_url: &str) -> Config {
     Config::from_parts(Secret::from_bytes(K_CH), server_url, 3_600, "room", 0).unwrap()
 }
 
+/// A channel of `ttl_seconds` on `SERVER`.
+fn config_with(ttl_seconds: u32) -> Config {
+    Config::from_parts(Secret::from_bytes(K_CH), SERVER, ttl_seconds, "room", 0).unwrap()
+}
+
 /// A new store for the channel of `config_on(SERVER)`, and a handle to it.
 fn new_store() -> (Box<dyn Store>, MemoryStore) {
+    store_for(&config_on(SERVER))
+}
+
+/// A new store for the channel of `config`, and a handle to it.
+fn store_for(config: &Config) -> (Box<dyn Store>, MemoryStore) {
     let mut vault = MemoryVault::new();
-    let store = vault.create(&config_on(SERVER).channel_id()).unwrap();
+    let store = vault.create(&config.channel_id()).unwrap();
     let handle = MemoryStore::handle(&vault, *store.name());
     (store, handle)
 }
@@ -36,6 +47,16 @@ fn new_channel() -> (Channel, MemoryStore) {
     let (channel, created) = Channel::create(&config_on(SERVER), store).unwrap();
     assert!(created);
     (channel, handle)
+}
+
+/// A new channel of `config` over a `FailingStore`, a handle to its store
+/// and its faults.
+fn failing_channel(config: &Config) -> (Channel, MemoryStore, Faults) {
+    let (store, handle) = store_for(config);
+    let faults = Faults::new();
+    let failing = Box::new(FailingStore::new(store, faults.clone()));
+    let (channel, _) = Channel::create(config, failing).unwrap();
+    (channel, handle, faults)
 }
 
 /// The channel the store of `handle` holds now.
