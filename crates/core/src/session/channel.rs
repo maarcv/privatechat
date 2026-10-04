@@ -14,9 +14,10 @@ use crate::crypto::{self, Secret};
 use crate::error::Error;
 use crate::proto::config::Config;
 use crate::proto::envelope::{EXPIRY_MARGIN_MS, ttl_ms};
-use crate::storage::state::items::{OutboxEntry, OutboxKind};
+use crate::storage::state::items::{OutboxEntry, OutboxKind, PeerRecord};
 use crate::storage::{ChannelState, DirName, LogRecord, Store, StoreError, WriteBatch};
 
+mod gaps;
 mod headroom;
 mod outbox;
 mod own_key;
@@ -222,6 +223,9 @@ pub(crate) struct Channel {
     carry: SessionCarry,
     /// The outcomes queued for `take_outcomes` (R1).
     outcomes: Vec<Outcome>,
+    /// A peer, one's own name or a gap changed since `take_peers_changed`
+    /// (R1).
+    peers_changed: bool,
     /// The `now` of the last compaction attempt (R18).
     last_compaction: Option<u64>,
     /// The `now` of the latest call that took one (R25).
@@ -329,9 +333,17 @@ impl Channel {
             records,
             carry: SessionCarry::default(),
             outcomes: Vec::new(),
+            peers_changed: true,
             last_compaction: None,
             latest_now: None,
         }
+    }
+
+    /// Whether a peer, one's own name or a gap changed since the last call,
+    /// so that the client re-reads its lists only then (R1, spec
+    /// 022-peers-tofu R13).
+    pub(crate) fn take_peers_changed(&mut self) -> bool {
+        core::mem::take(&mut self.peers_changed)
     }
 
     /// A copy of the committed state carrying the in-session values every
@@ -373,11 +385,30 @@ impl Channel {
         let batch = WriteBatch::new(state, records);
         self.store.commit(&batch)?;
         let (state, records) = batch.into_parts();
+        self.peers_changed |= peers_differ(&self.state, &state);
         self.expiry.extend(&records);
         self.records.extend(records);
         self.state = state;
         Ok(())
     }
+}
+
+/// Whether a commit from `old` to `new` created or removed a peer record,
+/// changed what a client shows of one, or changed one's own name; not
+/// `last_seen` or `max_counter` alone (R1).
+fn peers_differ(old: &ChannelState, new: &ChannelState) -> bool {
+    let shown = |peer: &PeerRecord| {
+        (
+            peer.pk.0,
+            peer.label.clone(),
+            peer.verified,
+            peer.muted,
+            peer.retired_at,
+            peer.last_display_name.as_ref().map(|name| name.to_vec()),
+        )
+    };
+    let peers = |state: &ChannelState| state.peers.iter().map(shown).collect::<Vec<_>>();
+    old.own_display_name != new.own_display_name || peers(old) != peers(new)
 }
 
 /// The first state of a new channel (R4): a fresh identity, nothing sent or

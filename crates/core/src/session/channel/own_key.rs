@@ -5,9 +5,9 @@
 
 use super::receive::Arrival;
 use super::{Channel, ClientRef, Received, Sender};
-use crate::crypto;
+use crate::crypto::{self, PublicKey};
 use crate::error::Error;
-use crate::proto::envelope::{self, EXPIRY_MARGIN_MS, Opened, Verified};
+use crate::proto::envelope::{self, EXPIRY_MARGIN_MS, Opened, SenderKey, Verified};
 use crate::proto::payload::PayloadKind;
 use crate::storage::{ChannelState, LogEntry, LogRecord};
 
@@ -53,6 +53,71 @@ impl Channel {
         received.map(Some).ok_or(Error::Expired)
     }
 
+    /// Step 5 for a blob of the key being retired (R9, spec
+    /// 025-identity-regen): one that is not the sealed copy of one of its
+    /// own entries comes from a thief, and when a member could still
+    /// accept it, the entries of the old key at or below its counter are
+    /// removed as not delivered, since receivers that took it reject them;
+    /// never the pending `key_retired`.
+    ///
+    /// # Errors
+    ///
+    /// `RetiredKey`, after that commit; `Store` when it fails.
+    pub(super) fn overtaken_by_thief(
+        &mut self,
+        verified: Verified<'_>,
+        now: u64,
+    ) -> Result<Option<Received>, Error> {
+        let signature = verified.signature();
+        let sealed_here = self
+            .state
+            .outbox
+            .iter()
+            .any(|entry| crypto::ct_eq(&entry.signature.0, signature));
+        if sealed_here {
+            return Err(Error::RetiredKey);
+        }
+        let opened = verified.open()?;
+        // As for one's own key (R14): a blob no member accepts any more, or
+        // none could yet, overtakes nothing.
+        if self.past_window(opened.sent_at, now) || !self.within_reach(opened.sent_at, now) {
+            return Err(Error::RetiredKey);
+        }
+        let mut next = self.next_state();
+        let mut records = Vec::new();
+        let removed = self.remove_entries(&mut next, &mut records, |entry| {
+            entry.under_retired_key && entry.counter <= opened.counter
+        });
+        if !removed.is_empty() {
+            self.commit(next, records)?;
+            self.queue_not_delivered(&removed);
+        }
+        Err(Error::RetiredKey)
+    }
+
+    /// The key whose `key_retired` is pending (spec 025-identity-regen).
+    ///
+    /// # Errors
+    ///
+    /// `Internal` when libsodium fails.
+    pub(super) fn is_retiring(&self, pk: &PublicKey) -> Result<bool, Error> {
+        let Some(seed) = &self.state.retiring_seed else {
+            return Ok(false);
+        };
+        let old = SenderKey::from_seed(seed)?;
+        Ok(crypto::ct_eq(&old.public().0, &pk.0))
+    }
+
+    /// Whether a member could still accept a message dated `sent_at`: the
+    /// latest date a copy the server keeps for one TTL could be accepted by
+    /// a member whose clock is off by the margin, or no readable date
+    /// (R14).
+    pub(super) fn within_reach(&self, sent_at: Option<u64>, now: u64) -> bool {
+        let window = self.ttl_ms().saturating_add(EXPIRY_MARGIN_MS);
+        let reach = now.saturating_add(window.saturating_mul(2));
+        sent_at.is_none_or(|sent_at| sent_at <= reach)
+    }
+
     /// The signature of a kept-signature record or of an `outbox` entry,
     /// under `ct_eq`, whatever key sealed it (R13, R15).
     fn is_echo(&self, signature: &[u8; 64]) -> bool {
@@ -90,11 +155,7 @@ impl Channel {
             }
             next.read_only |= key_retired;
         }
-        // The latest date a copy the server keeps for one TTL could still
-        // be accepted by a member whose clock is off by the margin.
-        let window = self.ttl_ms().saturating_add(EXPIRY_MARGIN_MS);
-        let reach = now.saturating_add(window.saturating_mul(2));
-        if opened.sent_at.is_some_and(|sent_at| sent_at > reach) {
+        if !self.within_reach(opened.sent_at, now) {
             return Vec::new();
         }
         self.remove_entries(next, records, |entry| {
