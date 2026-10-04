@@ -51,6 +51,13 @@ jobs:
       - name: s016_t12_r12_clippy_under_cfg_fuzzing
         # `fuzz_entry` compiles only under `--cfg fuzzing` outside tests (spec 016).
         run: RUSTFLAGS="--cfg fuzzing" cargo clippy -p privatechat-core -- -D warnings
+      - name: s010_t26_r17_clippy_paths_resolve
+        # A `disallowed-methods` path clippy cannot resolve guards nothing, and clippy only
+        # warns of it even under -D warnings; `touch` makes it lint `core` again.
+        run: |
+          touch crates/core/src/lib.rs
+          out="$(cargo clippy -p privatechat-core -- -D warnings 2>&1)"
+          if printf '%s\n' "$out" | grep 'does not refer to'; then exit 1; fi
 
   test:
     name: test
@@ -66,12 +73,26 @@ jobs:
       - name: s020_t23_r23_io_in_one_module
         # Every system call of store in crates/store/src/fs.rs; the script tests itself first.
         run: scripts/check_store_io.sh
+      - name: s020_t31_r31_golden_files_unchanged
+        # The golden files of spec 020 are never regenerated (R31).
+        run: cd crates/store/tests/golden/v1 && sha256sum -c SHA256SUMS
       - name: s015_t06_r06_reference_script
         # The reference script rewrites specs/vectors/; any difference from the commit fails.
         run: |
           python3 scripts/reference/vectors.py
           changed="$(git status --porcelain -- specs/vectors)"
           if [ -n "$changed" ]; then echo "$changed"; git diff -- specs/vectors; exit 1; fi
+
+  store-macos:
+    name: store-macos
+    # The commit order and its crash points on a second file system (spec 020 R23).
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install # from rust-toolchain.toml
+      - uses: Swatinem/rust-cache@v2
+      - name: s020_t10_r10_commit_order_on_macos
+        run: cargo test -p privatechat-store s020_t
 
   deny:
     name: deny
