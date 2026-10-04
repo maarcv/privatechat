@@ -1,7 +1,10 @@
 //! Tests of the own-key check under a full log (R19) and of the reserve of
 //! R18 it relies on.
 
-use super::{fill, receiver, retiring, seal, text_from};
+use super::{
+    FULL, HEADROOM, HOUR_MS, LIVE, MARGIN_MS, NOW, counters, fill, own_text, plant_retirement,
+    receiver, reopened, retiring, seal, text_from,
+};
 use crate::Error;
 use crate::proto::envelope;
 use crate::proto::payload::{Payload, PayloadKind};
@@ -9,26 +12,8 @@ use crate::session::channel::{Channel, ClientRef};
 use crate::storage::{LogEntry, StoreError};
 use crate::testing::{Faults, MemoryStore};
 
-/// A whole minute.
-const NOW: u64 = 1_790_000_040_000;
-const HOUR_MS: u64 = 3_600_000;
-const MARGIN_MS: u64 = 360_000;
-const LIVE: u64 = NOW + 36_000_000;
-const FULL: u64 = 67_108_864;
-const HEADROOM: u64 = 1_114_156;
-
-/// A text sealed with this channel's own key elsewhere.
-fn own_text(channel: &Channel, counter: u64, sent_at: u64) -> Vec<u8> {
-    text_from(
-        channel,
-        *channel.state.identity_seed.expose(),
-        counter,
-        sent_at,
-    )
-}
-
 /// A `key_retired` sealed with this channel's own key elsewhere.
-fn own_key_retired(channel: &Channel, sent_at: u64) -> Vec<u8> {
+fn own_key_retired(channel: &Channel, counter: u64, sent_at: u64) -> Vec<u8> {
     let payload = Payload {
         kind: PayloadKind::KeyRetired,
         display_name: None,
@@ -37,7 +22,7 @@ fn own_key_retired(channel: &Channel, sent_at: u64) -> Vec<u8> {
     };
     let seed = *channel.state.identity_seed.expose();
     seal(channel, seed, |ctx, sender, nonce| {
-        envelope::seal(ctx, sender, u64::MAX, nonce, &payload)
+        envelope::seal(ctx, sender, counter, nonce, &payload)
     })
 }
 
@@ -53,16 +38,6 @@ fn stalled() -> (Channel, MemoryStore, Faults, Vec<ClientRef>) {
         .collect();
     fill(&mut channel, LIVE, FULL - HEADROOM + 1);
     (channel, handle, faults, entries)
-}
-
-/// The counters still in the `outbox`.
-fn counters(channel: &Channel) -> Vec<u64> {
-    channel
-        .state
-        .outbox
-        .iter()
-        .map(|entry| entry.counter)
-        .collect()
 }
 
 /// Spec 021, R19: under a full log, a foreign blob of one's own key raises
@@ -116,9 +91,10 @@ fn s021_t19_r19_reserve_bound() {
     let entries: Vec<ClientRef> = (0..31)
         .map(|_| channel.encrypt("mine", None, NOW).unwrap())
         .collect();
-    super::plant_retirement(&mut channel);
+    plant_retirement(&mut channel);
     fill(&mut channel, LIVE, FULL - HEADROOM + 1);
-    for (n, entry) in entries.iter().enumerate().rev() {
+    // In order: each leaves its acked record, the larger one.
+    for (n, entry) in entries.iter().enumerate() {
         let server_id = [u8::try_from(n).unwrap(); 16];
         channel.acked(*entry, server_id, NOW, NOW).unwrap();
     }
@@ -138,13 +114,13 @@ fn s021_t19_r19_verdicts() {
 
     // A fresh `key_retired`: every entry, and `read_only`.
     let (mut channel, _, _, _) = stalled();
-    let retired = own_key_retired(&channel, NOW);
+    let retired = own_key_retired(&channel, u64::MAX, NOW);
     assert_eq!(channel.check_own_key(&retired, NOW, NOW), Ok(true));
     assert!(counters(&channel).is_empty() && channel.status().read_only);
 
     // A stale one within reach: every entry, but no `read_only`.
     let (mut channel, _, _, _) = stalled();
-    let retired = own_key_retired(&channel, NOW + HOUR_MS + 420_000);
+    let retired = own_key_retired(&channel, u64::MAX, NOW + HOUR_MS + 420_000);
     assert_eq!(channel.check_own_key(&retired, NOW, NOW), Ok(true));
     assert!(counters(&channel).is_empty() && !channel.status().read_only);
     assert!(channel.status().own_key_used_elsewhere);
@@ -157,7 +133,7 @@ fn s021_t19_r19_verdicts() {
     channel.acked(sent, [1; 16], NOW, NOW).unwrap();
     let later = NOW + 2 * (HOUR_MS + MARGIN_MS) + 60_000;
     channel.store.compact(&channel.state, later).unwrap();
-    let mut channel = super::reopened(&handle);
+    let mut channel = reopened(&handle);
     let commits = handle.commits();
     assert_eq!(channel.check_own_key(&blob, later, later), Ok(false));
     assert!(!channel.status().own_key_used_elsewhere);
@@ -168,12 +144,16 @@ fn s021_t19_r19_verdicts() {
 /// a failed commit that keeps nothing in memory.
 #[test]
 fn s021_t19_r19_retiring_and_failures() {
-    for sent_at in [NOW, NOW + HOUR_MS + 420_000] {
+    for (sent_at, kept) in [
+        (NOW, &[u64::MAX][..]),
+        (NOW + HOUR_MS + 420_000, &[u64::MAX]),
+        (NOW + 2 * HOUR_MS + 780_000, &[300, 301, u64::MAX]),
+    ] {
         let (mut channel, _, _, old_seed, _) = retiring();
         fill(&mut channel, LIVE, FULL - HEADROOM + 1);
         let thief = text_from(&channel, old_seed, 1_000, sent_at);
         assert_eq!(channel.check_own_key(&thief, NOW, NOW), Ok(false));
-        assert_eq!(counters(&channel), [u64::MAX], "{sent_at}");
+        assert_eq!(counters(&channel), kept, "{sent_at}");
     }
     let (mut channel, _, faults, old_seed, _) = retiring();
     let thief = text_from(&channel, old_seed, 1_000, NOW);
@@ -193,4 +173,17 @@ fn s021_t19_r19_retiring_and_failures() {
     assert_eq!(channel.check_own_key(&foreign, NOW, NOW), Ok(true));
     assert!(channel.status().own_key_used_elsewhere);
     assert!(counters(&channel).is_empty());
+}
+
+/// Spec 021, R14 and R19: a fresh `key_retired` removes every ordinary
+/// entry whatever its counter; the check commits no pending cursor.
+#[test]
+fn s021_t19_r19_key_retired_and_cursor() {
+    let (mut channel, handle, _, _) = stalled();
+    let retired = own_key_retired(&channel, 5, NOW);
+    channel.cursor = Some(NOW);
+    assert_eq!(channel.check_own_key(&retired, NOW, NOW), Ok(true));
+    assert!(counters(&channel).is_empty() && channel.status().read_only);
+    assert_eq!(super::reopened(&handle).cursor(), None);
+    assert_eq!(channel.cursor(), Some(NOW));
 }

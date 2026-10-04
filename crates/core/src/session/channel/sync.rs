@@ -52,8 +52,17 @@ impl Channel {
 
     /// Commits the pending values when the cursor or `synced_at` alone
     /// make a commit due (R20).
-    pub(super) fn commit_pending(&mut self, now: u64) -> Result<(), Error> {
+    fn commit_pending(&mut self, now: u64) -> Result<(), Error> {
         if self.cursor_due() || self.synced_at_due(now) {
+            self.commit(self.next_state(), Vec::new())?;
+        }
+        Ok(())
+    }
+
+    /// Commits the pending values when the cursor's minute changed: the
+    /// one commit a rejected push may make (R3, R20).
+    pub(super) fn commit_cursor(&mut self) -> Result<(), Error> {
+        if self.cursor_due() {
             self.commit(self.next_state(), Vec::new())?;
         }
         Ok(())

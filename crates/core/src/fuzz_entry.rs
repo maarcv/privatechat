@@ -189,7 +189,7 @@ pub(crate) fn channel_decrypt_verdict(data: &[u8]) -> Option<Result<Option<Recei
     let (received_at, now) = (u64::from_be_bytes(*received_at), u64::from_be_bytes(*now));
     Some(text_k1_config().and_then(|config| {
         let own = Secret::from_bytes(text_k1::SENDER_SEED);
-        let mut channel = Channel::for_fuzzing(&config, &own)?;
+        let mut channel = Channel::for_fuzzing(&config, own)?;
         channel.decrypt(blob, *server_id, received_at, now)
     }))
 }

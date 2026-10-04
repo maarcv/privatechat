@@ -1,10 +1,12 @@
 //! The fuzz target's verdict function (R29) and the exchange property of
 //! R30.
 
+use std::cell::Cell;
+
 use proptest::collection::vec;
 use proptest::prelude::{ProptestConfig, proptest};
 
-use super::{config_with, store_for};
+use super::{NOW, config_with, store_for};
 use crate::Error;
 use crate::fuzz_entry::channel_decrypt_verdict;
 use crate::session::channel::{AckOutcome, Channel, MessageContent, Sender};
@@ -12,8 +14,6 @@ use crate::storage::StoreError;
 use crate::testing::{FailingStore, Faults, MemoryStore, records_eq, state_eq};
 use crate::vectors::{self, Vector};
 
-/// A whole minute.
-const NOW: u64 = 1_790_000_040_000;
 const MESSAGES: u64 = 1_000;
 
 /// The seed layout of R29: the two times, a `server_id`, the blob.
@@ -89,10 +89,14 @@ fn s021_t29_r29_channel_decrypt_target() {
     assert_eq!(channel_decrypt_verdict(&[0; 31]).map(|_| ()), None);
 }
 
-/// Runs `call` again once when the injected failure hit it.
-fn retried<T>(mut call: impl FnMut() -> Result<T, Error>) -> Result<T, Error> {
+/// Runs `call` again once when the injected failure hit it, counting the
+/// failures in `failed`.
+fn retried<T>(failed: &Cell<u32>, mut call: impl FnMut() -> Result<T, Error>) -> Result<T, Error> {
     match call() {
-        Err(Error::Store(StoreError::Io)) => call(),
+        Err(Error::Store(StoreError::Io)) => {
+            failed.set(failed.get() + 1);
+            call()
+        }
         other => other,
     }
 }
@@ -111,19 +115,20 @@ fn exchange(fail_at: u32, doubles: &[u8]) {
         })
         .collect();
     faults.fail_at(fail_at);
+    let failed = Cell::new(0);
     let mut received = [Vec::new(), Vec::new()];
     for i in 0..MESSAGES {
         let now = NOW + i * 1_000;
         let from = usize::try_from(i % 2).unwrap();
         let body = format!("message {i}");
         let sender = &mut members[from].0;
-        let client_ref = retried(|| sender.encrypt(&body, None, now)).unwrap();
-        let step = retried(|| sender.outbox(now, &[], false)).unwrap();
+        let client_ref = retried(&failed, || sender.encrypt(&body, None, now)).unwrap();
+        let step = retried(&failed, || sender.outbox(now, &[], false)).unwrap();
         assert_eq!(step.publish.len(), 1, "{i}");
         let blob = step.publish[0].1.clone();
         let mut server_id = [0; 16];
         server_id[8..].copy_from_slice(&i.to_be_bytes());
-        let outcome = retried(|| sender.acked(client_ref, server_id, now, now)).unwrap();
+        let outcome = retried(&failed, || sender.acked(client_ref, server_id, now, now)).unwrap();
         assert_eq!(outcome.outcome, AckOutcome::Delivered, "{i}");
         let pushes = if doubles[usize::try_from(i).unwrap()] == 0 {
             2
@@ -132,7 +137,7 @@ fn exchange(fail_at: u32, doubles: &[u8]) {
         };
         for push in 0..pushes {
             for (to, (member, _)) in members.iter_mut().enumerate() {
-                let verdict = retried(|| member.decrypt(&blob, server_id, now, now));
+                let verdict = retried(&failed, || member.decrypt(&blob, server_id, now, now));
                 if to == from || push > 0 {
                     assert_eq!(verdict.map(|_| ()), Err(Error::Replay), "{i} {to} {push}");
                 } else if let Ok(Some(message)) = verdict {
@@ -143,6 +148,8 @@ fn exchange(fail_at: u32, doubles: &[u8]) {
             }
         }
     }
+    // The failure fired once, whichever call it hit.
+    assert_eq!(failed.get(), 1, "fail_at {fail_at}");
     for (to, (member, handle)) in members.iter().enumerate() {
         let expected: Vec<MessageContent> = (0..MESSAGES)
             .filter(|i| usize::try_from(i % 2).unwrap() != to)

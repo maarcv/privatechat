@@ -1,13 +1,11 @@
 //! Tests of the reads and the clock sample (R25), of leaving (R27), and of
 //! the R32 clause of `leave`.
 
-use super::{SERVER, config_on, config_with, failing_channel, new_channel, reopened};
+use super::{
+    DAY_MS, HOUR_MS, NOW, SERVER, config_on, config_with, failing_channel, new_channel, reopened,
+};
 use crate::Error;
 use crate::storage::{Store, StoreError};
-
-const NOW: u64 = 1_790_000_040_000;
-const HOUR_MS: u64 = 3_600_000;
-const DAY_MS: u64 = 86_400_000;
 
 /// A clock sample `(received_at, now, live)` and `clock_off` after it.
 type Sample = (u64, u64, bool, bool);
@@ -31,7 +29,32 @@ fn s021_t25_r25_reads_do_not_commit() {
 
     // (TTL, samples as (received_at, now, live, `clock_off` after it)); a
     // backlog sample never clears a live sample's flag.
-    let cases: [(u32, &[Sample]); 6] = [
+    let cases: [(u32, &[Sample]); 9] = [
+        // Behind by the margin and one more millisecond.
+        (
+            3_600,
+            &[
+                (NOW + 360_000, NOW, true, false),
+                (NOW + 360_001, NOW, true, true),
+            ],
+        ),
+        // Ahead in a 60-second channel: half its TTL.
+        (
+            60,
+            &[
+                (NOW - 30_000, NOW, true, false),
+                (NOW - 30_001, NOW, true, true),
+            ],
+        ),
+        // A backlog sample changes no flag a live sample set.
+        (
+            3_600,
+            &[
+                (NOW + 360_001, NOW, true, true),
+                (NOW + HOUR_MS, NOW, false, true),
+                (NOW + HOUR_MS, NOW + HOUR_MS, false, true),
+            ],
+        ),
         (
             3_600,
             &[(NOW + DAY_MS, NOW, true, true), (NOW, NOW, true, false)],

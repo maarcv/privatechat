@@ -39,6 +39,11 @@ impl Channel {
         let mut next = self.next_state();
         let mut records = Vec::new();
         let removed = self.own_key_changes(&mut next, &mut records, &opened, arrival.now);
+        // A stale blob writes no seen record, so a server could push it
+        // again and again: it commits only what it changes (R3, R14).
+        if stale && !self.event_changes(&next, &removed) {
+            return Err(Error::Expired);
+        }
         let mut received = None;
         if !stale {
             let sender = Sender::OwnKeyElsewhere {
@@ -65,7 +70,13 @@ impl Channel {
         verified: Verified<'_>,
         now: u64,
     ) -> Result<Option<Received>, Error> {
-        if let Some(opened) = self.open_unless_sealed_here(verified)? {
+        // Step 5 decides: a blob of this key whose AEAD does not open is
+        // `RetiredKey` like any other.
+        let opened = match self.open_unless_sealed_here(verified) {
+            Err(Error::BadSignature) => None,
+            other => other?,
+        };
+        if let Some(opened) = opened {
             let mut next = self.next_state();
             let mut records = Vec::new();
             let removed = self.thief_removal(&mut next, &mut records, &opened, now);
@@ -95,8 +106,11 @@ impl Channel {
     ) -> Result<bool, Error> {
         self.latest_now = Some(now);
         let ctx = ChannelCtx::from_config(&self.config)?;
-        let Ok(verified) = envelope::verify(blob, &ctx, received_at, now) else {
-            return Ok(false);
+        let verified = match envelope::verify(blob, &ctx, received_at, now) {
+            Ok(verified) => verified,
+            // A libsodium failure is no verdict on the blob.
+            Err(Error::Internal) => return Err(Error::Internal),
+            Err(_) => return Ok(false),
         };
         let sender = *verified.sender_pk();
         let own = SenderKey::from_seed(&self.state.identity_seed)?;
@@ -128,11 +142,7 @@ impl Channel {
         } else {
             self.thief_removal(&mut next, &mut records, &opened, now)
         };
-        let changed = !removed.is_empty()
-            || next.own_key_used_elsewhere != self.state.own_key_used_elsewhere
-            || next.send_counter != self.state.send_counter
-            || next.read_only != self.state.read_only;
-        if changed {
+        if self.event_changes(&next, &removed) {
             self.commit(next, records).map_err(|error| match error {
                 Error::Store(StoreError::LogFull) => Error::Internal,
                 other => other,
@@ -195,9 +205,17 @@ impl Channel {
     /// a member whose clock is off by the margin, or no readable date
     /// (R14).
     pub(super) fn within_reach(&self, sent_at: Option<u64>, now: u64) -> bool {
-        let window = self.ttl_ms().saturating_add(EXPIRY_MARGIN_MS);
+        let window = self.accept_window();
         let reach = now.saturating_add(window.saturating_mul(2));
         sent_at.is_none_or(|sent_at| sent_at <= reach)
+    }
+
+    /// Whether the own-key changes of `next` change the committed state.
+    fn event_changes(&self, next: &ChannelState, removed: &[(ClientRef, u64)]) -> bool {
+        !removed.is_empty()
+            || next.own_key_used_elsewhere != self.state.own_key_used_elsewhere
+            || next.send_counter != self.state.send_counter
+            || next.read_only != self.state.read_only
     }
 
     /// The signature of a kept-signature record or of an `outbox` entry,

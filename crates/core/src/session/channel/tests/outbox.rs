@@ -1,7 +1,9 @@
 //! Tests of the `outbox` after sealing: R15–R17, R22, R23, R31 and their
 //! clauses of R32.
 
-use super::{SERVER, config_on, config_with, failing_channel, new_channel, reopened};
+use super::{
+    HOUR_MS, MARGIN_MS, NOW, SERVER, config_on, config_with, failing_channel, new_channel, reopened,
+};
 use crate::Error;
 use crate::crypto::Signature;
 use crate::session::channel::{AckOutcome, Channel, ClientRef, Outcome};
@@ -9,10 +11,6 @@ use crate::storage::state::items::{OutboxEntry, OutboxKind};
 use crate::storage::{LogEntry, LogRecord, StoreError};
 use crate::testing::state_eq;
 
-/// A whole minute, so that `sent_at` is `NOW`.
-const NOW: u64 = 1_790_000_040_000;
-const HOUR_MS: u64 = 3_600_000;
-const MARGIN_MS: u64 = 360_000;
 const SERVER_ID: [u8; 16] = [0x5e; 16];
 
 /// A pending `key_retired`, planted as spec 025-identity-regen would.
@@ -30,7 +28,7 @@ fn key_retired() -> OutboxEntry {
 
 /// Plants the `key_retired` and marks the entries of `retired` as sealed
 /// under the key being retired, in one commit.
-fn plant_retirement(channel: &mut Channel, retired: &[ClientRef]) {
+fn mark_retiring(channel: &mut Channel, retired: &[ClientRef]) {
     let mut next = channel.next_state();
     for entry in &mut next.outbox {
         entry.under_retired_key = retired.contains(&ClientRef::of(entry));
@@ -189,7 +187,7 @@ fn s021_t15_r15_signature_retention() {
     let first = channel.encrypt("one", None, NOW).unwrap();
     let signature = channel.state.outbox[0].signature;
     let second = channel.encrypt("two", None, NOW).unwrap();
-    plant_retirement(&mut channel, &[second]);
+    mark_retiring(&mut channel, &[second]);
     let before = channel.records.len();
     channel.acked(first, SERVER_ID, NOW, NOW).unwrap();
     channel.acked(second, [1; 16], NOW, NOW).unwrap();
@@ -243,7 +241,7 @@ fn s021_t22_r22_outbox() {
     assert!(channel.take_outcomes().is_empty());
     assert_eq!(reopened(&handle).state.outbox.len(), 3);
 
-    plant_retirement(&mut channel, &[fresh[1]]);
+    mark_retiring(&mut channel, &[fresh[1]]);
     let step = channel.outbox(later, &[], true).unwrap();
     let order: Vec<ClientRef> = step.publish.iter().map(|(c, _)| *c).collect();
     assert_eq!(order, [fresh[1], ClientRef { bytes: [0xee; 16] }]);
@@ -255,7 +253,7 @@ fn s021_t22_r22_outbox() {
 fn s021_t23_r23_expire_outbox() {
     let (mut channel, _) = new_channel();
     let stale = channel.encrypt("stale", None, NOW).unwrap();
-    plant_retirement(&mut channel, &[]);
+    mark_retiring(&mut channel, &[]);
     let step = channel.expire_outbox(NOW + 2 * HOUR_MS, &[]).unwrap();
     assert!(step.publish.is_empty());
     assert_eq!(step.not_delivered, [(stale, NOW)]);
@@ -270,7 +268,7 @@ fn s021_t23_r23_expire_outbox() {
 fn s021_t31_r31_abandon() {
     let (mut channel, handle) = new_channel();
     let sent = channel.encrypt("refused", None, NOW).unwrap();
-    plant_retirement(&mut channel, &[]);
+    mark_retiring(&mut channel, &[]);
     assert_eq!(channel.abandon(sent), Ok(Some(NOW)));
     let new: Vec<&LogRecord> = channel.records.iter().skip(1).collect();
     assert!(is_kept_signature(new[0]) && is_not_delivered(new[1], sent));
@@ -302,4 +300,31 @@ fn s021_t32_r32_failing_outbox_methods() {
     assert!(state_eq(&channel.state, &before));
     assert!(state_eq(&reopened(&handle).state, &before));
     assert_eq!(channel.records.len(), 2);
+}
+
+/// Spec 021, R17 and R22: an `ack` removes the lower entries of its own
+/// key only; an entry not in flight goes one millisecond after `sent_at +
+/// ttl_ms + 360 000`, not at it.
+#[test]
+fn s021_t17_r17_same_key_and_edges() {
+    let (mut channel, _) = new_channel();
+    let old = channel.encrypt("old key", None, NOW).unwrap();
+    mark_retiring(&mut channel, &[old]);
+    let current = channel.encrypt("current key", None, NOW).unwrap();
+    channel.acked(current, SERVER_ID, NOW, NOW).unwrap();
+    let left: Vec<ClientRef> = channel.state.outbox.iter().map(ClientRef::of).collect();
+    assert_eq!(left, [old, ClientRef { bytes: [0xee; 16] }]);
+
+    let (mut channel, _) = new_channel();
+    let sent = channel.encrypt("edge", None, NOW).unwrap();
+    let edge = NOW + HOUR_MS + MARGIN_MS;
+    assert!(
+        channel
+            .outbox(edge, &[], false)
+            .unwrap()
+            .not_delivered
+            .is_empty()
+    );
+    let step = channel.outbox(edge + 1, &[], false).unwrap();
+    assert_eq!(step.not_delivered, [(sent, NOW)]);
 }
