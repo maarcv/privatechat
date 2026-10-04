@@ -1,6 +1,6 @@
 # ADR 0036 — Compare names with the unicode-rs normalisation and confusable tables
 
-Date: 2026-09-25 · Status: accepted
+Date: 2026-09-25 · Status: superseded by 0043
 
 ## Context
 `docs/spec.md` §7 compares labels and `display_name`s after `NFKC → casefold → no spaces or format characters → confusables skeleton (UTS #39)`, so that "Аlice" with a Cyrillic А collides with "Alice". It is the main defence against someone who writes with a new key and claims to be a known member. The rule needs the Unicode normalisation data and the UTS #39 confusables table, which `core` does not carry: its only dependencies are `libsodium-sys-stable` and `zeroize` (§9, ADR 0023). Writing spec 022-peers-tofu forced the choice.

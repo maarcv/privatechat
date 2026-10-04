@@ -48,11 +48,12 @@ One decision per file, template in `TEMPLATE.md`. The documentation lint (spec 0
 | 0033 | Seal every `key_retired` with the last counter | 2026-09-24 | accepted |
 | 0034 | Publish no stale `outbox` entry, and re-seal a pending `key_retired` | 2026-09-24 | accepted |
 | 0035 | Bind every log entry to its place and name channel directories by a keyed hash | 2026-09-25 | accepted |
-| 0036 | Compare names with the unicode-rs normalisation and confusable tables | 2026-09-25 | accepted |
+| 0036 | Compare names with the unicode-rs normalisation and confusable tables | 2026-09-25 | superseded by 0043 |
 | 0037 | Expose one `Device` handle at the core boundary | 2026-09-25 | accepted |
 | 0038 | Allow a plain `ws://` server URL for `.onion` hosts only | 2026-09-25 | accepted |
 | 0039 | Open the desktop client's TLS connections with rustls, in a workspace of its own | 2026-09-26 | superseded by 0040 |
 | 0040 | Check the desktop client's certificates with no network request of their own | 2026-09-26 | superseded by 0041 |
 | 0041 | Open every client's server connections through one Rust host | 2026-09-27 | accepted |
 | 0042 | Prove strict Ed25519 with published cases a lax verifier accepts | 2026-10-01 | accepted |
+| 0043 | Compare names by lowercase with white space and invisible characters removed | 2026-10-04 | accepted |
 | 0044 | Measure a message's life in the client from its signed send time alone | 2026-10-04 | accepted |
