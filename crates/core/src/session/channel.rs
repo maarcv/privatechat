@@ -12,13 +12,19 @@ use super::expiry::ExpiryIndex;
 use crate::crypto::{self, Secret};
 use crate::error::Error;
 use crate::proto::config::Config;
+use crate::proto::envelope::{EXPIRY_MARGIN_MS, ttl_ms};
+use crate::storage::state::items::{OutboxEntry, OutboxKind};
 use crate::storage::{ChannelState, DirName, LogRecord, Store, StoreError, WriteBatch};
 
 mod headroom;
+mod outbox;
 mod send;
 
 #[cfg(test)]
 mod tests;
+
+/// The minute of grace an entry in flight gets for its `ack` (R22).
+const ACK_GRACE_MS: u64 = 60_000;
 
 /// A peer's `pk_u` (`docs/spec.md` §9); used by specs 022–027.
 pub type PeerId = [u8; 32];
@@ -29,6 +35,42 @@ pub type PeerId = [u8; 32];
 pub struct ClientRef {
     /// 16 bytes from `random_bytes`.
     pub bytes: [u8; 16],
+}
+
+/// What became of a message this device sent (R16, R17, R22).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AckOutcome {
+    /// The server stored it in time for receivers to show it.
+    Delivered,
+    /// It was not stored, or not in time: it failed.
+    NotDelivered,
+    /// The `key_retired` was stored (spec 025-identity-regen).
+    RetirementDelivered,
+    /// An `ack` for no current `outbox` entry.
+    Ignored,
+}
+
+/// The outcome of one entry and its times, from which spec
+/// 028-session-sans-io builds its event (R17).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Outcome {
+    pub(crate) client_ref: ClientRef,
+    pub(crate) outcome: AckOutcome,
+    /// The server's identifier of an acknowledged message.
+    pub(crate) server_id: Option<[u8; 16]>,
+    /// The time an `ack` is listed at, clamped (R17).
+    pub(crate) received_at: Option<u64>,
+    /// `None` only for an unknown `client_ref`.
+    pub(crate) sent_at: Option<u64>,
+}
+
+/// What `outbox` hands out and what it removed (R22).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct OutboxStep {
+    /// The entries to publish, in `outbox` order.
+    pub(crate) publish: Vec<(ClientRef, Vec<u8>)>,
+    /// The entries removed as not delivered, with their `sent_at`.
+    pub(crate) not_delivered: Vec<(ClientRef, u64)>,
 }
 
 /// The messages missing from one sender in this session (R24).
@@ -75,6 +117,8 @@ pub(crate) struct Channel {
     synced_at: Option<u64>,
     truncated_at: Option<u64>,
     carry: SessionCarry,
+    /// The outcomes queued for `take_outcomes` (R1).
+    outcomes: Vec<Outcome>,
     /// The `now` of the last compaction attempt (R18).
     last_compaction: Option<u64>,
     /// The `now` of the latest call that took one (R25).
@@ -181,6 +225,7 @@ impl Channel {
             state,
             records,
             carry: SessionCarry::default(),
+            outcomes: Vec::new(),
             last_compaction: None,
             latest_now: None,
         }
@@ -194,6 +239,29 @@ impl Channel {
         state.synced_at = self.synced_at;
         state.truncated_at = self.truncated_at;
         state
+    }
+
+    /// `ttl_ms` of the channel (R21).
+    fn ttl_ms(&self) -> u64 {
+        ttl_ms(self.config.ttl_seconds())
+    }
+
+    /// The `purge_at` of one's own message, and of its acked or
+    /// not-delivered record (R26): reported not delivered at the latest
+    /// moment R22 allows, it stays visible as failed one more TTL.
+    fn own_purge_at(&self, sent_at: u64) -> u64 {
+        sent_at
+            .saturating_add(self.ttl_ms().saturating_mul(2))
+            .saturating_add(EXPIRY_MARGIN_MS)
+            .saturating_add(ACK_GRACE_MS)
+    }
+
+    /// The `outbox` entries that are not the `key_retired`.
+    fn ordinary_outbox(&self) -> impl Iterator<Item = &OutboxEntry> {
+        self.state
+            .outbox
+            .iter()
+            .filter(|entry| entry.kind == OutboxKind::Text)
     }
 
     /// Commits `state` and `records` once and moves them into memory only
