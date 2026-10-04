@@ -254,6 +254,20 @@ impl Config {
         Config::from_checked(k_ch, checked, created_at)
     }
 
+    /// The one deep copy of a config, `K_ch` through `Secret::copy_from`
+    /// (R19): `Config` is not `Clone`.
+    pub(crate) fn duplicate(&self) -> Config {
+        Config {
+            k_ch: Secret::copy_from(self.k_ch.expose()),
+            server_url: self.server_url.clone(),
+            host: self.host.clone(),
+            ttl_seconds: self.ttl_seconds,
+            created_at: self.created_at,
+            suggested_name: self.suggested_name.clone(),
+            id: ChannelId(self.id.0),
+        }
+    }
+
     /// The file of R13 under the key Argon2id derives from `password`, which
     /// is taken as canonical bytes (R15) and not canonicalised: the only
     /// caller outside the tests passes `draw_password()`.

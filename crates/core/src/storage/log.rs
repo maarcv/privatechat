@@ -6,8 +6,8 @@
 use zeroize::Zeroizing;
 
 use super::{
-    DirName, ID_LEN, KEY_LEN, MAX_NAME, SIGNATURE_LEN, StorageKey, StoreError, open_box, required,
-    seal_box, store_key, within,
+    DirName, ENTRY_LEN_LEN, ID_LEN, KEY_LEN, MAX_NAME, MIN_SEALED, SIGNATURE_LEN, StorageKey,
+    StoreError, open_box, required, seal_box, store_key, within,
 };
 use crate::crypto::{PublicKey, Signature};
 use crate::proto::payload::MAX_PAYLOAD;
@@ -242,6 +242,17 @@ impl LogRecord {
             }
         }
         Ok(writer.finish())
+    }
+
+    /// The bytes this record takes in `messages.log`: its `len`, the nonce,
+    /// the record and the tag (R5), whatever its generation and offset,
+    /// which are fixed-width. Spec 021-channel-session counts with it what a
+    /// compaction would free.
+    pub(crate) fn entry_len(&self) -> u64 {
+        let len = ENTRY_LEN_LEN
+            .saturating_add(MIN_SEALED)
+            .saturating_add(self.encoded_len());
+        u64::try_from(len).unwrap_or(u64::MAX)
     }
 
     /// The exact length of [`LogRecord::encode`]'s output: the four keys

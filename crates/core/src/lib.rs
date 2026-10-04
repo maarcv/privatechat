@@ -29,6 +29,9 @@ pub mod fuzz_entry;
 mod proto;
 
 #[allow(dead_code, reason = "reached through Device, spec 027-core-api")]
+mod session;
+
+#[allow(dead_code, reason = "reached through Device, spec 027-core-api")]
 mod storage;
 
 #[cfg(any(test, fuzzing, feature = "test-support"))]
