@@ -82,8 +82,16 @@ impl Channel {
         let sender = *verified.sender_pk();
         let own = SenderKey::from_seed(&self.state.identity_seed)?;
         let is_own = crypto::ct_eq(&sender.0, &own.public().0);
+        let arrival = Arrival {
+            server_id,
+            received_at,
+            now,
+        };
         // Step 5.
         if self.is_retired(&sender) {
+            if self.is_retiring(&sender)? {
+                return self.overtaken_by_thief(verified, now);
+            }
             return Err(Error::RetiredKey);
         }
         if !is_own && self.peer(&sender).is_none() && !self.has_room_for(&sender) {
@@ -93,11 +101,6 @@ impl Channel {
         if self.has_seen_server_id(&server_id) {
             return Err(Error::Replay);
         }
-        let arrival = Arrival {
-            server_id,
-            received_at,
-            now,
-        };
         if is_own {
             return self.receive_own(verified, arrival);
         }
@@ -125,9 +128,14 @@ impl Channel {
         }
         let sender = opened.sender_pk;
         let counter = opened.counter;
+        let listed = listed_time(sent_at, arrival.received_at);
         let listing = self.listing(opened, arrival, Sender::Peer { pk: sender.0 }, 0)?;
-        let mut next = self.next_state();
         let key_retired = listing.received.content == MessageContent::KeyRetired;
+        // R24: a `key_retired` counts for no gap.
+        let gap = (!key_retired)
+            .then(|| self.gap_of(self.peer(&sender), counter, listed, arrival.now))
+            .flatten();
+        let mut next = self.next_state();
         update_peer(
             &mut next,
             &sender,
@@ -137,6 +145,9 @@ impl Channel {
             arrival.now,
         );
         self.commit(next, listing.records)?;
+        if let Some(gap) = gap {
+            self.add_gap(gap);
+        }
         Ok(Some(listing.received))
     }
 
@@ -166,15 +177,8 @@ impl Channel {
     ) -> Result<Listing, Error> {
         let sent_at = opened.sent_at;
         let expires_at = self.expires_at(sent_at, arrival);
-        // R11: never later than its arrival, never earlier than its signed
-        // `sent_at` minus the margin.
-        let listed_at = sent_at
-            .map_or(arrival.received_at, |sent_at| {
-                arrival
-                    .received_at
-                    .max(sent_at.saturating_sub(EXPIRY_MARGIN_MS))
-            })
-            .min(arrival.now);
+        // R11: never later than its arrival.
+        let listed_at = listed_time(sent_at, arrival.received_at).min(arrival.now);
         let (content, stored, name) = contents(opened.content)?;
         let message = LogRecord {
             purge_at: expires_at,
@@ -253,6 +257,15 @@ impl Channel {
                 if sender_pk.0 == pk.0 && *seen == counter)
         })
     }
+}
+
+/// `r` of R11: the arrival, never earlier than the signed `sent_at` minus
+/// the margin, so that a server cannot bury a message in the scrollback;
+/// clamped to `now` where it is listed.
+fn listed_time(sent_at: Option<u64>, received_at: u64) -> u64 {
+    sent_at.map_or(received_at, |sent_at| {
+        received_at.max(sent_at.saturating_sub(EXPIRY_MARGIN_MS))
+    })
 }
 
 /// What a consumed message holds: for `Received`, for the log record, and
