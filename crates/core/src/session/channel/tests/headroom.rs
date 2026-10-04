@@ -1,7 +1,7 @@
 //! Tests of the log headroom for `encrypt` (R18) and of the expiry index
 //! after a compaction (R1), over logs filled to the byte.
 
-use super::{SERVER, config_on, new_channel, new_store};
+use super::{SERVER, config_on, fill, new_channel, new_store};
 use crate::Error;
 use crate::session::channel::Channel;
 use crate::storage::{ENTRY_LEN_LEN, MAX_LOG_ENTRY, StoreError};
@@ -13,24 +13,6 @@ const LIVE: u64 = NOW + 36_000_000;
 const FULL: u64 = 67_108_864;
 const HEADROOM: u64 = 1_114_156;
 const MIB: u64 = 1_048_576;
-/// The largest body a log record holds (spec 020-store-files Limits).
-const MAX_BODY: u64 = 64_511;
-
-/// Commits records of `purge_at` until the log is exactly `target` bytes.
-fn fill(channel: &mut Channel, purge_at: u64, target: u64) {
-    let base = record(0, 0).entry_len();
-    let mut remaining = target - channel.store.log_len();
-    let mut records = Vec::new();
-    while remaining > 0 {
-        let mut len = remaining.min(base + MAX_BODY);
-        if remaining > len && remaining - len < base {
-            len -= base;
-        }
-        records.push(record(purge_at, usize::try_from(len - base).unwrap()));
-        remaining -= len;
-    }
-    channel.commit(channel.next_state(), records).unwrap();
-}
 
 /// A channel whose log has `expired` bytes that expired before `NOW` and
 /// is `len` bytes long, the rest live; with a handle and its faults.

@@ -1,12 +1,13 @@
 //! Tests of spec 021 over `MemoryStore`, each requirement checked through the
 //! calls of `Channel` and the state a reopened store holds.
 
-use super::{Channel, ClockOff, Gap, SessionCarry};
+use super::{Channel, ClientRef, ClockOff, Gap, SessionCarry};
 use crate::Error;
-use crate::crypto::{Nonce, Secret};
+use crate::crypto::{Nonce, PublicKey, Secret, Signature};
 use crate::proto::config::Config;
 use crate::proto::envelope::{self, ChannelCtx, SenderKey, text_k1};
 use crate::proto::payload::{Payload, PayloadKind};
+use crate::storage::state::items::{OldKey, OutboxEntry, OutboxKind};
 use crate::storage::{Store, StoreError, Vault};
 use crate::testing::{
     FailingStore, Faults, MemoryStore, MemoryVault, batch, record, state_eq, state_for,
@@ -18,10 +19,13 @@ mod outbox;
 mod own_key;
 mod receive;
 mod send;
+mod stall;
 mod status;
 mod sync;
 
 const K_CH: [u8; 32] = [0xa5; 32];
+/// A whole minute, the time of the planted retirement.
+const NOW: u64 = 1_790_000_040_000;
 const SERVER: &str = "wss://example.org";
 
 /// A one-hour channel on `server_url`; its `channel_id` does not depend on
@@ -118,6 +122,74 @@ fn seal(
 /// The `n`-th `server_id`.
 fn sid(n: u8) -> [u8; 16] {
     [n; 16]
+}
+
+/// The largest body a log record holds (spec 020-store-files Limits).
+const MAX_BODY: u64 = 64_511;
+
+/// Commits records of `purge_at` until the log is exactly `target` bytes.
+fn fill(channel: &mut Channel, purge_at: u64, target: u64) {
+    let base = record(0, 0).entry_len();
+    let mut remaining = target - channel.store.log_len();
+    let mut records = Vec::new();
+    while remaining > 0 {
+        let mut len = remaining.min(base + MAX_BODY);
+        if remaining > len && remaining - len < base {
+            len -= base;
+        }
+        records.push(record(purge_at, usize::try_from(len - base).unwrap()));
+        remaining -= len;
+    }
+    channel.commit(channel.next_state(), records).unwrap();
+}
+
+/// `pk_u` of `seed`.
+fn pk_of(seed: [u8; 32]) -> [u8; 32] {
+    SenderKey::from_seed(&Secret::from_bytes(seed))
+        .unwrap()
+        .public()
+        .0
+}
+
+/// The seed of one's key before a regeneration, planted with the
+/// retirement spec 025-identity-regen commits: the old key among one's old
+/// keys, a new seed, the entries marked and a pending `key_retired`.
+fn plant_retirement(channel: &mut Channel) -> [u8; 32] {
+    let old_seed = *channel.state.identity_seed.expose();
+    let mut next = channel.next_state();
+    next.own_old_keys.push(OldKey {
+        pk: PublicKey(pk_of(old_seed)),
+        retired_at: NOW,
+    });
+    next.retiring_seed = Some(Secret::from_bytes(old_seed));
+    next.identity_seed = Secret::from_bytes([0x99; 32]);
+    for entry in &mut next.outbox {
+        entry.under_retired_key = true;
+    }
+    next.outbox.push(OutboxEntry {
+        client_ref: [0xee; 16],
+        kind: OutboxKind::KeyRetired,
+        sent_at: NOW,
+        blob: vec![1; 10],
+        signature: Signature([2; 64]),
+        under_retired_key: true,
+        counter: u64::MAX,
+    });
+    channel.commit(next, Vec::new()).unwrap();
+    old_seed
+}
+
+/// A channel with entries 300 and 301 under the key being retired.
+fn retiring() -> (Channel, MemoryStore, Faults, [u8; 32], Vec<ClientRef>) {
+    let (mut channel, handle, faults) = receiver(3_600);
+    let mut next = channel.next_state();
+    next.send_counter = 300;
+    channel.commit(next, Vec::new()).unwrap();
+    let entries = (0..2)
+        .map(|_| channel.encrypt("old", None, NOW).unwrap())
+        .collect();
+    let old_seed = plant_retirement(&mut channel);
+    (channel, handle, faults, old_seed, entries)
 }
 
 /// The channel the store of `handle` holds now.

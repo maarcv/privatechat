@@ -11,7 +11,7 @@ use crate::error::Error;
 use crate::proto::envelope::{self, ChannelCtx, EXPIRY_MARGIN_MS, Opened, SenderKey};
 use crate::proto::payload::PayloadKind;
 use crate::storage::state::items::PeerRecord;
-use crate::storage::{ChannelState, Content, LogEntry, LogRecord, Message};
+use crate::storage::{ChannelState, Content, LogEntry, LogRecord, Message, StoreError};
 
 /// Where and when a blob arrived.
 #[derive(Clone, Copy)]
@@ -48,7 +48,13 @@ impl Channel {
     ) -> Result<Option<Received>, Error> {
         self.latest_now = Some(now);
         // R18 first: it reads only the log length, which no blob changes.
-        self.check_headroom(now)?;
+        // A full log cannot hide the own-key alert (R19).
+        if let Err(error) = self.check_headroom(now) {
+            if error == Error::Store(StoreError::LogFull) {
+                self.check_own_key(blob, received_at, now)?;
+            }
+            return Err(error);
+        }
         let previous = self.cursor;
         // R20: a push the server would not hold if the clocks agreed leaves
         // the cursor where a corrected clock fetches it again.

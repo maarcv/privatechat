@@ -1,14 +1,13 @@
 //! Tests of the gaps and the truncation (R24), the peers-changed flag of
 //! R1, and the retiring-key clause of R9.
 
-use super::{receiver, reopened, sid, text_from};
+use super::{receiver, reopened, retiring, sid, text_from};
 use crate::Error;
-use crate::crypto::{PublicKey, Secret, Signature};
+use crate::crypto::Secret;
 use crate::proto::envelope::SenderKey;
 use crate::proto::payload::{Payload, PayloadKind};
 use crate::session::channel::{AckOutcome, Channel, ClientRef, Gap};
 use crate::storage::StoreError;
-use crate::storage::state::items::{OldKey, OutboxEntry, OutboxKind};
 
 /// A whole minute.
 const NOW: u64 = 1_790_000_040_000;
@@ -112,53 +111,6 @@ fn s021_t01_r01_peers_changed() {
     assert!(channel.take_peers_changed());
     drop(channel);
     assert!(reopened(&handle).take_peers_changed());
-}
-
-/// The seed of one's key before a regeneration, planted with the
-/// retirement spec 025-identity-regen commits: the old key among one's old
-/// keys, a new seed, the entries marked and a pending `key_retired`.
-fn plant_retirement(channel: &mut Channel) -> [u8; 32] {
-    let old_seed = *channel.state.identity_seed.expose();
-    let mut next = channel.next_state();
-    next.own_old_keys.push(OldKey {
-        pk: PublicKey(pk(old_seed)),
-        retired_at: NOW,
-    });
-    next.retiring_seed = Some(Secret::from_bytes(old_seed));
-    next.identity_seed = Secret::from_bytes([0x99; 32]);
-    for entry in &mut next.outbox {
-        entry.under_retired_key = true;
-    }
-    next.outbox.push(OutboxEntry {
-        client_ref: [0xee; 16],
-        kind: OutboxKind::KeyRetired,
-        sent_at: NOW,
-        blob: vec![1; 10],
-        signature: Signature([2; 64]),
-        under_retired_key: true,
-        counter: u64::MAX,
-    });
-    channel.commit(next, Vec::new()).unwrap();
-    old_seed
-}
-
-/// A channel with entries 300 and 301 under the key being retired.
-fn retiring() -> (
-    Channel,
-    crate::testing::MemoryStore,
-    crate::testing::Faults,
-    [u8; 32],
-    Vec<ClientRef>,
-) {
-    let (mut channel, handle, faults) = receiver(3_600);
-    let mut next = channel.next_state();
-    next.send_counter = 300;
-    channel.commit(next, Vec::new()).unwrap();
-    let entries = (0..2)
-        .map(|_| channel.encrypt("old", None, NOW).unwrap())
-        .collect();
-    let old_seed = plant_retirement(&mut channel);
-    (channel, handle, faults, old_seed, entries)
 }
 
 /// Spec 021, R9: a thief's blob of the key being retired is `RetiredKey`
