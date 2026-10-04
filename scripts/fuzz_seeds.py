@@ -80,7 +80,13 @@ TARGETS: dict[str, tuple[str, Callable[[dict], bool], Seed]] = {
                           lambda v: field(v, "record")),
     "settings_decode": ("020", lambda v: v["inputs"]["schema"] == "settings",
                         lambda v: field(v, "record")),
+    "channel_decrypt": ("013", lambda v: True,
+                        lambda v: times(v) + CHANNEL_SERVER_ID + field(v, "blob")),
 }
+
+
+# The `server_id` of every `channel_decrypt` seed (spec 021-channel-session R29).
+CHANNEL_SERVER_ID = bytes(16)
 
 
 def read_back(target: str, seed: bytes) -> dict[str, bytes]:
@@ -89,6 +95,9 @@ def read_back(target: str, seed: bytes) -> dict[str, bytes]:
         return {"policy": seed[:1], "record": seed[1:]}
     if target == "receive":
         return {"received_at": seed[:8], "now": seed[8:16], "blob": seed[16:]}
+    if target == "channel_decrypt":
+        return {"received_at": seed[:8], "now": seed[8:16], "server_id": seed[16:32],
+                "blob": seed[32:]}
     if target == "receive_signed":
         return {"counter": seed[:8], "nonce": seed[8:32], "received_at": seed[32:40],
                 "now": seed[40:48], "padded": seed[48:]}
@@ -102,6 +111,9 @@ def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
     if target == "receive":
         return {"received_at": field(v, "received_at"), "now": field(v, "now"),
                 "blob": field(v, "blob")}
+    if target == "channel_decrypt":
+        return {"received_at": field(v, "received_at"), "now": field(v, "now"),
+                "server_id": CHANNEL_SERVER_ID, "blob": field(v, "blob")}
     if target == "receive_signed":
         return {"counter": field(v, "counter"), "nonce": field(v, "nonce"),
                 "received_at": field(v, "received_at"), "now": field(v, "now"),
@@ -116,7 +128,8 @@ def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
 # `TARGETS` are checked against it, so that a narrowed filter that drops seeds fails here.
 SEED_COUNTS = {"record_decode": 31, "config_parse": 27, "config_parse_qr": 32,
                "payload_decode": 17, "receive": 30, "receive_signed": 18, "verify_qr_parse": 6,
-               "state_decode": 2, "log_record_decode": 4, "settings_decode": 2}
+               "state_decode": 2, "log_record_decode": 4, "settings_decode": 2,
+               "channel_decrypt": 30}
 
 
 def check_s016_t08_r08_corpus_is_seeded() -> None:

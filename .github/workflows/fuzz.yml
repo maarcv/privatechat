@@ -33,6 +33,7 @@ jobs:
           - state_decode
           - log_record_decode
           - settings_decode
+          - channel_decrypt
     steps:
       - uses: actions/checkout@v7
       - name: s016_t09_r09_install_nightly_and_cargo_fuzz

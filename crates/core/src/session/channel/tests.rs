@@ -13,10 +13,12 @@ use crate::testing::{
     FailingStore, Faults, MemoryStore, MemoryVault, batch, record, state_eq, state_for,
 };
 
+mod extremes;
 mod gaps;
 mod headroom;
 mod outbox;
 mod own_key;
+mod property;
 mod receive;
 mod send;
 mod stall;

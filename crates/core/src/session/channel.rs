@@ -258,13 +258,23 @@ impl Channel {
             }
             return Ok((channel, false));
         }
-        let batch = WriteBatch::new(first_state(config)?, Vec::new());
-        store.commit(&batch)?;
-        let (state, records) = batch.into_parts();
-        Ok((
-            Channel::new(store, config.duplicate(), state, records),
-            true,
-        ))
+        let channel = Channel::first_commit(config, store, Secret::random()?)?;
+        Ok((channel, true))
+    }
+
+    /// A new channel of `config` over a `MemoryStore` whose identity is
+    /// `seed`, for the fuzz target `channel_decrypt` (R29): with the sender
+    /// seed of a 013 vector, its blobs reach the own-key branch.
+    ///
+    /// # Errors
+    ///
+    /// As [`Channel::create`].
+    #[cfg(any(test, fuzzing))]
+    pub(crate) fn for_fuzzing(config: &Config, seed: &Secret<32>) -> Result<Channel, Error> {
+        use crate::storage::Vault;
+        use crate::testing::MemoryVault;
+        let store = MemoryVault::new().create(&config.channel_id())?;
+        Channel::first_commit(config, store, Secret::copy_from(seed.expose()))
     }
 
     /// The channel `store` holds (R6).
@@ -299,6 +309,18 @@ impl Channel {
     /// reset of the load (R1).
     pub(crate) fn carry_session(&mut self, carry: SessionCarry) {
         self.carry = carry;
+    }
+
+    /// Commits the first state of a channel with the identity `seed` (R4).
+    fn first_commit(
+        config: &Config,
+        mut store: Box<dyn Store>,
+        seed: Secret<32>,
+    ) -> Result<Channel, Error> {
+        let batch = WriteBatch::new(first_state(config, seed)?, Vec::new());
+        store.commit(&batch)?;
+        let (state, records) = batch.into_parts();
+        Ok(Channel::new(store, config.duplicate(), state, records))
     }
 
     /// A channel over what `store` loaded, its config decoded once (R6).
@@ -413,11 +435,11 @@ fn peers_differ(old: &ChannelState, new: &ChannelState) -> bool {
 
 /// The first state of a new channel (R4): a fresh identity, nothing sent or
 /// seen, and the config without `invite_expires_at`.
-fn first_state(config: &Config) -> Result<ChannelState, Error> {
+fn first_state(config: &Config, identity_seed: Secret<32>) -> Result<ChannelState, Error> {
     Ok(ChannelState {
         channel_id: config.channel_id(),
         config: config.record(None)?,
-        identity_seed: Secret::random()?,
+        identity_seed,
         identity_epoch: 0,
         send_counter: 0,
         cursor: None,
