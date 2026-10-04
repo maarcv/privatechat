@@ -247,6 +247,10 @@ const SETTINGS_TAG: &[u8; 23] = b"privatechat/settings/v1";
 /// The domain tag of a channel directory's name (R18).
 const DIR_TAG: &[u8; 18] = b"privatechat/dir/v1";
 
+/// Bytes of the `len` before each entry of `messages.log` (R5), which spec
+/// 021-channel-session counts in what a compaction frees.
+pub(crate) const ENTRY_LEN_LEN: usize = 4;
+
 /// Bytes of a nonce, before every box (R4, R5).
 pub(crate) const NONCE_LEN: usize = 24;
 
