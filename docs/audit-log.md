@@ -2,6 +2,17 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AC
+
+**2026-10-04 — Audit AC, a subtraction audit of the state layer before spec 021-channel-session is implemented.** Sixteen audits had added rules to specs 020–028 and removed none. Read-only passes looked for rules that cost more than they protect: store failure, the own echo and the `sent_at` windows (name comparison is Audit AB). The human reviewer took every recommendation. Each change removes a rule; none adds a defence.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AC1 | On a store error other than `LogFull`, the channel held the own-key alert, the counter bump, `read_only` and the overtaken counters in memory and carried them to the reopened instance (`HeldOwnKey`), and `outbox` handed out entries and a `key_retired` re-sealed in memory for 600 000 ms. A failing disk is not an adversary of the threat model, and the alert's remedy, `regenerate_identity`, needs a commit anyway | Low | The channel is frozen until the probe of spec 027 R12: no `decrypt`, `check_own_key`, publish or commit; the push is fetched again after it. 021 R3, R13, R19, R20, R22, R23, Security; 025 R1, R4, R5; 027 R12, R14; 028 R10, R12, R14 |
+| AC2 | R19's `LogFull` fallback and spec 025 R1's retry-once guarded a commit that cannot meet `LogFull`: while R18's check fails nothing but the reserve's commits appends, at most three records per `outbox` entry, and `Store::commit` refuses before writing (spec 020) | Low | The bound stated in R18 and tested in T19; a `LogFull` there is `Error::Internal` |
+| AC3 | The last compaction time, carried over a reopen, only moved the first retry after a failed compaction from the 60 000 ms probe to 600 000 ms | Low | `last_compaction` and `set_last_compaction` removed; 021 R18, Security; 027 R14, R15 |
+| AC4 | 021 R18 restated spec 020 R11 | Low | Cited |
+
 ## Reading of spec 020 R10–R15
 
 **2026-10-03 — The second reading the acceptance criterion of spec 020-store-files asks for: that every interruption of a commit, a compaction or a recovery leaves the previous commit or the new one.** The human reviewer read R10–R15 and found them sound; two agents read them independently, one from the spec's text and one from the code, under a model where a crash keeps any subset of the unsynced directory operations, in any order.
