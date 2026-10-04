@@ -13,6 +13,22 @@ use crate::proto::payload::PayloadKind;
 use crate::storage::state::items::PeerRecord;
 use crate::storage::{ChannelState, Content, LogEntry, LogRecord, Message};
 
+/// Where and when a blob arrived.
+#[derive(Clone, Copy)]
+pub(super) struct Arrival {
+    pub(super) server_id: [u8; 16],
+    pub(super) received_at: u64,
+    pub(super) now: u64,
+}
+
+/// What a consumed message appends and returns.
+pub(super) struct Listing {
+    pub(super) records: Vec<LogRecord>,
+    pub(super) received: Received,
+    /// The signed name, for the peer record.
+    pub(super) name: Option<String>,
+}
+
 impl Channel {
     /// Checks and, when it passes, consumes one pushed blob (R9–R12):
     /// `Ok(Some)` when it appended a message record, `Ok(None)` when it
@@ -77,8 +93,13 @@ impl Channel {
         if self.has_seen_server_id(&server_id) {
             return Err(Error::Replay);
         }
+        let arrival = Arrival {
+            server_id,
+            received_at,
+            now,
+        };
         if is_own {
-            return self.receive_own(verified, server_id, received_at, now);
+            return self.receive_own(verified, arrival);
         }
         let counter = verified.counter();
         let max_counter = self.peer(&sender).and_then(|peer| peer.max_counter);
@@ -86,49 +107,82 @@ impl Channel {
             return Err(Error::Replay);
         }
         let opened = verified.open()?;
-        self.consume(opened, server_id, received_at, now)
+        self.consume(opened, arrival)
     }
 
     /// R10–R12 for a peer's message that `open` read.
-    fn consume(
-        &mut self,
-        opened: Opened,
-        server_id: [u8; 16],
-        received_at: u64,
-        now: u64,
-    ) -> Result<Option<Received>, Error> {
-        let ttl = self.ttl_ms();
+    fn consume(&mut self, opened: Opened, arrival: Arrival) -> Result<Option<Received>, Error> {
         let sent_at = opened.sent_at;
         // R10: a life measured from the signed `sent_at` (ADR 0044).
-        let past_window = sent_at.is_some_and(|sent_at| {
-            sent_at.saturating_add(ttl).saturating_add(EXPIRY_MARGIN_MS) < now
-        });
-        if matches!(opened.content, envelope::Content::Stale) || past_window {
+        if matches!(opened.content, envelope::Content::Stale)
+            || self.past_window(sent_at, arrival.now)
+        {
             return Err(Error::Expired);
         }
         // A message that would expire before it is shown is not consumed.
-        let shown_from = sent_at.unwrap_or(received_at).min(now);
-        let expires_at = shown_from.saturating_add(ttl);
-        if expires_at < now {
+        if self.expires_at(sent_at, arrival) < arrival.now {
             return Err(Error::Expired);
         }
+        let sender = opened.sender_pk;
+        let counter = opened.counter;
+        let listing = self.listing(opened, arrival, Sender::Peer { pk: sender.0 }, 0)?;
+        let mut next = self.next_state();
+        let key_retired = listing.received.content == MessageContent::KeyRetired;
+        update_peer(
+            &mut next,
+            &sender,
+            counter,
+            listing.name,
+            key_retired,
+            arrival.now,
+        );
+        self.commit(next, listing.records)?;
+        Ok(Some(listing.received))
+    }
+
+    /// A `sent_at` older than one TTL and the margin: no member accepts the
+    /// message any more (R10, R14).
+    pub(super) fn past_window(&self, sent_at: Option<u64>, now: u64) -> bool {
+        let window = self.ttl_ms().saturating_add(EXPIRY_MARGIN_MS);
+        sent_at.is_some_and(|sent_at| sent_at.saturating_add(window) < now)
+    }
+
+    /// The display expiry: one TTL from `min(sent_at, now)`, or from
+    /// `min(received_at, now)` when `open` read no `sent_at` (R10, R26).
+    fn expires_at(&self, sent_at: Option<u64>, arrival: Arrival) -> u64 {
+        let shown_from = sent_at.unwrap_or(arrival.received_at).min(arrival.now);
+        shown_from.saturating_add(self.ttl_ms())
+    }
+
+    /// The message record, its seen record and the `Received` of a
+    /// consumed message (R11, R12, R26); the seen record lasts until
+    /// `sent_at + ttl_ms + seen_margin`.
+    pub(super) fn listing(
+        &self,
+        opened: Opened,
+        arrival: Arrival,
+        sender: Sender,
+        seen_margin: u64,
+    ) -> Result<Listing, Error> {
+        let sent_at = opened.sent_at;
+        let expires_at = self.expires_at(sent_at, arrival);
         // R11: never later than its arrival, never earlier than its signed
         // `sent_at` minus the margin.
         let listed_at = sent_at
-            .map_or(received_at, |sent_at| {
-                received_at.max(sent_at.saturating_sub(EXPIRY_MARGIN_MS))
+            .map_or(arrival.received_at, |sent_at| {
+                arrival
+                    .received_at
+                    .max(sent_at.saturating_sub(EXPIRY_MARGIN_MS))
             })
-            .min(now);
+            .min(arrival.now);
         let (content, stored, name) = contents(opened.content)?;
-        let sender = opened.sender_pk;
-        let counter = opened.counter;
         let message = LogRecord {
             purge_at: expires_at,
             entry: LogEntry::Message(Message {
-                server_id: Some(server_id),
+                server_id: Some(arrival.server_id),
                 received_at: listed_at,
-                sender_pk: sender,
-                counter,
+                sender_pk: opened.sender_pk,
+                counter: opened.counter,
                 content: stored,
                 display_name: name.clone().map(|name| Zeroizing::new(name.into_bytes())),
                 sent_at,
@@ -137,26 +191,32 @@ impl Channel {
         };
         // R26: the seen record outlives every moment a copy could still be
         // accepted.
+        let seen_until = |sent_at: u64| {
+            sent_at
+                .saturating_add(self.ttl_ms())
+                .saturating_add(seen_margin)
+        };
         let seen = LogRecord {
-            purge_at: sent_at.map_or(expires_at, |sent_at| sent_at.saturating_add(ttl)),
+            purge_at: sent_at.map_or(expires_at, seen_until),
             entry: LogEntry::Seen {
-                server_id,
-                sender_pk: sender,
-                counter,
+                server_id: arrival.server_id,
+                sender_pk: opened.sender_pk,
+                counter: opened.counter,
             },
         };
-        let mut next = self.next_state();
-        let key_retired = content == MessageContent::KeyRetired;
-        update_peer(&mut next, &sender, counter, name, key_retired, now);
-        self.commit(next, vec![message, seen])?;
-        Ok(Some(Received {
-            server_id,
-            sender: Sender::Peer { pk: sender.0 },
+        let received = Received {
+            server_id: arrival.server_id,
+            sender,
             received_at: listed_at,
             sent_at,
             expires_at,
             content,
-        }))
+        };
+        Ok(Listing {
+            records: vec![message, seen],
+            received,
+            name,
+        })
     }
 
     /// The peer record of `pk`, looked up by its public identifier
