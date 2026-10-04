@@ -1,19 +1,16 @@
 //! Tests of the receive pipeline: R3, R9–R12, the cursor half of R20, the
 //! peer half of R26 and the `decrypt` clauses of R18 and R32.
 
-use super::{receiver, reopened, seal, sid, text_from};
+use super::{HOUR_MS, MARGIN_MS, NOW, pk_of, receiver, reopened, seal, sid, text_from};
 use crate::Error;
-use crate::crypto::Secret;
-use crate::proto::envelope::{self, SenderKey, text_k1};
+use crate::crypto::PublicKey;
+use crate::proto::envelope::{self, text_k1};
 use crate::session::channel::{Channel, MessageContent, Received, Sender};
+use crate::storage::state::items::OldKey;
 use crate::storage::{Content, LogEntry, LogRecord, StoreError};
 use crate::testing::state_eq;
 use crate::vectors::{self, Vector};
 
-/// A whole minute.
-const NOW: u64 = 1_790_000_040_000;
-const HOUR_MS: u64 = 3_600_000;
-const MARGIN_MS: u64 = 360_000;
 const PEER: [u8; 32] = [0x77; 32];
 
 /// The verdict of a fresh channel on one 013 vector, which is every
@@ -236,7 +233,7 @@ fn s021_t11_r11_consumed_single_commit() {
     assert_eq!(stored.records.len(), 2);
     assert_eq!(stored.cursor(), Some(NOW));
     let peer = &stored.state.peers[0];
-    assert_eq!(peer.pk.0, sender_pk(PEER));
+    assert_eq!(peer.pk.0, pk_of(PEER));
     assert_eq!(
         (peer.first_seen, peer.last_seen, peer.max_counter),
         (NOW, NOW, Some(3))
@@ -268,14 +265,6 @@ fn s021_t11_r11_consumed_single_commit() {
     );
 }
 
-/// `pk_u` of `seed`.
-fn sender_pk(seed: [u8; 32]) -> [u8; 32] {
-    SenderKey::from_seed(&Secret::from_bytes(seed))
-        .unwrap()
-        .public()
-        .0
-}
-
 /// Spec 021, R12: the `Received` of `text_k1`.
 #[test]
 fn s021_t12_r12_received_fields() {
@@ -289,7 +278,7 @@ fn s021_t12_r12_received_fields() {
     let expected = Received {
         server_id: sid(9),
         sender: Sender::Peer {
-            pk: sender_pk(text_k1::SENDER_SEED),
+            pk: pk_of(text_k1::SENDER_SEED),
         },
         received_at: text_k1::RECEIVED_AT,
         sent_at: Some(text_k1::SENT_AT),
@@ -308,17 +297,24 @@ fn s021_t12_r12_received_fields() {
 fn s021_t20_r20_cursor() {
     let (mut channel, _, _) = receiver(3_600);
     let blob = text_from(&channel, PEER, 0, 0);
-    for (n, received_at) in [5, 3, 7].into_iter().enumerate() {
-        let _ = channel.decrypt(&blob, sid(u8::try_from(n).unwrap()), received_at, 10_000);
+    // A later push dated earlier leaves the cursor at the largest.
+    for (n, received_at, cursor) in [(0, 5, 5), (1, 7, 7), (2, 3, 7)] {
+        let verdict = channel.decrypt(&blob, sid(n), received_at, 10_000);
+        assert!(!matches!(verdict, Err(Error::Store(_))), "{received_at}");
+        assert_eq!(channel.cursor(), Some(cursor), "{received_at}");
     }
-    assert_eq!(channel.cursor(), Some(7));
-    let _ = channel.decrypt(&blob, sid(9), u64::MAX, 1_000_000);
+    let verdict = channel.decrypt(&blob, sid(9), u64::MAX, 1_000_000);
+    assert_eq!(verdict, Err(Error::Replay));
     assert_eq!(channel.cursor(), Some(1_000_000));
+    // At exactly one TTL old by the local clock, the push still moves it.
+    let at = 1_000_000 + 60_000;
+    let _ = channel.decrypt(&blob, sid(11), at, at + HOUR_MS);
+    assert_eq!(channel.cursor(), Some(at));
     // The clock two hours ahead of the server in a one-hour channel.
     let fresh = text_from(&channel, PEER, 1, NOW);
     let result = channel.decrypt(&fresh, sid(10), NOW, NOW + 2 * HOUR_MS);
     assert_eq!(result, Err(Error::Expired));
-    assert_eq!(channel.cursor(), Some(1_000_000));
+    assert_eq!(channel.cursor(), Some(1_060_000));
 }
 
 /// Spec 021, R26: a copy pushed after its sender was removed and the log
@@ -359,4 +355,61 @@ fn s021_t32_r32_failing_decrypt() {
     assert!(state_eq(&reopened(&handle).state, &before));
     assert!(state_eq(&channel.state, &before));
     assert_eq!(channel.cursor(), None);
+    assert!(channel.records.is_empty() && channel.expiry.oldest_expiry().is_none());
+    assert!(channel.gaps().is_empty());
+    // Nothing marked the push as seen: it is consumed when it comes again.
+    faults.fail_commits(false);
+    assert!(channel.decrypt(&blob, sid(1), NOW, NOW).unwrap().is_some());
+}
+
+/// Spec 021, R9: a counter at or below `max_counter` that no seen record
+/// holds is `Replay`; a retired peer and an old key of one's own that is
+/// not the one being retired are `RetiredKey`, with no commit.
+#[test]
+fn s021_t09_r09_max_counter_and_retired_keys() {
+    let (mut channel, handle, _) = receiver(3_600);
+    channel
+        .decrypt(&text_from(&channel, PEER, 5, NOW), sid(1), NOW, NOW)
+        .unwrap();
+    let lower = text_from(&channel, PEER, 4, NOW);
+    assert_eq!(
+        channel.decrypt(&lower, sid(2), NOW, NOW),
+        Err(Error::Replay)
+    );
+
+    let old = [0x66; 32];
+    let mut next = channel.next_state();
+    next.peers[0].retired_at = Some(NOW);
+    next.own_old_keys.push(OldKey {
+        pk: PublicKey(pk_of(old)),
+        retired_at: NOW,
+    });
+    channel.commit(next, Vec::new()).unwrap();
+    let commits = handle.commits();
+    for (seed, id) in [(PEER, 3), (old, 4)] {
+        let blob = text_from(&channel, seed, 9, NOW);
+        assert_eq!(
+            channel.decrypt(&blob, sid(id), NOW, NOW),
+            Err(Error::RetiredKey)
+        );
+    }
+    assert_eq!(handle.commits(), commits);
+}
+
+/// Spec 021, R3: a rejected push commits the cursor alone, never a waiting
+/// `synced_at`.
+#[test]
+fn s021_t03_r03_rejection_leaves_synced_at() {
+    let (mut channel, handle, _) = receiver(3_600);
+    let blob = text_from(&channel, PEER, 0, NOW);
+    channel.decrypt(&blob, sid(1), NOW, NOW).unwrap();
+    channel.synced(NOW).unwrap();
+    channel.synced(NOW + 1_000).unwrap();
+    let all = handle.all_commits();
+    assert_eq!(
+        channel.decrypt(&blob, sid(2), NOW, NOW + 2_000_000),
+        Err(Error::Replay)
+    );
+    assert_eq!(handle.all_commits(), all);
+    assert_eq!(reopened(&handle).synced_at(), Some(NOW));
 }

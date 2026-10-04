@@ -64,8 +64,9 @@ impl Channel {
         }
         let result = match self.receive(blob, server_id, received_at, now) {
             Err(Error::Store(error)) => Err(Error::Store(error)),
-            // A rejection commits the cursor alone, and only when due.
-            other => self.commit_pending(now).and(other),
+            // A rejection commits the cursor alone, and only when due (R3).
+            Err(error) => self.commit_cursor().and(Err(error)),
+            consumed => consumed,
         };
         if matches!(result, Err(Error::Store(_))) {
             self.cursor = previous;
@@ -160,7 +161,7 @@ impl Channel {
     /// A `sent_at` older than one TTL and the margin: no member accepts the
     /// message any more (R10, R14).
     pub(super) fn past_window(&self, sent_at: Option<u64>, now: u64) -> bool {
-        let window = self.ttl_ms().saturating_add(EXPIRY_MARGIN_MS);
+        let window = self.accept_window();
         sent_at.is_some_and(|sent_at| sent_at.saturating_add(window) < now)
     }
 
@@ -268,7 +269,7 @@ impl Channel {
 /// `r` of R11: the arrival, never earlier than the signed `sent_at` minus
 /// the margin, so that a server cannot bury a message in the scrollback;
 /// clamped to `now` where it is listed.
-fn listed_time(sent_at: Option<u64>, received_at: u64) -> u64 {
+pub(super) fn listed_time(sent_at: Option<u64>, received_at: u64) -> u64 {
     sent_at.map_or(received_at, |sent_at| {
         received_at.max(sent_at.saturating_sub(EXPIRY_MARGIN_MS))
     })

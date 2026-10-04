@@ -59,6 +59,8 @@ impl Channel {
         self.carry.clock_off = match (live, self.carry.clock_off) {
             (true, _) if ahead || behind => ClockOff::Live,
             (true, _) => ClockOff::No,
+            // Only a live sample changes a live sample's flag.
+            (false, ClockOff::Live) => ClockOff::Live,
             (false, _) if behind => ClockOff::Backlog(received_at),
             (false, ClockOff::Backlog(setting)) if received_at >= setting => ClockOff::No,
             (false, other) => other,
@@ -85,9 +87,7 @@ impl Channel {
             return Some(truncated_at.saturating_sub(ttl));
         };
         let truncated_at = truncated_at.min(now);
-        let shown_until = truncated_at
-            .saturating_add(ttl)
-            .saturating_add(EXPIRY_MARGIN_MS);
+        let shown_until = truncated_at.saturating_add(self.accept_window());
         (shown_until >= now).then(|| truncated_at.saturating_sub(ttl))
     }
 }

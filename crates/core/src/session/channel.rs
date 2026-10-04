@@ -383,13 +383,19 @@ impl Channel {
         ttl_ms(self.config.ttl_seconds())
     }
 
+    /// One TTL and the margin: the longest a member accepts a message after
+    /// its `sent_at` (`docs/spec.md` §4, ADR 0044).
+    fn accept_window(&self) -> u64 {
+        self.ttl_ms().saturating_add(EXPIRY_MARGIN_MS)
+    }
+
     /// The `purge_at` of one's own message, and of its acked or
     /// not-delivered record (R26): reported not delivered at the latest
     /// moment R22 allows, it stays visible as failed one more TTL.
     fn own_purge_at(&self, sent_at: u64) -> u64 {
         sent_at
-            .saturating_add(self.ttl_ms().saturating_mul(2))
-            .saturating_add(EXPIRY_MARGIN_MS)
+            .saturating_add(self.ttl_ms())
+            .saturating_add(self.accept_window())
             .saturating_add(ACK_GRACE_MS)
     }
 
@@ -426,11 +432,14 @@ fn peers_differ(old: &ChannelState, new: &ChannelState) -> bool {
             peer.verified,
             peer.muted,
             peer.retired_at,
-            peer.last_display_name.as_ref().map(|name| name.to_vec()),
         )
     };
-    let peers = |state: &ChannelState| state.peers.iter().map(shown).collect::<Vec<_>>();
-    old.own_display_name != new.own_display_name || peers(old) != peers(new)
+    fn name(peer: &PeerRecord) -> Option<&[u8]> {
+        peer.last_display_name.as_deref().map(Vec::as_slice)
+    }
+    old.own_display_name != new.own_display_name
+        || !old.peers.iter().map(shown).eq(new.peers.iter().map(shown))
+        || !old.peers.iter().map(name).eq(new.peers.iter().map(name))
 }
 
 /// The first state of a new channel (R4): a fresh identity, nothing sent or

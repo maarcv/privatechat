@@ -1,18 +1,20 @@
 //! Tests of spec 021 over `MemoryStore`, each requirement checked through the
 //! calls of `Channel` and the state a reopened store holds.
 
+use super::headroom::{HEADROOM, RESERVE};
 use super::{Channel, ClientRef, ClockOff, Gap, SessionCarry};
 use crate::Error;
 use crate::crypto::{Nonce, PublicKey, Secret, Signature};
 use crate::proto::config::Config;
-use crate::proto::envelope::{self, ChannelCtx, SenderKey, text_k1};
+use crate::proto::envelope::{self, ChannelCtx, EXPIRY_MARGIN_MS, SenderKey, text_k1};
 use crate::proto::payload::{Payload, PayloadKind};
 use crate::storage::state::items::{OldKey, OutboxEntry, OutboxKind};
-use crate::storage::{Store, StoreError, Vault};
+use crate::storage::{MAX_LOG_LEN, Store, StoreError, Vault};
 use crate::testing::{
     FailingStore, Faults, MemoryStore, MemoryVault, batch, record, state_eq, state_for,
 };
 
+mod edges;
 mod extremes;
 mod gaps;
 mod headroom;
@@ -29,6 +31,12 @@ const K_CH: [u8; 32] = [0xa5; 32];
 /// A whole minute, the time of the planted retirement.
 const NOW: u64 = 1_790_000_040_000;
 const SERVER: &str = "wss://example.org";
+const HOUR_MS: u64 = 3_600_000;
+const DAY_MS: u64 = 86_400_000;
+const MARGIN_MS: u64 = EXPIRY_MARGIN_MS;
+/// A `purge_at` far beyond every test's `now`.
+const LIVE: u64 = NOW + 36_000_000;
+const FULL: u64 = MAX_LOG_LEN;
 
 /// A one-hour channel on `server_url`; its `channel_id` does not depend on
 /// the URL.
@@ -194,6 +202,26 @@ fn retiring() -> (Channel, MemoryStore, Faults, [u8; 32], Vec<ClientRef>) {
     (channel, handle, faults, old_seed, entries)
 }
 
+/// A text sealed with this channel's own key elsewhere.
+fn own_text(channel: &Channel, counter: u64, sent_at: u64) -> Vec<u8> {
+    text_from(
+        channel,
+        *channel.state.identity_seed.expose(),
+        counter,
+        sent_at,
+    )
+}
+
+/// The counters still in the `outbox`.
+fn counters(channel: &Channel) -> Vec<u64> {
+    channel
+        .state
+        .outbox
+        .iter()
+        .map(|entry| entry.counter)
+        .collect()
+}
+
 /// The channel the store of `handle` holds now.
 fn reopened(handle: &MemoryStore) -> Channel {
     Channel::open_stored(Box::new(handle.reopen())).unwrap()
@@ -300,6 +328,12 @@ fn s021_t05_r05_create_existing() {
     let other = config_on("wss://elsewhere.example");
     assert_eq!(other.channel_id(), config_on(SERVER).channel_id());
     let result = Channel::create(&other, Box::new(handle.reopen()));
+    assert!(matches!(result, Err(Error::ConfigMismatch)));
+    assert_eq!(handle.all_commits(), 1);
+    // Another channel's config over this store.
+    let another =
+        Config::from_parts(Secret::from_bytes([0x5a; 32]), SERVER, 3_600, "x", 0).unwrap();
+    let result = Channel::create(&another, Box::new(handle.reopen()));
     assert!(matches!(result, Err(Error::ConfigMismatch)));
     assert_eq!(handle.all_commits(), 1);
 }

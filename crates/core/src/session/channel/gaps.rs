@@ -4,7 +4,6 @@
 //! gap for the messages that expired meanwhile.
 
 use super::{Channel, Gap};
-use crate::proto::envelope::EXPIRY_MARGIN_MS;
 use crate::storage::state::items::PeerRecord;
 
 /// A single skip above this is anomalous (R24).
@@ -37,9 +36,7 @@ impl Channel {
         if let Some(truncated_at) = self.truncated_at.map(|at| at.min(now))
             && peer.last_seen < truncated_at.saturating_sub(ttl)
         {
-            let window_end = truncated_at
-                .saturating_add(ttl)
-                .saturating_add(EXPIRY_MARGIN_MS);
+            let window_end = truncated_at.saturating_add(self.accept_window());
             // What expired while the device was away is no deletion.
             if listed <= window_end {
                 return None;

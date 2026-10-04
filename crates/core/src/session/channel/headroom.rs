@@ -9,10 +9,10 @@ use crate::storage::{MAX_LOG_LEN, StoreError};
 
 /// A maximal log entry with its 4-byte `len` (65 580 bytes) and the
 /// reserve of 1 048 576 for the commits that add no message (R18).
-const HEADROOM: u64 = 1_114_156;
+pub(super) const HEADROOM: u64 = 1_114_156;
 
 /// The reserve alone, the least a compaction must free.
-const RESERVE: u64 = 1_048_576;
+pub(super) const RESERVE: u64 = 1_048_576;
 
 /// The least time between two compactions of one channel.
 const COMPACTION_INTERVAL_MS: u64 = 600_000;

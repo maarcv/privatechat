@@ -1,7 +1,7 @@
 //! Tests of the log headroom for `encrypt` (R18) and of the expiry index
 //! after a compaction (R1), over logs filled to the byte.
 
-use super::{SERVER, config_on, fill, new_channel, new_store};
+use super::{FULL, HEADROOM, RESERVE, SERVER, config_on, fill, new_channel, new_store};
 use crate::Error;
 use crate::session::channel::Channel;
 use crate::storage::{ENTRY_LEN_LEN, MAX_LOG_ENTRY, StoreError};
@@ -10,8 +10,6 @@ use crate::testing::{FailingStore, Faults, MemoryStore, record};
 const NOW: u64 = 1_790_000_000_000;
 const EXPIRED: u64 = NOW - 1;
 const LIVE: u64 = NOW + 36_000_000;
-const FULL: u64 = 67_108_864;
-const HEADROOM: u64 = 1_114_156;
 const MIB: u64 = 1_048_576;
 
 /// A channel whose log has `expired` bytes that expired before `NOW` and
@@ -33,7 +31,8 @@ fn filled(expired: u64, len: u64) -> (Channel, MemoryStore, Faults) {
 fn s021_t18_r18_headroom_constants() {
     let max_entry = u64::try_from(MAX_LOG_ENTRY + ENTRY_LEN_LEN).unwrap();
     assert_eq!(max_entry, 65_580);
-    assert_eq!(HEADROOM, max_entry + MIB);
+    assert_eq!((HEADROOM, RESERVE), (1_114_156, 1_048_576));
+    assert_eq!(HEADROOM, max_entry + RESERVE);
     let (mut channel, _) = new_channel();
     fill(&mut channel, LIVE, FULL - HEADROOM);
     assert!(channel.encrypt("fits", None, NOW).is_ok());
@@ -56,6 +55,24 @@ fn s021_t18_r18_headroom_live_log() {
         assert_eq!(handle.commits(), commits);
         assert_eq!(channel.store.log_len(), FULL - HEADROOM + 1);
         assert_eq!(channel.relieve_headroom(NOW), Ok(false));
+        assert!(channel.status().storage_full);
+    }
+}
+
+/// Spec 021, R7 and R18: the headroom comes after the `outbox` check and
+/// before the name: 31 entries and a full log → `OutboxFull`; 30 entries,
+/// a full log and a name too long → `LogFull`.
+#[test]
+fn s021_t07_r07_headroom_in_order() {
+    for (entries, error) in [(31, StoreError::OutboxFull), (30, StoreError::LogFull)] {
+        let (mut channel, _) = new_channel();
+        for _ in 0..entries {
+            channel.encrypt("mine", None, NOW).unwrap();
+        }
+        fill(&mut channel, LIVE, FULL - HEADROOM + 1);
+        let name = "n".repeat(65);
+        let result = channel.encrypt("hi", Some(&name), NOW);
+        assert_eq!(result, Err(Error::Store(error)), "{entries}");
     }
 }
 

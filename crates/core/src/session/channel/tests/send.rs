@@ -1,7 +1,7 @@
 //! Tests of sending: R7, R8, R26 for one's own message, R33, and the
 //! `encrypt` clauses of R2 and R32.
 
-use super::{SERVER, config_on, new_channel, new_store, reopened};
+use super::{HOUR_MS, SERVER, config_on, new_channel, new_store, reopened};
 use crate::Error;
 use crate::proto::envelope::{self, ChannelCtx};
 use crate::session::channel::Channel;
@@ -9,7 +9,6 @@ use crate::storage::{ChannelState, Content, LogEntry, LogRecord, Message, StoreE
 use crate::testing::{FailingStore, Faults, state_eq};
 
 const NOW: u64 = 1_790_000_123_456;
-const HOUR_MS: u64 = 3_600_000;
 
 /// A change to a state, made through one commit.
 type Change = fn(&mut ChannelState);

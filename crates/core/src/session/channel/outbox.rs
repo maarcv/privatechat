@@ -3,9 +3,9 @@
 //! overtaken, and whichever way it leaves, its signature is kept until no
 //! receiver can accept its blob any more.
 
+use super::receive::listed_time;
 use super::{ACK_GRACE_MS, AckOutcome, Channel, ClientRef, OutboxStep, Outcome};
 use crate::error::Error;
-use crate::proto::envelope::EXPIRY_MARGIN_MS;
 use crate::storage::state::items::{OutboxEntry, OutboxKind};
 use crate::storage::{ChannelState, LogEntry, LogRecord};
 
@@ -30,7 +30,6 @@ impl Channel {
         let Some(entry) = self
             .ordinary_outbox()
             .find(|entry| entry.client_ref == client_ref.bytes)
-            .cloned()
         else {
             return Ok(Outcome {
                 client_ref,
@@ -40,35 +39,35 @@ impl Channel {
                 sent_at: None,
             });
         };
+        let kept = self.kept_signature(entry, self.state.identity_epoch);
+        let (sent_at, counter, under_retired_key) =
+            (entry.sent_at, entry.counter, entry.under_retired_key);
         let mut next = self.next_state();
         next.outbox
-            .retain(|other| other.client_ref != entry.client_ref);
-        let mut records = vec![self.kept_signature(&entry, next.identity_epoch)];
+            .retain(|other| other.client_ref != client_ref.bytes);
+        let mut records = vec![kept];
         // The server stores one connection's publishes in order, so an
         // entry it refused earlier and would store later reaches every
         // receiver as `Replay`.
         let overtaken = self.remove_entries(&mut next, &mut records, |other| {
-            other.under_retired_key == entry.under_retired_key && other.counter < entry.counter
+            other.under_retired_key == under_retired_key && other.counter < counter
         });
-        let sent_at = entry.sent_at;
         // Checked against the server's own time: a sender clock off by more
         // than the margin cannot hide a loss behind an `ack` (ADR 0034).
-        let window = self.ttl_ms().saturating_add(EXPIRY_MARGIN_MS);
+        let window = self.accept_window();
         let in_time =
             received_at.abs_diff(sent_at) <= window && sent_at.saturating_add(self.ttl_ms()) >= now;
-        let listed_at = received_at
-            .max(sent_at.saturating_sub(EXPIRY_MARGIN_MS))
-            .min(now);
+        let listed_at = listed_time(Some(sent_at), received_at).min(now);
         let (outcome, kind) = if in_time {
             let acked = LogEntry::Acked {
                 server_id,
                 received_at: listed_at,
-                client_ref: entry.client_ref,
+                client_ref: client_ref.bytes,
             };
             (AckOutcome::Delivered, acked)
         } else {
             let not_delivered = LogEntry::NotDelivered {
-                client_ref: entry.client_ref,
+                client_ref: client_ref.bytes,
             };
             (AckOutcome::NotDelivered, not_delivered)
         };
@@ -168,7 +167,7 @@ impl Channel {
         in_flight: &[ClientRef],
     ) -> Result<Vec<(ClientRef, u64)>, Error> {
         self.latest_now = Some(now);
-        let window = self.ttl_ms().saturating_add(EXPIRY_MARGIN_MS);
+        let window = self.accept_window();
         let stale = |entry: &OutboxEntry| {
             let grace = if in_flight.contains(&ClientRef::of(entry)) {
                 ACK_GRACE_MS
@@ -233,7 +232,7 @@ impl Channel {
     /// a replay of it into a false alarm. Its `client_ref` and `epoch` are
     /// written and never read.
     fn kept_signature(&self, entry: &OutboxEntry, epoch: u32) -> LogRecord {
-        let window = self.ttl_ms().saturating_add(EXPIRY_MARGIN_MS);
+        let window = self.accept_window();
         LogRecord {
             purge_at: entry.sent_at.saturating_add(window.saturating_mul(2)),
             entry: LogEntry::KeptSignature {

@@ -93,7 +93,8 @@ None of its own: the blob is the 013 `key_retired` layout; the flow is unit test
 
 ## Open questions
 
-None.
+- 025-R2 (from audit AD of spec 021): after a re-seal, a superseded copy of the `key_retired` is in neither the `outbox` nor a kept-signature record, so its echo, at counter `2^64 − 1`, reads at spec 021 R9 step 5 as a thief's blob and removes every ordinary entry `under_retired_key` as not delivered, although the server stored each before that copy (it stores a connection's publishes in order). The usual trigger is an `ack` lost to a reconnect; the cost is entries reported failed that were delivered, and a resend showing the text twice. A thief's `key_retired` at the same counter cannot be told apart. Options: (a) document it as a residual in 021 R9 and Security beside the lost-`ack` residual; (b) keep the signatures of the superseded copies still within the window (at most a handful) and compare them in 021's step-5 check. Spec 021 T09 pins today's behaviour.
+- 025-R1 (from audit AD of spec 021): R1 marks every ordinary entry `under_retired_key`, and specs 021 R9 and R17 read that flag as "the same key". Entries of an earlier old key still waiting for a lost `ack` when a second regeneration comes are marked again, so an `ack` or a thief's blob of the newer old key compares counters of two keys. Options: record the sealing key or epoch per entry, or have R1 drop or bound such entries.
 
 ## History
 
@@ -120,3 +121,4 @@ None.
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-10-04 amended after audit AC (`docs/audit-log.md`): no own-key value held in memory to apply and no retry without it (R1); no `key_retired` copy re-sealed in memory when the `outbox` commit fails (R4, R5)
 - 2026-10-04 amended after audit AC (`docs/audit-log.md`): the old key's kept signatures are no longer filtered out by epoch; step 5 stops its echoes first (R3)
+- 2026-10-04 open questions 025-R1 and 025-R2 added from audit AD of spec 021 (`docs/audit-log.md`)

@@ -112,8 +112,6 @@ impl Channel {
     pub(crate) fn outbox_ref(&self, counter: u64) -> Option<ClientRef> {
         self.ordinary_outbox()
             .find(|entry| entry.counter == counter)
-            .map(|entry| ClientRef {
-                bytes: entry.client_ref,
-            })
+            .map(ClientRef::of)
     }
 }

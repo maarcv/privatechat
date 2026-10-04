@@ -1,28 +1,20 @@
 //! Tests of the gaps and the truncation (R24), the peers-changed flag of
 //! R1, and the retiring-key clause of R9.
 
-use super::{receiver, reopened, retiring, sid, text_from};
+use super::{
+    DAY_MS, HOUR_MS, MARGIN_MS, NOW, pk_of, plant_retirement, receiver, reopened, retiring, seal,
+    sid, text_from,
+};
 use crate::Error;
 use crate::crypto::Secret;
-use crate::proto::envelope::SenderKey;
+use crate::proto::envelope::text_k1;
 use crate::proto::payload::{Payload, PayloadKind};
 use crate::session::channel::{AckOutcome, Channel, ClientRef, Gap};
 use crate::storage::StoreError;
+use crate::vectors;
 
-/// A whole minute.
-const NOW: u64 = 1_790_000_040_000;
-const HOUR_MS: u64 = 3_600_000;
-const DAY_MS: u64 = 86_400_000;
 const ANN: [u8; 32] = [0x41; 32];
 const BOB: [u8; 32] = [0x42; 32];
-
-/// `pk_u` of `seed`.
-fn pk(seed: [u8; 32]) -> [u8; 32] {
-    SenderKey::from_seed(&Secret::from_bytes(seed))
-        .unwrap()
-        .public()
-        .0
-}
 
 /// Delivers a fresh text of `seed` at `counter`, sent and received at `at`.
 fn deliver(channel: &mut Channel, seed: [u8; 32], counter: u64, at: u64) {
@@ -48,15 +40,15 @@ fn s021_t24_r24_gaps() {
         anomalous,
         spans_truncation,
     };
-    assert_eq!(channel.gaps(), [gap(pk(ANN), 3, false, false)]);
+    assert_eq!(channel.gaps(), [gap(pk_of(ANN), 3, false, false)]);
     deliver(&mut channel, BOB, 0, NOW);
     deliver(&mut channel, BOB, (1 << 32) + 1, NOW);
-    let bob = |channel: &Channel| channel.gaps().into_iter().find(|g| g.peer == pk(BOB));
-    assert_eq!(bob(&channel), Some(gap(pk(BOB), 1 << 32, false, false)));
+    let bob = |channel: &Channel| channel.gaps().into_iter().find(|g| g.peer == pk_of(BOB));
+    assert_eq!(bob(&channel), Some(gap(pk_of(BOB), 1 << 32, false, false)));
     deliver(&mut channel, BOB, (1 << 33) + 3, NOW);
     assert_eq!(
         bob(&channel),
-        Some(gap(pk(BOB), (1 << 32) * 2 + 1, true, false))
+        Some(gap(pk_of(BOB), (1 << 32) * 2 + 1, true, false))
     );
     // A `key_retired` counts for no gap.
     let retired = Payload {
@@ -65,12 +57,12 @@ fn s021_t24_r24_gaps() {
         sent_at: NOW,
         body: Vec::new(),
     };
-    let blob = super::seal(&channel, ANN, |ctx, sender, nonce| {
+    let blob = seal(&channel, ANN, |ctx, sender, nonce| {
         crate::proto::envelope::seal(ctx, sender, u64::MAX, nonce, &retired)
     });
     channel.decrypt(&blob, sid(200), NOW, NOW).unwrap();
-    let ann = channel.gaps().into_iter().find(|g| g.peer == pk(ANN));
-    assert_eq!(ann, Some(gap(pk(ANN), 3, false, false)));
+    let ann = channel.gaps().into_iter().find(|g| g.peer == pk_of(ANN));
+    assert_eq!(ann, Some(gap(pk_of(ANN), 3, false, false)));
 
     // Both last seen at `NOW`; the history truncated two hours later.
     let (mut channel, handle, _) = receiver(3_600);
@@ -87,7 +79,7 @@ fn s021_t24_r24_gaps() {
     deliver(&mut channel, ANN, 9, truncated_at + 1_800_000);
     assert!(channel.gaps().is_empty());
     deliver(&mut channel, BOB, 9, truncated_at + 30 * DAY_MS);
-    assert_eq!(channel.gaps(), [gap(pk(BOB), 8, false, true)]);
+    assert_eq!(channel.gaps(), [gap(pk_of(BOB), 8, false, true)]);
     assert_eq!(channel.status().truncated_before, None);
 }
 
@@ -123,6 +115,10 @@ fn s021_t09_r09_retiring_key() {
         (NOW, true),
         (NOW + HOUR_MS + 420_000, true),
         (NOW - HOUR_MS - 780_000, false),
+        // The edges: exactly one window old, exactly at the reach.
+        (NOW - HOUR_MS - MARGIN_MS, true),
+        (NOW + 2 * (HOUR_MS + MARGIN_MS), true),
+        (NOW + 2 * HOUR_MS + 780_000, false),
     ] {
         let (mut channel, _, _, old_seed, entries) = retiring();
         let thief = text_from(&channel, old_seed, 301, sent_at);
@@ -147,15 +143,17 @@ fn s021_t09_r09_retiring_key() {
         }
     }
 
-    // The echo of a superseded `key_retired` copy keeps the pending one.
-    let (mut channel, _, _, old_seed, _) = retiring();
+    // The echo of a superseded `key_retired` copy keeps the pending one;
+    // it reads as a thief's, so the old entries go as not delivered
+    // (open question 025-R2).
+    let (mut channel, _, _, old_seed, entries) = retiring();
     let retired = Payload {
         kind: PayloadKind::KeyRetired,
         display_name: None,
         sent_at: NOW,
         body: Vec::new(),
     };
-    let copy = super::seal(&channel, old_seed, |ctx, sender, nonce| {
+    let copy = seal(&channel, old_seed, |ctx, sender, nonce| {
         crate::proto::envelope::seal(ctx, sender, u64::MAX, nonce, &retired)
     });
     assert_eq!(
@@ -164,6 +162,12 @@ fn s021_t09_r09_retiring_key() {
     );
     assert_eq!(channel.state.outbox.len(), 1);
     assert!(channel.status().retirement_pending);
+    let gone: Vec<ClientRef> = channel
+        .take_outcomes()
+        .iter()
+        .map(|o| o.client_ref)
+        .collect();
+    assert_eq!(gone, entries);
 
     let (mut channel, _, faults, old_seed, entries) = retiring();
     let thief = text_from(&channel, old_seed, 301, NOW);
@@ -183,4 +187,47 @@ fn s021_t09_r09_retiring_key() {
         .map(|o| o.client_ref)
         .collect();
     assert_eq!(gone, entries);
+}
+
+/// Spec 021, R9: a thief's blob below the old entries removes only those
+/// at or below its counter; one whose AEAD does not open is `RetiredKey`,
+/// since step 5 decides.
+#[test]
+fn s021_t09_r09_retiring_key_bounds() {
+    let (mut channel, _, _, old_seed, _) = retiring();
+    let thief = text_from(&channel, old_seed, 300, NOW);
+    assert_eq!(
+        channel.decrypt(&thief, sid(1), NOW, NOW),
+        Err(Error::RetiredKey)
+    );
+    let left: Vec<u64> = channel.state.outbox.iter().map(|e| e.counter).collect();
+    assert_eq!(left, [301, u64::MAX]);
+
+    let (mut channel, _, _) = receiver(3_600);
+    let mut next = channel.next_state();
+    next.identity_seed = Secret::from_bytes(text_k1::SENDER_SEED);
+    channel.commit(next, Vec::new()).unwrap();
+    plant_retirement(&mut channel);
+    let forged = vectors::load("013", "aead_forged_signed");
+    let blob = forged.input("blob").bytes();
+    let (received_at, now) = (
+        forged.input("received_at").u64_hex(),
+        forged.input("now").u64_hex(),
+    );
+    assert_eq!(
+        channel.decrypt(blob, sid(1), received_at, now),
+        Err(Error::RetiredKey)
+    );
+}
+
+/// Spec 021, R24: a `truncated_at` ahead of `now` is read as `now`, so a
+/// sender seen recently still counts its gap.
+#[test]
+fn s021_t24_r24_truncation_ahead_is_now() {
+    let (mut channel, _, _) = receiver(3_600);
+    deliver(&mut channel, ANN, 0, NOW);
+    channel.truncated_at = Some(NOW + DAY_MS);
+    deliver(&mut channel, ANN, 5, NOW + 60_000);
+    let gap = channel.gaps().into_iter().find(|g| g.peer == pk_of(ANN));
+    assert_eq!(gap.map(|g| g.missing), Some(4));
 }
