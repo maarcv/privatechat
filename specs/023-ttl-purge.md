@@ -33,8 +33,8 @@ The TTL is part of the channel (ADR 0014) and the client enforces it without tru
 ## Interface
 
 ```
-crates/core/src/session/purge.rs          messages, purge_expired
-crates/core/src/session/purge/tests.rs    s023_* tests
+crates/core/src/session/channel/purge.rs          messages, message, purge_expired, purge_due
+crates/core/src/session/channel/tests/purge.rs    s023_* tests
 ```
 
 ```rust
@@ -72,7 +72,7 @@ None directly: spec 027-core-api exposes `messages(now)` and `purge_expired`, wi
 
 - T01 (covers R1): `s023_t01_r01_display_expiry`: an expired peer message is hidden before compaction; in a 60-second channel, one's own message written offline at 12:00:59 stays listed until its `purge_at`, `sent_at + 540 000`, as `NotDelivered` from `sent_at + 480 001`, and still so after `expire_outbox` removes it at `sent_at + 480 001`; after an in-time `ack` it is listed until `sent_at + 60 000`; `commits = 0`.
 - T02 (covers R2): `s023_t02_r02_order`: a peer message at 12:00:40 and one's own sent at 12:00:50 are listed in that order before and after the `ack`; a peer message whose signed `sent_at` is a TTL ahead is placed at its arrival, not at the bottom; one the server dates six days back is placed at `sent_at − 360 000`; an own message acked with a `received_at` a day ahead is placed at the time of the `ack`, and one acked a TTL back at `sent_at − 360 000`, still listed.
-- T03 (covers R3): `s023_t03_r03_message_fields`: `encrypt` → `Own`, `Pending`, its `client_ref` and `expires_at`; in-time `ack` → `Delivered` with the server's `server_id`; late `ack` → `NotDelivered`; a `display_name` with U+202E comes out cleaned (spec 022-peers-tofu R6); a message from one's own key sealed elsewhere → `OwnKeyElsewhere` with no delivery, and still so with its key moved to `own_old_keys` through the `testing` builders; a message whose sender was evicted carries a `stranger` whose `claims_name_of` names the labelled "Alice" its "ALlCE" collides with.
+- T03 (covers R3): `s023_t03_r03_message_fields`: `encrypt` → `Own`, `Pending`, its `client_ref` and `expires_at`; in-time `ack` → `Delivered` with the server's `server_id`; late `ack` → `NotDelivered`; a `display_name` with U+202E comes out cleaned (spec 022-peers-tofu R6); a message from one's own key sealed elsewhere → `OwnKeyElsewhere` with no delivery, and still so with its key moved to `own_old_keys` through the `testing` builders; a message whose sender was evicted carries a `stranger` whose `claims_name_of` names the labelled "Alice" its "ALICE" collides with.
 - T04 (covers R4): `s023_t04_r04_purge_counts_messages`: three expired messages and two expired signatures → 3; `messages` and a reopened store agree; nothing expired → 0 and no call to `compact`.
 - T05 (covers R5): `s023_t05_r05_open_does_not_purge`: `open_stored` of a store with expired records commits nothing and `messages(now)` hides them; `purge_due` is true at a quarter of the log or a day after the oldest expiry, and not before; after a failed `purge_expired` (`Faults`), and after a failed headroom compaction, `purge_due` is false until 600 000 ms later, then true, and after a failed `purge_expired` `relieve_headroom` returns `Ok(false)` for those ten minutes; with the last attempt at `t` and the rule met, `purge_due(t − 86 400 000)` → true; `on_tick` is tested by spec 027-core-api T12.
 - T06 (covers R6): `s023_t06_r06_failed_compaction`: a `FailingStore` failing the compaction → the error, memory unchanged, the reopened state before or after, never a mix.
@@ -121,3 +121,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-10-04 amended after audit AC (`docs/audit-log.md`): an echo writes no acked record, so a not-delivered record is final (R3)
 - 2026-10-04 amended after audit AC and ADR 0044 (`docs/audit-log.md`): display expiry from the signed `sent_at`, `received_at` only for the order (R1, Security)
+- 2026-10-05 text: T03's "ALlCE", a look-alike that ADR 0043 no longer folds, written "ALICE"; the Interface paths under `session/channel/`, as spec 022's

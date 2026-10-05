@@ -75,7 +75,7 @@ enum Target {
 }
 
 /// The 4 words of a key (spec 014-fingerprint R6).
-type Short = [&'static str; SHORT_WORD_COUNT];
+pub(super) type Short = [&'static str; SHORT_WORD_COUNT];
 
 /// A record and what `peers()` compares it on, computed once per call.
 struct Entry<'a> {
@@ -85,10 +85,27 @@ struct Entry<'a> {
     short: Short,
 }
 
-/// One's own key and name, which R13 and R15 compare with.
-struct Own {
-    short: Short,
-    name_key: Option<String>,
+/// The labels, in `first_seen` order, and one's own name that a name is
+/// checked against: R13 for an unknown peer, and spec 023-ttl-purge R3 for
+/// the sender of a message that has no record.
+pub(super) struct Claimable {
+    labels: Vec<(PeerId, String)>,
+    own_name: Option<String>,
+}
+
+impl Claimable {
+    /// The first peer whose label `name` collides with, and whether it
+    /// collides with one's own name (R13).
+    pub(super) fn claims(&self, name: &str) -> (Option<PeerId>, bool) {
+        let Some(key) = collision_key(name) else {
+            return (None, false);
+        };
+        let holder = self.labels.iter().find(|(_, label)| *label == key);
+        (
+            holder.map(|(id, _)| *id),
+            self.own_name.as_ref() == Some(&key),
+        )
+    }
 }
 
 impl Channel {
@@ -113,18 +130,32 @@ impl Channel {
             })
             .collect::<Result<Vec<_>, Error>>()?;
         let own_key = SenderKey::from_seed(&self.state.identity_seed)?;
-        let own = Own {
-            short: self.short(own_key.public())?,
-            name_key: self
+        let own_short = self.short(own_key.public())?;
+        let claimable = self.claimable();
+        Ok(entries
+            .iter()
+            .map(|entry| listed(entry, &entries, &own_short, &claimable))
+            .collect())
+    }
+
+    /// What a name is checked against for the warnings of R13.
+    pub(super) fn claimable(&self) -> Claimable {
+        let mut labelled: Vec<&PeerRecord> = self.state.peers.iter().collect();
+        // Stable, as in `peers()`: any label counts, a retired one too,
+        // since an impostor appears when a key is retired.
+        labelled.sort_by_key(|peer| peer.first_seen);
+        let labels = labelled
+            .into_iter()
+            .filter_map(|peer| Some((peer.pk.0, collision_key(peer.label.as_deref()?)?)))
+            .collect();
+        Claimable {
+            labels,
+            own_name: self
                 .state
                 .own_display_name
                 .as_deref()
                 .and_then(collision_key),
-        };
-        Ok(entries
-            .iter()
-            .map(|entry| listed(entry, &entries, &own))
-            .collect())
+        }
     }
 
     /// Gives `peer` the label `name` (R7).
@@ -265,7 +296,7 @@ impl Channel {
     }
 
     /// The 4 words of `pk`, without the QR `fingerprint` also builds.
-    fn short(&self, pk: &PublicKey) -> Result<Short, Error> {
+    pub(super) fn short(&self, pk: &PublicKey) -> Result<Short, Error> {
         let words = fingerprint::words(&fingerprint::fingerprint(self.config.id(), pk)?)?;
         Ok(fingerprint::short_identifier(&words))
     }
@@ -345,13 +376,13 @@ fn collision_key(name: &str) -> Option<String> {
 }
 
 /// `entry` as a client paints it, its warnings read against `all` (R13–R15).
-fn listed(entry: &Entry<'_>, all: &[Entry<'_>], own: &Own) -> Peer {
+fn listed(entry: &Entry<'_>, all: &[Entry<'_>], own_short: &Short, claimable: &Claimable) -> Peer {
     let record = entry.record;
     let suggested = suggested_name(record);
     // R13 reads the suggested name of an unknown peer alone.
-    let claimed = suggested
+    let (claims_name_of, claims_own_name) = suggested
         .filter(|_| is_unknown(record))
-        .and_then(collision_key);
+        .map_or((None, false), |name| claimable.claims(name));
     let others = || all.iter().filter(|other| other.record.pk.0 != record.pk.0);
     Peer {
         id: record.pk.0,
@@ -363,17 +394,11 @@ fn listed(entry: &Entry<'_>, all: &[Entry<'_>], own: &Own) -> Peer {
         first_seen: record.first_seen,
         last_seen: record.last_seen,
         short: entry.short.map(str::to_owned).to_vec(),
-        // Any label counts, a retired one too, since an impostor appears
-        // when a key is retired; `all` is in `first_seen` order.
-        claims_name_of: claimed.as_ref().and_then(|key| {
-            all.iter()
-                .find(|other| other.label_key.as_ref() == Some(key))
-                .map(|other| other.record.pk.0)
-        }),
-        claims_own_name: claimed.is_some() && claimed == own.name_key,
+        claims_name_of,
+        claims_own_name,
         label_collides: entry.label_key.is_some()
             && others().any(|other| other.label_key == entry.label_key),
-        short_collides: entry.short == own.short
+        short_collides: entry.short == *own_short
             || others().any(|other| other.short == entry.short),
     }
 }
