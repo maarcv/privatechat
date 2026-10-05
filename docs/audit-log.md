@@ -18,6 +18,14 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AF8 | The `Context` built with a `'static` base and struct update; `fold_fate` an associated fn with no `self`; the pending window retyped as 420 000; the content of a `Received` built apart from the list's (C4, C6, C7, C8) | Nit | Free functions; the window from `accept_window` and the grace minute; `Received` takes `content_of` |
 | AF9 | Test gaps: the attempt instant, a peer row received after its `sent_at`, a stranger claiming one's own name, a `key_retired` row, an expired delivery record in the count, the open check through the log, T07 after the `ack`, an oracle from the production formula (C1, C12, C13, C16, A3, mutants P37, P54, P57) | Low | T01–T05, T07 |
 
+**Round 2.** Two passes: a fresh reading of R1–R7 with the round-1 fixes, conformance and adversary together, which found them correct and complete (a delivered row's tie position survives compactions and reloads, since an acked record shares its message's `purge_at`; each clock setback allows at most one extra attempt); and 98 hand mutants of the code spec 023 added or changed, 88 killed, 5 equivalent, 5 test gaps and no production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AF10 | `contents` and `listing` kept a `Result` that can no longer fail after `content_of` | Nit | Infallible |
+| AF11 | Test gaps: a stranger's later rows without their 4 words, every message at one log position, a `purge_at` equal to `now` counted as expired, `purge_expired` and `relieve_headroom` not recording their `now` (021 R1, R25), the tie not checked after a reload and a compaction | Low | T02–T05; their text amended |
+
+
 ## Spec 022 implemented
 
 **2026-10-05 — The non-automatable acceptance criterion of spec 022-peers-tofu: a second check of `INVISIBLE` against `UnicodeData.txt` and `DerivedCoreProperties.txt` of Unicode 17.0.0.** The human reviewer took the independent rebuild of pass C of Audit AE as that check: from its own download of the two files, Cf with its `First`/`Last` ranges expanded, `Default_Ignorable_Code_Point` and the five code points R5 lists, it computed the same 26 ranges, and the pinned toolchain's `char::UNICODE_VERSION` is 17.0.0. `cargo test -p privatechat-core s022_`, clippy, `cargo deny` and the documentation lint are green on `mvp` (6dc66dc). Spec 022 is `implemented`.

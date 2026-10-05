@@ -164,17 +164,31 @@ fn s023_t02_r02_order() {
 
     // A tie: one's own message, sealed before a peer's but acked after it,
     // stands after it, where the client moved it at its `ack`.
-    let (mut channel, _, _) = receiver(3_600);
+    let (mut channel, handle, _) = receiver(3_600);
     let mine = channel.encrypt("mine", None, NOW).unwrap();
     push(&mut channel, ANN, 0, (NOW, NOW - 400_000, NOW), None);
     channel.acked(mine, [7; 16], NOW - 400_000, NOW).unwrap();
+    // A peer's message logged after the `ack`, at the same time, after it.
+    push(&mut channel, BOB, 0, (NOW, NOW - 400_000, NOW), None);
     let rows = channel.messages(NOW).unwrap();
     let order: Vec<(Option<ClientRef>, u64)> =
         rows.iter().map(|r| (r.client_ref, r.received_at)).collect();
     assert_eq!(
         order,
-        [(None, NOW - MARGIN_MS), (Some(mine), NOW - MARGIN_MS)]
+        [
+            (None, NOW - MARGIN_MS),
+            (Some(mine), NOW - MARGIN_MS),
+            (None, NOW - MARGIN_MS)
+        ]
     );
+    assert_eq!(rows[2].sender, Sender::Peer { pk: pk_of(BOB) });
+    // The same after a reload, and after a compaction drops other records.
+    assert_eq!(reopened(&handle).messages(NOW), channel.messages(NOW));
+    channel
+        .commit(channel.next_state(), vec![record(NOW - 10, 10)])
+        .unwrap();
+    assert_eq!(channel.purge_expired(NOW), Ok(1));
+    assert_eq!(channel.messages(NOW).unwrap(), rows);
 }
 
 /// Spec 023, R3: the fields of each kind of row.
@@ -242,6 +256,7 @@ fn s023_t03_r03_message_fields() {
 
     // A sender whose record is gone is a stranger, claims included.
     push(&mut channel, BOB, 0, (NOW, NOW, NOW), Some("ALICE"));
+    push(&mut channel, BOB, 1, (NOW, NOW, NOW), Some("ALICE"));
     channel.label(pk_of(ANN), "Alice", NOW).unwrap();
     let mut next = channel.next_state();
     next.peers.retain(|peer| peer.pk.0 != pk_of(BOB));
@@ -252,6 +267,14 @@ fn s023_t03_r03_message_fields() {
         .find(|r| r.sender == Sender::Peer { pk: pk_of(BOB) })
         .unwrap();
     let stranger = bob.stranger.as_ref().unwrap();
+    // Every row of the sender carries its 4 words, computed once.
+    let rows_of_bob: Vec<&Message> = rows
+        .iter()
+        .filter(|r| r.sender == Sender::Peer { pk: pk_of(BOB) })
+        .collect();
+    assert_eq!(rows_of_bob.len(), 2);
+    assert_eq!(rows_of_bob[1].stranger.as_ref(), Some(stranger));
+    assert_eq!(stranger.short.len(), 4);
     assert_eq!(stranger.claims_name_of, Some(pk_of(ANN)));
     assert!(!stranger.claims_own_name);
     assert_eq!(
@@ -364,6 +387,24 @@ fn s023_t04_r04_purge_counts_messages() {
     let (mut empty, _, faults) = receiver(3_600);
     faults.fail_compactions(true);
     assert_eq!(empty.purge_expired(NOW), Ok(0));
+
+    // Both compaction calls take a `now` and may commit, so they record it
+    // for the truncation banner of spec 021-channel-session R1 and R25.
+    let late = NOW + 2 * DAY_MS;
+    for headroom in [false, true] {
+        let (mut channel, handle, _) = receiver(3_600);
+        let mut next = channel.next_state();
+        next.truncated_at = Some(NOW);
+        channel.commit(next, Vec::new()).unwrap();
+        let mut channel = reopened(&handle);
+        assert!(channel.status().truncated_before.is_some());
+        if headroom {
+            assert_eq!(channel.relieve_headroom(late), Ok(false));
+        } else {
+            assert_eq!(channel.purge_expired(late), Ok(0));
+        }
+        assert_eq!(channel.status().truncated_before, None, "{headroom}");
+    }
 }
 
 /// Spec 023, R5: opening never compacts; the purge is due at a quarter of
@@ -407,6 +448,10 @@ fn s023_t05_r05_open_does_not_purge() {
         vec![record(NOW + 2 * DAY_MS, live), record(NOW, 1_000)],
     );
     assert_eq!(channel.store.log_len(), 4 * small);
+    assert!(
+        !channel.purge_due(NOW),
+        "a `purge_at` of `now` has not expired"
+    );
     assert!(channel.purge_due(NOW + 1));
     let (mut channel, _, _) = receiver(3_600);
     plant(

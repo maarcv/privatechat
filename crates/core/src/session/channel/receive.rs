@@ -137,7 +137,7 @@ impl Channel {
         let sender = opened.sender_pk;
         let counter = opened.counter;
         let listed = listed_time(sent_at, arrival.received_at);
-        let listing = self.listing(opened, arrival, Sender::Peer { pk: sender.0 }, 0)?;
+        let listing = self.listing(opened, arrival, Sender::Peer { pk: sender.0 }, 0);
         let key_retired = listing.received.content == MessageContent::KeyRetired;
         // R24: a `key_retired` counts for no gap.
         let gap = (!key_retired)
@@ -182,12 +182,12 @@ impl Channel {
         arrival: Arrival,
         sender: Sender,
         seen_margin: u64,
-    ) -> Result<Listing, Error> {
+    ) -> Listing {
         let sent_at = opened.sent_at;
         let expires_at = self.expires_at(sent_at, arrival);
         // R11: never later than its arrival.
         let listed_at = listed_time(sent_at, arrival.received_at).min(arrival.now);
-        let (stored, name) = contents(opened.content)?;
+        let (stored, name) = contents(opened.content);
         let stored = Message {
             server_id: Some(arrival.server_id),
             received_at: listed_at,
@@ -227,11 +227,11 @@ impl Channel {
             expires_at,
             content,
         };
-        Ok(Listing {
+        Listing {
             records: vec![message, seen],
             received,
             name,
-        })
+        }
     }
 
     /// The peer record of `pk`, looked up by its public identifier
@@ -281,18 +281,18 @@ pub(super) fn listed_time(sent_at: Option<u64>, received_at: u64) -> u64 {
 
 /// What a consumed message holds, for the log record, and its name as
 /// signed.
-fn contents(opened: envelope::Content) -> Result<(Content, Option<String>), Error> {
+fn contents(opened: envelope::Content) -> (Content, Option<String>) {
     let envelope::Content::Message(payload) = opened else {
-        return Ok((Content::Unreadable, None));
+        return (Content::Unreadable, None);
     };
-    Ok(match payload.kind {
+    match payload.kind {
         PayloadKind::Text => (
             Content::Text(Zeroizing::new(payload.body)),
             payload.display_name,
         ),
         PayloadKind::KeyRetired => (Content::KeyRetired, None),
         PayloadKind::Unknown(_) => (Content::Unreadable, None),
-    })
+    }
 }
 
 /// The peer as spec 022-peers-tofu R1 and R2 create or update it, with
