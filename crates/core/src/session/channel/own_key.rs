@@ -49,7 +49,7 @@ impl Channel {
             let sender = Sender::OwnKeyElsewhere {
                 pk: opened.sender_pk.0,
             };
-            let listing = self.listing(opened, arrival, sender, EXPIRY_MARGIN_MS)?;
+            let listing = self.listing(opened, arrival, sender, EXPIRY_MARGIN_MS);
             records.extend(listing.records);
             received = Some(listing.received);
         }

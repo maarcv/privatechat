@@ -133,8 +133,8 @@ fn s021_t18_r18_failed_compaction() {
     assert_eq!(reopened.relieve_headroom(NOW + 600_001), Ok(true));
 }
 
-/// Spec 021, R18: a clock set back resets the time of the last compaction
-/// to `now`, from which the ten minutes run.
+/// Spec 021, R18: a compaction recorded later than `now`, by a clock set
+/// back, holds nothing off; the ten minutes run from the next attempt.
 #[test]
 fn s021_t18_r18_clock_set_back() {
     let (mut channel, _, _) = filled(MIB, FULL - HEADROOM + 1);
@@ -143,7 +143,10 @@ fn s021_t18_r18_clock_set_back() {
     let start = channel.store.log_len();
     fill(&mut channel, back - 1, start + MIB);
     fill(&mut channel, LIVE, FULL - HEADROOM + 1);
-    assert_eq!(channel.relieve_headroom(back), Ok(false));
+    assert_eq!(channel.relieve_headroom(back), Ok(true));
+    let start = channel.store.log_len();
+    fill(&mut channel, back - 1, start + MIB);
+    fill(&mut channel, LIVE, FULL - HEADROOM + 1);
     assert_eq!(channel.relieve_headroom(back + 599_999), Ok(false));
     assert_eq!(channel.relieve_headroom(back + 600_000), Ok(true));
 }
