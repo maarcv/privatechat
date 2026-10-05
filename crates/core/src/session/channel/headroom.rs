@@ -15,7 +15,7 @@ pub(super) const HEADROOM: u64 = 1_114_156;
 pub(super) const RESERVE: u64 = 1_048_576;
 
 /// The least time between two compactions of one channel.
-pub(super) const COMPACTION_INTERVAL_MS: u64 = 600_000;
+const COMPACTION_INTERVAL_MS: u64 = 600_000;
 
 impl Channel {
     /// Compacts the log when what expired before `now` restores the
@@ -27,10 +27,7 @@ impl Channel {
     /// The compaction's `Store` error, memory left as it was.
     pub(crate) fn relieve_headroom(&mut self, now: u64) -> Result<bool, Error> {
         self.latest_now = Some(now);
-        // A clock set back must not hold compactions off until it catches up.
-        let last = self.last_compaction.map(|last| last.min(now));
-        self.last_compaction = last;
-        let held_off = last.is_some_and(|last| now.saturating_sub(last) < COMPACTION_INTERVAL_MS);
+        let held_off = self.compaction_held_off(now);
         let excess = self
             .store
             .log_len()
@@ -41,6 +38,15 @@ impl Channel {
         }
         self.compact_at(now)?;
         Ok(true)
+    }
+
+    /// Whether the last compaction attempt is less than ten minutes before
+    /// `now` (R18, spec 023-ttl-purge R5). One recorded later than `now`, by
+    /// a clock since set back, holds nothing off, so that the clock does
+    /// not hold compactions off until it catches up.
+    pub(super) fn compaction_held_off(&self, now: u64) -> bool {
+        self.last_compaction
+            .is_some_and(|last| last <= now && now.saturating_sub(last) < COMPACTION_INTERVAL_MS)
     }
 
     /// One compaction attempt at `now`, recorded whether it succeeds or

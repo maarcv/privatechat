@@ -5,12 +5,12 @@
 
 use zeroize::Zeroizing;
 
+use super::purge::content_of;
 use super::{Channel, MessageContent, Received, Sender};
 use crate::crypto::{self, PublicKey};
 use crate::error::Error;
 use crate::proto::envelope::{self, ChannelCtx, EXPIRY_MARGIN_MS, Opened, SenderKey};
 use crate::proto::payload::PayloadKind;
-use crate::session::names::shown_name;
 use crate::storage::state::items::PeerRecord;
 use crate::storage::{ChannelState, Content, LogEntry, LogRecord, Message, StoreError};
 
@@ -187,19 +187,22 @@ impl Channel {
         let expires_at = self.expires_at(sent_at, arrival);
         // R11: never later than its arrival.
         let listed_at = listed_time(sent_at, arrival.received_at).min(arrival.now);
-        let (content, stored, name) = contents(opened.content)?;
+        let (stored, name) = contents(opened.content)?;
+        let stored = Message {
+            server_id: Some(arrival.server_id),
+            received_at: listed_at,
+            sender_pk: opened.sender_pk,
+            counter: opened.counter,
+            content: stored,
+            display_name: name.clone().map(|name| Zeroizing::new(name.into_bytes())),
+            sent_at,
+            own_client_ref: None,
+        };
+        // The client reads it as the message list does (spec 023-ttl-purge).
+        let content = content_of(&stored);
         let message = LogRecord {
             purge_at: expires_at,
-            entry: LogEntry::Message(Message {
-                server_id: Some(arrival.server_id),
-                received_at: listed_at,
-                sender_pk: opened.sender_pk,
-                counter: opened.counter,
-                content: stored,
-                display_name: name.clone().map(|name| Zeroizing::new(name.into_bytes())),
-                sent_at,
-                own_client_ref: None,
-            }),
+            entry: LogEntry::Message(stored),
         };
         // R26: the seen record outlives every moment a copy could still be
         // accepted.
@@ -276,30 +279,19 @@ pub(super) fn listed_time(sent_at: Option<u64>, received_at: u64) -> u64 {
     })
 }
 
-/// What a consumed message holds: for `Received`, for the log record, and
-/// its name.
-fn contents(opened: envelope::Content) -> Result<(MessageContent, Content, Option<String>), Error> {
+/// What a consumed message holds, for the log record, and its name as
+/// signed.
+fn contents(opened: envelope::Content) -> Result<(Content, Option<String>), Error> {
     let envelope::Content::Message(payload) = opened else {
-        return Ok((MessageContent::Unreadable, Content::Unreadable, None));
+        return Ok((Content::Unreadable, None));
     };
     Ok(match payload.kind {
-        PayloadKind::Text => {
-            // `validate` proved the body UTF-8.
-            let body = String::from_utf8(payload.body).map_err(|_| Error::BadPayload)?;
-            // Spec 022-peers-tofu R6: no client renders an invisible
-            // character of a name; the log keeps it as sent.
-            let content = MessageContent::Text {
-                body: body.clone(),
-                display_name: payload.display_name.as_deref().and_then(shown_name),
-            };
-            (
-                content,
-                Content::Text(Zeroizing::new(body.into_bytes())),
-                payload.display_name,
-            )
-        }
-        PayloadKind::KeyRetired => (MessageContent::KeyRetired, Content::KeyRetired, None),
-        PayloadKind::Unknown(_) => (MessageContent::Unreadable, Content::Unreadable, None),
+        PayloadKind::Text => (
+            Content::Text(Zeroizing::new(payload.body)),
+            payload.display_name,
+        ),
+        PayloadKind::KeyRetired => (Content::KeyRetired, None),
+        PayloadKind::Unknown(_) => (Content::Unreadable, None),
     })
 }
 

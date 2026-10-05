@@ -1,11 +1,10 @@
 //! Tests of spec 023-ttl-purge: the message list (R1–R3, R7) and the
 //! purge (R4–R6).
 
-use super::{NOW, fill, own_text, pk_of, receiver, reopened, sealed};
+use super::{DAY_MS, HOUR_MS, MARGIN_MS, NOW, fill, own_text, pk_of, receiver, reopened, sealed};
 use crate::crypto::Signature;
 use crate::crypto::{PublicKey, Secret};
 use crate::error::Error;
-use crate::proto::envelope::EXPIRY_MARGIN_MS;
 use crate::proto::payload::PayloadKind;
 use crate::session::channel::purge::{Delivery, Message};
 use crate::session::channel::{AckOutcome, Channel, ClientRef, MessageContent, Sender};
@@ -16,7 +15,6 @@ use crate::testing::{MemoryStore, record, state_eq};
 const ANN: [u8; 32] = [0x41; 32];
 const BOB: [u8; 32] = [0x42; 32];
 const MINUTE_MS: u64 = 60_000;
-const DAY_MS: u64 = 86_400_000;
 const WEEK_S: u32 = 604_800;
 
 /// Delivers a text of `seed` at `counter`, signed at `sent_at`, pushed with
@@ -51,18 +49,21 @@ fn times(channel: &Channel, now: u64) -> Vec<u64> {
         .collect()
 }
 
-/// Asserts that reading the list committed nothing.
-fn no_commit(handle: &MemoryStore, commits: u32) {
-    assert_eq!(handle.all_commits(), commits);
-}
-
 /// Spec 023, R1: a peer's message leaves the list at its display expiry,
 /// before any compaction; one's own stays as failed until its `purge_at`,
 /// and once delivered until one TTL after its `sent_at`.
 #[test]
 fn s023_t01_r01_display_expiry() {
     let (mut channel, handle, _) = receiver(60);
-    push(&mut channel, ANN, 0, (NOW, NOW, NOW), None);
+    // Received half a minute after it was signed: its life runs from
+    // `sent_at` all the same.
+    push(
+        &mut channel,
+        ANN,
+        0,
+        (NOW, NOW + 30_000, NOW + 30_000),
+        None,
+    );
     // Written offline at 12:00:59: `sent_at` is 12:00:00.
     let client_ref = channel.encrypt("mine", None, NOW + 59_000).unwrap();
     let commits = handle.all_commits();
@@ -78,7 +79,7 @@ fn s023_t01_r01_display_expiry() {
     assert_eq!(pending.expires_at, purge_at);
     let late = own_row(&channel, client_ref, NOW + 480_001).unwrap();
     assert_eq!(late.delivery, Some(Delivery::NotDelivered));
-    no_commit(&handle, commits);
+    assert_eq!(handle.all_commits(), commits);
     channel.expire_outbox(NOW + 480_001, &[]).unwrap();
     assert!(channel.state.outbox.is_empty());
     let failed = own_row(&channel, client_ref, purge_at).unwrap();
@@ -93,7 +94,7 @@ fn s023_t01_r01_display_expiry() {
     let delivered = own_row(&channel, client_ref, NOW + MINUTE_MS).unwrap();
     assert_eq!(delivered.expires_at, NOW + MINUTE_MS);
     assert!(own_row(&channel, client_ref, NOW + MINUTE_MS + 1).is_none());
-    no_commit(&handle, commits);
+    assert_eq!(handle.all_commits(), commits);
 }
 
 /// Spec 023, R2: the list follows the display time, which neither a future
@@ -149,7 +150,7 @@ fn s023_t02_r02_order() {
         .acked(back, [8; 16], NOW - 7 * DAY_MS, now + 3)
         .unwrap();
     let rows = channel.messages(now + 3).unwrap();
-    let margin = NOW - EXPIRY_MARGIN_MS;
+    let margin = NOW - MARGIN_MS;
     let order: Vec<(Option<ClientRef>, u64)> =
         rows.iter().map(|r| (r.client_ref, r.received_at)).collect();
     assert_eq!(
@@ -159,6 +160,20 @@ fn s023_t02_r02_order() {
     assert!(
         rows.iter()
             .all(|row| row.delivery != Some(Delivery::NotDelivered))
+    );
+
+    // A tie: one's own message, sealed before a peer's but acked after it,
+    // stands after it, where the client moved it at its `ack`.
+    let (mut channel, _, _) = receiver(3_600);
+    let mine = channel.encrypt("mine", None, NOW).unwrap();
+    push(&mut channel, ANN, 0, (NOW, NOW - 400_000, NOW), None);
+    channel.acked(mine, [7; 16], NOW - 400_000, NOW).unwrap();
+    let rows = channel.messages(NOW).unwrap();
+    let order: Vec<(Option<ClientRef>, u64)> =
+        rows.iter().map(|r| (r.client_ref, r.received_at)).collect();
+    assert_eq!(
+        order,
+        [(None, NOW - MARGIN_MS), (Some(mine), NOW - MARGIN_MS)]
     );
 }
 
@@ -171,14 +186,14 @@ fn s023_t03_r03_message_fields() {
     assert_eq!(row.sender, Sender::Own);
     assert_eq!(row.delivery, Some(Delivery::Pending));
     assert_eq!(row.server_id, None);
-    assert_eq!(row.expires_at, channel.own_purge_at(NOW));
+    assert_eq!(row.expires_at, NOW + 2 * HOUR_MS + 420_000);
     assert_eq!(row.stranger, None);
     channel.acked(mine, [7; 16], NOW, NOW).unwrap();
     let row = own_row(&channel, mine, NOW).unwrap();
     assert_eq!(row.delivery, Some(Delivery::Delivered));
     assert_eq!(row.server_id, Some([7; 16]));
     let late = channel.encrypt("late", None, NOW).unwrap();
-    let after = NOW + 3_600_001;
+    let after = NOW + HOUR_MS + 1;
     let outcome = channel.acked(late, [8; 16], NOW, after).unwrap();
     assert_eq!(outcome.outcome, AckOutcome::NotDelivered);
     let row = own_row(&channel, late, after).unwrap();
@@ -248,6 +263,26 @@ fn s023_t03_r03_message_fields() {
         .find(|r| r.sender == Sender::Peer { pk: pk_of(ANN) })
         .unwrap();
     assert_eq!(ann.stranger, None);
+
+    // A stranger claiming one's own name; a `key_retired` is listed as such.
+    let cat = [0x43; 32];
+    let mut next = channel.next_state();
+    next.own_display_name = Some("Me".to_owned());
+    channel.commit(next, Vec::new()).unwrap();
+    push(&mut channel, cat, 0, (NOW, NOW, NOW), Some("ME"));
+    let retired = sealed(&channel, cat, 1, NOW, PayloadKind::KeyRetired, None);
+    channel.decrypt(&retired, [0x44; 16], NOW, NOW).unwrap();
+    let mut next = channel.next_state();
+    next.peers.retain(|peer| peer.pk.0 != pk_of(cat));
+    channel.commit(next, Vec::new()).unwrap();
+    let rows = channel.messages(NOW).unwrap();
+    let from_cat: Vec<&Message> = rows
+        .iter()
+        .filter(|r| r.sender == Sender::Peer { pk: pk_of(cat) })
+        .collect();
+    assert_eq!(from_cat.len(), 2);
+    assert!(from_cat[0].stranger.as_ref().unwrap().claims_own_name);
+    assert_eq!(from_cat[1].content, MessageContent::KeyRetired);
 }
 
 /// Spec 023, R7: the one own row equals its row of the list.
@@ -260,8 +295,9 @@ fn s023_t07_r07_single_message() {
     assert!(channel.message(mine, NOW).is_some());
     channel.acked(mine, [7; 16], NOW, NOW).unwrap();
     assert_eq!(channel.message(mine, NOW), own_row(&channel, mine, NOW));
+    assert!(channel.message(mine, NOW).is_some());
     assert_eq!(channel.message(ClientRef { bytes: [3; 16] }, NOW), None);
-    assert_eq!(channel.message(mine, NOW + 3_600_001), None);
+    assert_eq!(channel.message(mine, NOW + HOUR_MS + 1), None);
 }
 
 /// A kept signature that may be dropped from `purge_at` on.
@@ -292,7 +328,7 @@ fn stored_purge_ats(handle: &MemoryStore) -> Vec<u64> {
 }
 
 /// Spec 023, R4: the purge drops every expired record and counts the
-/// messages alone; with nothing expired it calls no compaction.
+/// messages alone, not the kept signatures or delivery records; with nothing expired it calls no compaction.
 #[test]
 fn s023_t04_r04_purge_counts_messages() {
     let (mut channel, handle, faults) = receiver(3_600);
@@ -302,6 +338,12 @@ fn s023_t04_r04_purge_counts_messages() {
         record(NOW + 1, 10),
         kept_signature(NOW + 1),
         record(NOW + 2, 10),
+        LogRecord {
+            purge_at: NOW + 2,
+            entry: LogEntry::NotDelivered {
+                client_ref: [5; 16],
+            },
+        },
     ];
     plant(&mut channel, expired);
     plant(
@@ -333,7 +375,9 @@ fn s023_t05_r05_open_does_not_purge() {
     plant(&mut channel, vec![record(NOW, 30_000), record(NOW, 100)]);
     drop(channel);
     let commits = handle.all_commits();
+    let before = stored_purge_ats(&handle);
     let channel = reopened(&handle);
+    assert_eq!(stored_purge_ats(&handle), before, "no compaction at open");
     assert_eq!(handle.all_commits(), commits);
     assert_eq!(channel.records.len(), 2);
     assert!(channel.messages(NOW + 1).unwrap().is_empty());
@@ -386,6 +430,7 @@ fn s023_t05_r05_open_does_not_purge() {
     let t = NOW + 2 * DAY_MS;
     faults.fail_compactions(true);
     assert_eq!(channel.purge_expired(t), Err(Error::Store(StoreError::Io)));
+    assert!(!channel.purge_due(t));
     assert!(!channel.purge_due(t + 599_999));
     assert_eq!(channel.relieve_headroom(t + 599_999), Ok(false));
     assert!(channel.purge_due(t + 600_000));
