@@ -1,13 +1,17 @@
-//! Tests of spec 023-ttl-purge: the message list (R1–R3, R7).
+//! Tests of spec 023-ttl-purge: the message list (R1–R3, R7) and the
+//! purge (R4–R6).
 
-use super::{NOW, own_text, pk_of, receiver, sealed};
+use super::{NOW, fill, own_text, pk_of, receiver, reopened, sealed};
+use crate::crypto::Signature;
 use crate::crypto::{PublicKey, Secret};
+use crate::error::Error;
 use crate::proto::envelope::EXPIRY_MARGIN_MS;
 use crate::proto::payload::PayloadKind;
 use crate::session::channel::purge::{Delivery, Message};
 use crate::session::channel::{AckOutcome, Channel, ClientRef, MessageContent, Sender};
 use crate::storage::state::items::OldKey;
-use crate::testing::MemoryStore;
+use crate::storage::{LogEntry, LogRecord, StoreError};
+use crate::testing::{MemoryStore, record, state_eq};
 
 const ANN: [u8; 32] = [0x41; 32];
 const BOB: [u8; 32] = [0x42; 32];
@@ -258,4 +262,171 @@ fn s023_t07_r07_single_message() {
     assert_eq!(channel.message(mine, NOW), own_row(&channel, mine, NOW));
     assert_eq!(channel.message(ClientRef { bytes: [3; 16] }, NOW), None);
     assert_eq!(channel.message(mine, NOW + 3_600_001), None);
+}
+
+/// A kept signature that may be dropped from `purge_at` on.
+fn kept_signature(purge_at: u64) -> LogRecord {
+    LogRecord {
+        purge_at,
+        entry: LogEntry::KeptSignature {
+            sent_at: purge_at,
+            client_ref: [5; 16],
+            signature: Signature([6; 64]),
+            epoch: 0,
+        },
+    }
+}
+
+/// Commits `records` to `channel`.
+fn plant(channel: &mut Channel, records: Vec<LogRecord>) {
+    channel.commit(channel.next_state(), records).unwrap();
+}
+
+/// The `purge_at` of every record a reopened store holds.
+fn stored_purge_ats(handle: &MemoryStore) -> Vec<u64> {
+    reopened(handle)
+        .records
+        .iter()
+        .map(LogRecord::purge_at)
+        .collect()
+}
+
+/// Spec 023, R4: the purge drops every expired record and counts the
+/// messages alone; with nothing expired it calls no compaction.
+#[test]
+fn s023_t04_r04_purge_counts_messages() {
+    let (mut channel, handle, faults) = receiver(3_600);
+    let expired = vec![
+        record(NOW, 10),
+        kept_signature(NOW),
+        record(NOW + 1, 10),
+        kept_signature(NOW + 1),
+        record(NOW + 2, 10),
+    ];
+    plant(&mut channel, expired);
+    plant(
+        &mut channel,
+        vec![record(NOW + 3, 10), kept_signature(NOW + 3)],
+    );
+    assert_eq!(channel.purge_expired(NOW + 3), Ok(3));
+    assert_eq!(stored_purge_ats(&handle), [NOW + 3, NOW + 3]);
+    assert_eq!(channel.records.len(), 2);
+    assert_eq!(
+        channel.messages(NOW + 3),
+        reopened(&handle).messages(NOW + 3)
+    );
+    assert_eq!(channel.messages(NOW + 3).unwrap().len(), 1);
+    // Nothing expired: a failing compaction is never reached.
+    faults.fail_compactions(true);
+    assert_eq!(channel.purge_expired(NOW + 3), Ok(0));
+    let (mut empty, _, faults) = receiver(3_600);
+    faults.fail_compactions(true);
+    assert_eq!(empty.purge_expired(NOW), Ok(0));
+}
+
+/// Spec 023, R5: opening never compacts; the purge is due at a quarter of
+/// the log or a day after the oldest expiry, and not within ten minutes of
+/// the last attempt, failed or not, unless that attempt is in the future.
+#[test]
+fn s023_t05_r05_open_does_not_purge() {
+    let (mut channel, handle, _) = receiver(3_600);
+    plant(&mut channel, vec![record(NOW, 30_000), record(NOW, 100)]);
+    drop(channel);
+    let commits = handle.all_commits();
+    let channel = reopened(&handle);
+    assert_eq!(handle.all_commits(), commits);
+    assert_eq!(channel.records.len(), 2);
+    assert!(channel.messages(NOW + 1).unwrap().is_empty());
+
+    // A quarter of the log: a large live record and small expired ones.
+    let (mut channel, _, _) = receiver(3_600);
+    plant(&mut channel, vec![record(NOW + 2 * DAY_MS, 30_000)]);
+    let mut crossed = false;
+    for step in 0..40 {
+        plant(&mut channel, vec![record(NOW, 1_000)]);
+        let expired = channel.expiry.expired_bytes(NOW + 1);
+        let quarter = expired * 4 >= channel.store.log_len();
+        assert_eq!(channel.purge_due(NOW + 1), quarter, "step {step}");
+        crossed |= quarter;
+    }
+    assert!(crossed);
+    // Exactly a quarter is due; nothing expired never is, the log holding
+    // its header.
+    let (mut channel, _, _) = receiver(3_600);
+    assert!(!channel.purge_due(NOW + DAY_MS * 2));
+    let header = channel.store.log_len();
+    let small = record(NOW, 1_000).entry_len();
+    let base = record(NOW, 0).entry_len();
+    let live = usize::try_from(3 * small - header - base).unwrap();
+    plant(
+        &mut channel,
+        vec![record(NOW + 2 * DAY_MS, live), record(NOW, 1_000)],
+    );
+    assert_eq!(channel.store.log_len(), 4 * small);
+    assert!(channel.purge_due(NOW + 1));
+    let (mut channel, _, _) = receiver(3_600);
+    plant(
+        &mut channel,
+        vec![record(NOW + 2 * DAY_MS, live + 1), record(NOW, 1_000)],
+    );
+    assert!(!channel.purge_due(NOW + 1));
+    // A day after the oldest expiry, however little expired.
+    let (mut channel, _, _) = receiver(3_600);
+    plant(
+        &mut channel,
+        vec![record(NOW + 2 * DAY_MS, 30_000), record(NOW, 10)],
+    );
+    assert!(!channel.purge_due(NOW + DAY_MS));
+    assert!(channel.purge_due(NOW + DAY_MS + 1));
+
+    // A failed purge holds the next one off for ten minutes, and the
+    // headroom's compaction too.
+    let (mut channel, _, faults) = receiver(3_600);
+    fill(&mut channel, NOW, 3_000_000);
+    let t = NOW + 2 * DAY_MS;
+    faults.fail_compactions(true);
+    assert_eq!(channel.purge_expired(t), Err(Error::Store(StoreError::Io)));
+    assert!(!channel.purge_due(t + 599_999));
+    assert_eq!(channel.relieve_headroom(t + 599_999), Ok(false));
+    assert!(channel.purge_due(t + 600_000));
+    // An attempt recorded later than `now` holds nothing off.
+    assert!(channel.purge_due(t - DAY_MS));
+    assert_eq!(
+        channel.relieve_headroom(t + 600_000),
+        Err(Error::Store(StoreError::Io))
+    );
+    assert!(!channel.purge_due(t + 1_199_999));
+    assert!(channel.purge_due(t + 1_200_000));
+    faults.fail_compactions(false);
+    assert_eq!(channel.relieve_headroom(t + 1_200_000), Ok(true));
+}
+
+/// Spec 023, R6: a failed compaction leaves memory as it was, and the
+/// store before or after it, never a mix.
+#[test]
+fn s023_t06_r06_failed_compaction() {
+    let records = || vec![record(NOW, 10), kept_signature(NOW), record(NOW + 5, 10)];
+    for poisoned in [false, true] {
+        let (mut channel, handle, faults) = receiver(3_600);
+        plant(&mut channel, records());
+        let state = channel.state.duplicate();
+        if poisoned {
+            // The compaction is written, then the store fails.
+            faults.poison_after(1);
+        } else {
+            faults.fail_compactions(true);
+        }
+        let result = channel.purge_expired(NOW + 1);
+        assert_eq!(result, Err(Error::Store(StoreError::Io)), "{poisoned}");
+        assert_eq!(channel.records.len(), 3);
+        assert!(state_eq(&channel.state, &state));
+        let stored = stored_purge_ats(&handle);
+        let expected = if poisoned {
+            vec![NOW + 5]
+        } else {
+            vec![NOW, NOW, NOW + 5]
+        };
+        assert_eq!(stored, expected, "{poisoned}");
+        assert!(state_eq(&reopened(&handle).state, &state));
+    }
 }

@@ -1,10 +1,12 @@
 //! The message list of spec 023-ttl-purge (R1–R3, R7): every message
 //! still on screen, in the order of its display time, with one's own
-//! folded with its fate.
+//! folded with its fate; and the purge that removes expired records from
+//! the disk, and when it is due (R4, R5).
 
 use core::fmt;
 use std::collections::BTreeMap;
 
+use super::headroom::COMPACTION_INTERVAL_MS;
 use super::peers::Claimable;
 use super::{Channel, ClientRef, MessageContent, PeerId, Sender, key_prefix};
 use crate::crypto::PublicKey;
@@ -12,6 +14,13 @@ use crate::error::Error;
 use crate::proto::envelope::SenderKey;
 use crate::session::names::shown_name;
 use crate::storage::{Content, LogEntry, LogRecord, Message as Stored};
+
+/// A rewrite of the log is due once expired records take this fraction of
+/// it, the inverse of a quarter (R5).
+const DUE_FRACTION: u64 = 4;
+
+/// Or once the oldest expired record expired this long ago (R5).
+const DUE_AFTER_MS: u64 = 86_400_000;
 
 /// The margin and the grace minute of spec 021-channel-session R22 beyond
 /// one TTL: after them, a pending message can no longer be acknowledged.
@@ -134,6 +143,46 @@ impl Channel {
             .find(|(_, stored)| stored.own_client_ref == Some(client_ref.bytes))?;
         // An own row computes no stranger, so it cannot fail.
         self.row(stored, purge_at, &context).ok().flatten()
+    }
+
+    /// Removes every record whose `purge_at` is below `now` from the disk
+    /// and from memory, whatever the amount expired, and returns the number
+    /// of message records removed (R4); with nothing expired, it touches
+    /// no store.
+    ///
+    /// # Errors
+    ///
+    /// The compaction's `Store` error, memory left as it was and the
+    /// attempt recorded (spec 020-store-files R11).
+    pub(crate) fn purge_expired(&mut self, now: u64) -> Result<u32, Error> {
+        self.latest_now = Some(now);
+        if self
+            .expiry
+            .oldest_expiry()
+            .is_none_or(|oldest| oldest >= now)
+        {
+            return Ok(0);
+        }
+        let removed = self.compact_at(now)?;
+        Ok(u32::try_from(removed).unwrap_or(u32::MAX))
+    }
+
+    /// Whether `purge_expired` is due (R5): expired records take a quarter
+    /// of the log or the oldest expired a day ago, and the last compaction
+    /// attempt is ten minutes old, so that a rewrite frees at least a
+    /// quarter of what it writes and a failing one is retried at most every
+    /// ten minutes. An attempt recorded later than `now` holds nothing off.
+    pub(crate) fn purge_due(&self, now: u64) -> bool {
+        let held_off = self
+            .last_compaction
+            .is_some_and(|last| last <= now && now.saturating_sub(last) < COMPACTION_INTERVAL_MS);
+        let expired = self.expiry.expired_bytes(now);
+        let quarter = expired.saturating_mul(DUE_FRACTION) >= self.store.log_len();
+        let day_old = self
+            .expiry
+            .oldest_expiry()
+            .is_some_and(|oldest| oldest.saturating_add(DUE_AFTER_MS) < now);
+        !held_off && (quarter || day_old)
     }
 
     /// The message records of the log, with their `purge_at`.
