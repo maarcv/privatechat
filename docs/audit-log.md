@@ -37,6 +37,9 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AE18 | Mutants that survived: `to_uppercase` for `to_lowercase`, an empty own name claimed by a blank one, `Peer::muted`, `retired_at` and `short` read from elsewhere, the stored name cleaned (which breaks R2 and the log keeping the name as sent), the full key in `OwnKeyElsewhere`'s `Debug`, the prefix unpadded | Low | T01, T02, T04, T06, T10, T12, T13: the cases added |
 | AE19 | R8 says the admission applies to any peer with no label; the code skips a retired one, which is already in the labelled budget | Nit | R8, R9: for an unknown peer or a new record, as R7 and the code; `is_unknown` made private |
 
+## Spec 021 implemented
+
+**2026-10-05 — The non-automatable acceptance criterion of spec 021-channel-session: a second reading of R9–R15 and R19 against `docs/spec.md` §4 steps 5–8 and "Messages from one's own key".** The human reviewer took Audit AD as that reading: pass B of round 1 walked R9 step 5 and R13–R19 against the code, and round 2 read R1–R33 afresh with the round-1 fixes and found no defect. The tests, clippy, `cargo deny` and the documentation lint are green on `mvp` (106986f), and `channel_decrypt` runs in the nightly fuzz workflow. Spec 021 is `implemented`; questions 025-R1 and 025-R2 stay open for spec 025-identity-regen.
 
 ## Audit AD
 

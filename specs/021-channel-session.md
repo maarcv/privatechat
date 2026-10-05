@@ -1,6 +1,6 @@
 # 021 — Channel: identity, sending, receiving and the single commit
 
-Status: accepted
+Status: implemented
 Phase: 2
 Related ADRs: 0013, 0016, 0019, 0020, 0027, 0029, 0030, 0033, 0034, 0037, 0044
 Depends on: 012-message-keys, 013-wire-message, 016-fuzz-harness, 020-store-files
