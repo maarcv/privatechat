@@ -44,8 +44,9 @@ pub struct ClientRef {
     pub bytes: [u8; 16],
 }
 
-/// Who sent a message (R12, spec 023-ttl-purge).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Who sent a message (R12, spec 023-ttl-purge). Its `Debug` shows the
+/// 4-byte prefix of a key (AGENTS 19).
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Sender {
     /// Another member.
     Peer {
@@ -96,6 +97,36 @@ pub struct Received {
     pub content: MessageContent,
 }
 
+impl fmt::Debug for Gap {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Gap")
+            .field("peer", &key_prefix(&self.peer))
+            .field("missing", &self.missing)
+            .field("anomalous", &self.anomalous)
+            .field("spans_truncation", &self.spans_truncation)
+            .finish()
+    }
+}
+
+impl fmt::Debug for Sender {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Sender::Peer { pk } => write!(f, "Peer({})", key_prefix(pk)),
+            Sender::Own => f.write_str("Own"),
+            Sender::OwnKeyElsewhere { pk } => write!(f, "OwnKeyElsewhere({})", key_prefix(pk)),
+        }
+    }
+}
+
+/// The hex of the first 4 bytes of a key, all a log or a `Debug` may show
+/// of it (AGENTS 19).
+pub(crate) fn key_prefix(pk: &PeerId) -> String {
+    pk.iter()
+        .take(4)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 impl fmt::Debug for MessageContent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -142,8 +173,9 @@ pub(crate) struct OutboxStep {
     pub(crate) not_delivered: Vec<(ClientRef, u64)>,
 }
 
-/// The messages missing from one sender in this session (R24).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The messages missing from one sender in this session (R24). Its
+/// `Debug` shows the 4-byte prefix of the key (AGENTS 19).
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Gap {
     /// The sender.
     pub peer: PeerId,
