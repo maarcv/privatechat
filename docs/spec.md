@@ -1,6 +1,6 @@
 # Private E2E chat — Specification and plan (SDD)
 
-Version: mvp · Post-audit I revision · Updated: 2026-10-04 · Marc Vilardebó (audits in `docs/audit-log.md`)
+Version: mvp · Post-audit I revision · Updated: 2026-10-05 · Marc Vilardebó (audits in `docs/audit-log.md`)
 
 This file, on the default branch (`mvp` until the first release), is the canonical source of the specification (see §11 "Governance"). Read copy, may lag behind: https://claude.ai/code/artifact/1527bf13-79e8-485a-908d-a515cbd062a4
 
@@ -376,7 +376,7 @@ stateDiagram-v2
 - Labelled: local name in black. If two peers of the channel have labels that collide under the normalisation below, both carry the short identifier next to them.
 - Verified: name + icon. Lost if the `pk` changes.
 - Retired: "Alice (key retired on DD/MM)", in grey. Any message from this `pk` received after the retirement is rejected (`Error::RetiredKey`), whatever its counter. The `(pk, retired_at)` records **are never purged** and count within the limit of 500 (Peer limits, below); their messages do expire.
-- **A label already assigned to a `pk` of the channel cannot be assigned to another unverified `pk`.** To reuse it, the new `pk` must be verified (QR or 12 words) or an explicit dialog confirmed that marks the old one as retired. Label and `display_name` comparison is done over `no spaces or invisible characters (the table `INVISIBLE` of spec 022-peers-tofu R5: Cf, Default_Ignorable_Code_Point, listed blanks and the separators U+2028/U+2029) → Unicode lowercase` (the standard library's Unicode data, the invisible set by hand; ADR 0043, spec 022-peers-tofu); look-alike letters (another script, digits for letters, full-width forms) do not collide, and such a key is told apart by the unknown mark, its short identifier and verification; on rendering, Cc characters and the invisible set of spec 022-peers-tofu R5 are removed.
+- **A label already assigned to a `pk` of the channel cannot be assigned to another unverified `pk`.** To reuse it, the new `pk` must be verified (QR or 12 words) or an explicit dialog confirmed that marks the old one as retired. Label and `display_name` comparison is done over `no spaces or invisible characters (the table `INVISIBLE` of spec 022-peers-tofu R5: Cf, Default_Ignorable_Code_Point, listed blanks and the separators U+2028/U+2029) → Unicode lowercase, with İ read as I before it and ς as σ, ı as i after it` (the standard library's Unicode data, the invisible set by hand; ADR 0043, spec 022-peers-tofu); look-alike letters (another script, digits for letters, full-width forms) and capitals written without their accents do not collide, and such a key is told apart by the unknown mark, its short identifier and verification; on rendering, Cc characters and the invisible set of spec 022-peers-tofu R5 are removed.
 - If a new `pk` arrives with a `display_name` that collides with a labelled or verified peer: explicit warning in the chat ("Someone claims to be X with a new key. Verify them before trusting them"). `display_name` and writing style link the old and the new key for the members; this is intended.
 - Two devices of one person are two members (ADR 0019): each sees the other as an unknown key with the same `display_name`, so this warning fires and the two verify each other like strangers; the key-used-elsewhere alert does not fire, since neither device sealed the other's messages under its own key.
 - Short identifier (§4): tells peers apart in the UI, is always labelled "identifier, not verification" and never enables the verified state. If the short identifier of a new `pk` matches that of an existing peer, the client shows the 12 words of both with the warning "Identifier identical to another member: possible impersonation. Verify by QR".
@@ -465,6 +465,7 @@ pub enum Error {
     BadLength, UnsupportedVersion, WrongChannel, Expired, RetiredKey, PeerLimit,
     Replay, BadSignature, BadPayload, CounterExhausted,
     BadConfig, BadPassword, InviteExpired, ConfigMismatch,
+    UnknownPeer, LabelInUse, OwnKey, // arrive with spec 022-peers-tofu
     Internal,          // libsodium failed (to initialise, or to allocate the 64 MiB of Argon2id), or an export's expiry overflowed
     Store(StoreError), // arrives with spec 020-store-files
 }

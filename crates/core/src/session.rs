@@ -5,3 +5,4 @@
 
 pub(crate) mod channel;
 mod expiry;
+mod names;
