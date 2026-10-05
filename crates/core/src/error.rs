@@ -45,6 +45,13 @@ pub enum Error {
     InviteExpired,
     /// A config for a channel already open with another server.
     ConfigMismatch,
+    /// A `PeerId` with no peer record (spec 022-peers-tofu).
+    UnknownPeer,
+    /// A label another peer holds, for a target that is not verified (spec
+    /// 022-peers-tofu R7).
+    LabelInUse,
+    /// One's own key where a peer's is expected (spec 022-peers-tofu R9).
+    OwnKey,
     /// A failure the input cannot cause: libsodium failed (to initialise, to
     /// allocate the 64 MiB of Argon2id, or otherwise), an expiry overflowed,
     /// or a bug.

@@ -6,7 +6,8 @@ use crate::crypto::CryptoError;
 use crate::storage::StoreError;
 
 /// Spec 011, R20: every `CryptoError` becomes `Internal`, and the enum has
-/// exactly the variants of `docs/spec.md` §9, `Store` since spec 020. Both
+/// exactly the variants of `docs/spec.md` §9, `Store` since spec 020 and
+/// `UnknownPeer`, `LabelInUse` and `OwnKey` since spec 022. Both
 /// lists are checked by an exhaustive match, which fails to compile when a
 /// variant is added or removed.
 #[test]
@@ -47,6 +48,9 @@ fn s011_t20_r20_error_mapping() {
         Error::BadPassword,
         Error::InviteExpired,
         Error::ConfigMismatch,
+        Error::UnknownPeer,
+        Error::LabelInUse,
+        Error::OwnKey,
         Error::Internal,
         Error::Store(StoreError::Corrupt),
     ] {
@@ -65,6 +69,9 @@ fn s011_t20_r20_error_mapping() {
             Error::BadPassword => "BadPassword",
             Error::InviteExpired => "InviteExpired",
             Error::ConfigMismatch => "ConfigMismatch",
+            Error::UnknownPeer => "UnknownPeer",
+            Error::LabelInUse => "LabelInUse",
+            Error::OwnKey => "OwnKey",
             Error::Internal => "Internal",
             Error::Store(_) => "Store(Corrupt)",
         };

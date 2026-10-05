@@ -465,6 +465,7 @@ pub enum Error {
     BadLength, UnsupportedVersion, WrongChannel, Expired, RetiredKey, PeerLimit,
     Replay, BadSignature, BadPayload, CounterExhausted,
     BadConfig, BadPassword, InviteExpired, ConfigMismatch,
+    UnknownPeer, LabelInUse, OwnKey, // arrive with spec 022-peers-tofu
     Internal,          // libsodium failed (to initialise, or to allocate the 64 MiB of Argon2id), or an export's expiry overflowed
     Store(StoreError), // arrives with spec 020-store-files
 }

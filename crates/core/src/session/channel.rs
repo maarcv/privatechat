@@ -3,8 +3,8 @@
 //! the one commit every change goes through (R1, R2, AGENTS 23).
 //!
 //! Sending, receiving, the `outbox` and the reads are the later slices of
-//! spec 021; the peers, the message list, retirement, regeneration and the
-//! peer limits are specs 022–026's.
+//! spec 021, the peers spec 022's (`peers.rs`); the message list,
+//! retirement, regeneration and the peer limits are specs 023–026's.
 
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
@@ -21,6 +21,7 @@ mod gaps;
 mod headroom;
 mod outbox;
 mod own_key;
+mod peers;
 mod receive;
 mod send;
 mod status;
