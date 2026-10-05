@@ -1,6 +1,6 @@
 # 023 — TTL purge: the message list and compaction
 
-Status: accepted
+Status: implemented
 Phase: 2
 Related ADRs: 0009, 0014, 0021, 0029, 0044
 Depends on: 020-store-files, 021-channel-session, 022-peers-tofu
