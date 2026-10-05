@@ -24,6 +24,7 @@ mod own_key;
 mod peers;
 mod purge;
 mod receive;
+mod retired;
 mod send;
 mod status;
 mod sync;

@@ -404,6 +404,6 @@ fn listed(entry: &Entry<'_>, all: &[Entry<'_>], own_short: &Short, claimable: &C
 }
 
 /// The record of `peer` in a state being built.
-fn find<'a>(peers: &'a mut [PeerRecord], peer: &PeerId) -> Option<&'a mut PeerRecord> {
+pub(super) fn find<'a>(peers: &'a mut [PeerRecord], peer: &PeerId) -> Option<&'a mut PeerRecord> {
     peers.iter_mut().find(|record| record.pk.0 == *peer)
 }

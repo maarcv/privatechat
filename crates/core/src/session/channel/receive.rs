@@ -6,7 +6,8 @@
 use zeroize::Zeroizing;
 
 use super::purge::content_of;
-use super::{Channel, MessageContent, Received, Sender};
+use super::retired::is_key_retired;
+use super::{Channel, Received, Sender};
 use crate::crypto::{self, PublicKey};
 use crate::error::Error;
 use crate::proto::envelope::{self, ChannelCtx, EXPIRY_MARGIN_MS, Opened, SenderKey};
@@ -134,24 +135,17 @@ impl Channel {
         if self.expires_at(sent_at, arrival) < arrival.now {
             return Err(Error::Expired);
         }
+        // R24: a `key_retired` counts for no gap.
+        if is_key_retired(&opened) {
+            return self.consume_retirement(opened, arrival);
+        }
         let sender = opened.sender_pk;
         let counter = opened.counter;
         let listed = listed_time(sent_at, arrival.received_at);
+        let gap = self.gap_of(self.peer(&sender), counter, listed, arrival.now);
         let listing = self.listing(opened, arrival, Sender::Peer { pk: sender.0 }, 0);
-        let key_retired = listing.received.content == MessageContent::KeyRetired;
-        // R24: a `key_retired` counts for no gap.
-        let gap = (!key_retired)
-            .then(|| self.gap_of(self.peer(&sender), counter, listed, arrival.now))
-            .flatten();
         let mut next = self.next_state();
-        update_peer(
-            &mut next,
-            &sender,
-            counter,
-            listing.name,
-            key_retired,
-            arrival.now,
-        );
+        update_peer(&mut next, &sender, counter, listing.name, arrival.now);
         self.commit(next, listing.records)?;
         if let Some(gap) = gap {
             self.add_gap(gap);
@@ -296,14 +290,13 @@ fn contents(opened: envelope::Content) -> (Content, Option<String>) {
 }
 
 /// The peer as spec 022-peers-tofu R1 and R2 create or update it, with
-/// `max_counter = counter` (R11). A `key_retired` creates no record: spec
-/// 024-key-retired says what it changes.
+/// `max_counter = counter` (R11); a `key_retired` is spec
+/// 024-key-retired's (`retired.rs`).
 fn update_peer(
     next: &mut ChannelState,
     pk: &PublicKey,
     counter: u64,
     name: Option<String>,
-    key_retired: bool,
     now: u64,
 ) {
     let name = name.map(|name| Zeroizing::new(name.into_bytes()));
@@ -313,7 +306,7 @@ fn update_peer(
         if name.is_some() {
             peer.last_display_name = name;
         }
-    } else if !key_retired {
+    } else {
         next.peers.push(PeerRecord {
             pk: *pk,
             label: None,

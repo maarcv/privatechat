@@ -33,7 +33,8 @@ fn check_decrypt(vector: &Vector) {
             "unreadable".to_owned()
         }
         Ok(Some(_)) => "message".to_owned(),
-        Ok(None) => "none".to_owned(),
+        // A stranger's `key_retired` lists nothing (spec 024-key-retired R2).
+        Ok(None) => "message".to_owned(),
         Err(Error::Expired) if !vector.has_input("blob") => "stale".to_owned(),
         Err(error) => format!("{error:?}"),
     };
