@@ -1,5 +1,6 @@
-//! The peers of spec 022-peers-tofu: the list a client paints (R3), the
-//! calls that change a peer (R7–R10) and the fingerprints (R12). The record
+//! The peers of spec 022-peers-tofu: the list a client paints with its
+//! warnings (R3, R13–R15), the calls that change a peer (R7–R10) and the
+//! fingerprints (R12). The record
 //! is created and updated on receive (R1, R2, `receive.rs`); retirement is
 //! spec 024-key-retired's, and the admission check spec 026-peer-limits'.
 
@@ -33,6 +34,15 @@ pub struct Peer {
     pub last_seen: u64,
     /// The 4 words of spec 014-fingerprint.
     pub short: Vec<String>,
+    /// For an unknown peer, the first seen peer with a label its suggested
+    /// name collides with (R13).
+    pub claims_name_of: Option<PeerId>,
+    /// An unknown peer suggests one's own display name (R13).
+    pub claims_own_name: bool,
+    /// Its label collides with another peer's (R14).
+    pub label_collides: bool,
+    /// Its 4 words equal another peer's or one's own (R15).
+    pub short_collides: bool,
 }
 
 /// Whether the label of a call is checked against the other peers' labels
@@ -44,7 +54,8 @@ enum Target {
 }
 
 impl Channel {
-    /// Every peer, in `first_seen` order (R3); commits nothing.
+    /// Every peer, in `first_seen` order (R3), with the warnings of
+    /// R13–R15; commits nothing.
     ///
     /// # Errors
     ///
@@ -52,26 +63,43 @@ impl Channel {
     pub(crate) fn peers(&self) -> Result<Vec<Peer>, Error> {
         let mut records: Vec<&PeerRecord> = self.state.peers.iter().collect();
         records.sort_by_key(|peer| peer.first_seen);
-        records
-            .into_iter()
-            .map(|peer| {
-                Ok(Peer {
-                    id: peer.pk.0,
-                    label: peer.label.as_deref().and_then(shown_name),
-                    suggested_name: peer
-                        .last_display_name
-                        .as_deref()
-                        .and_then(|name| core::str::from_utf8(name).ok())
-                        .and_then(shown_name),
-                    verified: peer.verified,
-                    muted: peer.muted,
-                    retired_at: peer.retired_at,
-                    first_seen: peer.first_seen,
-                    last_seen: peer.last_seen,
-                    short: self.fingerprint(peer.pk.0)?.short,
-                })
-            })
-            .collect()
+        let shorts = records
+            .iter()
+            .map(|peer| Ok(self.fingerprint(peer.pk.0)?.short))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let own_short = self.own_fingerprint()?.short;
+        let own_name = self.state.own_display_name.as_deref();
+        let peers = records.iter().zip(&shorts).map(|(peer, short)| {
+            let suggested = suggested_name(peer);
+            // §7: a peer with no label that is not retired is unknown.
+            let unknown = peer.label.is_none() && peer.retired_at.is_none();
+            let claimed = suggested.filter(|_| unknown);
+            Peer {
+                id: peer.pk.0,
+                label: peer.label.as_deref().and_then(shown_name),
+                suggested_name: suggested.and_then(shown_name),
+                verified: peer.verified,
+                muted: peer.muted,
+                retired_at: peer.retired_at,
+                first_seen: peer.first_seen,
+                last_seen: peer.last_seen,
+                short: short.clone(),
+                claims_name_of: claimed.and_then(|name| first_holder(&records, name)),
+                claims_own_name: claimed
+                    .zip(own_name)
+                    .is_some_and(|(name, own)| names_collide(name, own)),
+                label_collides: peer
+                    .label
+                    .as_deref()
+                    .is_some_and(|label| label_held_by_other(&records, &peer.pk, label)),
+                short_collides: *short == own_short
+                    || records
+                        .iter()
+                        .zip(&shorts)
+                        .any(|(other, words)| other.pk.0 != peer.pk.0 && words == short),
+            }
+        });
+        Ok(peers.collect())
     }
 
     /// Gives `peer` the label `name` (R7).
@@ -263,6 +291,39 @@ impl Channel {
     fn admits(&self, _peer: &PeerId, _now: u64) -> bool {
         true
     }
+}
+
+/// The name of the peer's last message that carried one, as sent.
+fn suggested_name(peer: &PeerRecord) -> Option<&str> {
+    let name = peer.last_display_name.as_deref()?;
+    core::str::from_utf8(name).ok()
+}
+
+/// The first of `records` (in `first_seen` order) whose label collides with
+/// `name`: labelled, verified or retired, since an impostor appears when a
+/// key is retired (R13).
+fn first_holder(records: &[&PeerRecord], name: &str) -> Option<PeerId> {
+    records
+        .iter()
+        .find(|other| {
+            other
+                .label
+                .as_deref()
+                .is_some_and(|label| names_collide(label, name))
+        })
+        .map(|other| other.pk.0)
+}
+
+/// Whether a peer other than `pk` holds a label colliding with `label`,
+/// retired peers included (R14).
+fn label_held_by_other(records: &[&PeerRecord], pk: &PublicKey, label: &str) -> bool {
+    records.iter().any(|other| {
+        other.pk.0 != pk.0
+            && other
+                .label
+                .as_deref()
+                .is_some_and(|held| names_collide(held, label))
+    })
 }
 
 /// The record of `peer` in a state being built.
