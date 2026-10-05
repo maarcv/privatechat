@@ -2,6 +2,37 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AE
+
+**2026-10-05 — Audit AE, the code audit of spec 022-peers-tofu (branches `022-a` to `022-c`, PRs #30–#32), round 1 of three read-only passes (A: conformance with R1–R16 and T01–T16; B: the adversary, an intruder with the config, a malicious server and a confused user; C: code quality, tests, hand mutants and an independent rebuild of `INVISIBLE`).** No High finding. Pass C rebuilt `INVISIBLE` from its own download of the Unicode 17.0.0 files and found it equal range by range; the human check of the acceptance criterion is still due. The human reviewer took the recommendation of each of the four decisions (AE1, AE3, AE6, and the text of AE12–AE14).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AE1 | `to_lowercase` picks ς or σ from the letters around it, and `name_key` removes the white space first, so "ΝΊΚΟΣ Π" did not collide with "Νίκος Π": caps lock alone escaped the warning and `LabelInUse` (B1) | Medium | R4: U+03C2 read as U+03C3 after lowercasing; ADR 0043 and `docs/spec.md` §7 amended; T04 (decision) |
+| AE2 | The derived `Debug` of `Peer` printed the label, the suggested name and the full `pk`; that of `Sender`, inside `Received`, the full `pk` (A2, B2) | Medium | Hand-written `Debug`: the 4-byte prefix of a key, no name (AGENTS 19); T06 |
+| AE3 | An unknown key withdraws `claims_name_of` by sending a blank or another name, while its earlier message still reads as the imitated name (B3) | Low | Security: a stated residual, the unknown mark staying on every message (decision) |
+| AE4 | "Unknown" was computed without "not verified", true only through the invariant that a verified peer has a label (A1) | Low | `is_unknown`: no label, not verified, not retired; T13 plants a verified record with no label |
+| AE5 | The admission hook of spec 026-peer-limits was called for every target, so a relabel at the labelled limit would be refused once 026 lands (A3) | Low | Called only for an unknown peer or a new record |
+| AE6 | `label` and `verify` commit an unchanged peer, where `mute` does not (A-Q2, B6, C18) | Nit | Kept: R7 and R8 say to commit, and only the user can cause it (decision) |
+| AE7 | Tests that a mutant survived: the Unicode lowercase (ASCII pairs only), `MAX_NAME` in bytes, the order `BadPayload` before `LabelInUse`, the ignored label of R8, a known unlabelled peer scanned with a held label, C1 controls, a changed bound of `INVISIBLE`, an empty key matching an empty key in R13 and R14, T08's flags (C1–C6, C12, C14, A4, A5) | Low | T04–T09, T13, T14: the cases added; T05 pins 4 209 code points |
+| AE8 | T16 compared unrelated strings, which almost never collide (C13) | Nit | T16 also disguises a string by case, white space and an invisible character |
+| AE9 | `peers()` built every name key once per pair and a QR per peer, 40 lines in one closure (A, B5, C7, C8) | Low | Keys and 4 words computed once per call; one `listed` helper; one collision predicate |
+| AE10 | `!name.is_empty()` could never decide (C10) | Nit | Removed |
+| AE11 | Doc nits: a bullet of `INVISIBLE` mixed the blanks with the default ignorables; a broken module doc; `verify_scanned`'s errors (C17) | Nit | Reworded |
+| AE12 | The Interface named `session/peers.rs` and neither `names_collide` nor `shown_name` (A-Q1, C11) | Nit | Interface amended |
+| AE13 | Ties in `first_seen` fell back to storage order unstated (A-Q3) | Nit | R3, R13: ties in creation order |
+| AE14 | A blank name replaces the previous suggested name (A-Q4) | Nit | R2 says so |
+
+**Round 2.** Two passes: a fresh reading of R1–R16 with the round-1 fixes, conformance and adversary together, which found the fixes correct and complete; and 124 hand mutants of the code spec 022 added, 109 killed, 6 equivalent, 1 that did not compile, 8 test gaps and no production defect. The human reviewer took both recommendations (AE15, AE17).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AE15 | A Turkish caps lock writes ı as I and i as İ, so "IŞIK" did not collide with "Işık" nor "İNCE" with "ince", the same class as AE1; it is the only other context or locale case of `to_lowercase` that removed spaces or caps lock reach | Low | R4: İ read as I before the lowercase, ı as i after it; ADR 0043 and §7 amended; T04 (decision) |
+| AE16 | `Gap`, public through spec 028's event, still derived a `Debug` with the full `pk`, and with it `SessionCarry` | Low | Hand-written `Debug` with the 4-byte prefix; T06 |
+| AE17 | Capitals written without their accents ("ELODIE", Greek capitals without the tonos) do not collide, a residual of no normalisation that ADR 0043 did not name | Nit | ADR 0043, Security and §7 name it; T04 pins "Élodie"/"ELODIE" and "Νίκος"/"ΝΙΚΟΣ" (decision) |
+| AE18 | Mutants that survived: `to_uppercase` for `to_lowercase`, an empty own name claimed by a blank one, `Peer::muted`, `retired_at` and `short` read from elsewhere, the stored name cleaned (which breaks R2 and the log keeping the name as sent), the full key in `OwnKeyElsewhere`'s `Debug`, the prefix unpadded | Low | T01, T02, T04, T06, T10, T12, T13: the cases added |
+| AE19 | R8 says the admission applies to any peer with no label; the code skips a retired one, which is already in the labelled budget | Nit | R8, R9: for an unknown peer or a new record, as R7 and the code; `is_unknown` made private |
+
 ## Spec 021 implemented
 
 **2026-10-05 — The non-automatable acceptance criterion of spec 021-channel-session: a second reading of R9–R15 and R19 against `docs/spec.md` §4 steps 5–8 and "Messages from one's own key".** The human reviewer took Audit AD as that reading: pass B of round 1 walked R9 step 5 and R13–R19 against the code, and round 2 read R1–R33 afresh with the round-1 fixes and found no defect. The tests, clippy, `cargo deny` and the documentation lint are green on `mvp` (106986f), and `channel_decrypt` runs in the nightly fuzz workflow. Spec 021 is `implemented`; questions 025-R1 and 025-R2 stay open for spec 025-identity-regen.

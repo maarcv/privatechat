@@ -10,6 +10,7 @@ use crate::crypto::{self, PublicKey};
 use crate::error::Error;
 use crate::proto::envelope::{self, ChannelCtx, EXPIRY_MARGIN_MS, Opened, SenderKey};
 use crate::proto::payload::PayloadKind;
+use crate::session::names::shown_name;
 use crate::storage::state::items::PeerRecord;
 use crate::storage::{ChannelState, Content, LogEntry, LogRecord, Message, StoreError};
 
@@ -285,9 +286,11 @@ fn contents(opened: envelope::Content) -> Result<(MessageContent, Content, Optio
         PayloadKind::Text => {
             // `validate` proved the body UTF-8.
             let body = String::from_utf8(payload.body).map_err(|_| Error::BadPayload)?;
+            // Spec 022-peers-tofu R6: no client renders an invisible
+            // character of a name; the log keeps it as sent.
             let content = MessageContent::Text {
                 body: body.clone(),
-                display_name: payload.display_name.clone(),
+                display_name: payload.display_name.as_deref().and_then(shown_name),
             };
             (
                 content,

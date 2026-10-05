@@ -20,6 +20,7 @@ mod gaps;
 mod headroom;
 mod outbox;
 mod own_key;
+mod peers;
 mod property;
 mod receive;
 mod send;
@@ -127,6 +128,31 @@ fn seal(
     let ctx = ChannelCtx::from_config(channel.config()).unwrap();
     let sender = SenderKey::from_seed(&Secret::from_bytes(seed)).unwrap();
     build(&ctx, &sender, &Nonce([0x31; 24])).unwrap().blob
+}
+
+/// A payload of `kind` from `seed` at `counter`, with `name`.
+fn sealed(
+    channel: &Channel,
+    seed: [u8; 32],
+    counter: u64,
+    sent_at: u64,
+    kind: PayloadKind,
+    name: Option<&str>,
+) -> Vec<u8> {
+    let body = if kind == PayloadKind::Text {
+        b"hi".to_vec()
+    } else {
+        Vec::new()
+    };
+    let payload = Payload {
+        kind,
+        display_name: name.map(str::to_owned),
+        sent_at,
+        body,
+    };
+    seal(channel, seed, |ctx, sender, nonce| {
+        envelope::seal(ctx, sender, counter, nonce, &payload)
+    })
 }
 
 /// The `n`-th `server_id`.
