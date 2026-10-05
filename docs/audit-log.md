@@ -2,6 +2,27 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AE
+
+**2026-10-05 — Audit AE, the code audit of spec 022-peers-tofu (branches `022-a` to `022-c`, PRs #30–#32), round 1 of three read-only passes (A: conformance with R1–R16 and T01–T16; B: the adversary, an intruder with the config, a malicious server and a confused user; C: code quality, tests, hand mutants and an independent rebuild of `INVISIBLE`).** No High finding. Pass C rebuilt `INVISIBLE` from its own download of the Unicode 17.0.0 files and found it equal range by range; the human check of the acceptance criterion is still due. The human reviewer took the recommendation of each of the four decisions (AE1, AE3, AE6, and the text of AE12–AE14).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AE1 | `to_lowercase` picks ς or σ from the letters around it, and `name_key` removes the white space first, so "ΝΊΚΟΣ Π" did not collide with "Νίκος Π": caps lock alone escaped the warning and `LabelInUse` (B1) | Medium | R4: U+03C2 read as U+03C3 after lowercasing; ADR 0043 and `docs/spec.md` §7 amended; T04 (decision) |
+| AE2 | The derived `Debug` of `Peer` printed the label, the suggested name and the full `pk`; that of `Sender`, inside `Received`, the full `pk` (A2, B2) | Medium | Hand-written `Debug`: the 4-byte prefix of a key, no name (AGENTS 19); T06 |
+| AE3 | An unknown key withdraws `claims_name_of` by sending a blank or another name, while its earlier message still reads as the imitated name (B3) | Low | Security: a stated residual, the unknown mark staying on every message (decision) |
+| AE4 | "Unknown" was computed without "not verified", true only through the invariant that a verified peer has a label (A1) | Low | `is_unknown`: no label, not verified, not retired; T13 plants a verified record with no label |
+| AE5 | The admission hook of spec 026-peer-limits was called for every target, so a relabel at the labelled limit would be refused once 026 lands (A3) | Low | Called only for an unknown peer or a new record |
+| AE6 | `label` and `verify` commit an unchanged peer, where `mute` does not (A-Q2, B6, C18) | Nit | Kept: R7 and R8 say to commit, and only the user can cause it (decision) |
+| AE7 | Tests that a mutant survived: the Unicode lowercase (ASCII pairs only), `MAX_NAME` in bytes, the order `BadPayload` before `LabelInUse`, the ignored label of R8, a known unlabelled peer scanned with a held label, C1 controls, a changed bound of `INVISIBLE`, an empty key matching an empty key in R13 and R14, T08's flags (C1–C6, C12, C14, A4, A5) | Low | T04–T09, T13, T14: the cases added; T05 pins 4 209 code points |
+| AE8 | T16 compared unrelated strings, which almost never collide (C13) | Nit | T16 also disguises a string by case, white space and an invisible character |
+| AE9 | `peers()` built every name key once per pair and a QR per peer, 40 lines in one closure (A, B5, C7, C8) | Low | Keys and 4 words computed once per call; one `listed` helper; one collision predicate |
+| AE10 | `!name.is_empty()` could never decide (C10) | Nit | Removed |
+| AE11 | Doc nits: a bullet of `INVISIBLE` mixed the blanks with the default ignorables; a broken module doc; `verify_scanned`'s errors (C17) | Nit | Reworded |
+| AE12 | The Interface named `session/peers.rs` and neither `names_collide` nor `shown_name` (A-Q1, C11) | Nit | Interface amended |
+| AE13 | Ties in `first_seen` fell back to storage order unstated (A-Q3) | Nit | R3, R13: ties in creation order |
+| AE14 | A blank name replaces the previous suggested name (A-Q4) | Nit | R2 says so |
+
 ## Audit AD
 
 **2026-10-04 — Audit AD, the code audit of spec 021-channel-session (branches `021-a1` to `021-e`, PRs #19–#27), round 1 of three read-only passes (A: R1–R12, R18, R20, R21, R24, R26, R33; B: the own key and the `outbox`, R9 step 5, R13–R17, R19, R22, R23, R25, R31; C: code quality, tests, fuzz and property).** No blocker; no path found by which a server or a thief raises a false alarm while a signature is kept, shortens a signature's retention, removes the pending `key_retired`, or leaves memory and disk out of step. The human reviewer took every recommendation of the four decisions (AD1–AD4).

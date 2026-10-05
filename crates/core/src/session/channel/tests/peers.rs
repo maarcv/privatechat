@@ -150,8 +150,21 @@ fn s022_t03_r03_peers_in_order() {
 #[test]
 fn s022_t06_r06_names_cleaned_in_peers_and_received() {
     let (mut channel, _, _) = receiver(3_600);
-    let received = deliver(&mut channel, ANN, 0, NOW, Some("Ann\u{202E}")).unwrap();
-    assert_eq!(name_of(&received.unwrap()).as_deref(), Some("Ann"));
+    let received = deliver(&mut channel, ANN, 0, NOW, Some("Ann\u{202E}"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(name_of(&received).as_deref(), Some("Ann"));
+    // Neither `Debug` shows a name or more than 4 bytes of a key (AGENTS 19).
+    let full: String = pk_of(ANN).iter().map(|b| format!("{b:02x}")).collect();
+    let sender = format!("{:?}", received.sender);
+    assert_eq!(sender, format!("Peer({})", &full[..8]));
+    channel.label(pk_of(ANN), "Annabel", NOW).unwrap();
+    let peer = format!("{:?}", channel.peers().unwrap()[0]);
+    assert!(
+        peer.contains(&full[..8]) && !peer.contains(&full[..10]),
+        "{peer}"
+    );
+    assert!(!peer.contains("Ann"), "{peer}");
     let cases = [
         (BOB, "\u{200B}\u{2800}\u{FEFF}", None),
         (CAT, "   ", None),
@@ -191,16 +204,29 @@ fn s022_t07_r07_label_rules() {
     let commits = handle.all_commits();
     let result = channel.label(pk_of(CAT), "", NOW);
     refused(result, Error::UnknownPeer, &handle, commits);
-    let too_long = "a".repeat(65);
-    for name in ["", too_long.as_str(), "Bo\u{7}b", "\u{200B} \u{3164}"] {
+    // `MAX_NAME` counts bytes: 33 two-byte letters are 66.
+    let too_long = ["a".repeat(65), "é".repeat(33)];
+    let names = [
+        &too_long[0],
+        &too_long[1],
+        "",
+        "Bo\u{7}b",
+        "Bo\u{85}b",
+        "\u{200B} \u{3164}",
+    ];
+    for name in names {
         let result = channel.label(pk_of(ANN), name, NOW);
         refused(result, Error::BadPayload, &handle, commits);
     }
     channel.label(pk_of(ANN), &"a".repeat(64), NOW).unwrap();
+    channel.label(pk_of(ANN), &"é".repeat(32), NOW).unwrap();
     channel.label(pk_of(ANN), "Alice", NOW).unwrap();
     let commits = handle.all_commits();
     let result = channel.label(pk_of(BOB), "AL ICE", NOW);
     refused(result, Error::LabelInUse, &handle, commits);
+    // An invalid name is refused before the collision it would also be.
+    let result = channel.label(pk_of(BOB), "Alice\u{7}", NOW);
+    refused(result, Error::BadPayload, &handle, commits);
     // Relabelling a peer with its own label is no collision.
     channel.label(pk_of(ANN), "alice", NOW).unwrap();
 
@@ -236,7 +262,8 @@ fn s022_t08_r08_verify() {
     refused(result, Error::BadPayload, &handle, commits);
 
     channel.label(pk_of(ANN), "Ann", NOW).unwrap();
-    channel.verify(pk_of(ANN), Some("Other"), NOW).unwrap();
+    // The given label is ignored, not checked.
+    channel.verify(pk_of(ANN), Some("O\u{7}"), NOW).unwrap();
     let ann = record_of(&channel, pk_of(ANN)).unwrap();
     assert!(ann.verified);
     assert_eq!(ann.label.as_deref(), Some("Ann"));
@@ -247,6 +274,8 @@ fn s022_t08_r08_verify() {
     let bob = record_of(&stored, pk_of(BOB)).unwrap();
     assert!(bob.verified);
     assert_eq!(bob.label.as_deref(), Some("alice"));
+    assert!(listed(&stored, pk_of(BOB)).label_collides);
+    assert!(listed(&stored, pk_of(CAT)).label_collides);
 }
 
 /// Spec 022, R9: the QR's errors, one's own keys refused, a known key
@@ -256,7 +285,7 @@ fn s022_t09_r09_verify_scanned() {
     let (mut channel, handle, _) = receiver(3_600);
     let qr_of = |seed| verify_qr(channel.config.id(), &PublicKey(pk_of(seed))).unwrap();
     let (ann_qr, bob_qr, cat_qr, dan_qr) = (qr_of(ANN), qr_of(BOB), qr_of(CAT), qr_of(DAN));
-    let eve_qr = qr_of([0x45; 32]);
+    let (eve_qr, fay_qr) = (qr_of([0x45; 32]), qr_of([0x46; 32]));
     deliver(&mut channel, ANN, 0, NOW, None).unwrap();
     deliver(&mut channel, BOB, 0, NOW, None).unwrap();
     let mut next = channel.next_state();
@@ -322,6 +351,13 @@ fn s022_t09_r09_verify_scanned() {
     let eve = record_of(&stored, pk_of([0x45; 32])).unwrap();
     assert!(eve.verified);
     assert_eq!(eve.label.as_deref(), Some("dan"));
+    // So may a known key with no label.
+    let fay = [0x46; 32];
+    deliver(&mut channel, fay, 0, NOW, None).unwrap();
+    channel.verify_scanned(&fay_qr, "DAN", NOW).unwrap();
+    let fay = record_of(&channel, pk_of(fay)).unwrap();
+    assert!(fay.verified);
+    assert_eq!(fay.label.as_deref(), Some("DAN"));
 }
 
 /// Spec 022, R10: mute and unmute commit, the same value does not; the
@@ -357,7 +393,8 @@ fn s022_t10_r10_mute() {
 }
 
 /// Spec 022, R11: an error commits nothing, and a failed commit leaves
-/// memory and the reopened store as they were.
+/// memory and the reopened store as they were. T07–T10 assert every other
+/// error of their calls with `refused`, which checks the commits too.
 #[test]
 fn s022_t11_r11_errors_and_failing_store() {
     let (mut channel, handle, faults) = receiver(3_600);
@@ -440,7 +477,7 @@ fn s022_t13_r13_claims() {
     let (mut channel, _, _) = receiver(3_600);
     deliver(&mut channel, ANN, 0, NOW, None).unwrap();
     channel.label(pk_of(ANN), "Alice", NOW).unwrap();
-    deliver(&mut channel, unknown, 0, NOW + 10, Some("al ice")).unwrap();
+    deliver(&mut channel, unknown, 0, NOW + 10, Some("alice")).unwrap();
     assert_eq!(
         listed(&channel, pk_of(unknown)).claims_name_of,
         Some(pk_of(ANN))
@@ -465,6 +502,9 @@ fn s022_t13_r13_claims() {
         Some(pk_of(CAT))
     );
     assert!(!listed(&channel, pk_of(unknown)).claims_own_name);
+    // With no own name, a peer with no name claims it neither.
+    deliver(&mut channel, BOB, 0, NOW, None).unwrap();
+    assert!(!listed(&channel, pk_of(BOB)).claims_own_name);
 
     let mut next = channel.next_state();
     next.own_display_name = Some("Me\u{200B}".to_owned());
@@ -486,6 +526,14 @@ fn s022_t13_r13_claims() {
     let retired = listed(&channel, pk_of([0x51; 32]));
     assert_eq!(retired.suggested_name.as_deref(), Some("ALICE"));
     assert_eq!(retired.claims_name_of, None);
+    // Nor is a verified one, even planted without the label it always has.
+    let mut next = channel.next_state();
+    let mut verified = record_of(&channel, pk_of(unknown)).unwrap().clone();
+    verified.pk = PublicKey(pk_of([0x52; 32]));
+    verified.verified = true;
+    next.peers.push(verified);
+    channel.commit(next, Vec::new()).unwrap();
+    assert_eq!(listed(&channel, pk_of([0x52; 32])).claims_name_of, None);
 }
 
 /// Spec 022, R14: colliding labels flag both peers, retired ones included.
@@ -514,9 +562,12 @@ fn s022_t14_r14_label_collision_flag() {
     deliver(&mut channel, BOB, 0, NOW, None).unwrap();
     channel.label(pk_of(BOB), "alice", NOW).unwrap();
     deliver(&mut channel, CAT, 0, NOW, None).unwrap();
+    deliver(&mut channel, DAN, 0, NOW, None).unwrap();
     assert!(listed(&channel, pk_of(ANN)).label_collides);
     assert!(listed(&channel, pk_of(BOB)).label_collides);
+    // Two peers with no label share no label.
     assert!(!listed(&channel, pk_of(CAT)).label_collides);
+    assert!(!listed(&channel, pk_of(DAN)).label_collides);
 }
 
 /// Two identity seeds whose keys share the first 44 bits of their

@@ -20,12 +20,12 @@ Retirement, received or manual, is spec 024-key-retired; the counts, the room ch
 **The record**
 
 - R1 A consumed, not stale message other than a `key_retired` from a `pk` with no peer record, other than one's own `pk_u` (never a peer), MUST create one with no label, `verified` and `muted` false, no `retired_at`, `first_seen = last_seen = now`, `max_counter` set by spec 021-channel-session R11, and `last_display_name` set to the message's name when it has one, in the commit of that message.
-- R2 Each later consumed, not stale message of that peer MUST set `last_seen = now`, and `last_display_name` to its name when it carries one, in the same commit.
-- R3 `peers()` MUST return every peer record, in `first_seen` order, as a `Peer` with the fields of the Interface, and MUST NOT commit.
+- R2 Each later consumed, not stale message of that peer MUST set `last_seen = now`, and `last_display_name` to its name when it carries one, in the same commit; a name whose key (R4) is empty replaces the previous one too, and is handed out as no name (R6).
+- R3 `peers()` MUST return every peer record, in `first_seen` order with ties in creation order, as a `Peer` with the fields of the Interface, and MUST NOT commit.
 
 **Names**
 
-- R4 `name_key(text)` MUST be the text with every character removed that is `White_Space` (`char::is_whitespace`) or in the table `INVISIBLE` of R5, then the Unicode lowercase mapping (`str::to_lowercase`), with no normalisation, confusable skeleton or fold (ADR 0043). Two names collide exactly when their keys are equal and non-empty.
+- R4 `name_key(text)` MUST be the text with every character removed that is `White_Space` (`char::is_whitespace`) or in the table `INVISIBLE` of R5, then the Unicode lowercase mapping (`str::to_lowercase`), with every U+03C2 GREEK SMALL LETTER FINAL SIGMA then replaced by U+03C3, since `to_lowercase` picks the final form from the letters around it and the removed white space changes them; no normalisation, confusable skeleton or other fold (ADR 0043). Two names collide exactly when their keys are equal and non-empty.
 - R5 `INVISIBLE` MUST be a table of code point ranges written by hand in `core`, the union of General_Category Cf and `Default_Ignorable_Code_Point` of the Unicode version of the pinned toolchain (`char::UNICODE_VERSION`), the blank-rendering code points listed with their reason in the table's doc comment (at least U+2800 BRAILLE PATTERN BLANK, U+3164 HANGUL FILLER and U+FFA0 HALFWIDTH HANGUL FILLER), and the line and paragraph separators U+2028 and U+2029, which could draw a second line that looks like another sender, with that version and the source files (`UnicodeData.txt`, `DerivedCoreProperties.txt`) named in its doc comment; a test pins the number of ranges and that `char::UNICODE_VERSION` is the version the doc comment names, so that a change of the table or of the toolchain's Unicode data is a reviewed diff.
 - R6 Every name the core hands to a client — `label` and `suggested_name` of a `Peer`, `display_name` of a `Received` or a `Message`, `suggested_name`, `local_name` and `own_display_name` of a `ChannelInfo` — MUST have its Cc characters and the characters of `INVISIBLE` removed by `clean_name`, so that no client renders them (`docs/spec.md` §7); an optional name whose `name_key` is empty (only white space or invisible characters) is handed out as `None`, and a required one (`suggested_name` of a `ChannelInfo`) as the empty string; `channel_name` of a `BrokenChannel` (spec 027-core-api) is cleaned the same way and is `None` when empty; which the client replaces by its own placeholder.
 
@@ -40,7 +40,7 @@ Retirement, received or manual, is spec 024-key-retired; the counts, the room ch
 
 **Warnings**
 
-- R13 For an unknown peer, `Peer::claims_name_of` MUST be the `PeerId` of a labelled, verified or retired peer whose label collides with this peer's `suggested_name` (a retired label counts, since an impostor appears when a key is retired), the one first seen when several do, and `Peer::claims_own_name` MUST be true when its `suggested_name` collides with `own_display_name`, which is how two devices of one person see each other (`docs/spec.md` §7).
+- R13 For an unknown peer, `Peer::claims_name_of` MUST be the `PeerId` of a labelled, verified or retired peer whose label collides with this peer's `suggested_name` (a retired label counts, since an impostor appears when a key is retired), the one first seen when several do (ties in creation order), and `Peer::claims_own_name` MUST be true when its `suggested_name` collides with `own_display_name`, which is how two devices of one person see each other (`docs/spec.md` §7).
 - R14 `Peer::label_collides` MUST be true when this peer's label collides with another peer's label, retired peers included as in R13, which R7–R9 allow only for a verified target or next to a retired label; a client shows the short identifier next to both.
 - R15 `Peer::short_collides` MUST be true when the 4 words of this peer equal those of another peer or of one's own `pk_u`; a client then shows the 12 words of both with the warning of §7.
 
@@ -60,9 +60,10 @@ Retirement, received or manual, is spec 024-key-retired; the counts, the room ch
 ## Interface
 
 ```
-crates/core/src/session/peers.rs            the peer record, R1–R3, R7–R15
-crates/core/src/session/names.rs            name_key, clean_name and the table INVISIBLE (R4–R6)
-crates/core/src/session/peers/tests.rs      s022_* tests
+crates/core/src/session/channel/peers.rs          the peer list and calls, R3, R7–R15 (R1, R2 in channel/receive.rs)
+crates/core/src/session/names.rs                  name_key, names_collide, clean_name, shown_name and the table INVISIBLE (R4–R6)
+crates/core/src/session/channel/tests/peers.rs    s022_* tests of the record, the calls and the warnings
+crates/core/src/session/names/tests.rs            s022_* tests of the names
 ```
 
 ```rust
@@ -86,7 +87,9 @@ impl Channel {   // pub(crate); spec 027-core-api exposes them through Device
     pub(crate) fn own_fingerprint(&self) -> Result<Fingerprint, Error>;
 }
 pub(crate) fn name_key(text: &str) -> String;
+pub(crate) fn names_collide(first: &str, second: &str) -> bool;   // equal, non-empty keys (R4)
 pub(crate) fn clean_name(text: &str) -> String;
+pub(crate) fn shown_name(text: &str) -> Option<String>;            // an optional name as R6 hands it out
 pub(crate) const INVISIBLE: &[(u32, u32)];
 ```
 
@@ -101,7 +104,8 @@ pub(crate) const INVISIBLE: &[(u32, u32)];
 - The Unicode data is the pinned toolchain's (`char::UNICODE_VERSION`) and the table of R5; two clients built with different toolchains can disagree only on a rare collision, which changes a warning or a refusal, never a byte on the wire. Every platform runs the same Rust code, so no vector file is needed.
 - The short identifier identifies and never authenticates (spec 014-fingerprint): R15 reports a collision and never resolves it.
 - Pre-verification (R9) is the remedy to "this is my new phone": the member scans the new key in person before its first message, and may give it the label the old device holds.
-- Names are content: they never reach a log or an error (AGENTS 19).
+- `claims_name_of` follows the suggested name of the peer's last message that carried one (R2): an unknown key that wrote as "Alice" and then sends a blank name or another one withdraws the warning, while its earlier message still reads "Alice". A stated residual (audit AE): the unknown mark, the grey name and the short identifier, which the sender cannot remove, stay on every one of its messages, and verification is what authenticates.
+- Names are content: they never reach a log, an error or a `Debug` (AGENTS 19); the `Debug` of `Peer` and `Sender` shows the 4-byte prefix of a key and no name.
 
 ## Public API changes
 
@@ -112,7 +116,7 @@ None directly: spec 027-core-api exposes `peers`, `label` (with `now`), `verify`
 - T01 (covers R1): `s022_t01_r01_first_message_creates_peer`: a new `pk` → one record with the suggested name; a stale message or a `key_retired` → none; a fresh blob from one's own `pk_u` sealed elsewhere → no peer record (the own-key rule of spec 021-channel-session R14 applies instead).
 - T02 (covers R2): `s022_t02_r02_later_messages_update`: `last_seen` moves; a message without a name keeps the previous one.
 - T03 (covers R3): `s022_t03_r03_peers_in_order`: three peers in `first_seen` order; `commits = 0`.
-- T04 (covers R4): `s022_t04_r04_name_key_collisions`: each pair collides — "Alice"/"ALICE", "Mike"/"MIKE", "Olivia"/"OLIVIA", "Al ice"/"Alice", "Alice"/"Ali\u{3000}ce", "Alice"/"Alice\u{2800}", "Alice"/"Ali\u{200B}ce", "Alice"/"Ali\u{034F}ce", "Alice"/"Ali\u{3164}ce", "Alice"/"Ali\u{FFA0}ce"; these do not, the residual of ADR 0043 pinned so that it is neither closed nor widened by accident — "Alice"/"Alicia", "Alice"/"Аlice" (U+0410), "Alice"/"AIice" (capital I), "Bob"/"B0b", "Alice"/"\u{FF21}lice" (full-width A), "Alice"/"Ali\u{307}ce"; "   " and "\u{200B}" have an empty key.
+- T04 (covers R4): `s022_t04_r04_name_key_collisions`: each pair collides — "Alice"/"ALICE", "Mike"/"MIKE", "Olivia"/"OLIVIA", "Al ice"/"Alice", "Alice"/"Ali\u{3000}ce", "Alice"/"Alice\u{2800}", "Alice"/"Ali\u{200B}ce", "Alice"/"Ali\u{034F}ce", "Alice"/"Ali\u{3164}ce", "Alice"/"Ali\u{FFA0}ce", "Élodie"/"ÉLODIE", "Νίκος Π"/"ΝΊΚΟΣ Π", "οδος α"/"ΟΔΟΣ Α", "Νίκοσ"/"Νίκος"; these do not, the residual of ADR 0043 pinned so that it is neither closed nor widened by accident — "Alice"/"Alicia", "Alice"/"Аlice" (U+0410), "Alice"/"AIice" (capital I), "Bob"/"B0b", "Alice"/"\u{FF21}lice" (full-width A), "Alice"/"Ali\u{307}ce"; "   " and "\u{200B}" have an empty key.
 - T05 (covers R5): `s022_t05_r05_invisible_table`: U+200B, U+200D, U+202E, U+FEFF, U+034F, U+115F, U+1160, U+3164, U+FFA0, U+2800, U+2028 and U+2029 are in it; "a" and U+0020 are not; the range count matches the pinned value and `char::UNICODE_VERSION` is the version the doc comment names.
 - T06 (covers R6): `s022_t06_r06_names_are_cleaned`: a suggested name with U+202E comes out without it, in `peers()` and in the `Received` (a name with a Cc character is dropped on decode by spec 013 R9, and `clean_name` is tested on U+0007 directly) (spec 023-ttl-purge T03 checks `messages()`); a `display_name` made only of `INVISIBLE` characters → `None`; a `display_name` of three spaces, or of U+3000 alone → `None`; "Bob\u{2029}Alice" and "Bob\u{2028}Alice" → "BobAlice".
 - T07 (covers R7): `s022_t07_r07_label_rules`: each error of R7 in order; a label held by a retired peer (planted with the `testing` builders) is free; held by an unverified peer it is `LabelInUse` for an unverified target and allowed for a verified one; `commits = 0` on every error.
@@ -171,3 +175,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): drawing points to spec 055
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-10-04 amended by ADR 0043 (`docs/audit-log.md`, audit AB): `name_key` is lowercase with white space and `INVISIBLE` removed, with no Unicode crate, skeleton or fold; look-alikes a stated residual; no fuzz target and no amendment of specs 010 and 016; `INVISIBLE` pinned to the toolchain's Unicode version
+- 2026-10-05 revised after audit AE (`docs/audit-log.md`): the final sigma folded in R4 (ADR 0043 amended), ties in creation order in R3 and R13, a blank name in R2, the withdrawn claim a stated residual, the Interface paths and helpers

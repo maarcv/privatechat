@@ -9,6 +9,10 @@ use super::{INVISIBLE, clean_name, name_key, names_collide, shown_name};
 /// The number of ranges of `INVISIBLE` for Unicode 17.0.0 (R5).
 const INVISIBLE_RANGES: usize = 26;
 
+/// The number of code points those ranges hold, so that a changed bound is
+/// a reviewed diff too.
+const INVISIBLE_CODE_POINTS: u32 = 4_209;
+
 /// Spec 022, R4: case, white space and invisible characters collide;
 /// look-alikes do not, the residual of ADR 0043.
 #[test]
@@ -24,6 +28,13 @@ fn s022_t04_r04_name_key_collisions() {
         ("Alice", "Ali\u{034F}ce"),
         ("Alice", "Ali\u{3164}ce"),
         ("Alice", "Ali\u{FFA0}ce"),
+        ("Élodie", "ÉLODIE"),
+        // The final sigma: lowercased in context, and the spaces removed
+        // change the context (audit AE).
+        ("Νίκος Π", "ΝΊΚΟΣ Π"),
+        ("οδος α", "ΟΔΟΣ Α"),
+        ("Νίκος", "ΝΊΚΟΣ"),
+        ("Νίκοσ", "Νίκος"),
     ];
     for (first, second) in colliding {
         assert!(names_collide(first, second), "{first:?} / {second:?}");
@@ -61,6 +72,8 @@ fn s022_t05_r05_invisible_table() {
         assert!(!contains(code), "U+{code:04X}");
     }
     assert_eq!(INVISIBLE.len(), INVISIBLE_RANGES);
+    let code_points: u32 = INVISIBLE.iter().map(|&(a, b)| b - a + 1).sum();
+    assert_eq!(code_points, INVISIBLE_CODE_POINTS);
     assert!(
         INVISIBLE
             .windows(2)
@@ -80,6 +93,7 @@ fn s022_t05_r05_invisible_table() {
 fn s022_t06_r06_names_are_cleaned() {
     assert_eq!(clean_name("Bob\u{202E}ecilA"), "BobecilA");
     assert_eq!(clean_name("Bob\u{0007}"), "Bob");
+    assert_eq!(clean_name("Bob\u{0085}\u{009B}"), "Bob");
     assert_eq!(clean_name("Bob\u{2029}Alice"), "BobAlice");
     assert_eq!(clean_name("Bob\u{2028}Alice"), "BobAlice");
     assert_eq!(shown_name("\u{200B}\u{2800}\u{FEFF}"), None);
@@ -88,19 +102,36 @@ fn s022_t06_r06_names_are_cleaned() {
     assert_eq!(shown_name("Al ice\u{200B}"), Some("Al ice".to_owned()));
 }
 
+/// A name that differs from another only in what `name_key` drops or folds.
+fn disguise(name: &str, extra: char) -> String {
+    let mut disguised: String = name.chars().flat_map(char::to_uppercase).collect();
+    disguised.insert(0, extra);
+    disguised.push(' ');
+    disguised
+}
+
 proptest! {
     /// Spec 022, R16: the name functions never panic, and collision is
-    /// symmetric, for strings of up to 256 bytes.
+    /// symmetric, for strings of up to 256 bytes, unrelated ones and ones
+    /// disguised by case, white space and an invisible character.
     #[test]
     fn s022_t16_r16_name_key_property(
         first in vec(any::<char>(), 0..=64),
         second in vec(any::<char>(), 0..=64),
+        extra in proptest::sample::select(vec!['\u{200B}', '\u{3000}', '\u{2800}', '\u{FEFF}']),
     ) {
         let first: String = first.into_iter().collect();
         let second: String = second.into_iter().collect();
         let _ = clean_name(&first);
         let _ = shown_name(&first);
         assert_eq!(names_collide(&first, &second), names_collide(&second, &first));
-        assert!(names_collide(&first, &first) || name_key(&first).is_empty());
+        let disguised = disguise(&first, extra);
+        assert_eq!(names_collide(&first, &disguised), names_collide(&disguised, &first));
+        // Uppercasing then lowercasing is not always the identity (ß, ǅ),
+        // so a disguise collides whenever the keys of the two cases agree.
+        let same_case = name_key(&first) == name_key(&first.to_uppercase());
+        if same_case && !name_key(&first).is_empty() {
+            assert!(names_collide(&first, &disguised), "{first:?}");
+        }
     }
 }

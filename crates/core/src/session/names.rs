@@ -1,7 +1,8 @@
 //! Names of spec 022-peers-tofu R4–R6 (ADR 0043): the key two names are
 //! compared on, and the cleaning of every name the core hands to a client.
-//! Standard library only (R16): no normalisation, confusable skeleton or
-//! fold, so look-alikes of another script do not collide, a stated residual.
+//! Standard library only (R16): no normalisation or confusable skeleton,
+//! and no fold but the final sigma, so look-alikes of another script do not
+//! collide, a stated residual.
 
 /// Code points removed from every name by [`name_key`] and [`clean_name`],
 /// as inclusive ranges in ascending order (R5).
@@ -10,10 +11,10 @@
 /// toolchain), of:
 /// - General_Category Cf, from `UnicodeData.txt`;
 /// - `Default_Ignorable_Code_Point`, from `DerivedCoreProperties.txt`;
-/// - code points that render blank and are in neither: U+2800 BRAILLE
-///   PATTERN BLANK, which draws an empty cell; U+3164 HANGUL FILLER and
-///   U+FFA0 HALFWIDTH HANGUL FILLER, already default ignorable but listed
-///   because they are the usual way to fake a blank name;
+/// - U+2800 BRAILLE PATTERN BLANK, in neither, which draws an empty cell;
+/// - U+3164 HANGUL FILLER and U+FFA0 HALFWIDTH HANGUL FILLER, already
+///   default ignorable, listed because they are the usual way to fake a
+///   blank name;
 /// - U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR, which could draw
 ///   a second line that looks like another sender.
 ///
@@ -56,12 +57,16 @@ fn is_invisible(character: char) -> bool {
 }
 
 /// The key of R4: `text` without white space and [`INVISIBLE`] characters,
-/// lowercased.
+/// lowercased, with the final sigma read as the medial one.
 pub(crate) fn name_key(text: &str) -> String {
     text.chars()
         .filter(|&character| !character.is_whitespace() && !is_invisible(character))
         .collect::<String>()
         .to_lowercase()
+        // `to_lowercase` picks ς or σ from the letters around it, which the
+        // removed spaces change: "ΝΊΚΟΣ Π" would not collide with "Νίκος Π"
+        // (audit AE).
+        .replace('\u{03C2}', "\u{03C3}")
 }
 
 /// Whether two names collide (R4): equal, non-empty keys.
