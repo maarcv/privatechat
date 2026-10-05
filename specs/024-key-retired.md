@@ -33,8 +33,8 @@ Only a key the user already trusts — labelled or verified — becomes a retire
 ## Interface
 
 ```
-crates/core/src/session/retired.rs          R1–R6
-crates/core/src/session/retired/tests.rs    s024_* tests
+crates/core/src/session/channel/retired.rs          R1, R2, R4, R5 (R3 in channel/own_key.rs)
+crates/core/src/session/channel/tests/retired.rs    s024_* tests
 ```
 
 ```rust
