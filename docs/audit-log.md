@@ -2,6 +2,10 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Spec 023 implemented
+
+**2026-10-05 — Spec 023-ttl-purge is `implemented`.** Its acceptance criterion is automated alone: `cargo test -p privatechat-core s023_`, clippy and the documentation lint are green on `mvp` (889809c), after the two rounds of Audit AF.
+
 ## Audit AF
 
 **2026-10-05 — Audit AF, the code audit of spec 023-ttl-purge (branches `023-a` and `023-b`, PRs #35 and #36), round 1 of three read-only passes (A: conformance with R1–R7 and T01–T07; B: the adversary, a server choosing every `received_at`, an intruder with the config and a flood; C: code quality, tests and hand mutants).** No High or Medium finding and no production defect. Pass C ran 21 of its 86 mutants before it was stopped; the fixes were then checked with mutants of their own. The human reviewer took the recommendation of each of the three decisions (AF1, AF2, AF3 with AF4).
