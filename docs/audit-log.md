@@ -2,6 +2,10 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Spec 021 implemented
+
+**2026-10-05 — The non-automatable acceptance criterion of spec 021-channel-session: a second reading of R9–R15 and R19 against `docs/spec.md` §4 steps 5–8 and "Messages from one's own key".** The human reviewer took Audit AD as that reading: pass B of round 1 walked R9 step 5 and R13–R19 against the code, and round 2 read R1–R33 afresh with the round-1 fixes and found no defect. The tests, clippy, `cargo deny` and the documentation lint are green on `mvp` (106986f), and `channel_decrypt` runs in the nightly fuzz workflow. Spec 021 is `implemented`; questions 025-R1 and 025-R2 stay open for spec 025-identity-regen.
+
 ## Audit AD
 
 **2026-10-04 — Audit AD, the code audit of spec 021-channel-session (branches `021-a1` to `021-e`, PRs #19–#27), round 1 of three read-only passes (A: R1–R12, R18, R20, R21, R24, R26, R33; B: the own key and the `outbox`, R9 step 5, R13–R17, R19, R22, R23, R25, R31; C: code quality, tests, fuzz and property).** No blocker; no path found by which a server or a thief raises a false alarm while a signature is kept, shortens a signature's retention, removes the pending `key_retired`, or leaves memory and disk out of step. The human reviewer took every recommendation of the four decisions (AD1–AD4).

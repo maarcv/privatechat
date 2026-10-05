@@ -21,7 +21,7 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 016 | 016-fuzz-harness | 1 | implemented |
 | 017 | 017-record-encoding | 1 | implemented |
 | 020 | 020-store-files | 2 | implemented |
-| 021 | 021-channel-session | 2 | accepted |
+| 021 | 021-channel-session | 2 | implemented |
 | 022 | 022-peers-tofu | 2 | accepted |
 | 023 | 023-ttl-purge | 2 | accepted |
 | 024 | 024-key-retired | 2 | accepted |
