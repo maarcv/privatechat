@@ -1,6 +1,6 @@
 # Private E2E chat — Specification and plan (SDD)
 
-Version: mvp · Post-audit I revision · Updated: 2026-10-04 · Marc Vilardebó (audits in `docs/audit-log.md`)
+Version: mvp · Post-audit I revision · Updated: 2026-10-05 · Marc Vilardebó (audits in `docs/audit-log.md`)
 
 This file, on the default branch (`mvp` until the first release), is the canonical source of the specification (see §11 "Governance"). Read copy, may lag behind: https://claude.ai/code/artifact/1527bf13-79e8-485a-908d-a515cbd062a4
 
