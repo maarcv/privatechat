@@ -96,3 +96,4 @@ None.
 - 2026-09-25 revised after audit J round 13 (`docs/audit-log.md`)
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): dialogs point to spec 055
 - 2026-09-28 accepted (Marc Vilardebó)
+- 2026-10-05 text: the Interface paths under `session/channel/`, R3 in `own_key.rs`, as specs 022 and 023

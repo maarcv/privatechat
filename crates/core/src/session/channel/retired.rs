@@ -22,6 +22,7 @@ impl Channel {
     /// `UnknownPeer` for a key with no record; `Store` when the commit
     /// fails.
     pub(crate) fn retire(&mut self, peer: PeerId, now: u64) -> Result<(), Error> {
+        self.latest_now = Some(now);
         let record = self.peer(&PublicKey(peer)).ok_or(Error::UnknownPeer)?;
         if record.retired_at.is_some() {
             return Ok(());
@@ -36,6 +37,10 @@ impl Channel {
     /// Consumes a peer's readable, not stale `key_retired` (R1, R2): only a
     /// key the user named or verified becomes a retired record, so that a
     /// stranger can plant none (audit J, J-B1).
+    ///
+    /// # Errors
+    ///
+    /// `Store` when the commit fails, the cursor unchanged.
     pub(super) fn consume_retirement(
         &mut self,
         opened: Opened,
@@ -52,6 +57,7 @@ impl Channel {
         if trusted {
             let listing = self.listing(opened, arrival, Sender::Peer { pk }, 0);
             if let Some(record) = find(&mut next.peers, &pk) {
+                // Step 5 stops a retired key first; R1's "unless already set".
                 record.retired_at.get_or_insert(arrival.now);
                 spend(record, arrival.now);
             }

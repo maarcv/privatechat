@@ -50,7 +50,9 @@ fn s021_t24_r24_gaps() {
         bob(&channel),
         Some(gap(pk_of(BOB), (1 << 32) * 2 + 1, true, false))
     );
-    // A `key_retired` counts for no gap.
+    // A `key_retired` counts for no gap; from a labelled peer, which keeps
+    // its record (spec 024-key-retired R1).
+    channel.label(pk_of(ANN), "Ann", NOW).unwrap();
     let retired = Payload {
         kind: PayloadKind::KeyRetired,
         display_name: None,
@@ -61,6 +63,7 @@ fn s021_t24_r24_gaps() {
         crate::proto::envelope::seal(ctx, sender, u64::MAX, nonce, &retired)
     });
     channel.decrypt(&blob, sid(200), NOW, NOW).unwrap();
+    assert!(channel.state.peers[0].retired_at.is_some());
     let ann = channel.gaps().into_iter().find(|g| g.peer == pk_of(ANN));
     assert_eq!(ann, Some(gap(pk_of(ANN), 3, false, false)));
 

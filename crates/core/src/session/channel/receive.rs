@@ -5,6 +5,7 @@
 
 use zeroize::Zeroizing;
 
+use super::peers::find;
 use super::purge::content_of;
 use super::retired::is_key_retired;
 use super::{Channel, Received, Sender};
@@ -300,7 +301,7 @@ fn update_peer(
     now: u64,
 ) {
     let name = name.map(|name| Zeroizing::new(name.into_bytes()));
-    if let Some(peer) = next.peers.iter_mut().find(|peer| peer.pk.0 == pk.0) {
+    if let Some(peer) = find(&mut next.peers, &pk.0) {
         peer.last_seen = now;
         peer.max_counter = Some(counter);
         if name.is_some() {

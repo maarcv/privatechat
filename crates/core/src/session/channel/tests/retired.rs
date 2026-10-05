@@ -1,7 +1,7 @@
 //! Tests of spec 024-key-retired: a received retirement from a known peer,
 //! a stranger and one's own key, and the manual `retire`.
 
-use super::{DAY_MS, NOW, pk_of, receiver, reopened, sealed};
+use super::{DAY_MS, HOUR_MS, MARGIN_MS, NOW, pk_of, receiver, reopened, sealed};
 use crate::Error;
 use crate::crypto::PublicKey;
 use crate::proto::payload::PayloadKind;
@@ -63,7 +63,34 @@ fn s024_t01_r01_retirement_from_known_peer() {
     text(&mut channel, ANN, 0).unwrap();
     channel.label(pk_of(ANN), "Ann", NOW).unwrap();
     channel.verify(pk_of(ANN), None, NOW).unwrap();
+    // A retirement that would expire before it is shown, or that no
+    // member accepts any more, changes nothing.
+    let commits = handle.commits();
+    for (copy, sent_at) in [
+        (8, NOW - HOUR_MS - 120_000),
+        (9, NOW - HOUR_MS - MARGIN_MS - 60_000),
+    ] {
+        let late = sealed(
+            &channel,
+            ANN,
+            u64::MAX,
+            sent_at,
+            PayloadKind::KeyRetired,
+            None,
+        );
+        let result = channel.decrypt(&late, sid_of(ANN, copy, 1), NOW, NOW);
+        assert_eq!(result, Err(Error::Expired), "{sent_at}");
+        assert_eq!(record_of(&channel, ANN).unwrap().retired_at, None);
+    }
+    assert_eq!(handle.commits(), commits);
+
     let received = retirement(&mut channel, ANN, 0).unwrap().unwrap();
+    assert_eq!(handle.commits(), commits + 1);
+    let seen = channel.records.iter().any(|record| {
+        matches!(&record.entry, LogEntry::Seen { sender_pk, counter, .. }
+            if sender_pk.0 == pk_of(ANN) && *counter == u64::MAX)
+    });
+    assert!(seen);
     assert_eq!(received.content, MessageContent::KeyRetired);
     assert_eq!(received.sender, Sender::Peer { pk: pk_of(ANN) });
     assert_eq!(retirements_listed(&channel), 1);
@@ -90,6 +117,32 @@ fn s024_t01_r01_retirement_from_known_peer() {
     let bob = record_of(&channel, BOB).unwrap();
     assert_eq!(bob.retired_at, Some(NOW));
     assert!(bob.muted && !bob.verified);
+
+    // `verified` alone is enough, from a loaded state; `retired_at` and
+    // `last_seen` are the arrival's `now`.
+    let mut next = channel.next_state();
+    next.peers.push(PeerRecord {
+        pk: PublicKey(pk_of(CAT)),
+        label: None,
+        verified: true,
+        muted: false,
+        retired_at: None,
+        first_seen: NOW,
+        last_seen: NOW,
+        max_counter: None,
+        last_display_name: None,
+    });
+    channel.commit(next, Vec::new()).unwrap();
+    let later = NOW + 5_000;
+    let blob = sealed(&channel, CAT, u64::MAX, NOW, PayloadKind::KeyRetired, None);
+    assert!(
+        channel
+            .decrypt(&blob, sid_of(CAT, 0, 1), later, later)
+            .unwrap()
+            .is_some()
+    );
+    let cat = record_of(&channel, CAT).unwrap();
+    assert_eq!((cat.retired_at, cat.last_seen), (Some(later), later));
 }
 
 /// Spec 024, R2: a stranger's retirement leaves no record and no message;
@@ -97,10 +150,12 @@ fn s024_t01_r01_retirement_from_known_peer() {
 #[test]
 fn s024_t02_r02_retirement_from_stranger() {
     let (mut channel, handle, _) = receiver(3_600);
-    let commits = handle.commits();
+    let (commits, all) = (handle.commits(), handle.all_commits());
     assert_eq!(retirement(&mut channel, ANN, 0), Ok(None));
     assert!(record_of(&channel, ANN).is_none());
     assert_eq!(handle.commits(), commits);
+    assert_eq!(handle.all_commits(), all + 1);
+    assert_eq!(reopened(&handle).state.cursor, Some(NOW));
     assert_eq!(retirements_listed(&channel), 0);
 
     text(&mut channel, BOB, 0).unwrap();
@@ -154,8 +209,10 @@ fn s024_t03_r03_own_key_retired_elsewhere() {
     assert!(channel.status().read_only);
     assert_eq!(channel.encrypt("hi", None, NOW), Err(Error::RetiredKey));
 
-    // Nothing but spec 025-identity-regen clears it.
+    // Nothing but spec 025-identity-regen clears it, a later text of
+    // one's own key from elsewhere included.
     text(&mut channel, ANN, 0).unwrap();
+    text(&mut channel, own, 3).unwrap();
     channel.flush(NOW + 60_000).unwrap();
     assert!(reopened(&handle).state.read_only);
 }
@@ -238,4 +295,20 @@ fn s024_t06_r06_failing_store() {
     );
     assert!(state_eq(&channel.state, &before));
     assert!(state_eq(&reopened(&handle).state, &before));
+
+    // A received retirement fails the same way on each branch of R1 and R2
+    // (AGENTS 23).
+    faults.fail_commits(false);
+    text(&mut channel, BOB, 0).unwrap();
+    text(&mut channel, CAT, 0).unwrap();
+    channel.label(pk_of(ANN), "Ann", NOW).unwrap();
+    channel.mute(pk_of(CAT), true).unwrap();
+    let before = channel.state.duplicate();
+    faults.fail_commits(true);
+    for seed in [ANN, BOB, CAT] {
+        let result = retirement(&mut channel, seed, 0);
+        assert_eq!(result, Err(Error::Store(StoreError::Io)));
+        assert!(state_eq(&channel.state, &before));
+        assert!(state_eq(&reopened(&handle).state, &before));
+    }
 }
