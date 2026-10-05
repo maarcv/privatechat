@@ -2,6 +2,10 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Spec 022 implemented
+
+**2026-10-05 — The non-automatable acceptance criterion of spec 022-peers-tofu: a second check of `INVISIBLE` against `UnicodeData.txt` and `DerivedCoreProperties.txt` of Unicode 17.0.0.** The human reviewer took the independent rebuild of pass C of Audit AE as that check: from its own download of the two files, Cf with its `First`/`Last` ranges expanded, `Default_Ignorable_Code_Point` and the five code points R5 lists, it computed the same 26 ranges, and the pinned toolchain's `char::UNICODE_VERSION` is 17.0.0. `cargo test -p privatechat-core s022_`, clippy, `cargo deny` and the documentation lint are green on `mvp` (6dc66dc). Spec 022 is `implemented`.
+
 ## Audit AE
 
 **2026-10-05 — Audit AE, the code audit of spec 022-peers-tofu (branches `022-a` to `022-c`, PRs #30–#32), round 1 of three read-only passes (A: conformance with R1–R16 and T01–T16; B: the adversary, an intruder with the config, a malicious server and a confused user; C: code quality, tests, hand mutants and an independent rebuild of `INVISIBLE`).** No High finding. Pass C rebuilt `INVISIBLE` from its own download of the Unicode 17.0.0 files and found it equal range by range; the human check of the acceptance criterion is still due. The human reviewer took the recommendation of each of the four decisions (AE1, AE3, AE6, and the text of AE12–AE14).

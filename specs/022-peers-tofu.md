@@ -1,6 +1,6 @@
 # 022 — Peers: trust on first use, labels, verification and name collisions
 
-Status: accepted
+Status: implemented
 Phase: 2
 Related ADRs: 0006, 0007, 0019, 0029, 0043
 Depends on: 010-primitives-wrapper, 014-fingerprint, 021-channel-session
