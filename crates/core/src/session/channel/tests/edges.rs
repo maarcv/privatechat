@@ -3,12 +3,11 @@
 
 use super::{
     FULL, HEADROOM, HOUR_MS, LIVE, MARGIN_MS, NOW, counters, fill, own_text, pk_of, receiver,
-    reopened, retiring, seal, sid, text_from,
+    reopened, retiring, sealed, sid, text_from,
 };
 use crate::Error;
 use crate::crypto::PublicKey;
-use crate::proto::envelope;
-use crate::proto::payload::{Payload, PayloadKind};
+use crate::proto::payload::PayloadKind;
 use crate::session::channel::{AckOutcome, Channel, ClientRef};
 use crate::storage::StoreError;
 use crate::storage::state::items::PeerRecord;
@@ -16,31 +15,6 @@ use crate::testing::record;
 
 const ANN: [u8; 32] = [0x41; 32];
 const BOB: [u8; 32] = [0x42; 32];
-
-/// A payload of `kind` from `seed` at `counter`, with `name`.
-fn sealed(
-    channel: &Channel,
-    seed: [u8; 32],
-    counter: u64,
-    sent_at: u64,
-    kind: PayloadKind,
-    name: Option<&str>,
-) -> Vec<u8> {
-    let body = if kind == PayloadKind::Text {
-        b"hi".to_vec()
-    } else {
-        Vec::new()
-    };
-    let payload = Payload {
-        kind,
-        display_name: name.map(str::to_owned),
-        sent_at,
-        body,
-    };
-    seal(channel, seed, |ctx, sender, nonce| {
-        envelope::seal(ctx, sender, counter, nonce, &payload)
-    })
-}
 
 /// Delivers a text of `seed` at `counter`, sent and received at `at`.
 fn deliver(channel: &mut Channel, seed: [u8; 32], counter: u64, at: u64, name: Option<&str>) {
