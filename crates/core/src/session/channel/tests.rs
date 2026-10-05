@@ -22,6 +22,7 @@ mod outbox;
 mod own_key;
 mod peers;
 mod property;
+mod purge;
 mod receive;
 mod send;
 mod stall;

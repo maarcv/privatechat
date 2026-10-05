@@ -22,6 +22,7 @@ mod headroom;
 mod outbox;
 mod own_key;
 mod peers;
+mod purge;
 mod receive;
 mod send;
 mod status;

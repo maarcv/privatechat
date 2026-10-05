@@ -5,7 +5,7 @@
 use super::Channel;
 use crate::error::Error;
 use crate::session::expiry::ExpiryIndex;
-use crate::storage::{MAX_LOG_LEN, StoreError};
+use crate::storage::{LogEntry, MAX_LOG_LEN, StoreError};
 
 /// A maximal log entry with its 4-byte `len` (65 580 bytes) and the
 /// reserve of 1 048 576 for the commits that add no message (R18).
@@ -27,10 +27,7 @@ impl Channel {
     /// The compaction's `Store` error, memory left as it was.
     pub(crate) fn relieve_headroom(&mut self, now: u64) -> Result<bool, Error> {
         self.latest_now = Some(now);
-        // A clock set back must not hold compactions off until it catches up.
-        let last = self.last_compaction.map(|last| last.min(now));
-        self.last_compaction = last;
-        let held_off = last.is_some_and(|last| now.saturating_sub(last) < COMPACTION_INTERVAL_MS);
+        let held_off = self.compaction_held_off(now);
         let excess = self
             .store
             .log_len()
@@ -39,11 +36,40 @@ impl Channel {
         if held_off || self.expiry.expired_bytes(now) < RESERVE.max(excess) {
             return Ok(false);
         }
+        self.compact_at(now)?;
+        Ok(true)
+    }
+
+    /// Whether the last compaction attempt is less than ten minutes before
+    /// `now` (R18, spec 023-ttl-purge R5). One recorded later than `now`, by
+    /// a clock since set back, holds nothing off, so that the clock does
+    /// not hold compactions off until it catches up.
+    pub(super) fn compaction_held_off(&self, now: u64) -> bool {
+        self.last_compaction
+            .is_some_and(|last| last <= now && now.saturating_sub(last) < COMPACTION_INTERVAL_MS)
+    }
+
+    /// One compaction attempt at `now`, recorded whether it succeeds or
+    /// fails (R18, spec 023-ttl-purge R5), and the records whose `purge_at`
+    /// is below `now` dropped from memory after it succeeds: returns the
+    /// number of message records dropped.
+    ///
+    /// # Errors
+    ///
+    /// The compaction's `Store` error, memory left as it was.
+    pub(super) fn compact_at(&mut self, now: u64) -> Result<usize, Error> {
         self.last_compaction = Some(now);
         self.store.compact(&self.state, now)?;
+        let messages = self
+            .records
+            .iter()
+            .filter(|record| {
+                record.purge_at() < now && matches!(record.entry, LogEntry::Message(_))
+            })
+            .count();
         self.records.retain(|record| record.purge_at() >= now);
         self.expiry = ExpiryIndex::of(&self.records);
-        Ok(true)
+        Ok(messages)
     }
 
     /// Whether the log has room for a maximal entry and the reserve.
