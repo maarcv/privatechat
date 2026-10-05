@@ -97,6 +97,17 @@ pub struct Received {
     pub content: MessageContent,
 }
 
+impl fmt::Debug for Gap {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Gap")
+            .field("peer", &key_prefix(&self.peer))
+            .field("missing", &self.missing)
+            .field("anomalous", &self.anomalous)
+            .field("spans_truncation", &self.spans_truncation)
+            .finish()
+    }
+}
+
 impl fmt::Debug for Sender {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -162,8 +173,9 @@ pub(crate) struct OutboxStep {
     pub(crate) not_delivered: Vec<(ClientRef, u64)>,
 }
 
-/// The messages missing from one sender in this session (R24).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The messages missing from one sender in this session (R24). Its
+/// `Debug` shows the 4-byte prefix of the key (AGENTS 19).
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Gap {
     /// The sender.
     pub peer: PeerId,

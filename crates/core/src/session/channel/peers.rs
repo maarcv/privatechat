@@ -335,7 +335,7 @@ fn suggested_name(peer: &PeerRecord) -> Option<&str> {
 }
 
 /// §7: a peer with no label, not verified and not retired is unknown.
-pub(super) fn is_unknown(peer: &PeerRecord) -> bool {
+fn is_unknown(peer: &PeerRecord) -> bool {
     peer.label.is_none() && !peer.verified && peer.retired_at.is_none()
 }
 

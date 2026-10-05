@@ -9,7 +9,7 @@ use crate::proto::config::ChannelId;
 use crate::proto::fingerprint::{presentation, verify_qr};
 use crate::proto::payload::PayloadKind;
 use crate::session::channel::peers::Peer;
-use crate::session::channel::{Channel, MessageContent, PeerId, Received};
+use crate::session::channel::{Channel, Gap, MessageContent, PeerId, Received, key_prefix};
 use crate::storage::StoreError;
 use crate::storage::state::items::{OldKey, PeerRecord};
 use crate::testing::{MemoryStore, state_eq};
@@ -104,7 +104,13 @@ fn s022_t01_r01_first_message_creates_peer() {
     assert!(record_of(&channel, pk_of(CAT)).is_none());
 
     let own = own_text(&channel, 0, NOW);
-    channel.decrypt(&own, [4; 16], NOW, NOW).unwrap();
+    let received = channel.decrypt(&own, [4; 16], NOW, NOW).unwrap().unwrap();
+    let own_pk = pk_of(*channel.state.identity_seed.expose());
+    let prefix: String = own_pk[..4].iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(
+        format!("{:?}", received.sender),
+        format!("OwnKeyElsewhere({prefix})")
+    );
     assert!(channel.state.own_key_used_elsewhere);
     assert_eq!(channel.peers().unwrap().len(), 1);
 }
@@ -123,6 +129,9 @@ fn s022_t02_r02_later_messages_update() {
     let ann = &reopened(&handle).peers().unwrap()[0];
     assert_eq!(ann.last_seen, NOW + 2_000);
     assert_eq!(ann.suggested_name.as_deref(), Some("Annie"));
+    // A blank name replaces it too, and reads as no name.
+    deliver(&mut channel, ANN, 3, NOW + 3_000, Some("   ")).unwrap();
+    assert_eq!(channel.peers().unwrap()[0].suggested_name, None);
 }
 
 /// Spec 022, R3: every peer in `first_seen` order, whatever the order of
@@ -165,6 +174,15 @@ fn s022_t06_r06_names_cleaned_in_peers_and_received() {
         "{peer}"
     );
     assert!(!peer.contains("Ann"), "{peer}");
+    assert_eq!(key_prefix(&[0x01; 32]), "01010101");
+    let gap = Gap {
+        peer: pk_of(ANN),
+        missing: 2,
+        anomalous: false,
+        spans_truncation: false,
+    };
+    assert!(format!("{gap:?}").contains(&format!("peer: \"{}\"", &full[..8])));
+    assert!(!format!("{gap:?}").contains(&full[..10]));
     let cases = [
         (BOB, "\u{200B}\u{2800}\u{FEFF}", None),
         (CAT, "   ", None),
@@ -375,6 +393,8 @@ fn s022_t10_r10_mute() {
     );
     channel.mute(pk_of(ANN), true).unwrap();
     assert_eq!(handle.all_commits(), commits + 1);
+    let ann = listed(&channel, pk_of(ANN));
+    assert!(ann.muted && !ann.verified);
     channel.mute(pk_of(ANN), true).unwrap();
     assert_eq!(handle.all_commits(), commits + 1);
     assert!(record_of(&reopened(&handle), pk_of(ANN)).unwrap().muted);
@@ -458,6 +478,13 @@ fn s022_t12_r12_fingerprints() {
         let expected = presentation(channel.config.id(), &pk).unwrap();
         assert_eq!(channel.fingerprint(pk.0).unwrap(), expected);
     }
+    // `peers()` carries each peer's own 4 words, and its retirement.
+    assert_eq!(
+        listed(&channel, pk_of(ANN)).short,
+        channel.fingerprint(pk_of(ANN)).unwrap().short
+    );
+    assert_eq!(listed(&channel, pk_of(BOB)).retired_at, Some(NOW));
+    assert_eq!(listed(&channel, pk_of(ANN)).retired_at, None);
     let own = PublicKey(pk_of(*channel.state.identity_seed.expose()));
     let expected = presentation(channel.config.id(), &own).unwrap();
     assert_eq!(channel.own_fingerprint().unwrap(), expected);
@@ -502,6 +529,15 @@ fn s022_t13_r13_claims() {
         Some(pk_of(CAT))
     );
     assert!(!listed(&channel, pk_of(unknown)).claims_own_name);
+    // A blank own name is no name: a blank suggested one does not claim it.
+    let mut next = channel.next_state();
+    next.own_display_name = Some("\u{200B}".to_owned());
+    channel.commit(next, Vec::new()).unwrap();
+    deliver(&mut channel, [0x53; 32], 0, NOW, Some(" ")).unwrap();
+    assert!(!listed(&channel, pk_of([0x53; 32])).claims_own_name);
+    let mut next = channel.next_state();
+    next.own_display_name = None;
+    channel.commit(next, Vec::new()).unwrap();
     // With no own name, a peer with no name claims it neither.
     deliver(&mut channel, BOB, 0, NOW, None).unwrap();
     assert!(!listed(&channel, pk_of(BOB)).claims_own_name);

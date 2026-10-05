@@ -35,6 +35,11 @@ fn s022_t04_r04_name_key_collisions() {
         ("οδος α", "ΟΔΟΣ Α"),
         ("Νίκος", "ΝΊΚΟΣ"),
         ("Νίκοσ", "Νίκος"),
+        // The Turkish I under caps lock (audit AE).
+        ("Işık", "IŞIK"),
+        ("ince", "İNCE"),
+        // The Kelvin sign lowercases to k.
+        ("\u{212A}elvin", "Kelvin"),
     ];
     for (first, second) in colliding {
         assert!(names_collide(first, second), "{first:?} / {second:?}");
@@ -46,6 +51,11 @@ fn s022_t04_r04_name_key_collisions() {
         ("Bob", "B0b"),
         ("Alice", "\u{FF21}lice"),
         ("Alice", "Ali\u{0307}ce"),
+        // No fold beyond the lowercase: ß is not ss, and a capital written
+        // without its accent is another name (ADR 0043).
+        ("Straße", "STRASSE"),
+        ("Élodie", "ELODIE"),
+        ("Νίκος", "ΝΙΚΟΣ"),
     ];
     for (first, second) in distinct {
         assert!(!names_collide(first, second), "{first:?} / {second:?}");

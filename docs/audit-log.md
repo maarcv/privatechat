@@ -23,6 +23,17 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AE13 | Ties in `first_seen` fell back to storage order unstated (A-Q3) | Nit | R3, R13: ties in creation order |
 | AE14 | A blank name replaces the previous suggested name (A-Q4) | Nit | R2 says so |
 
+**Round 2.** Two passes: a fresh reading of R1–R16 with the round-1 fixes, conformance and adversary together, which found the fixes correct and complete; and 124 hand mutants of the code spec 022 added, 109 killed, 6 equivalent, 1 that did not compile, 8 test gaps and no production defect. The human reviewer took both recommendations (AE15, AE17).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AE15 | A Turkish caps lock writes ı as I and i as İ, so "IŞIK" did not collide with "Işık" nor "İNCE" with "ince", the same class as AE1; it is the only other context or locale case of `to_lowercase` that removed spaces or caps lock reach | Low | R4: İ read as I before the lowercase, ı as i after it; ADR 0043 and §7 amended; T04 (decision) |
+| AE16 | `Gap`, public through spec 028's event, still derived a `Debug` with the full `pk`, and with it `SessionCarry` | Low | Hand-written `Debug` with the 4-byte prefix; T06 |
+| AE17 | Capitals written without their accents ("ELODIE", Greek capitals without the tonos) do not collide, a residual of no normalisation that ADR 0043 did not name | Nit | ADR 0043, Security and §7 name it; T04 pins "Élodie"/"ELODIE" and "Νίκος"/"ΝΙΚΟΣ" (decision) |
+| AE18 | Mutants that survived: `to_uppercase` for `to_lowercase`, an empty own name claimed by a blank one, `Peer::muted`, `retired_at` and `short` read from elsewhere, the stored name cleaned (which breaks R2 and the log keeping the name as sent), the full key in `OwnKeyElsewhere`'s `Debug`, the prefix unpadded | Low | T01, T02, T04, T06, T10, T12, T13: the cases added |
+| AE19 | R8 says the admission applies to any peer with no label; the code skips a retired one, which is already in the labelled budget | Nit | R8, R9: for an unknown peer or a new record, as R7 and the code; `is_unknown` made private |
+
+
 ## Audit AD
 
 **2026-10-04 — Audit AD, the code audit of spec 021-channel-session (branches `021-a1` to `021-e`, PRs #19–#27), round 1 of three read-only passes (A: R1–R12, R18, R20, R21, R24, R26, R33; B: the own key and the `outbox`, R9 step 5, R13–R17, R19, R22, R23, R25, R31; C: code quality, tests, fuzz and property).** No blocker; no path found by which a server or a thief raises a false alarm while a signature is kept, shortens a signature's retention, removes the pending `key_retired`, or leaves memory and disk out of step. The human reviewer took every recommendation of the four decisions (AD1–AD4).

@@ -1,7 +1,8 @@
 //! Names of spec 022-peers-tofu R4–R6 (ADR 0043): the key two names are
 //! compared on, and the cleaning of every name the core hands to a client.
 //! Standard library only (R16): no normalisation or confusable skeleton,
-//! and no fold but the final sigma, so look-alikes of another script do not
+//! and no fold but the final sigma and the Turkish I, so look-alikes of
+//! another script and capitals written without their accents do not
 //! collide, a stated residual.
 
 /// Code points removed from every name by [`name_key`] and [`clean_name`],
@@ -57,16 +58,30 @@ fn is_invisible(character: char) -> bool {
 }
 
 /// The key of R4: `text` without white space and [`INVISIBLE`] characters,
-/// lowercased, with the final sigma read as the medial one.
+/// lowercased, with the letters a caps lock writes in two ways read as one:
+/// the final sigma as the medial one, and the Turkish dotted and dotless I
+/// as the Latin i.
 pub(crate) fn name_key(text: &str) -> String {
     text.chars()
         .filter(|&character| !character.is_whitespace() && !is_invisible(character))
+        // `to_lowercase` maps İ to "i\u{307}", which a dotted i typed as a
+        // combining mark must not match (a stated residual), so it is read
+        // as I first.
+        .map(|character| {
+            if character == '\u{0130}' {
+                'I'
+            } else {
+                character
+            }
+        })
         .collect::<String>()
         .to_lowercase()
         // `to_lowercase` picks ς or σ from the letters around it, which the
         // removed spaces change: "ΝΊΚΟΣ Π" would not collide with "Νίκος Π"
         // (audit AE).
         .replace('\u{03C2}', "\u{03C3}")
+        // A Turkish caps lock writes ı as I and i as İ (audit AE).
+        .replace('\u{0131}', "i")
 }
 
 /// Whether two names collide (R4): equal, non-empty keys.
