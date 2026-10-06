@@ -2,6 +2,10 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Spec 024 implemented
+
+**2026-10-06 — Spec 024-key-retired is `implemented`.** Its acceptance criterion is automated alone: `cargo test -p privatechat-core s024_`, clippy and the documentation lint are green on `mvp` (b6c1173), after the two rounds of Audit AG.
+
 ## Audit AG
 
 **2026-10-06 — Audit AG, the code audit of spec 024-key-retired (branch `024-key-retired`, PR #39), round 1 of three read-only passes (A: conformance with R1–R6 and T01–T06; B: the adversary, a server choosing every `received_at` and `server_id`, an intruder with the config, a thief of a member's key and of one's own; C: code quality, tests and hand mutants).** No High or Medium finding and no production defect. Pass C ran 27 mutants: 20 killed, 2 equivalent, 5 survived, each killed by a test added below. The human reviewer took the recommendation of each of the three decisions (AG1, AG2, AG3).
