@@ -2,6 +2,20 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AG
+
+**2026-10-06 — Audit AG, the code audit of spec 024-key-retired (branch `024-key-retired`, PR #39), round 1 of three read-only passes (A: conformance with R1–R6 and T01–T06; B: the adversary, a server choosing every `received_at` and `server_id`, an intruder with the config, a thief of a member's key and of one's own; C: code quality, tests and hand mutants).** No High or Medium finding and no production defect. Pass C ran 27 mutants: 20 killed, 2 equivalent, 5 survived, each killed by a test added below. The human reviewer took the recommendation of each of the three decisions (AG1, AG2, AG3).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AG1 | A flood that keeps the log near full holds a trusted peer's retirement at `LogFull` until it may expire on the server; one's own key alone has a full-log exemption (B4) | Low | Accepted residual, 024 Security (decision) |
+| AG2 | R2's "no event follows" while removing a record sets the peers-changed flag of 021 R1, which a client reads as a refresh (A-A) | Nit | R2: no message event, the flag on a removal (decision) |
+| AG3 | R2 lists what changes for a muted unknown without `last_seen`, which the code moves as 022 R2 says (A-B) | Nit | R2 names `last_seen` (decision) |
+| AG4 | `retire` did not record its `now` (021 R1) (A2, B7) | Low | Recorded; `label`, `verify` and `verify_scanned` of spec 022 share the gap, left to a PR of their own |
+| AG5 | The 013 vector check read every `Ok(None)` as "message" (A1, B2, C5) | Low | Only for the two `key_retired` vectors |
+| AG6 | The Interface change had no History line (A3); `consume_retirement` had no `# Errors`; `update_peer` kept its own lookup (C1, C2) | Nit | History line; `# Errors`; `peers::find` |
+| AG7 | Test gaps: the cursor-only commit of a stranger's retirement, `verified` alone and `last_seen`, `read_only` after an own-key text, a retirement that expires before it is shown, a received retirement under `FailingStore`, the R24 gap check from an unknown that R2 now removes, a single commit with its seen record (mutants M08, M11, M22, M24, M25; A4, B1, B3, C7) | Low | T01–T03, T06; `s021_t24` labels the sender |
+
 ## Spec 023 implemented
 
 **2026-10-05 — Spec 023-ttl-purge is `implemented`.** Its acceptance criterion is automated alone: `cargo test -p privatechat-core s023_`, clippy and the documentation lint are green on `mvp` (889809c), after the two rounds of Audit AF.
