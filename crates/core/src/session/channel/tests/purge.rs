@@ -287,25 +287,30 @@ fn s023_t03_r03_message_fields() {
         .unwrap();
     assert_eq!(ann.stranger, None);
 
-    // A stranger claiming one's own name; a `key_retired` is listed as such.
+    // A stranger claiming one's own name, its record removed by its
+    // `key_retired` (spec 024-key-retired R2), which lists nothing; a
+    // labelled peer's `key_retired` is listed as such.
     let cat = [0x43; 32];
     let mut next = channel.next_state();
     next.own_display_name = Some("Me".to_owned());
     channel.commit(next, Vec::new()).unwrap();
     push(&mut channel, cat, 0, (NOW, NOW, NOW), Some("ME"));
     let retired = sealed(&channel, cat, 1, NOW, PayloadKind::KeyRetired, None);
-    channel.decrypt(&retired, [0x44; 16], NOW, NOW).unwrap();
-    let mut next = channel.next_state();
-    next.peers.retain(|peer| peer.pk.0 != pk_of(cat));
-    channel.commit(next, Vec::new()).unwrap();
+    assert_eq!(channel.decrypt(&retired, [0x44; 16], NOW, NOW), Ok(None));
+    let retired = sealed(&channel, ANN, u64::MAX, NOW, PayloadKind::KeyRetired, None);
+    channel.decrypt(&retired, [0x45; 16], NOW, NOW).unwrap();
     let rows = channel.messages(NOW).unwrap();
     let from_cat: Vec<&Message> = rows
         .iter()
         .filter(|r| r.sender == Sender::Peer { pk: pk_of(cat) })
         .collect();
-    assert_eq!(from_cat.len(), 2);
+    assert_eq!(from_cat.len(), 1);
     assert!(from_cat[0].stranger.as_ref().unwrap().claims_own_name);
-    assert_eq!(from_cat[1].content, MessageContent::KeyRetired);
+    let last_of_ann = rows
+        .iter()
+        .rfind(|r| r.sender == Sender::Peer { pk: pk_of(ANN) })
+        .unwrap();
+    assert_eq!(last_of_ann.content, MessageContent::KeyRetired);
 }
 
 /// Spec 023, R7: the one own row equals its row of the list.

@@ -18,7 +18,7 @@ Only a key the user already trusts — labelled or verified — becomes a retire
 ## Requirements
 
 - R1 A consumed, not stale `key_retired` from a peer with a label or `verified` MUST, in the commit of that message, set `retired_at = now` (unless already set), set `max_counter = 2^64 − 1`, keep the label and `verified`, and append the log record with `content` 1.
-- R2 A consumed, not stale `key_retired` from a `pk` other than one's own `pk_u` (R3) with no record, or from an unknown peer (no label, not verified, not retired) that is not muted, MUST remove that record if there is one and append nothing else, in the commit of that message; from a muted unknown it MUST keep the record, muted, set its `max_counter = 2^64 − 1` and append no log record, so that muting stays durable and the key's later blobs are `Replay`; in every case of R2 `decrypt` returns `Ok(None)` (spec 021-channel-session R11) and no event follows.
+- R2 A consumed, not stale `key_retired` from a `pk` other than one's own `pk_u` (R3) with no record, or from an unknown peer (no label, not verified, not retired) that is not muted, MUST remove that record if there is one and append nothing else, in the commit of that message; from a muted unknown it MUST keep the record, muted, set its `max_counter = 2^64 − 1` and `last_seen = now` (spec 022-peers-tofu R2) and append no log record, so that muting stays durable and the key's later blobs are `Replay`; in every case of R2 `decrypt` returns `Ok(None)` (spec 021-channel-session R11) and no message event follows, while a removed record sets the peers-changed flag of spec 021-channel-session R1.
 - R3 A consumed, not stale `key_retired` from one's own `pk_u` that this device did not seal MUST set `read_only` in the commit of the own-key event (spec 021-channel-session R14); `read_only` MUST stay set until spec 025-identity-regen clears it.
 - R4 `retire(peer, now)` MUST return `Error::UnknownPeer` for no record, commit nothing for a peer already retired, and otherwise commit `retired_at = now`, keeping the label.
 - R5 Retiring a peer, received by R1 or by hand, MUST NOT be refused by a limit of spec 026-peer-limits, and no purge or eviction MUST remove a retired record; only `forget` of spec 026-peer-limits does, when the user asks.
@@ -33,8 +33,8 @@ Only a key the user already trusts — labelled or verified — becomes a retire
 ## Interface
 
 ```
-crates/core/src/session/retired.rs          R1–R6
-crates/core/src/session/retired/tests.rs    s024_* tests
+crates/core/src/session/channel/retired.rs          R1, R2, R4, R5 (R3 in channel/own_key.rs)
+crates/core/src/session/channel/tests/retired.rs    s024_* tests
 ```
 
 ```rust
@@ -49,6 +49,7 @@ impl Channel {   // pub(crate); spec 027-core-api exposes it through Device
 - R2: a stranger's retirement can neither plant a permanent record nor grow the list; the worst it does is remove itself. The price: when a member the receiver never named retires a stolen key, a thief who keeps writing with it reappears to that receiver as a new unknown, grey and marked, rather than as `RetiredKey`; the receiver never trusted that key, so nothing it trusted is lost. The retired records a message can create are bounded by the peers the user named or verified.
 - R5: retiring can never fail for lack of room, and nothing automatic removes a retired record, so a thief cannot flood a key out of the retired list.
 - A retirement expires on the server like any message (ADR 0034): a member who does not connect within the TTL never receives it, which is why the manual action exists.
+- Accepted residual (audit AG): an intruder with the config who keeps the log near full holds every `decrypt`, a peer's retirement included, at `LogFull` (spec 021-channel-session R18); the push stays on the server and is fetched again after a compaction, but a flood longer than the TTL lets it expire unread. Only one's own key has a full-log exemption (spec 021-channel-session R19); for a peer the manual action covers it.
 
 ## Public API changes
 
@@ -96,3 +97,5 @@ None.
 - 2026-09-25 revised after audit J round 13 (`docs/audit-log.md`)
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): dialogs point to spec 055
 - 2026-09-28 accepted (Marc Vilardebó)
+- 2026-10-05 text: the Interface paths under `session/channel/`, R3 in `own_key.rs`, as specs 022 and 023
+- 2026-10-06 revised after audit AG (`docs/audit-log.md`, decisions of the human reviewer): no message event, the peers-changed flag on a removal, and `last_seen` for a muted unknown (R2); the flood residual (Security)

@@ -4,11 +4,11 @@
 //! alert that someone else holds the key.
 
 use super::receive::Arrival;
+use super::retired::is_key_retired;
 use super::{Channel, ClientRef, Received, Sender};
 use crate::crypto::{self, PublicKey};
 use crate::error::Error;
 use crate::proto::envelope::{self, ChannelCtx, EXPIRY_MARGIN_MS, Opened, SenderKey, Verified};
-use crate::proto::payload::PayloadKind;
 use crate::storage::{ChannelState, LogEntry, LogRecord, StoreError};
 
 impl Channel {
@@ -246,8 +246,7 @@ impl Channel {
         now: u64,
     ) -> Vec<(ClientRef, u64)> {
         next.own_key_used_elsewhere = true;
-        let key_retired = matches!(&opened.content,
-            envelope::Content::Message(payload) if payload.kind == PayloadKind::KeyRetired);
+        let key_retired = is_key_retired(opened);
         if !matches!(opened.content, envelope::Content::Stale) {
             if opened.counter >= next.send_counter {
                 // `2^64 − 1` stays: the counter is exhausted.

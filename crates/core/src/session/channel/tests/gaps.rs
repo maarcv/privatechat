@@ -50,7 +50,9 @@ fn s021_t24_r24_gaps() {
         bob(&channel),
         Some(gap(pk_of(BOB), (1 << 32) * 2 + 1, true, false))
     );
-    // A `key_retired` counts for no gap.
+    // A `key_retired` counts for no gap; from a labelled peer, which keeps
+    // its record (spec 024-key-retired R1).
+    channel.label(pk_of(ANN), "Ann", NOW).unwrap();
     let retired = Payload {
         kind: PayloadKind::KeyRetired,
         display_name: None,
@@ -61,8 +63,33 @@ fn s021_t24_r24_gaps() {
         crate::proto::envelope::seal(ctx, sender, u64::MAX, nonce, &retired)
     });
     channel.decrypt(&blob, sid(200), NOW, NOW).unwrap();
+    let ann = channel
+        .state
+        .peers
+        .iter()
+        .find(|p| p.pk.0 == pk_of(ANN))
+        .unwrap();
+    assert!(ann.retired_at.is_some());
     let ann = channel.gaps().into_iter().find(|g| g.peer == pk_of(ANN));
     assert_eq!(ann, Some(gap(pk_of(ANN), 3, false, false)));
+    // An unknown's retirement removes its record, and its gap with it
+    // (spec 024-key-retired R2); a muted unknown keeps both.
+    let cat = [0x43; 32];
+    let dan = [0x44; 32];
+    for seed in [cat, dan] {
+        deliver(&mut channel, seed, 0, NOW);
+        deliver(&mut channel, seed, 4, NOW);
+    }
+    channel.mute(pk_of(dan), true).unwrap();
+    for (n, seed) in [(201, cat), (202, dan)] {
+        let blob = seal(&channel, seed, |ctx, sender, nonce| {
+            crate::proto::envelope::seal(ctx, sender, u64::MAX, nonce, &retired)
+        });
+        assert_eq!(channel.decrypt(&blob, sid(n), NOW, NOW), Ok(None));
+    }
+    let peers: Vec<_> = channel.gaps().into_iter().map(|g| g.peer).collect();
+    assert!(!peers.contains(&pk_of(cat)));
+    assert!(peers.contains(&pk_of(dan)));
 
     // Both last seen at `NOW`; the history truncated two hours later.
     let (mut channel, handle, _) = receiver(3_600);

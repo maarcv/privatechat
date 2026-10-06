@@ -24,6 +24,7 @@ mod peers;
 mod property;
 mod purge;
 mod receive;
+mod retired;
 mod send;
 mod stall;
 mod status;
