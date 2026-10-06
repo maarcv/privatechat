@@ -1,6 +1,6 @@
 # 024 — Key retired: receiving a retirement and retiring a peer by hand
 
-Status: accepted
+Status: implemented
 Phase: 2
 Related ADRs: 0016, 0029, 0033
 Depends on: 021-channel-session, 022-peers-tofu
