@@ -63,7 +63,13 @@ fn s021_t24_r24_gaps() {
         crate::proto::envelope::seal(ctx, sender, u64::MAX, nonce, &retired)
     });
     channel.decrypt(&blob, sid(200), NOW, NOW).unwrap();
-    assert!(channel.state.peers[0].retired_at.is_some());
+    let ann = channel
+        .state
+        .peers
+        .iter()
+        .find(|p| p.pk.0 == pk_of(ANN))
+        .unwrap();
+    assert!(ann.retired_at.is_some());
     let ann = channel.gaps().into_iter().find(|g| g.peer == pk_of(ANN));
     assert_eq!(ann, Some(gap(pk_of(ANN), 3, false, false)));
 

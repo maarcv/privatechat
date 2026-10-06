@@ -13,6 +13,7 @@ use crate::testing::state_eq;
 const ANN: [u8; 32] = [0x41; 32];
 const BOB: [u8; 32] = [0x42; 32];
 const CAT: [u8; 32] = [0x43; 32];
+const DAN: [u8; 32] = [0x44; 32];
 
 /// The `server_id` of the blob of `seed` at `counter`, `kind` 0 for a text
 /// and 1 for a retirement.
@@ -86,11 +87,12 @@ fn s024_t01_r01_retirement_from_known_peer() {
 
     let received = retirement(&mut channel, ANN, 0).unwrap().unwrap();
     assert_eq!(handle.commits(), commits + 1);
-    let seen = channel.records.iter().any(|record| {
+    // Its seen record lasts one TTL from `sent_at`, as a text's.
+    let seen = channel.records.iter().find(|record| {
         matches!(&record.entry, LogEntry::Seen { sender_pk, counter, .. }
             if sender_pk.0 == pk_of(ANN) && *counter == u64::MAX)
     });
-    assert!(seen);
+    assert_eq!(seen.map(|record| record.purge_at), Some(NOW + HOUR_MS));
     assert_eq!(received.content, MessageContent::KeyRetired);
     assert_eq!(received.sender, Sender::Peer { pk: pk_of(ANN) });
     assert_eq!(retirements_listed(&channel), 1);
@@ -119,7 +121,8 @@ fn s024_t01_r01_retirement_from_known_peer() {
     assert!(bob.muted && !bob.verified);
 
     // `verified` alone is enough, from a loaded state; `retired_at` and
-    // `last_seen` are the arrival's `now`.
+    // `last_seen` are the arrival's `now`, the listed time its
+    // `received_at`.
     let mut next = channel.next_state();
     next.peers.push(PeerRecord {
         pk: PublicKey(pk_of(CAT)),
@@ -135,12 +138,8 @@ fn s024_t01_r01_retirement_from_known_peer() {
     channel.commit(next, Vec::new()).unwrap();
     let later = NOW + 5_000;
     let blob = sealed(&channel, CAT, u64::MAX, NOW, PayloadKind::KeyRetired, None);
-    assert!(
-        channel
-            .decrypt(&blob, sid_of(CAT, 0, 1), later, later)
-            .unwrap()
-            .is_some()
-    );
+    let received = channel.decrypt(&blob, sid_of(CAT, 0, 1), NOW + 1_000, later);
+    assert_eq!(received.unwrap().unwrap().received_at, NOW + 1_000);
     let cat = record_of(&channel, CAT).unwrap();
     assert_eq!((cat.retired_at, cat.last_seen), (Some(later), later));
 }
@@ -156,6 +155,9 @@ fn s024_t02_r02_retirement_from_stranger() {
     assert_eq!(handle.commits(), commits);
     assert_eq!(handle.all_commits(), all + 1);
     assert_eq!(reopened(&handle).state.cursor, Some(NOW));
+    // The cursor alone, so a second copy in the same minute commits nothing.
+    assert_eq!(retirement(&mut channel, ANN, 1), Ok(None));
+    assert_eq!(handle.all_commits(), all + 1);
     assert_eq!(retirements_listed(&channel), 0);
 
     text(&mut channel, BOB, 0).unwrap();
@@ -167,15 +169,20 @@ fn s024_t02_r02_retirement_from_stranger() {
     assert_eq!(channel.records.len(), records);
     assert!(channel.take_peers_changed());
 
+    text(&mut channel, DAN, 0).unwrap();
     text(&mut channel, CAT, 0).unwrap();
     channel.mute(pk_of(CAT), true).unwrap();
-    assert_eq!(retirement(&mut channel, CAT, 0), Ok(None));
-    assert_eq!(channel.records.len(), records + 2);
+    let later = NOW + 7_000;
+    let blob = sealed(&channel, CAT, u64::MAX, NOW, PayloadKind::KeyRetired, None);
+    let result = channel.decrypt(&blob, sid_of(CAT, 0, 1), NOW, later);
+    assert_eq!(result, Ok(None));
+    assert_eq!(channel.records.len(), records + 4);
     for stored in [&channel, &reopened(&handle)] {
         let cat = record_of(stored, CAT).unwrap();
         assert!(cat.muted && cat.label.is_none() && !cat.verified);
         assert_eq!(cat.retired_at, None);
-        assert_eq!(cat.max_counter, Some(u64::MAX));
+        assert_eq!((cat.max_counter, cat.last_seen), (Some(u64::MAX), later));
+        assert_eq!(record_of(stored, DAN).unwrap().max_counter, Some(0));
     }
     let commits = handle.commits();
     assert_eq!(text(&mut channel, CAT, 9), Err(Error::Replay));
@@ -240,6 +247,18 @@ fn s024_t04_r04_manual_retire() {
     assert_eq!(handle.all_commits(), commits);
     assert_eq!(record_of(&channel, ANN).unwrap().retired_at, Some(NOW + 1));
     assert_eq!(text(&mut channel, ANN, 1), Err(Error::RetiredKey));
+
+    // `retire` takes a `now` and may commit, so it records it for the
+    // truncation banner (spec 021-channel-session R1), refused or not.
+    let (mut channel, handle, _) = receiver(3_600);
+    let mut next = channel.next_state();
+    next.truncated_at = Some(NOW);
+    channel.commit(next, Vec::new()).unwrap();
+    let mut channel = reopened(&handle);
+    assert!(channel.status().truncated_before.is_some());
+    let late = NOW + 2 * DAY_MS;
+    assert_eq!(channel.retire(pk_of(ANN), late), Err(Error::UnknownPeer));
+    assert_eq!(channel.status().truncated_before, None);
 }
 
 /// Spec 024, R5: retiring finds room with 500 labelled peers, and a purge
