@@ -167,6 +167,7 @@ impl Channel {
     /// label and `peer` is not verified; `PeerLimit` from spec
     /// 026-peer-limits; `Store` when the commit fails.
     pub(crate) fn label(&mut self, peer: PeerId, name: &str, now: u64) -> Result<(), Error> {
+        self.latest_now = Some(now);
         let record = self.peer_record(&peer)?;
         let target = if record.verified {
             Target::Verified
@@ -195,6 +196,7 @@ impl Channel {
         label: Option<&str>,
         now: u64,
     ) -> Result<(), Error> {
+        self.latest_now = Some(now);
         let has_label = self.peer_record(&peer)?.label.is_some();
         let given = if has_label {
             None
@@ -228,6 +230,7 @@ impl Channel {
         label: &str,
         now: u64,
     ) -> Result<PeerId, Error> {
+        self.latest_now = Some(now);
         let pk = fingerprint::parse_verify_qr(qr, self.config.id())?;
         if self.is_own_key(&pk)? {
             return Err(Error::OwnKey);

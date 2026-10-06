@@ -2,7 +2,7 @@
 //! updated on receive, the list, the calls that change a peer, and the
 //! warnings. The name functions are tested in `session/names/tests.rs`.
 
-use super::{HOUR_MS, MARGIN_MS, NOW, own_text, pk_of, receiver, reopened, sealed};
+use super::{DAY_MS, HOUR_MS, MARGIN_MS, NOW, own_text, pk_of, receiver, reopened, sealed};
 use crate::Error;
 use crate::crypto::{PublicKey, Secret};
 use crate::proto::config::ChannelId;
@@ -458,6 +458,25 @@ fn s022_t11_r11_errors_and_failing_store() {
     assert_eq!(channel.mute(pk_of(ANN), true), Err(io));
     assert!(state_eq(&channel.state, &before));
     assert!(state_eq(&reopened(&handle).state, &before));
+
+    // Each call takes a `now` and may commit, so it records it for the
+    // truncation banner (spec 021-channel-session R1), refused or not.
+    let late = NOW + 2 * DAY_MS;
+    for call in 0..3 {
+        let (mut channel, handle, _) = receiver(3_600);
+        let mut next = channel.next_state();
+        next.truncated_at = Some(NOW);
+        channel.commit(next, Vec::new()).unwrap();
+        let mut channel = reopened(&handle);
+        assert!(channel.status().truncated_before.is_some());
+        let result = match call {
+            0 => channel.label(unknown, "Cat", late),
+            1 => channel.verify(unknown, None, late),
+            _ => channel.verify_scanned(&qr, "", late).map(|_| ()),
+        };
+        assert!(result.is_err(), "{call}");
+        assert_eq!(channel.status().truncated_before, None, "{call}");
+    }
 }
 
 /// Spec 022, R12: the fingerprint of any key of the channel, with or
