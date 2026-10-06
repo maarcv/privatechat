@@ -16,6 +16,14 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AG6 | The Interface change had no History line (A3); `consume_retirement` had no `# Errors`; `update_peer` kept its own lookup (C1, C2) | Nit | History line; `# Errors`; `peers::find` |
 | AG7 | Test gaps: the cursor-only commit of a stranger's retirement, `verified` alone and `last_seen`, `read_only` after an own-key text, a retirement that expires before it is shown, a received retirement under `FailingStore`, the R24 gap check from an unknown that R2 now removes, a single commit with its seen record (mutants M08, M11, M22, M24, M25; A4, B1, B3, C7) | Low | T01–T03, T06; `s021_t24` labels the sender |
 
+**Round 2.** Two passes: a fresh reading of R1–R6 with the round-1 fixes, conformance and adversary together, which found them correct and complete; and 34 hand mutants of the code spec 024 added or changed, 20 killed, 3 equivalent, 1 not compiling, 10 test gaps and no production defect. The human reviewer took the recommendation of the one decision (AG8).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AG8 | A removed record's in-session gap stayed behind: throwaway keys that leave a gap and retire themselves could pile up gaps until the lock (R2-1) | Low | 021 R24: a gap goes with its peer's record; `s021_t24` (decision) |
+| AG9 | A muted unknown that retired itself and is labelled later reads `Replay`, not `RetiredKey` (R2-2) | Nit | Within the price R2 states; none |
+| AG10 | Test gaps: `retire` recording its `now` when refused, a trusted retirement's listed time and seen record life, `retired_at` and `last_seen` from `now` and not `received_at`, a muted unknown among other peers, a stranger's second copy in the same minute, the gap test's peer order (mutants N01, N02b, N09, N11–N13, N17, N18, N34; R2-3) | Low | T01, T02, T04; `s021_t24` |
+
 ## Spec 023 implemented
 
 **2026-10-05 — Spec 023-ttl-purge is `implemented`.** Its acceptance criterion is automated alone: `cargo test -p privatechat-core s023_`, clippy and the documentation lint are green on `mvp` (889809c), after the two rounds of Audit AF.

@@ -72,6 +72,24 @@ fn s021_t24_r24_gaps() {
     assert!(ann.retired_at.is_some());
     let ann = channel.gaps().into_iter().find(|g| g.peer == pk_of(ANN));
     assert_eq!(ann, Some(gap(pk_of(ANN), 3, false, false)));
+    // An unknown's retirement removes its record, and its gap with it
+    // (spec 024-key-retired R2); a muted unknown keeps both.
+    let cat = [0x43; 32];
+    let dan = [0x44; 32];
+    for seed in [cat, dan] {
+        deliver(&mut channel, seed, 0, NOW);
+        deliver(&mut channel, seed, 4, NOW);
+    }
+    channel.mute(pk_of(dan), true).unwrap();
+    for (n, seed) in [(201, cat), (202, dan)] {
+        let blob = seal(&channel, seed, |ctx, sender, nonce| {
+            crate::proto::envelope::seal(ctx, sender, u64::MAX, nonce, &retired)
+        });
+        assert_eq!(channel.decrypt(&blob, sid(n), NOW, NOW), Ok(None));
+    }
+    let peers: Vec<_> = channel.gaps().into_iter().map(|g| g.peer).collect();
+    assert!(!peers.contains(&pk_of(cat)));
+    assert!(peers.contains(&pk_of(dan)));
 
     // Both last seen at `NOW`; the history truncated two hours later.
     let (mut channel, handle, _) = receiver(3_600);

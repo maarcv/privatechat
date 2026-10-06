@@ -73,6 +73,10 @@ impl Channel {
             next.peers.retain(|record| record.pk.0 != pk);
         }
         self.commit(next, Vec::new())?;
+        // Spec 021 R24: the gap goes with the record.
+        if !muted {
+            self.carry.gaps.remove(&pk);
+        }
         Ok(None)
     }
 }
