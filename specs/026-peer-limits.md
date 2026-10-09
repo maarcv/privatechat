@@ -36,14 +36,14 @@ Anyone with the config can create keys without end (`docs/spec.md` §2, row "Int
 ## Interface
 
 ```
-crates/core/src/session/limits.rs          R1–R7
-crates/core/src/session/limits/tests.rs    s026_* tests
+crates/core/src/session/channel/limits.rs          R1–R7 (the hooks in channel/receive.rs and channel/peers.rs)
+crates/core/src/session/channel/tests/limits.rs    s026_* tests
 ```
 
 ```rust
 pub(crate) const MAX_UNKNOWN_PEERS: usize = 50;
 pub(crate) const MAX_LABELLED_PEERS: usize = 500;
-pub(crate) const MAX_PEERS: usize = 550;
+// MAX_PEERS = 550 is spec 020-store-files' bound on the state (storage/state.rs).
 pub(crate) const MAX_IGNORED_TRACKED: usize = 1_024;
 
 impl Channel {   // pub(crate); spec 027-core-api exposes it through Device
@@ -114,3 +114,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the card counts point to spec 055
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-10-04 ADR 0036 superseded by ADR 0043 (`docs/audit-log.md`, audit AB): the name comparison of spec 022-peers-tofu R4 is lowercase with white space and invisible characters removed
+- 2026-10-09 Interface paths follow the channel module layout, and `MAX_PEERS` is the one of spec 020-store-files
