@@ -126,6 +126,7 @@ impl Config {
     pub(crate) fn seal_file_with_key(&self, key: &Secret<32>, salt: &Salt, nonce: &Nonce, now: u64) -> Result<Vec<u8>, Error>;
     pub(crate) fn open_file_with_key(bytes: &[u8], key: &Secret<32>, now: u64) -> Result<Config, Error>;
     pub(crate) fn host(&self) -> &str;
+    pub(crate) fn created_at(&self) -> u64;   // spec 028-session-sans-io R8
     pub(crate) fn channel_key(&self) -> &Secret<32>;
     pub(crate) fn record(&self, invite_expires_at: Option<u64>) -> Result<Zeroizing<Vec<u8>>, Error>;
     pub(crate) fn padded_record(&self, now: u64) -> Result<Zeroizing<Vec<u8>>, Error>;   // R19, what the file seals
@@ -251,3 +252,4 @@ None. Decided in audit F (`docs/audit-log.md`):
 - 2026-09-29 implemented: slices (a)–(e) with the audit S fixes, reviewed (Marc Vilardebó)
 - 2026-09-30 amended by spec 020-store-files R1 and R26: `RecordError` does not leave the core's decoders, since `StoreError` joins `Error` as a `pub` error; R20 and T20 count `Store`
 - 2026-10-01 revised after audit Y (`docs/audit-log.md`): R20 names `BadEncoding` among the errors a call site matches first; R22 and the Vectors paragraph name `chatcfg_reference` as the one record without its QR text; T05 lists the scheme case, percent and onion cases its table holds; T15 checks every code point
+- 2026-10-09 amended by spec 028-session-sans-io R8: `created_at()`, crate-internal, for the order of subscribes and the truncation check

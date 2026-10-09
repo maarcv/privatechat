@@ -238,6 +238,12 @@ impl Config {
         self.ttl_seconds
     }
 
+    /// When the creator made the channel, by the creator's clock (spec
+    /// 028-session-sans-io R6, R8).
+    pub(crate) fn created_at(&self) -> u64 {
+        self.created_at
+    }
+
     /// A config from fixed inputs, which the tests and `create` share.
     ///
     /// # Errors

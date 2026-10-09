@@ -5,6 +5,7 @@
 //! spec 027-core-api.
 
 pub(crate) mod channel;
+pub(crate) mod connection;
 mod expiry;
 pub(crate) mod frames;
 mod names;
