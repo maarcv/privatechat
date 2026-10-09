@@ -48,6 +48,12 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AI18 | Five mutants survived: the sender's `sent_at` passed to the eviction, off-by-ones at 549 peers in the room check, the eviction and `admits_labelled`, `forget` counting its key as ignored (C) | Medium | A backdated `sent_at` in the future-stamp clause; 549-peer rows in T02 and T03; a 550th pre-verification admitted in T04; `ignored_keys` read in T05 |
 | AI19 | A muted known stranger writing at the limit could be made to evict (C, contrived mutant); an eviction ends `short_collides` against the evicted stranger, which a key ground to its 4 words (about 2^44 tries) and a flood could use (B) | Far-fetched | A clause in T03 for the first; the second listed here, unknowns carrying no trust (spec 014) |
 
+**Round 6.** Fresh passes: A and B found nothing; C, no production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI20 | The 1 024 cap was pinned only through a direct `ignore_key` call: inlining it as a bare insert at the rejection or the eviction, which would let a flood grow the set without bound, survived; `forget` dropping a counted key from the set survived (C) | Medium | A T06 clause with a full set through a rejection and an eviction; a T06 clause forgetting a counted key |
+
 Left as they are: the third copy of "remove a record, then its gap" (C8), one line at each place; `unknown` and the test `text` helper not shared with other test files (C17); the O(550) counts per new key (C13), below the cost of the signature check and the state rewrite.
 
 ## Spec 025 implemented

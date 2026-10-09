@@ -601,6 +601,32 @@ fn s026_t06_r06_ignored_keys() {
         channel.ignore_key(pk_of(stranger(n)));
     }
     assert_eq!(channel.status().ignored_keys, 1_024);
+
+    // A full set stays full through a rejection and an eviction: the real
+    // paths go through the cap.
+    let (mut capped, _, _) = receiver(3_600);
+    plant(&mut capped, crowd(0, 50, true));
+    for n in 2_000..3_024u16 {
+        capped.ignore_key(pk_of(stranger(n)));
+    }
+    assert_eq!(
+        text(&mut capped, stranger(900), 0, NOW),
+        Err(Error::PeerLimit)
+    );
+    capped.mute(pk_of(stranger(1)), false).unwrap();
+    text(&mut capped, stranger(901), 0, NOW).unwrap();
+    assert!(!has_record(&capped, stranger(1)));
+    assert_eq!(capped.status().ignored_keys, 1_024);
+
+    // The user's `forget` leaves the count alone, even of a counted key.
+    let (mut counted, _, _) = receiver(3_600);
+    plant(&mut counted, crowd(0, 50, false));
+    text(&mut counted, stranger(900), 0, NOW).unwrap();
+    text(&mut counted, stranger(1), 11, NOW + HOUR_MS).unwrap();
+    let before = counted.status().ignored_keys;
+    counted.forget(pk_of(stranger(1))).unwrap();
+    assert_eq!(counted.status().ignored_keys, before);
+
     // The spec's numbers, pinned once (Interface).
     assert_eq!(
         (
