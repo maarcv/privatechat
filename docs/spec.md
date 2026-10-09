@@ -46,7 +46,7 @@ The main adversary is the server (or whoever compromises, hosts or seizes it) an
 | Malicious server | In addition: retain blobs beyond the TTL, selectively delete or delay blobs, hide listeners, fill the channel | TTL also on the client, counter gaps visible to the client, open source + reproducible builds, no client with code served by the server (ADR 0017) |
 | Seized or coerced operator (preservation or interception order) | Turn on IP↔channel↔time logging from the order onwards | Not mitigable by the protocol: the server does not store IPs on disk by design but can be compelled to. Tor or .onion service; self-hosting |
 | Server's hosting or network provider | Netflow: IP↔server↔time of all clients; size of the connected group from the `push` fan-out | Tor or .onion service. Nothing else in v1 |
-| User's network observer (ISP, wifi) | Server DNS/SNI, time of each connection, size and direction of each message (1 KiB class; write vs read). Does not see which channel or which member | TLS 1.3, one connection per server (does not reveal the number of channels on it), optional Tor. In v1 `channel_id` is not rotated and no cover traffic is added |
+| User's network observer (ISP, wifi) | Server DNS/SNI, time of each connection, size and direction of each message (1 KiB class; write vs read), how many channels each connection subscribes (one `subscribe` and one `ok` per channel, by size and timing). Does not see which channel or which member | TLS 1.3, one connection per server, every `subscribe` of one size (`since` always present), optional Tor. In v1 `channel_id` is not rotated and no cover traffic is added |
 | Member who operates the self-hosted server | Everything the server sees + everything a member sees: label↔IP↔time of each fellow member | Documented: when self-hosting, the operator sees the members' IPs. Tor if that matters |
 | Attacker without the config | Create channels and fill the server with blobs | `publish` bound to an authenticated subscription on the same connection; per-connection, per-channel and global quotas; per-IP limits only before authenticating |
 | Intruder with the leaked config (also a former member, forever) | Read the whole channel (past and future); write as a new key; create endless keys; fill the channel until the TTL; re-inject old blobs to members who did not see them | Detected if it writes (it appears as unknown); limit on unknown peers with eviction; the per-channel quota protects the server, not the channel: the only answer is a new channel (ADR 0008). Passive reading cannot be prevented |
@@ -307,7 +307,7 @@ sequenceDiagram
 | Message | Direction | Fields |
 | --- | --- | --- |
 | `hello` | S→C | `server_nonce` (bytes32), `proto_versions` (list of u8; the client accepts 1 to 8 items, spec 028-session-sans-io R2) |
-| `subscribe` | C→S | `pk_ch` (bytes32), `ttl_seconds` (uint32), `sig` (bytes64), `since` (uint64 ms, optional; absent = everything) |
+| `subscribe` | C→S | `pk_ch` (bytes32), `ttl_seconds` (uint32), `sig` (bytes64), `since` (uint64 ms, optional; absent or 0 = everything; the client always sends it, 0 with no cursor, so that every `subscribe` has one size) |
 | `ok` | S→C | `channel_id` (bytes16), sent after the channel's whole backlog |
 | `publish` | C→S | `channel_id`, `client_ref` (bytes16, one per `outbox` entry, reused on every publish of it), `blob` (bytes) |
 | `ack` | S→C | `client_ref`, `server_id` (bytes16), `received_at` (uint64 ms) |

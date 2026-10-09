@@ -51,6 +51,15 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AK26 | Survivors: a named `nonce_expired` also giving `Reconnect`; `max(cursor, synced_at)` with the cursor the larger; `since` taken from `synced_at` (C; 94 mutants, 88 killed, 3 equivalent) | Low | One clause each in T06, T07 |
 | AK27 | `Link::Unsupported` behaved as `Closed`; `id_prefix` copied `key_prefix` (C) | Low | One `Closed`; `key_prefix` takes a slice |
 
+**Round 5.** Fresh passes on the whole change. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AK28 | `docs/spec.md` §2 and `docs/threat-model.md` promised that one connection per server does not reveal its number of channels; one `subscribe` and one `ok` per channel, 1 100 ms apart, show it through TLS, and an absent `since` marks a new or imported channel by size (B) | Medium | Three advisors escalated, all recommending the second option; the human reviewer took it (decision): the observer row says the count shows, `since` is always sent (0 with no cursor) so every `subscribe` has one size; 028 R6, T06 and Security amended; cover traffic stays v2 |
+| AK29 | A stale `tests.rs.orig` committed in round 4, read by the requirement gate (A, B, C) | Low | Removed |
+| AK30 | A second `hello` never shown to set the nonce and window of the `subscribe`s a tick releases: three survivors (A, C; 64 mutants, 59 killed, 2 equivalent) | Medium | T07 checks the signature of a tick-released subscribe over the second nonce, late in its window |
+| AK31 | `Subscription` derived traits nothing uses; `key_prefix`'s doc and the test module's doc out of date (A, C) | Nit | Removed; reworded |
+
 ## Review during development
 
 **2026-10-09 — Decision of the human reviewer: until the first release, the audit of `CLAUDE.md` replaces the human review before merging.** The human still accepts every spec before it is implemented, decides what an audit escalates and approves every ADR; the human review before merging returns at the first release. `AGENTS.md` "Per-feature flow", `docs/spec.md` §10 "Per-feature flow" and governance, the `architecture` skill and `.github/CODEOWNERS` say so. GitHub required no approving review on `mvp` already (0), so its settings do not change.

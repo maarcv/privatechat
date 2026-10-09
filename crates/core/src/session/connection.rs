@@ -82,7 +82,6 @@ pub(crate) struct Step {
 }
 
 /// Where a channel's subscription stands on this connection.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Subscription {
     AwaitingOk,
     Subscribed,
@@ -346,14 +345,17 @@ fn subscribe(channel: &Channel, server_nonce: &[u8; 32]) -> Result<Vec<u8>, Erro
         config.host(),
     );
     let sig = crypto::sign_detached(&sk_ch, &message)?;
+    // Always present, 0 with no cursor (the server reads it as everything),
+    // so that every `subscribe` has one size and a network observer cannot
+    // tell a new channel from an old one (R6).
     let since = channel
         .cursor()
-        .map(|cursor| cursor.saturating_sub(cursor % MINUTE_MS));
+        .map_or(0, |cursor| cursor.saturating_sub(cursor % MINUTE_MS));
     Frame::Subscribe {
         pk_ch: pk_ch.0,
         ttl_seconds: config.ttl_seconds(),
         sig: sig.0,
-        since,
+        since: Some(since),
     }
     .encode()
 }

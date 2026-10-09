@@ -1,6 +1,6 @@
-//! Tests of spec 028 R1, R2 and R4–R7 at the level of the session: its
-//! frames are read back with `Frame::decode`, and the server is
-//! `MemoryServer`.
+//! Tests of spec 028 R1, R2, R4–R7 and the `ok` of R9 at the level of the
+//! session: its frames are read back with `Frame::decode`, and the server
+//! is `MemoryServer`.
 
 use super::{Channels, Event, HELLO_WAIT_MS, NONCE_WINDOW_MS, SUBSCRIBE_SPACING_MS, Session, Step};
 use crate::crypto::{self, PublicKey, Signature};
@@ -542,11 +542,12 @@ fn s028_t06_r06_subscribe_contents_and_pacing() {
     let on_url = section_6_message(1, channel_id, DAY, "chat.example.org:9001");
     assert!(crypto::verify_detached(&PublicKey(pk_ch), &on_url, &Signature(sig)).is_err());
 
-    // A new channel has no cursor and no `since`.
+    // A new channel has no cursor and sends `since` 0, so that its
+    // `subscribe` has the size of every other.
     let mut fresh = vec![channel(2, DAY, T0)];
     let mut session = connected(&fresh, T0);
     session.on_frame(&hello(1, &[1]), &mut fresh, T0);
-    assert_eq!(subscribes(&mut session)[0].1, None);
+    assert_eq!(subscribes(&mut session)[0].1, Some(0));
 
     // Three channels, ticks every 100 ms: 1 100 ms apart.
     let mut three = vec![
@@ -802,6 +803,25 @@ fn s028_t07_r07_nonce_window() {
     session.outgoing();
     assert!(session.on_tick(&mut three, T0 + 500).events.is_empty());
     assert_eq!(session.outgoing().len(), 1);
+
+    // A second `hello` replaces the first: a `subscribe` released by a tick
+    // signs its nonce, and its window runs from it.
+    let mut session = connected(&three, T0);
+    session.on_frame(&hello(1, &[1]), &mut three, T0);
+    session.outgoing();
+    session.on_frame(&hello(2, &[1]), &mut three, T0 + 40_000);
+    session.outgoing();
+    let step = session.on_tick(&mut three, T0 + 40_000 + NONCE_WINDOW_MS - 100);
+    assert!(step.events.is_empty());
+    let written = subscribes(&mut session);
+    assert_eq!(written.len(), 1);
+    let (pk_ch, _, sig) = written[0];
+    let signer = three
+        .iter()
+        .find(|channel| channel.config().channel_keypair().unwrap().0.0 == pk_ch)
+        .unwrap();
+    let message = section_6_message(2, signer.config().channel_id(), DAY, HOST);
+    assert!(crypto::verify_detached(&PublicKey(pk_ch), &message, &Signature(sig)).is_ok());
 }
 
 /// Spec 028, R9 (this slice's part): an `ok` of a channel awaiting one →
