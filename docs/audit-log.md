@@ -62,6 +62,13 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AI22 | An eviction or a `forget` rewritten as a `swap_remove` reordered the records, which spec 022 R3 and R13 read for ties of `first_seen` (C) | Low | A T03 test of the order after both |
 | AI23 | `SessionCarry` derives `Debug` over full keys, now up to 1 024 ignored ones; nothing formats it today (B) | Far-fetched | Listed; spec 027 or 028 redacts it if they ever log it |
 
+**Round 8.** Fresh passes: A and B found nothing; C no production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI24 | The server's `received_at` was tested only behind `now`: taking the later of the two clocks in the eviction, which would let a server stamping ahead restore the shield R3 removed, survived; a pre-verified key's first message treated as a new peer survived (C) | Medium | The future-stamp clause runs with a `received_at` two years ahead too; a T03 clause for a pre-verified key's first message |
+| AI25 | `labelled_limit_reached` as `!admits_labelled(true)` differs only with more than 50 unknowns (C) | Far-fetched | Listed (as AI13) |
+
 Left as they are: the third copy of "remove a record, then its gap" (C8), one line at each place; `unknown` and the test `text` helper not shared with other test files (C17); the O(550) counts per new key (C13), below the cost of the signature check and the state rewrite.
 
 ## Spec 025 implemented

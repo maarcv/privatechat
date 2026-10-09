@@ -348,8 +348,10 @@ fn s026_t03_r03_lru_eviction() {
     // older newcomer: they no longer shield a flood. Stamped a few ms or a
     // year ahead, first seen before the jump; one that writes again is
     // stamped `now`; neither the server's `received_at` nor the sender's
-    // `sent_at` decides.
-    for ahead in [0, 365 * 24 * 3_600_000] {
+    // `sent_at` decides, behind or ahead of `now`.
+    let year = 365 * 24 * HOUR_MS;
+    let cases = [0, year].map(|ahead| [(ahead, NOW - 4_000), (ahead, NOW + 2 * year)]);
+    for (ahead, received_at) in cases.into_iter().flatten() {
         let (mut channel, _, _) = receiver(3_600);
         let mut peers = crowd(0, 49, false);
         for peer in &mut peers {
@@ -368,12 +370,21 @@ fn s026_t03_r03_lru_eviction() {
             None,
         );
         channel
-            .decrypt(&blob, [0x91; 16], NOW - 4_000, NOW)
+            .decrypt(&blob, [0x91; 16], received_at, NOW)
             .unwrap();
         assert!(has_record(&channel, stranger(900)) && has_record(&channel, stranger(1)));
         assert!(!has_record(&channel, stranger(2)));
         assert_eq!(channel.status().ignored_keys, 1);
     }
+
+    // A pre-verified key's first message creates no peer: nobody goes.
+    let (mut channel, _, _) = receiver(3_600);
+    plant(&mut channel, crowd(0, 50, false));
+    let qr = verify_qr(channel.config.id(), &PublicKey(pk_of(stranger(800)))).unwrap();
+    channel.verify_scanned(&qr, "Bea", NOW).unwrap();
+    text(&mut channel, stranger(800), 0, NOW).unwrap();
+    assert_eq!(channel.state.peers.len(), MAX_UNKNOWN_PEERS + 1);
+    assert_eq!(channel.status().ignored_keys, 0);
 
     // A muted stranger already known writes at the limit: nobody goes.
     let (mut channel, _, _) = receiver(3_600);
