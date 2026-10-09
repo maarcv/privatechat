@@ -194,6 +194,12 @@ fn s028_t01_r01_frame_schemas() {
     let at_bounds = [
         record(&[(0, vec![6]), (1, vec![b'c'; 32]), (2, vec![b'm'; 256])]),
         record(&[
+            (0, vec![3]),
+            (1, vec![4; 16]),
+            (2, vec![5; 16]),
+            (3, vec![0; MAX_BLOB]),
+        ]),
+        record(&[
             (0, vec![5]),
             (1, vec![4; 16]),
             (2, vec![7; 16]),

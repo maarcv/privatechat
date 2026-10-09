@@ -132,7 +132,7 @@ Dependencies of `privatechat-server` added by this spec, each justified in its p
 
 ## Vectors
 
-No new vector file. The server reproduces the server-direction frames of `028.json` (T14), and `check_blob` reproduces the length, version and channel rows of `013.json` (T02).
+No new vector file. The server reproduces the positive server-direction frames of `028.json` other than `ok_unknown_key` (T14), and `check_blob` reproduces the length, version and channel rows of `013.json` (T02).
 
 ## Acceptance criterion
 

@@ -40,6 +40,16 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AJ20 | Survivors: an absent optional key still counted in `encoded_len`; `proto_versions` decoded with a bound below the frame's 13 990 items (C) | Low | T01 checks the capacity of a frame without an optional key; T02 decodes 13 990 versions |
 | AJ21 | `record_len`'s doc said every caller bounds its values first; `Frame::encoded_len` relies on the saturation (C) | Nit | Reworded |
 
+**Round 4.** Fresh passes on the whole change. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AJ22 | 030's Vectors section still said the server reproduces every server-direction frame, against R14 as AJ4 amended it (A) | Low | Reworded as R14 |
+| AJ23 | The §6 truncation sentence left out R8's rule that a `synced_at` later than `now` is ignored (B) | Low | Added |
+| AJ24 | The publish blob bound was not tested at `MAX_BLOB`, in decode or encode: two survivors (C) | Low | A `publish` of `MAX_BLOB` in T01's `at_bounds` |
+| AJ25 | The AJ21 rewording left a 124-character line; `Writer::with_capacity`'s doc said `max` is never an unbounded length (A, C) | Low | Rewrapped; the doc names a length checked against the schema's maximum |
+| AJ26 | §9's "their own specs" did not fit 028 (A) | Nit | "that a spec defines" |
+
 ## Spec 026 implemented
 
 **2026-10-09 — Spec 026-peer-limits is `implemented`.** Its acceptance criterion is automated alone: `cargo test -p privatechat-core s026_`, clippy and the documentation lint are green on `mvp` (9137d6a), after the eight rounds of Audit AI, which the human reviewer closed at round 8.
