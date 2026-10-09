@@ -517,8 +517,8 @@ fn section_6_message(nonce: u8, channel_id: [u8; 16], ttl_seconds: u32, host: &s
 }
 
 /// Spec 028, R6: the signature verifies over the §6 message with the
-/// config's host; `since` is the cursor down to the minute, absent with no
-/// cursor; subscribes leave at least 1 100 ms apart, by `last + ttl_ms` or
+/// config's host; `since` is the cursor down to the minute, 0 with no
+/// cursor, so every `subscribe` has one size; subscribes leave at least 1 100 ms apart, by `last + ttl_ms` or
 /// `created_at + ttl_ms`; a second `hello` discards the unreleased ones and
 /// subscribes only channels not subscribed; the spacing holds across a
 /// `nonce_expired` and a new `hello`, after which the refused channel is
@@ -693,7 +693,9 @@ fn error(code: &str, channel_id: Option<[u8; 16]>) -> Vec<u8> {
 /// about 31 s; a `subscribe` that would leave more than 50 000 ms after its
 /// `hello` → `Reconnect`; no `hello` within 50 000 ms of `on_connect` or of
 /// a `nonce_expired` (a second one not restarting the wait) → `Reconnect`;
-/// a clock set back counts the time recorded as long past.
+/// a clock set back counts the time recorded as long past; after a second
+/// `hello`, a tick-released `subscribe` signs its nonce, within the window
+/// counted from it.
 #[test]
 fn s028_t07_r07_nonce_window() {
     let mut sixteen: Channels = (1..=16).map(|byte| channel(byte, DAY, T0)).collect();

@@ -60,6 +60,12 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AK30 | A second `hello` never shown to set the nonce and window of the `subscribe`s a tick releases: three survivors (A, C; 64 mutants, 59 killed, 2 equivalent) | Medium | T07 checks the signature of a tick-released subscribe over the second nonce, late in its window |
 | AK31 | `Subscription` derived traits nothing uses; `key_prefix`'s doc and the test module's doc out of date (A, C) | Nit | Removed; reworded |
 
+**Round 6.** Fresh passes on the whole change. No production defect; pass B checked AK28 from the observer's side (every `subscribe` one size); pass C ran 73 mutants, 71 killed, 2 equivalent, none surviving.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AK32 | T06's doc comment still said `since` is absent with no cursor; T07 did not name the AK30 clause (A, B, C) | Nit | Reworded, in the test and in 028 T07 |
+
 ## Review during development
 
 **2026-10-09 — Decision of the human reviewer: until the first release, the audit of `CLAUDE.md` replaces the human review before merging.** The human still accepts every spec before it is implemented, decides what an audit escalates and approves every ADR; the human review before merging returns at the first release. `AGENTS.md` "Per-feature flow", `docs/spec.md` §10 "Per-feature flow" and governance, the `architecture` skill and `.github/CODEOWNERS` say so. GitHub required no approving review on `mvp` already (0), so its settings do not change.
