@@ -112,6 +112,15 @@ impl fmt::Debug for Gap {
     }
 }
 
+impl fmt::Debug for OldKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OldKey")
+            .field("pk", &key_prefix(&self.pk))
+            .field("retired_at", &self.retired_at)
+            .finish()
+    }
+}
+
 impl fmt::Debug for Sender {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -148,9 +157,10 @@ pub enum AckOutcome {
     Delivered,
     /// It was not stored, or not in time: it failed.
     NotDelivered,
-    /// The `key_retired` was stored (spec 025-identity-regen).
+    /// The `key_retired` was stored in time (spec 025-identity-regen R5).
     RetirementDelivered,
-    /// An `ack` for no current `outbox` entry.
+    /// An `ack` for no current `outbox` entry, or for a `key_retired` copy
+    /// not stored in time (spec 025-identity-regen R5).
     Ignored,
 }
 
@@ -164,7 +174,8 @@ pub(crate) struct Outcome {
     pub(crate) server_id: Option<[u8; 16]>,
     /// The time an `ack` is listed at, clamped (R17).
     pub(crate) received_at: Option<u64>,
-    /// `None` only for an unknown `client_ref`.
+    /// `None` only for an unknown `client_ref` and an earlier copy of the
+    /// `key_retired`.
     pub(crate) sent_at: Option<u64>,
 }
 
@@ -192,8 +203,9 @@ pub struct Gap {
 }
 
 /// One of one's own old keys in a channel and when it was retired (spec
-/// 025-identity-regen R6).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// 025-identity-regen R6). Its `Debug` shows the 4-byte prefix of the key
+/// (AGENTS 19).
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct OldKey {
     /// The old `pk_u`.
     pub pk: PeerId,

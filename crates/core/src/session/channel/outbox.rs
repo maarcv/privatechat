@@ -13,7 +13,8 @@ impl Channel {
     /// The server stored the entry `client_ref` as `server_id` at
     /// `received_at` (R16, R17): one commit removes it, and every ordinary
     /// entry of the same key with a lower counter as not delivered, keeps
-    /// its signature, and records whether it was stored in time.
+    /// its signature, and records whether it was stored in time. The
+    /// pending `key_retired` is spec 025-identity-regen R5's.
     ///
     /// # Errors
     ///
@@ -26,7 +27,9 @@ impl Channel {
         now: u64,
     ) -> Result<Outcome, Error> {
         self.latest_now = Some(now);
-        // A `key_retired` entry is spec 025-identity-regen's.
+        if let Some(outcome) = self.acked_retirement(client_ref, server_id, received_at, now)? {
+            return Ok(outcome);
+        }
         let Some(entry) = self
             .ordinary_outbox()
             .find(|entry| entry.client_ref == client_ref.bytes)
@@ -52,11 +55,7 @@ impl Channel {
         let overtaken = self.remove_entries(&mut next, &mut records, |other| {
             other.under_retired_key == under_retired_key && other.counter < counter
         });
-        // Checked against the server's own time: a sender clock off by more
-        // than the margin cannot hide a loss behind an `ack` (ADR 0034).
-        let window = self.accept_window();
-        let in_time =
-            received_at.abs_diff(sent_at) <= window && sent_at.saturating_add(self.ttl_ms()) >= now;
+        let in_time = self.stored_in_time(sent_at, received_at, now);
         let listed_at = listed_time(Some(sent_at), received_at).min(now);
         let (outcome, kind) = if in_time {
             let acked = LogEntry::Acked {
@@ -86,26 +85,32 @@ impl Channel {
         })
     }
 
-    /// Removes the stale ordinary entries in one commit, then hands out the
-    /// entries to publish (R22): those not in flight, and only the
-    /// `key_retired` and the entries `under_retired_key` when
-    /// `withhold_current` is set.
+    /// Re-seals the pending `key_retired` when the minute changed and
+    /// removes the stale ordinary entries, in one commit, then hands out
+    /// the entries to publish (R22, spec 025-identity-regen R4): those not
+    /// in flight, the `key_retired` only once no entry of the old key
+    /// waits, and only the `key_retired` and the entries
+    /// `under_retired_key` when `withhold_current` is set.
     ///
     /// # Errors
     ///
-    /// `Store` when the commit fails, with nothing handed out.
+    /// `Internal` when libsodium fails; `Store` when the commit fails;
+    /// either way with nothing handed out.
     pub(crate) fn outbox(
         &mut self,
         now: u64,
         in_flight: &[ClientRef],
         withhold_current: bool,
     ) -> Result<OutboxStep, Error> {
-        let not_delivered = self.remove_stale(now, in_flight)?;
+        let not_delivered = self.remove_stale(now, in_flight, true)?;
+        // The old key's messages arrive before its retirement.
+        let old_key_waits = old_key_waits(&self.state);
         let publish = self
             .state
             .outbox
             .iter()
             .filter(|entry| !in_flight.contains(&ClientRef::of(entry)))
+            .filter(|entry| entry.kind != OutboxKind::KeyRetired || !old_key_waits)
             .filter(|entry| {
                 !withhold_current || entry.kind == OutboxKind::KeyRetired || entry.under_retired_key
             })
@@ -118,7 +123,9 @@ impl Channel {
     }
 
     /// The removal of R22 alone, for a channel that is not subscribed
-    /// (R23): `publish` is always empty.
+    /// (R23): `publish` is always empty, and no re-seal, so that a device
+    /// offline does not rewrite its state every minute (spec
+    /// 025-identity-regen R4).
     ///
     /// # Errors
     ///
@@ -130,7 +137,7 @@ impl Channel {
     ) -> Result<OutboxStep, Error> {
         Ok(OutboxStep {
             publish: Vec::new(),
-            not_delivered: self.remove_stale(now, in_flight)?,
+            not_delivered: self.remove_stale(now, in_flight, false)?,
         })
     }
 
@@ -159,12 +166,15 @@ impl Channel {
     }
 
     /// Removes in one commit the ordinary entries no receiver accepts any
-    /// more, with a minute of grace for one in flight; no commit when there
-    /// is none (R22).
+    /// more, with a minute of grace for one in flight, and, when `reseal`
+    /// is set, re-seals in the same commit the pending `key_retired` that
+    /// `outbox` is about to hand out; no commit when neither happens (R22,
+    /// spec 025-identity-regen R4).
     fn remove_stale(
         &mut self,
         now: u64,
         in_flight: &[ClientRef],
+        reseal: bool,
     ) -> Result<Vec<(ClientRef, u64)>, Error> {
         self.latest_now = Some(now);
         let window = self.accept_window();
@@ -176,12 +186,13 @@ impl Channel {
             };
             entry.sent_at.saturating_add(window).saturating_add(grace) < now
         };
-        if !self.ordinary_outbox().any(stale) {
-            return Ok(Vec::new());
-        }
         let mut next = self.next_state();
         let mut records = Vec::new();
         let removed = self.remove_entries(&mut next, &mut records, stale);
+        let resealed = reseal && self.reseal_retirement(&mut next, now, in_flight)?;
+        if removed.is_empty() && !resealed {
+            return Ok(Vec::new());
+        }
         self.commit(next, records)?;
         Ok(removed)
     }
@@ -226,6 +237,16 @@ impl Channel {
             }));
     }
 
+    /// Whether the in-time test of R17 holds for an entry dated `sent_at`
+    /// whose `ack` says `received_at`: checked against the server's own
+    /// time, so that a sender clock off by more than the margin cannot hide
+    /// a loss behind an `ack` (ADR 0034), and only while a member still
+    /// shows it (ADR 0044).
+    pub(super) fn stored_in_time(&self, sent_at: u64, received_at: u64, now: u64) -> bool {
+        received_at.abs_diff(sent_at) <= self.accept_window()
+            && sent_at.saturating_add(self.ttl_ms()) >= now
+    }
+
     /// The kept-signature record of an entry that leaves the `outbox`
     /// (R15): it lasts one `ttl_ms + 360 000` beyond the last moment R14
     /// accepts the blob, so a clock set back by up to that much cannot turn
@@ -252,4 +273,13 @@ impl ClientRef {
             bytes: entry.client_ref,
         }
     }
+}
+
+/// An ordinary entry of the key being retired still waits in `state`'s
+/// `outbox` (spec 025-identity-regen R4).
+pub(super) fn old_key_waits(state: &ChannelState) -> bool {
+    state
+        .outbox
+        .iter()
+        .any(|entry| entry.kind == OutboxKind::Text && entry.under_retired_key)
 }
