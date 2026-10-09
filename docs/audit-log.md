@@ -42,6 +42,15 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AK22 | The 028 Interface named `testing.rs` for `MemoryServer` (A) | Nit | `testing/server.rs` |
 | AK23 | A channel id repeated in `Session::new` would be subscribed twice (B) | Far-fetched | None: no input reaches it; the `Device` opens each channel once |
 
+**Round 4.** Fresh passes on the whole change. No production defect; pass B found nothing.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AK24 | After `UnsupportedServer` a bad frame gets no `Reconnect`, as 027 R11 wants, but R1 read alone asked for one (A) | Low | R2 says frames are then ignored with no event; T02 |
+| AK25 | `Event` derives `PartialEq` and `Eq` that only the tests use; T09's push of an unknown channel cannot fail until pushes are routed (A) | Far-fetched | None now: `Received` already compares; the slice that routes pushes checks a known channel's |
+| AK26 | Survivors: a named `nonce_expired` also giving `Reconnect`; `max(cursor, synced_at)` with the cursor the larger; `since` taken from `synced_at` (C; 94 mutants, 88 killed, 3 equivalent) | Low | One clause each in T06, T07 |
+| AK27 | `Link::Unsupported` behaved as `Closed`; `id_prefix` copied `key_prefix` (C) | Low | One `Closed`; `key_prefix` takes a slice |
+
 ## Review during development
 
 **2026-10-09 — Decision of the human reviewer: until the first release, the audit of `CLAUDE.md` replaces the human review before merging.** The human still accepts every spec before it is implemented, decides what an audit escalates and approves every ADR; the human review before merging returns at the first release. `AGENTS.md` "Per-feature flow", `docs/spec.md` §10 "Per-feature flow" and governance, the `architecture` skill and `.github/CODEOWNERS` say so. GitHub required no approving review on `mvp` already (0), so its settings do not change.

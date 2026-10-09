@@ -20,7 +20,7 @@ Since the decision of 2026-09-25 (`docs/spec.md` §6), this spec also fixes the 
 **Frames**
 
 - R1 Every frame MUST be one record of spec 017-record-encoding, decoded under `UnknownKeys::Ignore`, with key 0 = `type` u8 and the fields of the table "Frames" below; a frame longer than 70 000 bytes, with an unknown `type`, or failing its schema (a text over its limit included) MUST be dropped and MUST produce `Event::Reconnect`.
-- R2 `hello.proto_versions` MUST be decoded as a `list<u8>` bounded only by the frame size; a list with no item, with more than 8 items, or without the `proto_version` of the channels (1) MUST produce `Event::UnsupportedServer`, and the session MUST then send nothing until the next `on_connect` (`docs/spec.md` §6 "Version"). `probe_hello` of spec 027-core-api applies this same rule.
+- R2 `hello.proto_versions` MUST be decoded as a `list<u8>` bounded only by the frame size; a list with no item, with more than 8 items, or without the `proto_version` of the channels (1) MUST produce `Event::UnsupportedServer`, and the session MUST then send nothing until the next `on_connect` (`docs/spec.md` §6 "Version"), ignoring every frame meanwhile with no event, R1's `Reconnect` included, since the client does not reopen such a server (spec 027-core-api R11); between `on_disconnect` and `on_connect` every frame is ignored too. `probe_hello` of spec 027-core-api applies this same rule.
 - R3 `Frame::encode` and `Frame::decode` MUST be the `pub` functions through which spec 030-ws-protocol reaches the frames without touching the codec (`docs/spec.md` §9), and this spec MUST amend spec 016-fuzz-harness R2, R8 and R9 with two targets seeded from the frames of `028.json`: `frame_decode`, over arbitrary bytes, and `session_on_frame`, which drives a `Session` holding the `text_k1` channel of spec 021-channel-session R29 through a fixed `hello` and `ok` and then reads its input as a sequence of frames, each `len` u16 BE ‖ frame, so that `push`, `ack` and `error` handling are reached.
 
 **Server contract**
@@ -154,7 +154,7 @@ A `Step` never fails as a whole: a store failure in one channel goes to `failed`
 ## Test cases
 
 - T01 (covers R1): `s028_t01_r01_frame_schemas`: each frame round-trips; 70 001 bytes, `type` 7, a missing key and a 33-byte `code` → dropped with `Reconnect`; an unknown key is ignored.
-- T02 (covers R2): `s028_t02_r02_version_list`: `[1]` → subscribes; `[]`, `[2]` and nine items including 1 → `UnsupportedServer`, and nothing is sent afterwards until `on_connect`.
+- T02 (covers R2): `s028_t02_r02_version_list`: `[1]` → subscribes; `[]`, `[2]` and nine items including 1 → `UnsupportedServer`, and nothing is sent afterwards until `on_connect`, a bad frame then giving no event.
 - T03 (covers R3): `s028_t03_r03_frames_round_trip_and_fuzz`: `encode(decode(encode(f))) = encode(f)` for every frame (proptest); `scripts/check_fuzz_targets.sh` lists both targets; the `session_on_frame` seed of a `push` reaches `decrypt`.
 - T04 (covers R4): `s028_t04_r04_memory_server_contract`: `MemoryServer` sends the backlog in order, then a live push published meanwhile, then `ok`, and never that push ahead of the backlog; two `publish`es on one connection are stored and acknowledged in the order sent.
 - T05 (covers R5): `s028_t05_r05_reconnect_forgets_connection`: after `on_disconnect`, `on_tick` queues nothing; after `on_connect`, an `ack` of a previous `client_ref` is ignored and the `outbox` is published again after `ok`; a channel in `skip` is not subscribed.
@@ -242,3 +242,4 @@ Decided on 2026-09-25: the frame keys belong to this spec (`docs/spec.md` §6).
 - 2026-10-09 slice (b1) implemented; amended by spec 031-auth-channel-signature R2 (R6 signs `auth_message`) and after audit AK (`docs/audit-log.md`)
 - 2026-10-09 amended after audit AK round 2 (`docs/audit-log.md`): a `nonce_expired` does not restart a running wait for a `hello` (R7, R16), so that a server cannot hold a connection with them
 - 2026-10-09 amended after audit AK round 3 (`docs/audit-log.md`): R7 says how a clock set back counts; T07 names its clauses; the Interface names `testing/server.rs`
+- 2026-10-09 amended after audit AK round 4 (`docs/audit-log.md`): R2 says frames after `UnsupportedServer` are ignored with no event, R1's `Reconnect` included

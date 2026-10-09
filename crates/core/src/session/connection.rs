@@ -14,7 +14,7 @@
 use core::fmt;
 use std::collections::{BTreeMap, VecDeque};
 
-use super::channel::Channel;
+use super::channel::{Channel, key_prefix};
 use super::frames::{CODE_NONCE_EXPIRED, Frame, is_supported};
 use crate::Error;
 use crate::crypto;
@@ -63,7 +63,7 @@ pub enum Event {
 impl fmt::Debug for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Event::Subscribed { channel } => write!(f, "Subscribed({})", id_prefix(channel)),
+            Event::Subscribed { channel } => write!(f, "Subscribed({})", key_prefix(channel)),
             Event::UnsupportedServer { connection } => {
                 write!(f, "UnsupportedServer({connection})")
             }
@@ -98,10 +98,9 @@ struct Hello {
 /// Where the socket stands.
 #[derive(Clone, Copy)]
 enum Link {
-    /// No socket: nothing is queued (R5).
+    /// No socket (R5), or a server that failed R2: nothing is queued and
+    /// every frame is ignored until the next `on_connect`.
     Closed,
-    /// The server failed R2: nothing is sent until the next `on_connect`.
-    Unsupported,
     /// Waiting for a `hello` since this time (R7).
     AwaitingHello { since: u64 },
     /// A `hello` holds the nonce the `subscribe`s sign (R6).
@@ -154,7 +153,7 @@ impl Session {
     /// One frame the socket received.
     pub(crate) fn on_frame(&mut self, frame: &[u8], channels: &mut Channels, now: u64) -> Step {
         let mut step = Step::default();
-        if matches!(self.link, Link::Closed | Link::Unsupported) {
+        if matches!(self.link, Link::Closed) {
             return step;
         }
         match Frame::decode(frame) {
@@ -203,7 +202,7 @@ impl Session {
         step: &mut Step,
     ) {
         if !is_supported(proto_versions) {
-            self.forget_connection(Link::Unsupported);
+            self.forget_connection(Link::Closed);
             step.events.push(Event::UnsupportedServer {
                 connection: self.connection,
             });
@@ -312,16 +311,6 @@ impl Session {
 /// than `now`, which only a clock set back gives, counts as long past.
 fn expired(from: u64, limit: u64, now: u64) -> bool {
     from > now || now.saturating_sub(from) > limit
-}
-
-/// The hex of the first 4 bytes of a channel id, all a `Debug` may show
-/// (AGENTS 19).
-fn id_prefix(channel_id: &[u8; 16]) -> String {
-    channel_id
-        .iter()
-        .take(4)
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 /// The channel of `channel_id` among the `Device`'s.

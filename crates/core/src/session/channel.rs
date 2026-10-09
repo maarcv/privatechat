@@ -134,8 +134,9 @@ impl fmt::Debug for Sender {
 
 /// The hex of the first 4 bytes of a key, all a log or a `Debug` may show
 /// of it (AGENTS 19).
-pub(crate) fn key_prefix(pk: &PeerId) -> String {
-    pk.iter()
+pub(crate) fn key_prefix(bytes: &[u8]) -> String {
+    bytes
+        .iter()
         .take(4)
         .map(|byte| format!("{byte:02x}"))
         .collect()
