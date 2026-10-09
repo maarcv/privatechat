@@ -21,7 +21,13 @@ const MAX_ORDINARY_OUTBOX: usize = MAX_OUTBOX - 1;
 const EXHAUSTED: u64 = u64::MAX;
 
 /// `sent_at` is a whole minute (spec 013-wire-message R8).
-pub(super) const MINUTE_MS: u64 = 60_000;
+const MINUTE_MS: u64 = 60_000;
+
+/// The whole minute of `now`, a blob's `sent_at` (spec 013-wire-message
+/// R8).
+pub(super) fn minute_of(now: u64) -> u64 {
+    now.saturating_sub(now % MINUTE_MS)
+}
 
 impl Channel {
     /// Seals `body` with the next counter and commits the counter, the
@@ -61,7 +67,7 @@ impl Channel {
         let payload = Payload {
             kind: PayloadKind::Text,
             display_name,
-            sent_at: now.saturating_sub(now % MINUTE_MS),
+            sent_at: minute_of(now),
             body: body.as_bytes().to_vec(),
         };
         let sender = SenderKey::from_seed(&self.state.identity_seed)?;

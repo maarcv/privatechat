@@ -120,7 +120,7 @@ impl Channel {
                 return Ok(false);
             }
             verified.open().map(Some)
-        } else if self.is_retiring(&sender)? {
+        } else if self.is_retiring(&sender) {
             self.open_unless_sealed_here(verified)
         } else {
             return Ok(false);
@@ -187,17 +187,16 @@ impl Channel {
         })
     }
 
-    /// The key whose `key_retired` is pending (spec 025-identity-regen).
-    ///
-    /// # Errors
-    ///
-    /// `Internal` when libsodium fails.
-    pub(super) fn is_retiring(&self, pk: &PublicKey) -> Result<bool, Error> {
-        let Some(seed) = &self.state.retiring_seed else {
-            return Ok(false);
-        };
-        let old = SenderKey::from_seed(seed)?;
-        Ok(crypto::ct_eq(&old.public().0, &pk.0))
+    /// The key whose `key_retired` is pending: the last of one's old keys,
+    /// which regeneration appends (spec 025-identity-regen R1), told without
+    /// reading the old seed, which seals the retirement alone (R7).
+    pub(super) fn is_retiring(&self, pk: &PublicKey) -> bool {
+        self.state.retiring_seed.is_some()
+            && self
+                .state
+                .own_old_keys
+                .last()
+                .is_some_and(|old| crypto::ct_eq(&old.pk.0, &pk.0))
     }
 
     /// Whether a member could still accept a message dated `sent_at`: the

@@ -99,7 +99,7 @@ impl Channel {
         };
         // Step 5.
         if self.is_retired(&sender) {
-            if self.is_retiring(&sender)? {
+            if self.is_retiring(&sender) {
                 return self.overtaken_by_thief(verified, now);
             }
             return Err(Error::RetiredKey);

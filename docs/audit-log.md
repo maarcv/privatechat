@@ -2,6 +2,24 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AH
+
+**2026-10-09 — Audit AH, the code audit of spec 025-identity-regen (branches `025-identity-regen` and `025-retirement`, PRs #42 and #43), round 1 of three read-only passes (A: conformance with R1–R8 and T01–T08; B: the adversary, a server choosing every `received_at` and the timing of acks, an intruder with the config, a thief of the old key, a wrong clock; C: code quality, tests and hand mutants).** One High finding (AH1), no production defect beyond it. The human reviewer took the recommendation of each of the four decisions (AH1–AH4). Pass C ran 27 mutants: 15 killed, 4 equivalent, 8 survived, each killed by a test added below; the author's mutants of the round-1 changes are killed too, but for `retiring_seed.is_some()` in `is_retiring`, equivalent since no old-key entry is left once it is cleared.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AH1 | R5 took an `ack` stored up to `ttl_ms + 360 000` after `sent_at` as delivered, without R17's `sent_at + ttl_ms ≥ now`: a retirement stored past its life, which no member shows, erased the old seed and cleared "retirement pending" (B1) | High | R5 judges it as R17 does an ordinary entry (ADR 0044); otherwise `Ignored` and re-sealed the next minute (decision, 025-R3); 025 added to ADR 0044's affected documents (a stale reference) |
+| AH2 | R4 re-sealed, and committed, every minute a copy held back behind the old key's entries, against `docs/spec.md` §4 and §7 and ADR 0034, "when it is handed out" (A2, B3) | Low | Re-sealed only as `outbox` hands it out (decision); 021 R22 names the copy R4 holds back (A4) |
+| AH3 | `is_retiring` derived the old key's public key from the old seed at every push, against R7 (A1) | Medium | The last of `own_old_keys` tells it; R7 says so (decision) |
+| AH4 | Residuals not written: an old key dropped while its later `key_retired` copy is still accepted (A3); a short TTL leaves a retirement less than a minute of life (B2); a thief of a dropped old key reads as an unknown peer (B5); a stuck retirement blocks a second regeneration (B6) | Low | 025 Security (decision) |
+| AH5 | R1's "the oldest" of `own_old_keys` read by list order, which the code and test pinned and the text did not say (A, question) | Nit | R1 and Limits: the first in the order of regeneration |
+| AH6 | `OldKey` derived a `Debug` printing the whole key (B4) | Low | Manual `Debug` with the 4-byte prefix (AGENTS 19), tested in T06 |
+| AH7 | Tests a mutant survived or a clause the spec names: the re-seal's signer, a fresh nonce, a delivery that wiped the current key's entries, `server_id`, 15 old keys, the retirement out in the call that expires the last old entry, R1's `now` (021 R25), the cursor a re-seal commits, the retiring key among two old keys, a delivery after a reopen, T08's re-seal under its own name (A5, A6, A8, A9, C1–C9) | Medium | One clause each in `tests/regen.rs` |
+| AH8 | A late `ack` of the current copy returned `sent_at: None`, which spec 028 R12 needs to hold that copy (A7, C10) | Low | `sent_at: Some`; the field's doc names the earlier copy |
+| AH9 | Docs and duplication: `acked`'s doc, `# Errors` of an epoch overflow, "oldest first", the marking comment, the minute rounding in three places (A10, A11, C11, C12, C15, C17, C18, C20, C22) | Nit | Reworded; `minute_of` shared; `NONCE_RANGE` reused by the test |
+
+Left as they are: `seal_retirement` repeats `encrypt`'s sealing and the `LogFull → Internal` closure is in two places, below the third caller (C13, C14); the old key derived twice in R1 (C16); `OldKey` beside `Gap` in `channel.rs` (C19); the test helpers of `tests/regen.rs` not shared (C21). M13 of pass C, the re-seal without its kind check, is equivalent once R4 re-seals only a copy no old-key entry precedes.
+
 ## Spec 025 open questions
 
 **2026-10-09 — The open questions 025-R1 and 025-R2 of spec 025-identity-regen (Audit AD, AD14) are closed before its implementation.** Both need an entry `under_retired_key` beside a `key_retired` copy that has left, or beside a second old key's entries, and spec 025 already rules both out: R4 hands out no copy of the `key_retired` while an entry `under_retired_key` is still in the `outbox`, no entry is marked after R1, and R1 refuses a second regeneration until R5 has removed the `key_retired`. The echo of a superseded copy therefore finds nothing to remove, and the flag always names the key being retired. The human reviewer took the recommendation: no new field and no kept signatures for superseded copies; the reason goes into 025 Security, and T01 and T04 pin it. Spec 021 T09 keeps its planted state, which tests step 5 alone.

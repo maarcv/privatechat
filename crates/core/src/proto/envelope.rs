@@ -32,7 +32,7 @@ pub(crate) const HEADER_LEN: usize = 81;
 /// The regions of the fixed header (R1).
 const CHANNEL_ID_RANGE: Range<usize> = 1..17;
 const ENC_HDR_RANGE: Range<usize> = 17..57;
-const NONCE_RANGE: Range<usize> = 57..81;
+pub(crate) const NONCE_RANGE: Range<usize> = 57..81;
 
 /// An Ed25519 signature, the last bytes of a blob (R1).
 const SIGNATURE_LEN: usize = 64;

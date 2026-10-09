@@ -34,4 +34,4 @@ Spec 013-wire-message keeps its own step 2 (`min(received_at, now) + T < now`) a
 - **Delay is now spent.** A message that waited in the `outbox`, or on the server, for a time `d` is shown for `ttl_ms − d` from when it arrives, no longer a full TTL from the server's receipt. A reader who connects late can miss a message the server still holds. The TTL now means "gone a TTL after it was written".
 - **Delivered.** An `ack` reports `Delivered` only while `sent_at + ttl_ms ≥ now`. The two-sided check of ADR 0034 on the `ack`'s `received_at` stays.
 - **What stands.** The decisions of ADR 0027 and ADR 0030 stand. This ADR changes the reference clock of ADR 0027's stale test and the acceptance range in ADR 0030's Consequences, for the client session only.
-- **Affected documents:** specs 021-channel-session and 023-ttl-purge; `docs/spec.md` §2, §4 and §6.
+- **Affected documents:** specs 021-channel-session, 023-ttl-purge and 025-identity-regen; `docs/spec.md` §2, §4 and §6.
