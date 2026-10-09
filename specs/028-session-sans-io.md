@@ -245,3 +245,4 @@ Decided on 2026-09-25: the frame keys belong to this spec (`docs/spec.md` §6).
 - 2026-10-09 amended after audit AK round 3 (`docs/audit-log.md`): R7 says how a clock set back counts; T07 names its clauses; the Interface names `testing/server.rs`
 - 2026-10-09 amended after audit AK round 4 (`docs/audit-log.md`): R2 says frames after `UnsupportedServer` are ignored with no event, R1's `Reconnect` included
 - 2026-10-09 amended after audit AK round 5 (`docs/audit-log.md`, decision of the human reviewer): `since` always present, 0 with no cursor (R6, T06); the channel count a network observer sees is a documented residual (Security, `docs/spec.md` §2)
+- 2026-10-09 amended after audit AK round 6 (`docs/audit-log.md`): T07 names its clause on a second `hello`

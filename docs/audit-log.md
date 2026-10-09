@@ -66,6 +66,12 @@ Findings and applied changes of every audit of the specification, newest first; 
 | --- | --- | --- | --- |
 | AK32 | T06's doc comment still said `since` is absent with no cursor; T07 did not name the AK30 clause (A, B, C) | Nit | Reworded, in the test and in 028 T07 |
 
+**Round 7.** Fresh passes on the whole change. Passes A and B found nothing but two far-fetched points (a 028 History line for round 6, two lines over 100 columns that no check enforces), fixed anyway; pass C found test gaps only, no production defect (30 mutants: 20 killed, 4 equivalent, 6 survived). The audit ends here, as `CLAUDE.md` says for such a round, once the tests below killed the survivors and the local CI was clean.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AK33 | Survivors: a `nonce_expired` naming a channel that had its `ok`; a session subscribing channels not its own; an `ok` arriving while a fresh `hello` is awaited; the test server's `ack` before its echo and the echo itself; two subscriptions catching up at once; a `subscribe` without `since` (C) | Low | One clause each in T04, T06, T09 |
+
 ## Review during development
 
 **2026-10-09 — Decision of the human reviewer: until the first release, the audit of `CLAUDE.md` replaces the human review before merging.** The human still accepts every spec before it is implemented, decides what an audit escalates and approves every ADR; the human review before merging returns at the first release. `AGENTS.md` "Per-feature flow", `docs/spec.md` §10 "Per-feature flow" and governance, the `architecture` skill and `.github/CODEOWNERS` say so. GitHub required no approving review on `mvp` already (0), so its settings do not change.

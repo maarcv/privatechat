@@ -218,15 +218,17 @@ fn s028_t04_r04_memory_server_contract() {
     // Two publishes in one millisecond: stored and acknowledged in order.
     server.receive(1, &publish(1), T0 + 5);
     server.receive(1, &publish(2), T0 + 5);
-    let acks: Vec<[u8; 16]> = server
+    // Each `ack` before its echo to the publisher's own subscription.
+    let seen: Vec<String> = server
         .read(1, 10)
         .iter()
-        .filter_map(|frame| match Frame::decode(frame).unwrap() {
-            Frame::Ack { client_ref, .. } => Some(client_ref),
-            _ => None,
+        .map(|frame| match Frame::decode(frame).unwrap() {
+            Frame::Ack { client_ref, .. } => format!("ack {}", client_ref[0]),
+            Frame::Push { blob, .. } => format!("push {}", blob[0]),
+            other => format!("{other:?}"),
         })
         .collect();
-    assert_eq!(acks, [[1; 16], [2; 16]]);
+    assert_eq!(seen, ["ack 1", "push 1", "ack 2", "push 2"]);
     let ids: std::collections::BTreeSet<[u8; 16]> = server
         .stored(&channel_id)
         .iter()
@@ -377,9 +379,9 @@ fn s028_t04_r04_memory_server_checks() {
         .map(|f| Frame::decode(f).unwrap())
         .collect();
     assert_eq!(error_codes(&answer), ["nonce_expired"]);
-    assert!(
-        matches!(&answer[1], Frame::Hello { server_nonce, .. } if server_nonce.to_vec() != hellos[0][10..42])
-    );
+    let first_nonce = &hellos[0][10..42];
+    assert!(matches!(&answer[1], Frame::Hello { server_nonce, .. }
+        if server_nonce.as_slice() != first_nonce));
     assert!(server.read(1, 10).is_empty());
     // Under the new nonce, 59 000 ms after it, the channel is accepted.
     let renewed = T0 + 60_001;
@@ -452,6 +454,54 @@ fn s028_t04_r04_memory_server_checks() {
         [T0 + 60_501]
     );
 
+    // Two subscriptions on one connection: each gets its backlog, then its
+    // `ok`.
+    // Both catch up at once: their subscribes arrive before any read.
+    let mut both = vec![channel(3, 60, T0), channel(4, DAY, T0)];
+    let mut session = connected(&both, T0 + 60_500);
+    server.connect(6, T0 + 60_500);
+    session.on_frame(&server.read(6, 1)[0], &mut both, T0 + 60_500);
+    session.on_tick(&mut both, T0 + 61_600);
+    for frame in session.outgoing() {
+        server.receive(6, &frame, T0 + 61_600);
+    }
+    let frames = decoded(server.read(6, 100));
+    let oks = frames
+        .iter()
+        .filter(|f| matches!(f, Frame::Ok { .. }))
+        .count();
+    assert_eq!(oks, 2);
+    // Read at +61 600, after the blob of +1 000 expired.
+    assert_eq!(pushed(&frames), &times[1..]);
+
+    // A `subscribe` without `since` gets every unexpired blob.
+    let mut bare = vec![channel(3, 60, T0)];
+    bare[0]
+        .decrypt(&[0; 8], [9; 16], T0 + 60_400, T0 + 60_400)
+        .ok();
+    let mut session = connected(&bare, T0 + 60_500);
+    server.connect(7, T0 + 60_500);
+    session.on_frame(&server.read(7, 1)[0], &mut bare, T0 + 60_500);
+    let unbounded = match Frame::decode(&session.outgoing()[0]).unwrap() {
+        Frame::Subscribe {
+            pk_ch,
+            ttl_seconds,
+            sig,
+            since,
+        } => {
+            assert_eq!(since, Some(T0 + 60_000));
+            Frame::Subscribe {
+                pk_ch,
+                ttl_seconds,
+                sig,
+                since: None,
+            }
+        }
+        other => other,
+    };
+    server.receive(7, &unbounded.encode().unwrap(), T0 + 60_500);
+    assert_eq!(pushed(&decoded(server.read(7, 10))), times);
+
     // Live pushes reach a subscription after its `ok`; a closed socket gets
     // nothing.
     server.receive(1, &publish(id, 6), T0 + 70_000);
@@ -518,11 +568,12 @@ fn section_6_message(nonce: u8, channel_id: [u8; 16], ttl_seconds: u32, host: &s
 
 /// Spec 028, R6: the signature verifies over the §6 message with the
 /// config's host; `since` is the cursor down to the minute, 0 with no
-/// cursor, so every `subscribe` has one size; subscribes leave at least 1 100 ms apart, by `last + ttl_ms` or
-/// `created_at + ttl_ms`; a second `hello` discards the unreleased ones and
-/// subscribes only channels not subscribed; the spacing holds across a
-/// `nonce_expired` and a new `hello`, after which the refused channel is
-/// subscribed again.
+/// cursor, so every `subscribe` has one size; subscribes leave at least
+/// 1 100 ms apart, by `last + ttl_ms` or `created_at + ttl_ms`; a second
+/// `hello` discards the unreleased ones and subscribes only channels not
+/// subscribed; the spacing holds across a `nonce_expired` and a new
+/// `hello`, after which the refused channel is subscribed again, also when
+/// it had its `ok`; a session subscribes its own channels alone.
 #[test]
 fn s028_t06_r06_subscribe_contents_and_pacing() {
     let mut channels = vec![channel(1, DAY, T0)];
@@ -668,6 +719,25 @@ fn s028_t06_r06_subscribe_contents_and_pacing() {
     }
     assert_eq!(again.len(), 2);
     assert!(again.contains(&refused));
+
+    // A `nonce_expired` naming a channel that had its `ok` frees it too.
+    let mut session = connected(&two, T0);
+    session.on_frame(&hello(1, &[1]), &mut two, T0);
+    let done = subscribed_ids(&mut session, &two)[0];
+    session.on_frame(&ok(done), &mut two, T0 + 100);
+    session.on_frame(&error("nonce_expired", Some(done)), &mut two, T0 + 200);
+    session.on_frame(&hello(2, &[1]), &mut two, T0 + 1_100);
+    assert!(subscribed_ids(&mut session, &two).contains(&done));
+
+    // A session subscribes its own channels alone, whatever the `Device`
+    // holds.
+    let own = ids(&two)[0];
+    let mut session = Session::new(CONNECTION, vec![own]);
+    session.on_connect(T0, &[]);
+    session.on_frame(&hello(1, &[1]), &mut two, T0);
+    assert_eq!(subscribed_ids(&mut session, &two), [own]);
+    let (released, _) = tick_releases(&mut session, &mut two, T0, T0 + 5_000, 100);
+    assert!(released.is_empty());
 
     // An error of another code leaves the queue alone.
     let mut session = connected(&two, T0);
@@ -843,6 +913,18 @@ fn s028_t09_r09_ok_marks_subscribed() {
             .events
             .is_empty()
     );
+    // An `ok` that arrives while the session waits for a fresh `hello` still
+    // counts.
+    let mut late = connected(&channels, T0);
+    late.on_frame(&hello(1, &[1]), &mut channels, T0);
+    late.on_tick(&mut channels, T0 + 1_100);
+    late.on_frame(
+        &error("nonce_expired", Some(second)),
+        &mut channels,
+        T0 + 1_200,
+    );
+    let step = late.on_frame(&ok(first), &mut channels, T0 + 1_300);
+    assert_eq!(step.events, [Event::Subscribed { channel: first }]);
     assert!(
         session
             .on_frame(&ok(second), &mut channels, T0 + 30)
