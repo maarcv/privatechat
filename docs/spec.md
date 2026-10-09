@@ -291,7 +291,7 @@ sequenceDiagram
     C->>S: WS connect (TLS 1.3, no resumption)
     S-->>C: hello(server_nonce, proto_versions)
     C->>S: subscribe(pk_ch, ttl_seconds, sig, since)
-    S-->>C: ok(channel_id, oldest_retained_at, has_more) + push*
+    S-->>C: push* (the backlog since `since`), then ok(channel_id)
     C->>S: publish(channel_id, client_ref, blob)
     S-->>C: ack(client_ref, server_id, received_at)
     S-->>C: push(channel_id, server_id, received_at, blob) to all subscribers
@@ -308,11 +308,11 @@ sequenceDiagram
 | --- | --- | --- |
 | `hello` | S→C | `server_nonce` (bytes32), `proto_versions` ([uint], ≤ 8) |
 | `subscribe` | C→S | `pk_ch` (bytes32), `ttl_seconds` (uint32), `sig` (bytes64), `since` (uint64 ms, optional; absent = everything) |
-| `ok` | S→C | `channel_id` (bytes16), `oldest_retained_at` (uint64 ms), `has_more` (bool) |
-| `publish` | C→S | `channel_id`, `client_ref` (bytes16, `randombytes_buf` for each `publish`), `blob` (bytes) |
+| `ok` | S→C | `channel_id` (bytes16), sent after the channel's whole backlog |
+| `publish` | C→S | `channel_id`, `client_ref` (bytes16, one per `outbox` entry, reused on every publish of it), `blob` (bytes) |
 | `ack` | S→C | `client_ref`, `server_id` (bytes16), `received_at` (uint64 ms) |
 | `push` | S→C | `channel_id`, `server_id`, `received_at`, `blob` |
-| `error` | S→C | `code` (text), `message` (text, no client data) |
+| `error` | S→C | `code` (text), `message` (text, no client data), `channel_id` and `client_ref` (optional: the channel or the publish it answers) |
 
 Error codes: `bad_auth`, `nonce_expired`, `bad_ttl`, `not_subscribed`, `bad_blob`, `rate_limited`, `channel_quota`, `server_full`, `unsupported_version`.
 
@@ -328,7 +328,7 @@ where `host` is `Config::host()`: the bytes of `server_url` between the scheme a
 
 **Order and time.** The server assigns `received_at = max(wall_clock_ms, last_received_at + 1)` per process: unique and strictly increasing, so that `ORDER BY received_at` is a total order. Messages are displayed in `received_at` order; the payload's `sent_at` is informative and the client warns if it differs by more than 5 minutes.
 
-**Cursor and gaps.** `server_id` is 16 random bytes (unique, unordered, reveals no volume). The client persists `cursor = received_at` of the last processed `push`, **regardless of the result** (a rejected blob only writes the cursor), in the same commit as any other state of that `push`. On reconnect it sends `since = cursor` **rounded down to the minute**; the resulting duplicates are discarded by `server_id` and by anti-replay. The server returns `ORDER BY received_at` in pages of 500 with `has_more`; `since > now` is treated as `now`; the query filters `expires_at > now`. `oldest_retained_at = now − ttl_ms`; if `since < oldest_retained_at`, the client shows "There may be expired messages before <date>" and `gaps()` does not count the counters before the first message received from each sender in this session (spec 021-channel-session passes `None` as `max_counter` to the gap computation for that first message).
+**Cursor and gaps.** `server_id` is 16 random bytes (unique, unordered, reveals no volume). The client keeps `cursor = max(cursor, min(received_at, now))` of the processed `push`es, **regardless of the result** (a rejected blob only moves the cursor), in the server's time; a commit whose only change is the cursor is made at most once a minute, and `synced_at`, the local time the channel was last complete, is kept beside it (spec 021-channel-session R20). On reconnect it sends `since = cursor` **rounded down to the minute**; the resulting duplicates are discarded by `server_id` and by anti-replay. The client sends one `subscribe` every 1 100 ms at most. After a `subscribe`, the server streams the channel's whole backlog `ORDER BY received_at`, then the live pushes it held back meanwhile, then `ok` (spec 028-session-sans-io R4); `since > now` is treated as `now`; the query filters `expires_at > now`. The client judges by its own clock, from `max(cursor, synced_at)` and the channel's TTL, whether history before the subscription may have expired (spec 028-session-sans-io R8, R9); if so it shows "There may be expired messages before <date>" and `gaps()` does not count the counters before the first message received from each sender in this session (spec 021-channel-session passes `None` as `max_counter` to the gap computation for that first message).
 
 **Authorisation and envelope validation** (spec 030, 033). The server only accepts `publish` for a `channel_id` authenticated with `subscribe` on the same connection; otherwise `error{not_subscribed}`. Before storing a blob it checks, without touching anything else: `1185 ≤ len ≤ 64673`, `(len − 161)` multiple of 1 024, `blob[0] = 0x01` and `blob[1..17] = channel_id`; otherwise `bad_blob`. It verifies no signatures and decrypts nothing.
 

@@ -2,6 +2,22 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AJ
+
+**2026-10-09 — Audit AJ, the code audit of slice (a) of spec 028-session-sans-io (branch `028-frames`): the frame codec, `028.json` and the `frame_decode` target (R1, R2, R3's first target); round 1 of three passes (A: conformance; B: the adversary, a server or an observer sending any frame; C: quality, tests and hand mutants).** No High finding. Pass C ran 40 mutants: 29 killed, 3 equivalent, 8 survived, each killed by a clause added below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AJ1 | `docs/spec.md` §6 was never brought up to date when 028 was accepted: `ok` with `has_more` and `oldest_retained_at`, `error` without `channel_id` and `client_ref`, a fresh `client_ref` per publish, pages of 500 (A) | Medium | §6 brought up to date as 028 "Public API changes" says |
+| AJ2 | `encode` returned its 70 000-byte buffer, so every queued frame held 70 KB, past the 4 MiB send-queue bound of §6 on a server using this encoder (B, C) | Medium | The frame copied at its length; T01 checks the capacity |
+| AJ3 | Survivors: trailing bytes after the last field, an unknown `type` with an `ok`'s key 1, a malformed optional key read as absent (`since`, `error.channel_id`, `error.client_ref`), the publish blob bound, the encode capacity at the limit, `frame_decode_verdict` (C) | Medium | T01 asserts every one-byte-short field and gains the cases; a `hello` of 69 998 and 70 003 bytes; 016 T08 checks the verdict; `type_unknown` carries a key 1 |
+| AJ4 | 030 R14 and T14 cannot hold for `ok_unknown_key`, a decode case no encoder writes (A) | Low | 030 R14 and T14 leave it out |
+| AJ5 | Three `origin` texts read "a ok", "a ack", "a error", in a file about to freeze (A) | Low | "the … frame with every key" |
+| AJ6 | `Frame` derived `Clone`, which nothing uses and the Interface does not name (A) | Low | Removed |
+| AJ7 | `MAX_BLOB`, the spec 013 envelope bound, lived in `storage::state::items` (C) | Low | Moved to `proto::envelope` |
+| AJ8 | `is_supported`'s lower bound is dead (an empty list contains no 1); `bytes64` rewrote `any::<[u8; 64]>()` (C) | Nit | Removed |
+| AJ9 | `Debug` prints `sig` and blobs; `error.message` may hold control characters (B) | Far-fetched | None: no secret, and no path shows `message` in this slice; spec 056 must not render it |
+
 ## Spec 026 implemented
 
 **2026-10-09 — Spec 026-peer-limits is `implemented`.** Its acceptance criterion is automated alone: `cargo test -p privatechat-core s026_`, clippy and the documentation lint are green on `mvp` (9137d6a), after the eight rounds of Audit AI, which the human reviewer closed at round 8.

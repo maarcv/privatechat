@@ -8,7 +8,7 @@ use proptest::prelude::{Strategy, any, prop_oneof, proptest};
 
 use super::{Frame, MAX_FRAME, is_supported};
 use crate::Error;
-use crate::storage::state::items::MAX_BLOB;
+use crate::proto::envelope::MAX_BLOB;
 use crate::vectors::{self, Checker, Kind, Value, Vector};
 
 /// One frame of each type, every optional key present.
@@ -88,8 +88,12 @@ fn reencoded(bytes: &[u8]) -> Result<Vec<u8>, Error> {
 fn s028_t01_r01_frame_schemas() {
     // Keys 1 and up that a frame of each `type` may leave out.
     let optional: [&[u8]; 7] = [&[], &[4], &[], &[], &[], &[], &[3, 4]];
-    for (frame, optional) in references().iter().zip(optional) {
+    // Keys 1 and up whose value may be one byte shorter.
+    let variable: [&[u8]; 7] = [&[], &[], &[], &[3], &[], &[4], &[1, 2]];
+    for ((frame, optional), variable) in references().iter().zip(optional).zip(variable) {
         let bytes = frame.encode().unwrap();
+        // Allocated at its length, not at the 70 000 bytes of a frame.
+        assert_eq!(bytes.capacity(), bytes.len());
         assert_eq!(reencoded(&bytes), Ok(bytes.clone()), "{frame:?}");
         let fields = fields(&bytes);
         for (index, (key, value)) in fields.iter().enumerate().skip(1) {
@@ -102,11 +106,16 @@ fn s028_t01_r01_frame_schemas() {
                 "{frame:?} without {key}"
             );
             if value.len() > 1 {
-                // One byte short: a fixed width broken, or a blob or text
-                // that still fits; never a panic.
+                // One byte short: a fixed width broken, optional or not, or
+                // a blob or text that still fits.
                 let mut short = fields.clone();
                 short[index].1.pop();
-                let _ = Frame::decode(&record(&short));
+                let decoded = Frame::decode(&record(&short));
+                assert_eq!(
+                    decoded.is_ok(),
+                    variable.contains(key),
+                    "{frame:?} short {key}"
+                );
             }
         }
         // An unknown key, before the end and after it, is ignored.
@@ -159,6 +168,15 @@ fn s028_t01_r01_frame_schemas() {
         ]),
         record(&[(1, vec![4; 16]), (0, vec![2])]),
         ok[..ok.len() - 1].to_vec(),
+        [ok.clone(), vec![9]].concat(),
+        record(&[(0, vec![7]), (1, vec![4; 16])]),
+        record(&[(0, vec![255]), (1, vec![4; 16])]),
+        record(&[
+            (0, vec![3]),
+            (1, vec![4; 16]),
+            (2, vec![5; 16]),
+            (3, vec![0; MAX_BLOB + 1]),
+        ]),
     ];
     for bytes in &broken {
         assert_eq!(
@@ -213,6 +231,14 @@ fn s028_t01_r01_frame_schemas() {
     for frame in &too_long {
         assert_eq!(frame.encode().err(), Some(Error::BadPayload));
     }
+    // A `hello` is the one frame that can reach the limit: 48 bytes and 5
+    // per version.
+    let hello = |count| Frame::Hello {
+        server_nonce: [1; 32],
+        proto_versions: vec![1; count],
+    };
+    assert_eq!(hello(13_990).encode().map(|bytes| bytes.len()), Ok(69_998));
+    assert_eq!(hello(13_991).encode().err(), Some(Error::BadPayload));
 }
 
 /// Spec 028, R2: `proto_versions` is bounded by the frame alone, and the
@@ -246,15 +272,6 @@ fn s028_t02_r02_version_list() {
     ));
 }
 
-fn bytes64() -> impl Strategy<Value = [u8; 64]> {
-    (any::<[u8; 32]>(), any::<[u8; 32]>()).prop_map(|(a, b)| {
-        let mut sig = [0; 64];
-        sig[..32].copy_from_slice(&a);
-        sig[32..].copy_from_slice(&b);
-        sig
-    })
-}
-
 /// Any frame `encode` accepts.
 fn frame() -> impl Strategy<Value = Frame> {
     prop_oneof![
@@ -267,7 +284,7 @@ fn frame() -> impl Strategy<Value = Frame> {
         (
             any::<[u8; 32]>(),
             any::<u32>(),
-            bytes64(),
+            any::<[u8; 64]>(),
             maybe(any::<u64>())
         )
             .prop_map(|(pk_ch, ttl_seconds, sig, since)| Frame::Subscribe {

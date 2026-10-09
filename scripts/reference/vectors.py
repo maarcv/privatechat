@@ -1394,7 +1394,7 @@ def frames_section_028() -> list[dict]:
                     for name, value in values.items()}
         if kind == "hello":
             expected["event"] = "accepted"
-        vectors.append(raw(f"{kind}_reference", "positive", f"a {kind} with every key",
+        vectors.append(raw(f"{kind}_reference", "positive", f"the {kind} frame with every key",
                            FRAME_SCHEMAS[kind][0], encode_frame(kind, values), expected))
     nonce = references["hello"]["server_nonce"]
     hellos = [
@@ -1414,8 +1414,8 @@ def frames_section_028() -> list[dict]:
     vectors += [
         raw("ok_unknown_key", "positive", "ok_reference and a key 9, ignored", 2,
             ok + record_field(9, b"\x01"), {"channel_id": channel_id, "event": "accepted"}),
-        raw("type_unknown", "negative", "a frame of type 7", 7, record_field(0, b"\x07"),
-            reconnect),
+        raw("type_unknown", "negative", "a frame of type 7 with the key 1 of an ok", 7,
+            record_field(0, b"\x07") + record_field(1, channel_id), reconnect),
         raw("ok_missing_channel_id", "negative", "an ok without its key 1", 2,
             record_field(0, b"\x02"), reconnect),
         raw("error_code_too_long", "negative", "error_reference with a 33-byte code", 6,

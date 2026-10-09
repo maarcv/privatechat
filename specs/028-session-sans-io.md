@@ -236,3 +236,4 @@ Decided on 2026-09-25: the frame keys belong to this spec (`docs/spec.md` §6).
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-10-04 amended after audit AC (`docs/audit-log.md`): a store error other than `LogFull` freezes the channel, with no `check_own_key` and no in-memory `outbox` (R10, R12, R14)
 - 2026-10-04 amended after audit AC (`docs/audit-log.md`): an echo is no outcome; a lost `ack` is recovered by the republish (R11, T11)
+- 2026-10-09 slice (a) implemented; `docs/spec.md` §6 brought up to date as "Public API changes" says (audit AJ, `docs/audit-log.md`)

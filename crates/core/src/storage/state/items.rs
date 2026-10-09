@@ -7,15 +7,10 @@ use zeroize::Zeroizing;
 
 use super::super::{ID_LEN, KEY_LEN, MAX_NAME, SIGNATURE_LEN, StoreError, required, within};
 use crate::crypto::{PublicKey, Signature};
-use crate::proto::envelope::BLOB_OVERHEAD;
-use crate::proto::payload::{MAX_BLOCKS, PAD_BLOCK};
+use crate::proto::envelope::MAX_BLOB;
 use crate::proto::record::{
     BOOL_LEN, FIELD_HEADER_LEN, Reader, U8_LEN, U64_LEN, UnknownKeys, Writer, record_len,
 };
-
-/// The largest sealed blob, of 63 padding blocks (spec 013-wire-message):
-/// 64 673 bytes.
-pub(crate) const MAX_BLOB: usize = BLOB_OVERHEAD + PAD_BLOCK * MAX_BLOCKS;
 
 /// The largest peer record: every field present at its maximum.
 pub(crate) const MAX_PEER_RECORD: usize =

@@ -5,9 +5,9 @@ use proptest::collection::vec as bytes_of;
 use proptest::prelude::{ProptestConfig, any, proptest};
 
 use super::{
-    QR_CHANNEL, config_parse_qr_verdict, config_parse_verdict, log_record_decode_verdict,
-    payload_decode_verdict, receive_signed_verdict, receive_verdict, record_decode_verdict,
-    settings_decode_verdict, state_decode_verdict, verify_qr_parse_verdict,
+    QR_CHANNEL, config_parse_qr_verdict, config_parse_verdict, frame_decode_verdict,
+    log_record_decode_verdict, payload_decode_verdict, receive_signed_verdict, receive_verdict,
+    record_decode_verdict, settings_decode_verdict, state_decode_verdict, verify_qr_parse_verdict,
 };
 use crate::Error;
 use crate::crypto::{self, Nonce, PublicKey, Secret};
@@ -17,6 +17,7 @@ use crate::proto::fingerprint;
 use crate::proto::payload::{Payload, PayloadKind};
 use crate::proto::record::UnknownKeys;
 use crate::proto::record::test_schema::{TestRecord, decode_test_record};
+use crate::session::frames::Frame;
 
 const ROOT_MANIFEST: &str = include_str!("../../../../Cargo.toml");
 const FUZZ_MANIFEST: &str = include_str!("../../fuzz/Cargo.toml");
@@ -293,6 +294,13 @@ fn s016_t08_r08_seeds_reach_their_entries() {
     assert!(off_the_minute.validate().is_err());
     assert_eq!(payload_decode_verdict(&encoded), Ok(()));
     assert_eq!(payload_decode_verdict(&[]), Err(Error::BadPayload));
+
+    let ok = Frame::Ok {
+        channel_id: [4; 16],
+    }
+    .encode()
+    .unwrap();
+    assert!(matches!(frame_decode_verdict(&ok), Ok(Frame::Ok { .. })));
 }
 
 /// Spec 016, R9: one nightly job per target, each installing the dated

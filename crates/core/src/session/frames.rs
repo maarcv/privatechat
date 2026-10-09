@@ -9,8 +9,8 @@
 
 use crate::Error;
 use crate::proto::config::VERSION as PROTO_VERSION;
+use crate::proto::envelope::MAX_BLOB;
 use crate::proto::record::{Reader, RecordError, UnknownKeys, Writer};
-use crate::storage::state::items::MAX_BLOB;
 
 #[cfg(test)]
 mod tests;
@@ -21,8 +21,10 @@ pub(crate) const MAX_FRAME: usize = 70_000;
 /// The most items of `hello.proto_versions` the session accepts (R2).
 pub(crate) const MAX_PROTO_VERSIONS: usize = 8;
 
-/// The largest `error.code` and `error.message`, in bytes of UTF-8 (R1).
+/// The largest `error.code`, in bytes of UTF-8 (R1).
 pub(crate) const MAX_ERROR_CODE: usize = 32;
+
+/// The largest `error.message`, in bytes of UTF-8 (R1).
 pub(crate) const MAX_ERROR_MESSAGE: usize = 256;
 
 /// The values of key 0, `type` (the table "Frames").
@@ -42,7 +44,7 @@ const VERSION_ITEM_LEN: usize = 1;
 
 /// One frame of the protocol, with the fields of the table "Frames". It
 /// derives no `PartialEq`: the tests compare encodings.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum Frame {
     /// Server → client, first on every connection.
     Hello {
@@ -132,8 +134,10 @@ impl Frame {
         let mut writer = Writer::with_capacity(MAX_FRAME);
         writer.u8(KEY_TYPE, self.type_byte()).map_err(bad_payload)?;
         self.write_fields(&mut writer).map_err(bad_payload)?;
-        // A frame is ciphertext and public fields: it leaves the wiping buffer.
-        Ok(core::mem::take(&mut *writer.finish()))
+        // A frame is ciphertext and public fields: it leaves the wiping
+        // buffer, copied at its length, so that a queue of small frames does
+        // not hold 70 000 bytes each.
+        Ok(writer.finish().to_vec())
     }
 
     /// The frame of a record, under `UnknownKeys::Ignore` (R1).
@@ -271,8 +275,8 @@ impl Frame {
 /// The version rule of R2 over a decoded `hello.proto_versions`: 1 to 8
 /// items, one of them the `proto_version` of the channels.
 pub(crate) fn is_supported(proto_versions: &[u8]) -> bool {
-    (1..=MAX_PROTO_VERSIONS).contains(&proto_versions.len())
-        && proto_versions.contains(&PROTO_VERSION)
+    // An empty list holds no version, so `contains` refuses it too.
+    proto_versions.len() <= MAX_PROTO_VERSIONS && proto_versions.contains(&PROTO_VERSION)
 }
 
 /// One item of `proto_versions`; the reader has bounded it to one byte, so
