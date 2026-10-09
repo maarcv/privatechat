@@ -35,6 +35,7 @@ jobs:
           - settings_decode
           - channel_decrypt
           - frame_decode
+          - session_on_frame
     steps:
       - uses: actions/checkout@v7
       - name: s016_t09_r09_install_nightly_and_cargo_fuzz

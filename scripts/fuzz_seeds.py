@@ -83,7 +83,58 @@ TARGETS: dict[str, tuple[str, Callable[[dict], bool], Seed]] = {
     "channel_decrypt": ("013", lambda v: True,
                         lambda v: times(v) + CHANNEL_SERVER_ID + field(v, "blob")),
     "frame_decode": ("028", lambda v: True, lambda v: field(v, "frame")),
+    "session_on_frame": ("028 013", lambda v: True, lambda v: framed(session_frame(v))),
 }
+
+
+def framed(frame: bytes) -> bytes:
+    """One frame in the layout of `session_on_frame`: `BE16(len) ‖ frame` (spec 028 R3)."""
+    return len(frame).to_bytes(2, "big") + frame
+
+
+# The `channel_id` every frame of `028.json` names.
+VECTOR_028_CHANNEL = bytes(range(0x10, 0x20))
+# The key of `channel_id` by frame `type` (spec 028, table "Frames").
+CHANNEL_KEY = {2: 1, 3: 1, 5: 1, 6: 3}
+PUSH_TYPE = 5
+
+
+def record_fields(record: bytes) -> list[tuple[int, bytes]] | None:
+    """The `key ‖ BE32(len) ‖ value` fields of a record of spec 017, or `None` for broken framing."""
+    fields, at = [], 0
+    while at < len(record):
+        if at + 5 > len(record):
+            return None
+        key, size = record[at], int.from_bytes(record[at + 1:at + 5], "big")
+        if at + 5 + size > len(record):
+            return None
+        fields.append((key, record[at + 5:at + 5 + size]))
+        at += 5 + size
+    return fields
+
+
+def record(fields: list[tuple[int, bytes]]) -> bytes:
+    return b"".join(bytes([key]) + len(value).to_bytes(4, "big") + value for key, value in fields)
+
+
+def text_k1_channel() -> bytes:
+    return next(field(v, "channel_id") for v in load("013") if v["name"] == "text_k1")
+
+
+def session_frame(v: dict) -> bytes:
+    """The frame of a `session_on_frame` seed (spec 028 R3): a 028 frame with its `channel_id`
+    set to the channel the target subscribes, so that it passes R9's routing; or a 013 blob as a
+    `push` to that channel at its `received_at`, so that the seeds reach `decrypt`."""
+    channel = text_k1_channel()
+    if "frame" not in v["inputs"]:
+        return record([(0, bytes([PUSH_TYPE])), (1, channel), (2, CHANNEL_SERVER_ID),
+                       (3, field(v, "received_at")), (4, field(v, "blob"))])
+    frame = field(v, "frame")
+    fields = record_fields(frame)
+    if not fields or fields[0][0] != 0 or len(fields[0][1]) != 1:
+        return frame
+    key = CHANNEL_KEY.get(fields[0][1][0])
+    return record([(k, channel if k == key and len(value) == 16 else value) for k, value in fields])
 
 
 # The `server_id` of every `channel_decrypt` seed (spec 021-channel-session R29).
@@ -99,6 +150,8 @@ def read_back(target: str, seed: bytes) -> dict[str, bytes]:
     if target == "channel_decrypt":
         return {"received_at": seed[:8], "now": seed[8:16], "server_id": seed[16:32],
                 "blob": seed[32:]}
+    if target == "session_on_frame":
+        return {"len": seed[:2], "frame": seed[2:]}
     if target == "receive_signed":
         return {"counter": seed[:8], "nonce": seed[8:32], "received_at": seed[32:40],
                 "now": seed[40:48], "padded": seed[48:]}
@@ -115,6 +168,19 @@ def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
     if target == "channel_decrypt":
         return {"received_at": field(v, "received_at"), "now": field(v, "now"),
                 "server_id": CHANNEL_SERVER_ID, "blob": field(v, "blob")}
+    if target == "session_on_frame":
+        # Written out apart from `session_frame`, so that a retargeting that breaks fails here.
+        channel = text_k1_channel()
+        if "frame" in v["inputs"]:
+            frame = field(v, "frame")
+            if v["inputs"]["frame_type"] in (2, 3, 5, 6):  # `ok`, `publish`, `push`, `error`
+                frame = frame.replace(VECTOR_028_CHANNEL, channel)
+        else:
+            blob, received_at = field(v, "blob"), field(v, "received_at")
+            frame = (b"\x00\x00\x00\x00\x01\x05" + b"\x01\x00\x00\x00\x10" + channel
+                     + b"\x02\x00\x00\x00\x10" + bytes(16) + b"\x03\x00\x00\x00\x08" + received_at
+                     + b"\x04" + len(blob).to_bytes(4, "big") + blob)
+        return {"len": len(frame).to_bytes(2, "big"), "frame": frame}
     if target == "receive_signed":
         return {"counter": field(v, "counter"), "nonce": field(v, "nonce"),
                 "received_at": field(v, "received_at"), "now": field(v, "now"),
@@ -130,7 +196,7 @@ def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
 SEED_COUNTS = {"record_decode": 31, "config_parse": 27, "config_parse_qr": 32,
                "payload_decode": 17, "receive": 30, "receive_signed": 18, "verify_qr_parse": 6,
                "state_decode": 2, "log_record_decode": 4, "settings_decode": 2,
-               "channel_decrypt": 30, "frame_decode": 14}
+               "channel_decrypt": 30, "frame_decode": 14, "session_on_frame": 44}
 
 
 def check_s016_t08_r08_corpus_is_seeded() -> None:

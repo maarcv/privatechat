@@ -3,24 +3,30 @@
 //! every frame its socket received and every tick, and which returns the
 //! frames to write and the events to show.
 //!
-//! This slice holds the connection and the subscription (R1, R2 and R5–R7)
-//! and marks a channel subscribed at its `ok`. Later slices of spec 028
-//! add truncation and `synced` (R8, R9), traffic and outcomes (R10–R14),
-//! the publish rate (R15), the error codes other than `nonce_expired`
-//! (R16), and, with `rate_limited`, the one clause of R7 only it can
-//! reach: a `subscribe` queued again after it is released however old its
-//! nonce.
+//! These slices hold the connection and the subscription (R1, R2 and
+//! R5–R7), the truncation (R8) and the `ok` with what follows it (R9).
+//! Later slices of spec 028 add traffic, its stalls and the freeze after a
+//! store failure (R10), outcomes and the `outbox` on send and tick
+//! (R11–R14), the publish rate (R15), the error codes other than
+//! `nonce_expired` (R16), and, with `rate_limited`, the one clause of R7
+//! only it can reach: a `subscribe` queued again after it is released
+//! however old its nonce.
 
-use core::fmt;
 use std::collections::{BTreeMap, VecDeque};
 
-use super::channel::{Channel, key_prefix};
+use super::channel::{Channel, ClientRef};
 use super::frames::{CODE_NONCE_EXPIRED, Frame, is_supported};
 use crate::Error;
 use crate::crypto;
 use crate::proto::auth::auth_message;
 use crate::proto::envelope::ttl_ms;
+use crate::storage::StoreError;
+use sync::Truncation;
 
+pub use event::Event;
+
+mod event;
+mod sync;
 #[cfg(test)]
 mod tests;
 
@@ -39,46 +45,16 @@ const HELLO_WAIT_MS: u64 = 50_000;
 /// `since` is the cursor rounded down to the minute (R6).
 const MINUTE_MS: u64 = 60_000;
 
-/// What the session tells the client, by channel or by connection. Its
-/// `Debug` shows a channel by the 4-byte prefix of its id (AGENTS 19).
-#[derive(PartialEq, Eq)]
-pub enum Event {
-    /// The channel's backlog arrived and live messages follow (R9).
-    Subscribed {
-        /// The channel.
-        channel: [u8; 16],
-    },
-    /// The server speaks no version of this app (R2).
-    UnsupportedServer {
-        /// The connection.
-        connection: u64,
-    },
-    /// The client should close the socket and connect again.
-    Reconnect {
-        /// The connection.
-        connection: u64,
-    },
-}
-
-impl fmt::Debug for Event {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Event::Subscribed { channel } => write!(f, "Subscribed({})", key_prefix(channel)),
-            Event::UnsupportedServer { connection } => {
-                write!(f, "UnsupportedServer({connection})")
-            }
-            Event::Reconnect { connection } => write!(f, "Reconnect({connection})"),
-        }
-    }
-}
-
 /// The `Device`'s open channels, found by `channel_id`.
 pub(crate) type Channels = Vec<Channel>;
 
-/// What one call produced.
+/// What one call produced. A store failure in one channel goes to
+/// `failed`, for the `Device` (spec 027-core-api R14), and the session
+/// carries on with the others.
 #[derive(Debug, Default)]
 pub(crate) struct Step {
     pub(crate) events: Vec<Event>,
+    pub(crate) failed: Vec<([u8; 16], StoreError)>,
 }
 
 /// Where a channel's subscription stands on this connection.
@@ -118,6 +94,17 @@ pub(crate) struct Session {
     /// When the last `subscribe` of the connection was released (R6).
     last_release: Option<u64>,
     subscriptions: BTreeMap<[u8; 16], Subscription>,
+    truncations: BTreeMap<[u8; 16], Truncation>,
+    /// When the latest `on_connect`, `on_tick` or `on_frame` came (R9).
+    last_call: u64,
+    /// When the latest frame came (R9).
+    last_frame: u64,
+    /// R9's stop after a gap between calls: no `synced` until the next
+    /// connection.
+    sync_stopped: bool,
+    /// The entries published on this connection and not yet answered, with
+    /// their channel.
+    in_flight: BTreeMap<ClientRef, [u8; 16]>,
     outgoing: Vec<Vec<u8>>,
 }
 
@@ -133,6 +120,11 @@ impl Session {
             queue: VecDeque::new(),
             last_release: None,
             subscriptions: BTreeMap::new(),
+            truncations: BTreeMap::new(),
+            last_call: 0,
+            last_frame: 0,
+            sync_stopped: false,
+            in_flight: BTreeMap::new(),
             outgoing: Vec::new(),
         }
     }
@@ -142,6 +134,7 @@ impl Session {
     pub(crate) fn on_connect(&mut self, now: u64, skip: &[[u8; 16]]) {
         self.forget_connection(Link::AwaitingHello { since: now });
         self.skip = skip.to_vec();
+        self.last_call = now;
     }
 
     /// The socket is closed (R5): nothing is queued until `on_connect`.
@@ -155,6 +148,8 @@ impl Session {
         if matches!(self.link, Link::Closed) {
             return step;
         }
+        self.check_gap(now, &mut step);
+        self.last_frame = now;
         match Frame::decode(frame) {
             // R1: a frame that breaks its schema is dropped.
             Err(_) => self.reconnect(&mut step),
@@ -162,7 +157,7 @@ impl Session {
                 server_nonce,
                 proto_versions,
             }) => self.on_hello(server_nonce, &proto_versions, channels, now, &mut step),
-            Ok(Frame::Ok { channel_id }) => self.on_ok(channel_id, &mut step),
+            Ok(Frame::Ok { channel_id }) => self.on_ok(channel_id, channels, now, &mut step),
             Ok(Frame::Error {
                 code, channel_id, ..
             }) => self.on_error(&code, channel_id, now, &mut step),
@@ -171,10 +166,13 @@ impl Session {
         step
     }
 
-    /// The clock moved: check the wait for a `hello` (R7) and release the
-    /// next `subscribe` (R6).
+    /// The clock moved: check the gap since the last call and the silence
+    /// before an `ok`, sync the subscribed channels (R9), check the wait
+    /// for a `hello` (R7) and release the next `subscribe` (R6).
     pub(crate) fn on_tick(&mut self, channels: &mut Channels, now: u64) -> Step {
         let mut step = Step::default();
+        self.check_gap(now, &mut step);
+        self.keep_synced(channels, now, &mut step);
         match self.link {
             Link::AwaitingHello { since } if expired(since, HELLO_WAIT_MS, now) => {
                 self.reconnect(&mut step);
@@ -196,7 +194,7 @@ impl Session {
         &mut self,
         server_nonce: [u8; 32],
         proto_versions: &[u8],
-        channels: &Channels,
+        channels: &mut Channels,
         now: u64,
         step: &mut Step,
     ) {
@@ -220,27 +218,28 @@ impl Session {
             .collect();
         // Stable: equal expiries keep the `Device`'s order.
         pending.sort_by_key(|(order, _)| *order);
+        for (_, channel_id) in &pending {
+            if let Some(channel) = find_mut(channels, channel_id) {
+                self.decide_truncation(channel, now, step);
+            }
+        }
         self.queue = pending.into_iter().map(|(_, id)| id).collect();
         self.release(hello, channels, now, step);
     }
 
-    /// An `ok` of a channel awaiting one marks it subscribed (R9); any other
-    /// is ignored.
-    fn on_ok(&mut self, channel_id: [u8; 16], step: &mut Step) {
-        if let Some(state @ Subscription::AwaitingOk) = self.subscriptions.get_mut(&channel_id) {
-            *state = Subscription::Subscribed;
-            step.events.push(Event::Subscribed {
-                channel: channel_id,
-            });
-        }
-    }
-
     /// `nonce_expired` (R16): the unreleased `subscribe`s are discarded, the
     /// named channel is again not subscribed, and the wait for a fresh
-    /// `hello` starts (R7), unless one is already running.
+    /// `hello` starts (R7), unless one is already running. One naming a
+    /// subscribed channel, which no `subscribe` awaits, is a `Reconnect`:
+    /// subscribing it again would judge its truncation by a `last` older
+    /// than the ticks' `synced`, and hide a deletion (R8, R9).
     fn on_error(&mut self, code: &str, channel_id: Option<[u8; 16]>, now: u64, step: &mut Step) {
         if code != CODE_NONCE_EXPIRED {
             return;
+        }
+        let named = channel_id.and_then(|channel_id| self.subscriptions.get(&channel_id));
+        if let Some(Subscription::Subscribed) = named {
+            return self.reconnect(step);
         }
         self.queue.clear();
         if let Link::Ready(_) = self.link {
@@ -289,10 +288,14 @@ impl Session {
         }
     }
 
+    /// Asks for a new connection, once a step whatever the causes.
     fn reconnect(&self, step: &mut Step) {
-        step.events.push(Event::Reconnect {
+        let reconnect = Event::Reconnect {
             connection: self.connection,
-        });
+        };
+        if !step.events.contains(&reconnect) {
+            step.events.push(reconnect);
+        }
     }
 
     /// Everything that belongs to one socket (R5).
@@ -302,6 +305,9 @@ impl Session {
         self.queue.clear();
         self.last_release = None;
         self.subscriptions.clear();
+        self.truncations.clear();
+        self.sync_stopped = false;
+        self.in_flight.clear();
         self.outgoing.clear();
     }
 }
@@ -310,6 +316,13 @@ impl Session {
 /// than `now`, which only a clock set back gives, counts as long past.
 fn expired(from: u64, limit: u64, now: u64) -> bool {
     from > now || now.saturating_sub(from) > limit
+}
+
+/// The channel of `channel_id` among the `Device`'s, to change.
+fn find_mut<'a>(channels: &'a mut Channels, channel_id: &[u8; 16]) -> Option<&'a mut Channel> {
+    channels
+        .iter_mut()
+        .find(|channel| channel.config().channel_id() == *channel_id)
 }
 
 /// The channel of `channel_id` among the `Device`'s.

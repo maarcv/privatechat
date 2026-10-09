@@ -33,5 +33,6 @@ pub(crate) const SENT_AT: u64 = 1_790_000_040_000;
 pub(crate) const BODY: &[u8] = b"Hello, channel.";
 #[cfg(test)]
 pub(crate) const RECEIVED_AT: u64 = 1_790_000_041_500;
-#[cfg(test)]
+/// The `now` of the vector, also the fixed time of the `session_on_frame`
+/// fuzz target (spec 028-session-sans-io R3).
 pub(crate) const NOW: u64 = 1_790_000_042_000;

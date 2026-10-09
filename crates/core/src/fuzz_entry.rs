@@ -19,6 +19,7 @@ use crate::proto::payload::{MAX_BLOCKS, PAD_BLOCK, Payload};
 use crate::proto::record::UnknownKeys;
 use crate::proto::record::test_schema::{TypesRecord, decode_test_record};
 use crate::session::channel::{Channel, Received};
+use crate::session::connection::{Event, Session};
 use crate::session::frames::Frame;
 use crate::storage::{ChannelState, LogRecord, Settings, StoreError};
 
@@ -107,6 +108,13 @@ pub fn channel_decrypt(data: &[u8]) {
 /// `frame_decode`: one frame of spec 028-session-sans-io.
 pub fn frame_decode(data: &[u8]) {
     let _ = frame_decode_verdict(data);
+}
+
+/// `session_on_frame`: frames of spec 028-session-sans-io, each
+/// `BE16(len) ‖ frame`, read by a session subscribed to the channel of
+/// `channel_decrypt` (R3).
+pub fn session_on_frame(data: &[u8]) {
+    let _ = session_on_frame_verdict(data);
 }
 
 /// The verdict of `record_decode`; `None` for an input with no policy byte.
@@ -203,6 +211,39 @@ pub(crate) fn channel_decrypt_verdict(data: &[u8]) -> Option<Result<Option<Recei
 /// The verdict of `frame_decode`.
 pub(crate) fn frame_decode_verdict(data: &[u8]) -> Result<Frame, Error> {
     Frame::decode(data)
+}
+
+/// The verdict of `session_on_frame`: the events of a fixed `hello` and
+/// `ok` at `text_k1`'s `now`, then of the input's frames; a trailing part
+/// shorter than its length is dropped.
+pub(crate) fn session_on_frame_verdict(data: &[u8]) -> Result<Vec<Event>, Error> {
+    let config = text_k1_config()?;
+    let own = Secret::from_bytes(text_k1::SENDER_SEED);
+    let mut channels = vec![Channel::for_fuzzing(&config, &own)?];
+    let channel_id = config.channel_id();
+    let mut session = Session::new(0, vec![channel_id]);
+    let now = text_k1::NOW;
+    session.on_connect(now, &[]);
+    let hello = Frame::Hello {
+        server_nonce: [0; 32],
+        proto_versions: vec![1],
+    };
+    let mut events = session
+        .on_frame(&hello.encode()?, &mut channels, now)
+        .events;
+    let ok = Frame::Ok { channel_id }.encode()?;
+    events.extend(session.on_frame(&ok, &mut channels, now).events);
+    let mut rest = data;
+    while let Some((len, tail)) = rest.split_first_chunk::<2>() {
+        let Some((frame, tail)) = tail.split_at_checked(usize::from(u16::from_be_bytes(*len)))
+        else {
+            break;
+        };
+        events.extend(session.on_frame(frame, &mut channels, now).events);
+        session.outgoing();
+        rest = tail;
+    }
+    Ok(events)
 }
 
 /// `verify`, then `open`, in the channel `ctx`.
