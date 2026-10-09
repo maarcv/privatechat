@@ -47,6 +47,12 @@ all far-fetched: outside the threat model of `docs/spec.md` §2, without an
 input that reaches them, or a preference no rule backs. Far-fetched findings
 are listed in the audit record, not fixed.
 
+A round whose passes A and B find nothing, or only far-fetched findings, and
+whose pass C finds only test gaps (surviving mutants of Low or Medium
+severity, no production defect) also ends the audit, once the tests that kill
+those mutants are added and the local CI is clean: hand mutants can always
+find a narrower gap, so they alone never open another round.
+
 Audits are named with the next letters after the last one in
 `docs/audit-log.md` (AH, then AI…), findings numbered within it (AI1, AI2…).
 Each audit adds its entry to `docs/audit-log.md`: rounds, findings, fixes and
