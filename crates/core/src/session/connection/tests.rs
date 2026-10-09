@@ -10,6 +10,9 @@ use crate::session::frames::Frame;
 use crate::storage::Vault;
 use crate::testing::{MemoryServer, MemoryVault};
 
+mod ok;
+mod truncation;
+
 const SERVER: &str = "wss://chat.example.org:9001";
 const HOST: &str = "chat.example.org";
 const CONNECTION: u64 = 7;
@@ -536,11 +539,13 @@ fn s028_t05_r05_reconnect_forgets_connection() {
     assert!(step.events.is_empty());
     assert!(session.outgoing().is_empty());
 
+    // `first` synced at its `ok`, so the never-synced `second` leaves first
+    // (R6).
     session.on_connect(T0 + 1_200, &[]);
     session.on_frame(&hello(3, &[1]), &mut channels, T0 + 1_200);
-    assert_eq!(subscribed_ids(&mut session, &channels), [first]);
-    session.on_tick(&mut channels, T0 + 2_300);
     assert_eq!(subscribed_ids(&mut session, &channels), [second]);
+    session.on_tick(&mut channels, T0 + 2_300);
+    assert_eq!(subscribed_ids(&mut session, &channels), [first]);
 
     session.on_connect(T0 + 10_000, &[second]);
     session.on_frame(&hello(4, &[1]), &mut channels, T0 + 10_000);
@@ -727,6 +732,7 @@ fn s028_t06_r06_subscribe_contents_and_pacing() {
     session.on_frame(&ok(done), &mut two, T0 + 100);
     session.on_frame(&error("nonce_expired", Some(done)), &mut two, T0 + 200);
     session.on_frame(&hello(2, &[1]), &mut two, T0 + 1_100);
+    session.on_tick(&mut two, T0 + 2_200);
     assert!(subscribed_ids(&mut session, &two).contains(&done));
 
     // A session subscribes its own channels alone, whatever the `Device`
@@ -778,42 +784,28 @@ fn s028_t07_r07_nonce_window() {
     assert_eq!(released.len(), 16);
     assert_eq!(released.last(), Some(&(T0 + 30_000)));
 
-    // The second of two channels, at the edge of the window and past it.
-    let mut two = vec![channel(1, DAY, T0), channel(2, DAY, T0)];
-    for (late, leaves) in [(NONCE_WINDOW_MS, true), (NONCE_WINDOW_MS + 1, false)] {
-        let mut session = connected(&two, T0);
-        session.on_frame(&hello(1, &[1]), &mut two, T0);
-        session.outgoing();
-        let step = session.on_tick(&mut two, T0 + late);
-        assert_eq!(session.outgoing().len(), usize::from(leaves));
-        let expected: Vec<Event> = if leaves { vec![] } else { vec![reconnect()] };
-        assert_eq!(step.events, expected);
-        // Past the window the queue is gone: one `Reconnect`, not one a tick.
-        assert!(
-            session
-                .on_tick(&mut two, T0 + late + 1_000)
-                .events
-                .is_empty()
-        );
-        assert!(session.outgoing().is_empty());
-    }
-
-    // Past the window within 1 100 ms of a release: `Reconnect` at once.
-    let mut three = vec![
-        channel(1, DAY, T0),
-        channel(2, DAY, T0),
-        channel(3, DAY, T0),
-    ];
-    let mut session = connected(&three, T0);
-    session.on_frame(&hello(1, &[1]), &mut three, T0);
-    session.on_tick(&mut three, T0 + 49_500);
-    assert_eq!(session.outgoing().len(), 2);
-    assert_eq!(
-        session.on_tick(&mut three, T0 + 50_001).events,
-        [reconnect()]
-    );
+    // Ticks every second release one `subscribe` every two (R6), so 27
+    // channels outlast the window: the 26th leaves at its edge, and the
+    // next tick, past it and within 1 100 ms of that release, is a
+    // `Reconnect` at once. Ticks this close keep R9's 5 000 ms rule quiet.
+    let mut many: Channels = (1..=27).map(|byte| channel(byte, DAY, T0)).collect();
+    let mut session = connected(&many, T0);
+    session.on_frame(&hello(1, &[1]), &mut many, T0);
+    session.outgoing();
+    let (times, events) = tick_releases(&mut session, &mut many, T0, T0 + NONCE_WINDOW_MS, 1_000);
+    assert!(events.is_empty());
+    assert_eq!(times.len(), 25);
+    assert_eq!(times.last(), Some(&(T0 + NONCE_WINDOW_MS)));
+    let step = session.on_tick(&mut many, T0 + NONCE_WINDOW_MS + 1);
+    assert_eq!(step.events, [reconnect()]);
+    assert!(session.outgoing().is_empty());
+    // Past the window the queue is gone: one `Reconnect`, not one a tick.
+    let step = session.on_tick(&mut many, T0 + NONCE_WINDOW_MS + 1_000);
+    assert!(step.events.is_empty());
+    assert!(session.outgoing().is_empty());
 
     // No `hello` after `on_connect`.
+    let mut two = vec![channel(1, DAY, T0), channel(2, DAY, T0)];
     let mut session = connected(&two, T0);
     assert!(
         session
@@ -855,7 +847,7 @@ fn s028_t07_r07_nonce_window() {
 
     // The clock set back: before the `hello` → `Reconnect`; before
     // `on_connect` → `Reconnect`; before the last release only → the next
-    // one leaves.
+    // one leaves, with R9's `Reconnect` for a call earlier than the last.
     let mut session = connected(&two, T0);
     session.on_frame(&hello(1, &[1]), &mut two, T0);
     assert_eq!(
@@ -873,27 +865,41 @@ fn s028_t07_r07_nonce_window() {
     session.on_frame(&hello(1, &[1]), &mut three, T0);
     session.on_tick(&mut three, T0 + 1_100);
     session.outgoing();
-    assert!(session.on_tick(&mut three, T0 + 500).events.is_empty());
+    assert_eq!(session.on_tick(&mut three, T0 + 500).events, [reconnect()]);
     assert_eq!(session.outgoing().len(), 1);
 
-    // A second `hello` replaces the first: a `subscribe` released by a tick
-    // signs its nonce, and its window runs from it.
-    let mut session = connected(&three, T0);
-    session.on_frame(&hello(1, &[1]), &mut three, T0);
+    // A second `hello` replaces the first: the `subscribe`s released by
+    // ticks after it sign its nonce, and its window runs from it, so the
+    // last leaves past the first `hello`'s window.
+    let mut session = connected(&many, T0);
+    session.on_frame(&hello(1, &[1]), &mut many, T0);
     session.outgoing();
-    session.on_frame(&hello(2, &[1]), &mut three, T0 + 40_000);
+    tick_releases(&mut session, &mut many, T0, T0 + 40_000, 1_000);
     session.outgoing();
-    let step = session.on_tick(&mut three, T0 + 40_000 + NONCE_WINDOW_MS - 100);
+    let step = session.on_frame(&hello(2, &[1]), &mut many, T0 + 40_500);
     assert!(step.events.is_empty());
-    let written = subscribes(&mut session);
-    assert_eq!(written.len(), 1);
-    let (pk_ch, _, sig) = written[0];
-    let signer = three
-        .iter()
-        .find(|channel| channel.config().channel_keypair().unwrap().0.0 == pk_ch)
-        .unwrap();
-    let message = section_6_message(2, signer.config().channel_id(), DAY, HOST);
-    assert!(crypto::verify_detached(&PublicKey(pk_ch), &message, &Signature(sig)).is_ok());
+    let mut written = subscribes(&mut session);
+    let mut last = T0 + 40_500;
+    let mut now = T0 + 41_000;
+    while now <= T0 + 40_500 + NONCE_WINDOW_MS {
+        assert!(session.on_tick(&mut many, now).events.is_empty());
+        let released = subscribes(&mut session);
+        if !released.is_empty() {
+            last = now;
+        }
+        written.extend(released);
+        now += 1_000;
+    }
+    assert_eq!(written.len(), 6);
+    assert!(last > T0 + NONCE_WINDOW_MS);
+    for (pk_ch, _, sig) in written {
+        let signer = many
+            .iter()
+            .find(|channel| channel.config().channel_keypair().unwrap().0.0 == pk_ch)
+            .unwrap();
+        let message = section_6_message(2, signer.config().channel_id(), DAY, HOST);
+        assert!(crypto::verify_detached(&PublicKey(pk_ch), &message, &Signature(sig)).is_ok());
+    }
 }
 
 /// Spec 028, R9 (this slice's part): an `ok` of a channel awaiting one →
