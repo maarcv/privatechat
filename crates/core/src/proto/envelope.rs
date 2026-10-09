@@ -12,7 +12,7 @@ use core::ops::Range;
 use super::config::{ChannelId, Config};
 use super::header::{ENC_HDR_LEN, Header, header_keystream};
 use super::keys::{ChannelKeys, message_key};
-use super::payload::{PAD_BLOCK, Payload, PayloadHead, is_padded_len};
+use super::payload::{MAX_BLOCKS, PAD_BLOCK, Payload, PayloadHead, is_padded_len};
 use crate::Error;
 use crate::crypto::{self, CryptoError, Nonce, PublicKey, Secret, Signature, TAG_LEN};
 
@@ -39,6 +39,9 @@ const SIGNATURE_LEN: usize = 64;
 
 /// Everything in a blob but the padded payload: header, tag and signature.
 pub(crate) const BLOB_OVERHEAD: usize = HEADER_LEN + TAG_LEN + SIGNATURE_LEN;
+
+/// The largest sealed blob, of 63 padding blocks: 64 673 bytes.
+pub(crate) const MAX_BLOB: usize = BLOB_OVERHEAD + PAD_BLOCK * MAX_BLOCKS;
 
 /// The domain tag of the message signature (`docs/spec.md` §4, R4).
 pub(crate) const MSG_SIGNATURE_TAG: &[u8; 18] = b"privatechat/msg/v1";

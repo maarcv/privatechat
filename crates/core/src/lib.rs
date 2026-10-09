@@ -43,6 +43,7 @@ mod vectors;
 pub use error::Error;
 pub use proto::config::Config;
 pub use proto::fingerprint::Fingerprint;
+pub use session::frames::Frame;
 pub use storage::{
     ChannelState, DirName, LogRecord, MAX_LOG_ENTRY, MAX_LOG_LEN, MAX_SETTINGS_FILE,
     MAX_STATE_FILE, Settings, StorageKey, Store, StoreError, Vault, WriteBatch, dir_name,

@@ -1,0 +1,227 @@
+{
+  "spec": "028",
+  "proto_version": 1,
+  "vectors": [
+    {
+      "name": "hello_reference",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 028: the hello frame with every key",
+      "inputs": {
+        "frame": "0000000001000100000020404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f02000000050000000101",
+        "frame_type": 0
+      },
+      "expected": {
+        "event": "accepted",
+        "proto_versions": [
+          1
+        ],
+        "server_nonce": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f"
+      }
+    },
+    {
+      "name": "subscribe_reference",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 028: the subscribe frame with every key",
+      "inputs": {
+        "frame": "0000000001010100000020606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0200000004000151800300000040808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf0400000008000001a0c4510840",
+        "frame_type": 1
+      },
+      "expected": {
+        "pk_ch": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "sig": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+        "since": "000001a0c4510840",
+        "ttl_seconds": 86400
+      }
+    },
+    {
+      "name": "ok_reference",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 028: the ok frame with every key",
+      "inputs": {
+        "frame": "0000000001020100000010101112131415161718191a1b1c1d1e1f",
+        "frame_type": 2
+      },
+      "expected": {
+        "channel_id": "101112131415161718191a1b1c1d1e1f"
+      }
+    },
+    {
+      "name": "publish_reference",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 028: the publish frame with every key",
+      "inputs": {
+        "frame": "0000000001030100000010101112131415161718191a1b1c1d1e1f0200000010202122232425262728292a2b2c2d2e2f030000003fc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfe",
+        "frame_type": 3
+      },
+      "expected": {
+        "blob": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfe",
+        "channel_id": "101112131415161718191a1b1c1d1e1f",
+        "client_ref": "202122232425262728292a2b2c2d2e2f"
+      }
+    },
+    {
+      "name": "ack_reference",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 028: the ack frame with every key",
+      "inputs": {
+        "frame": "0000000001040100000010202122232425262728292a2b2c2d2e2f0200000010303132333435363738393a3b3c3d3e3f0300000008000001a0c451f2a0",
+        "frame_type": 4
+      },
+      "expected": {
+        "client_ref": "202122232425262728292a2b2c2d2e2f",
+        "received_at": "000001a0c451f2a0",
+        "server_id": "303132333435363738393a3b3c3d3e3f"
+      }
+    },
+    {
+      "name": "push_reference",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 028: the push frame with every key",
+      "inputs": {
+        "frame": "0000000001050100000010101112131415161718191a1b1c1d1e1f0200000010303132333435363738393a3b3c3d3e3f0300000008000001a0c451f2a0040000003fc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfe",
+        "frame_type": 5
+      },
+      "expected": {
+        "blob": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfe",
+        "channel_id": "101112131415161718191a1b1c1d1e1f",
+        "received_at": "000001a0c451f2a0",
+        "server_id": "303132333435363738393a3b3c3d3e3f"
+      }
+    },
+    {
+      "name": "error_reference",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 028: the error frame with every key",
+      "inputs": {
+        "frame": "000000000106010000000d6368616e6e656c5f71756f7461020000000c6368616e6e656c2066756c6c0300000010101112131415161718191a1b1c1d1e1f0400000010202122232425262728292a2b2c2d2e2f",
+        "frame_type": 6
+      },
+      "expected": {
+        "channel_id": "101112131415161718191a1b1c1d1e1f",
+        "client_ref": "202122232425262728292a2b2c2d2e2f",
+        "code": "6368616e6e656c5f71756f7461",
+        "message": "6368616e6e656c2066756c6c"
+      }
+    },
+    {
+      "name": "hello_nine_versions",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 028: a hello with nine versions, 1 among them",
+      "inputs": {
+        "frame": "0000000001000100000020404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f020000002d000000010100000001020000000103000000010400000001050000000106000000010700000001080000000109",
+        "frame_type": 0
+      },
+      "expected": {
+        "event": "unsupported_server",
+        "proto_versions": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ],
+        "server_nonce": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f"
+      }
+    },
+    {
+      "name": "hello_no_version",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 028: a hello with an empty list",
+      "inputs": {
+        "frame": "0000000001000100000020404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f0200000000",
+        "frame_type": 0
+      },
+      "expected": {
+        "event": "unsupported_server",
+        "proto_versions": [],
+        "server_nonce": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f"
+      }
+    },
+    {
+      "name": "hello_without_1",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 028: a hello with the list [2]",
+      "inputs": {
+        "frame": "0000000001000100000020404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f02000000050000000102",
+        "frame_type": 0
+      },
+      "expected": {
+        "event": "unsupported_server",
+        "proto_versions": [
+          2
+        ],
+        "server_nonce": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f"
+      }
+    },
+    {
+      "name": "ok_unknown_key",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 028: ok_reference and a key 9, ignored",
+      "inputs": {
+        "frame": "0000000001020100000010101112131415161718191a1b1c1d1e1f090000000101",
+        "frame_type": 2
+      },
+      "expected": {
+        "channel_id": "101112131415161718191a1b1c1d1e1f",
+        "event": "accepted"
+      }
+    },
+    {
+      "name": "type_unknown",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 028: a frame of type 7 with the key 1 of an ok",
+      "inputs": {
+        "frame": "0000000001070100000010101112131415161718191a1b1c1d1e1f",
+        "frame_type": 7
+      },
+      "expected": {
+        "error": "BadPayload",
+        "event": "reconnect"
+      }
+    },
+    {
+      "name": "ok_missing_channel_id",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 028: an ok without its key 1",
+      "inputs": {
+        "frame": "000000000102",
+        "frame_type": 2
+      },
+      "expected": {
+        "error": "BadPayload",
+        "event": "reconnect"
+      }
+    },
+    {
+      "name": "error_code_too_long",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 028: error_reference with a 33-byte code",
+      "inputs": {
+        "frame": "0000000001060100000021636363636363636363636363636363636363636363636363636363636363636363020000000c6368616e6e656c2066756c6c0300000010101112131415161718191a1b1c1d1e1f0400000010202122232425262728292a2b2c2d2e2f",
+        "frame_type": 6
+      },
+      "expected": {
+        "error": "BadPayload",
+        "event": "reconnect"
+      }
+    }
+  ]
+}

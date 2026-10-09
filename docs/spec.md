@@ -291,7 +291,7 @@ sequenceDiagram
     C->>S: WS connect (TLS 1.3, no resumption)
     S-->>C: hello(server_nonce, proto_versions)
     C->>S: subscribe(pk_ch, ttl_seconds, sig, since)
-    S-->>C: ok(channel_id, oldest_retained_at, has_more) + push*
+    S-->>C: push* (the backlog since `since`, then the live pushes held meanwhile), then ok(channel_id)
     C->>S: publish(channel_id, client_ref, blob)
     S-->>C: ack(client_ref, server_id, received_at)
     S-->>C: push(channel_id, server_id, received_at, blob) to all subscribers
@@ -306,13 +306,13 @@ sequenceDiagram
 
 | Message | Direction | Fields |
 | --- | --- | --- |
-| `hello` | S→C | `server_nonce` (bytes32), `proto_versions` ([uint], ≤ 8) |
+| `hello` | S→C | `server_nonce` (bytes32), `proto_versions` (list of u8; the client accepts 1 to 8 items, spec 028-session-sans-io R2) |
 | `subscribe` | C→S | `pk_ch` (bytes32), `ttl_seconds` (uint32), `sig` (bytes64), `since` (uint64 ms, optional; absent = everything) |
-| `ok` | S→C | `channel_id` (bytes16), `oldest_retained_at` (uint64 ms), `has_more` (bool) |
-| `publish` | C→S | `channel_id`, `client_ref` (bytes16, `randombytes_buf` for each `publish`), `blob` (bytes) |
+| `ok` | S→C | `channel_id` (bytes16), sent after the channel's whole backlog |
+| `publish` | C→S | `channel_id`, `client_ref` (bytes16, one per `outbox` entry, reused on every publish of it), `blob` (bytes) |
 | `ack` | S→C | `client_ref`, `server_id` (bytes16), `received_at` (uint64 ms) |
 | `push` | S→C | `channel_id`, `server_id`, `received_at`, `blob` |
-| `error` | S→C | `code` (text), `message` (text, no client data) |
+| `error` | S→C | `code` (text), `message` (text, no client data), `channel_id` and `client_ref` (optional: the channel or the publish it answers) |
 
 Error codes: `bad_auth`, `nonce_expired`, `bad_ttl`, `not_subscribed`, `bad_blob`, `rate_limited`, `channel_quota`, `server_full`, `unsupported_version`.
 
@@ -324,11 +324,11 @@ sig = crypto_sign_detached(sk_ch, "privatechat/auth/v1" ‖ server_nonce(32) ‖
 
 where `host` is `Config::host()`: the bytes of `server_url` between the scheme and the optional port, exactly as written under the grammar of spec 011-config-format R5 and R6; the server takes its own hosts the same way (spec 031-auth-channel-signature R8). The server compares it with the `hostnames` list of its configuration, never with the `Host` header. The server checks the TTL range, recomputes `channel_id` from `(pk_ch, ttl_seconds)`, verifies the signature with `core::crypto` and returns the `channel_id` in `ok`. The credential proves having the config, is not reusable by whoever sees it (server, proxy, logs) and the server stores nothing. After 60 s → `error{nonce_expired}` and a new `hello`. Several `subscribe`s within the window reuse the nonce (each one binds a different `channel_id`).
 
-**Version.** The client refuses to connect if `hello.proto_versions` does not include exactly the `proto_version` of the config; there is no downgrade negotiation. More than 8 elements → local error and disconnection.
+**Version.** The client refuses to connect if `hello.proto_versions` does not include exactly the `proto_version` of the config; there is no downgrade negotiation. An empty list or more than 8 elements → local error, and the session sends nothing until it reconnects (spec 028-session-sans-io R2).
 
 **Order and time.** The server assigns `received_at = max(wall_clock_ms, last_received_at + 1)` per process: unique and strictly increasing, so that `ORDER BY received_at` is a total order. Messages are displayed in `received_at` order; the payload's `sent_at` is informative and the client warns if it differs by more than 5 minutes.
 
-**Cursor and gaps.** `server_id` is 16 random bytes (unique, unordered, reveals no volume). The client persists `cursor = received_at` of the last processed `push`, **regardless of the result** (a rejected blob only writes the cursor), in the same commit as any other state of that `push`. On reconnect it sends `since = cursor` **rounded down to the minute**; the resulting duplicates are discarded by `server_id` and by anti-replay. The server returns `ORDER BY received_at` in pages of 500 with `has_more`; `since > now` is treated as `now`; the query filters `expires_at > now`. `oldest_retained_at = now − ttl_ms`; if `since < oldest_retained_at`, the client shows "There may be expired messages before <date>" and `gaps()` does not count the counters before the first message received from each sender in this session (spec 021-channel-session passes `None` as `max_counter` to the gap computation for that first message).
+**Cursor and gaps.** `server_id` is 16 random bytes (unique, unordered, reveals no volume). The client keeps `cursor = max(cursor, min(received_at, now))` of the processed `push`es, **whatever the result** (a rejected blob only moves the cursor), except a push lost to a store failure and a push already expired by the local clock, which leave it where the blob can be fetched again, in the server's time; a commit whose only change is the cursor is made only when its minute changes, and `synced_at`, the local time the channel was last complete, is kept beside it (spec 021-channel-session R20). On reconnect it sends `since = cursor` **rounded down to the minute**; the resulting duplicates are discarded by `server_id` and by anti-replay. The client sends one `subscribe` every 1 100 ms at most. After a `subscribe`, the server streams the channel's whole backlog `ORDER BY received_at`, then the live pushes it held back meanwhile, then `ok` (spec 028-session-sans-io R4); `since > now` is treated as `now`; the query filters `expires_at > now`. The client judges by its own clock, from `max(cursor, synced_at)`, a `synced_at` later than `now` ignored, and the channel's TTL, whether history before the subscription may have expired (spec 028-session-sans-io R8, R9); if so it shows "There may be expired messages before <date>" and `gaps()` does not count the counters before the first message received from each sender in this session (spec 021-channel-session passes `None` as `max_counter` to the gap computation for that first message).
 
 **Authorisation and envelope validation** (spec 030, 033). The server only accepts `publish` for a `channel_id` authenticated with `subscribe` on the same connection; otherwise `error{not_subscribed}`. Before storing a blob it checks, without touching anything else: `1185 ≤ len ≤ 64673`, `(len − 161)` multiple of 1 024, `blob[0] = 0x01` and `blob[1..17] = channel_id`; otherwise `bad_blob`. It verifies no signatures and decrypts nothing.
 
@@ -338,7 +338,7 @@ where `host` is `Config::host()`: the bytes of `server_url` between the scheme a
 
 | Scope | Limit | Response |
 | --- | --- | --- |
-| Connection | 30 `publish`/min; 16 channels; 1 authentication attempt/s; close on the 3rd failed attempt; no valid `subscribe` within 60 s of the `hello` → close; ping every 30 s, no pong within 30 s → close; send queue ≤ 256 frames or 4 MiB, otherwise close (the client resumes with `since`) | `rate_limited`, close |
+| Connection | 30 `publish`/min; 16 channels; 1 authentication attempt/s; close on the 3rd failed attempt; no valid `subscribe` within 60 s of the `hello` → close; ping every 30 s, no pong within 30 s → close; send queue ≤ 256 frames or 4 MiB, otherwise close (the client resumes with `since`); the backlog and the live pushes held behind it do not count (spec 030-ws-protocol R10): the backlog is read one page of at most 256 KiB at a time as the socket drains (R7), and the held pushes are bounded per connection by R8, which ends that one subscription with `rate_limited` | `rate_limited`, close |
 | Channel (all connections) | 120 `publish`/min; 4 MiB/min; maximum retention 64 MiB or 20 000 blobs (the new one is rejected, the old one is not deleted). Counters in memory, rebuilt at startup with `GROUP BY channel_id` | `rate_limited`, `channel_quota` |
 | IP, **unauthenticated connections only** (before the first valid `subscribe`) | 20 simultaneous; 60 new/min. Not applied to connections from `127.0.0.1` (.onion service). The IP is kept in the clear in memory during the connection and is neither persisted nor logged | close |
 | Global | disk quota; `SQLITE_FULL` is never a panic | `server_full` |
@@ -537,7 +537,7 @@ impl Session {                                                                  
 
 - The UI never touches a key. The core never touches the network or the UI: it receives bytes and returns bytes. The UI groups the `Channel`s by the host and port of `server_url`, opens one TLS socket per group, passes frames in both directions and reconnects with backoff when it receives `Event::Reconnect`.
 - No server URL in the code outside the `DEFAULT_SERVER_URL` constant (spec 000).
-- The record encoding and `core::crypto` are crate-internal. `store` and `server` reach them only through `pub` functions of `core` that their own specs define (020-store-files, 030-ws-protocol); each such function that takes external bytes has a fuzz target (AGENTS 21).
+- The record encoding and `core::crypto` are crate-internal. `store` and `server` reach them only through `pub` functions of `core` that a spec defines (020-store-files; 028-session-sans-io for the frames; 030-ws-protocol); each such function that takes external bytes has a fuzz target (AGENTS 21).
 - The core does no I/O and does not read the clock: no `std::net`, `std::fs`, `tokio`, `SystemTime::now`. Time enters as a parameter (`now`). Checked by the dependency test of spec 010 R16 and clippy `disallowed_methods` (AGENTS 10).
 - One data directory per device with a `LOCK` file (advisory), one process: no widget or share extension in v1.
 - `Channel` has no state that has not gone through `commit`: in memory there is the copy loaded at `open`, and every change is written before returning the result.

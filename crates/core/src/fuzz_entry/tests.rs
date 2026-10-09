@@ -5,9 +5,9 @@ use proptest::collection::vec as bytes_of;
 use proptest::prelude::{ProptestConfig, any, proptest};
 
 use super::{
-    QR_CHANNEL, config_parse_qr_verdict, config_parse_verdict, log_record_decode_verdict,
-    payload_decode_verdict, receive_signed_verdict, receive_verdict, record_decode_verdict,
-    settings_decode_verdict, state_decode_verdict, verify_qr_parse_verdict,
+    QR_CHANNEL, config_parse_qr_verdict, config_parse_verdict, frame_decode_verdict,
+    log_record_decode_verdict, payload_decode_verdict, receive_signed_verdict, receive_verdict,
+    record_decode_verdict, settings_decode_verdict, state_decode_verdict, verify_qr_parse_verdict,
 };
 use crate::Error;
 use crate::crypto::{self, Nonce, PublicKey, Secret};
@@ -17,14 +17,15 @@ use crate::proto::fingerprint;
 use crate::proto::payload::{Payload, PayloadKind};
 use crate::proto::record::UnknownKeys;
 use crate::proto::record::test_schema::{TestRecord, decode_test_record};
+use crate::session::frames::Frame;
 
 const ROOT_MANIFEST: &str = include_str!("../../../../Cargo.toml");
 const FUZZ_MANIFEST: &str = include_str!("../../fuzz/Cargo.toml");
 const FUZZ_WORKFLOW: &str = include_str!("../../../../.github/workflows/fuzz.yml");
 
-/// The targets of R2: three added by spec 020-store-files, the last by
-/// spec 021-channel-session.
-const TARGETS: [&str; 11] = [
+/// The targets of R2: three added by spec 020-store-files, one by spec
+/// 021-channel-session, the last by spec 028-session-sans-io.
+const TARGETS: [&str; 12] = [
     "record_decode",
     "config_parse",
     "config_parse_qr",
@@ -36,6 +37,7 @@ const TARGETS: [&str; 11] = [
     "log_record_decode",
     "settings_decode",
     "channel_decrypt",
+    "frame_decode",
 ];
 
 /// The channel of `text_k1`, built here apart from `fuzz_entry`, so that an
@@ -292,6 +294,24 @@ fn s016_t08_r08_seeds_reach_their_entries() {
     assert!(off_the_minute.validate().is_err());
     assert_eq!(payload_decode_verdict(&encoded), Ok(()));
     assert_eq!(payload_decode_verdict(&[]), Err(Error::BadPayload));
+
+    let ok = Frame::Ok {
+        channel_id: [4; 16],
+    }
+    .encode()
+    .unwrap();
+    assert!(matches!(frame_decode_verdict(&ok), Ok(Frame::Ok { .. })));
+}
+
+/// Spec 016, R2: each target is one `[[bin]]` of the fuzz crate, built
+/// from its own file, so that no target is missing from `cargo fuzz build`.
+#[test]
+fn s016_t02_r02_every_target_is_a_bin() {
+    assert_eq!(FUZZ_MANIFEST.matches("[[bin]]").count(), TARGETS.len());
+    for target in TARGETS {
+        let bin = format!("name = \"{target}\"\npath = \"fuzz_targets/{target}.rs\"");
+        assert!(FUZZ_MANIFEST.contains(&bin), "{target}");
+    }
 }
 
 /// Spec 016, R9: one nightly job per target, each installing the dated

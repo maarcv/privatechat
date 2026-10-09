@@ -26,7 +26,7 @@ pub(crate) const CHANNEL_ID_TAG: &[u8; 19] = b"privatechat/chid/v1";
 pub(crate) const CHANNEL_AUTH_CONTEXT: KdfContext = KdfContext::new(*b"chauth__");
 
 /// The one `config_version` and `proto_version` this build speaks (R3).
-const VERSION: u8 = 1;
+pub(crate) const VERSION: u8 = 1;
 
 /// The largest encoded record (R7).
 pub(crate) const MAX_RECORD: usize = 512;

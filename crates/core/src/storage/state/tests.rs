@@ -7,12 +7,12 @@ use proptest::prelude::{any, prop, proptest};
 use super::super::tests::{field, fields, key, list_value, replaced, without};
 use super::super::{DirName, MAX_NAME, MIN_SEALED, StoreError};
 use super::items::{
-    MAX_BLOB, MAX_OLD_KEY, MAX_OUTBOX_ENTRY, MAX_PEER_RECORD, OldKey, OutboxEntry, OutboxKind,
-    PeerRecord,
+    MAX_OLD_KEY, MAX_OUTBOX_ENTRY, MAX_PEER_RECORD, OldKey, OutboxEntry, OutboxKind, PeerRecord,
 };
 use super::{ChannelState, MAX_OLD_KEYS, MAX_OUTBOX, MAX_PEERS, MAX_STATE_RECORD};
 use crate::crypto::{PublicKey, Secret, Signature};
 use crate::proto::config;
+use crate::proto::envelope::MAX_BLOB;
 use crate::proto::record::ITEM_HEADER_LEN;
 use crate::testing::state_eq;
 use crate::vectors::{Kind, Vector};
