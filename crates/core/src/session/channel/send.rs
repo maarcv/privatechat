@@ -21,7 +21,7 @@ const MAX_ORDINARY_OUTBOX: usize = MAX_OUTBOX - 1;
 const EXHAUSTED: u64 = u64::MAX;
 
 /// `sent_at` is a whole minute (spec 013-wire-message R8).
-const MINUTE_MS: u64 = 60_000;
+pub(super) const MINUTE_MS: u64 = 60_000;
 
 impl Channel {
     /// Seals `body` with the next counter and commits the counter, the

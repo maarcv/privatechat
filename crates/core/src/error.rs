@@ -52,6 +52,9 @@ pub enum Error {
     LabelInUse,
     /// One's own key where a peer's is expected (spec 022-peers-tofu R9).
     OwnKey,
+    /// A regeneration while the previous key's `key_retired` is pending
+    /// (spec 025-identity-regen R1).
+    RetirementPending,
     /// A failure the input cannot cause: libsodium failed (to initialise, to
     /// allocate the 64 MiB of Argon2id, or otherwise), an expiry overflowed,
     /// or a bug.

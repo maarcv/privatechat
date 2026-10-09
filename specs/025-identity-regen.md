@@ -37,8 +37,8 @@ One's own old keys are not peers: they go to a short list of their own (`own_old
 ## Interface
 
 ```
-crates/core/src/session/regen.rs          R1–R8
-crates/core/src/session/regen/tests.rs    s025_* tests
+crates/core/src/session/channel/regen.rs          R1–R8 (R4 and R5 called from channel/outbox.rs)
+crates/core/src/session/channel/tests/regen.rs    s025_* tests
 ```
 
 ```rust
@@ -61,6 +61,7 @@ impl Channel {   // pub(crate); spec 027-core-api exposes them through Device
 - A late `ack` changes nothing (R5), so a server that answers late cannot make the device drop the old key before the retirement has arrived in time; re-sealing happens at most once per minute of `now`, and in either direction of the clock (R4), so a clock corrected after the regeneration does not leave the copy stuck in the future.
 - Regeneration is never refused for room (R1): the one remedy to a stolen key cannot be blocked by filling the peer list. An old key dropped from the sixteen of `own_old_keys` is, whenever possible, one whose blobs nobody accepts any more (R1); only sixteen regenerations within one TTL can drop a younger one, whose echoes then appear to this device as an unknown peer.
 - A server that never acknowledges the retirement in time — or a device clock off by more than the margin — keeps it pending for ever; spec 028-session-sans-io holds it between re-seals so that it cannot flood the connection, and only `leave` ends it. Documented.
+- The old key's entries are never mixed with another key's, and no copy of the `key_retired` that left can overtake one of them: R4 hands out no copy while an entry `under_retired_key` is still in the `outbox`, no entry is marked after R1, and R1 refuses a second regeneration until R5 has removed the `key_retired`. So `under_retired_key` always means the key being retired (specs 021 R9 and R17 compare its counters alone), and the echo of a superseded copy, which step 5 reads as a thief's (spec 021 R9), finds no entry of the old key to remove (025-R1, 025-R2, closed).
 - Refusing a second regeneration while one is pending (R1) keeps a single old key in memory; the channel card shows why the button is disabled, and the client warns before leaving a channel with a retirement pending.
 
 ## Public API changes
@@ -69,10 +70,10 @@ None directly: spec 027-core-api exposes `regenerate_identity(now)` and `own_old
 
 ## Test cases
 
-- T01 (covers R1): `s025_t01_r01_regeneration_commit`: one commit; the old `pk` in `own_old_keys`; epoch + 1; `send_counter` 0; the event and `read_only` cleared; with 550 peers it still succeeds; a second call → `RetirementPending`, `commits = 0`; a seventeenth regeneration drops the oldest old key whose blobs have all expired, or else the oldest; after a foreign `key_retired` on a full log → regeneration succeeds, and the new key is neither `read_only` nor exhausted, with no alert; a log planted exactly full (the `testing` builders of spec 020-store-files) → regeneration succeeds, since it appends no record.
+- T01 (covers R1): `s025_t01_r01_regeneration_commit`: one commit; an ordinary entry left from before is marked `under_retired_key`, a later `encrypt` is not; after a delivered retirement a second regeneration finds no entry of the first old key, so only the second old key's entries are marked; the old `pk` in `own_old_keys`; epoch + 1; `send_counter` 0; the event and `read_only` cleared; with 550 peers it still succeeds; a second call → `RetirementPending`, `commits = 0`; a seventeenth regeneration drops the oldest old key whose blobs have all expired, or else the oldest; after a foreign `key_retired` on a full log → regeneration succeeds, and the new key is neither `read_only` nor exhausted, with no alert; a log planted exactly full (the `testing` builders of spec 020-store-files) → regeneration succeeds, since it appends no record.
 - T02 (covers R2): `s025_t02_r02_retirement_sealed`: the entry opens with the old `pk` at counter `2^64 − 1` as a `key_retired`; with 31 ordinary entries it still fits, and is handed out only after the last of them leaves the `outbox`.
 - T03 (covers R3): `s025_t03_r03_old_echoes_are_retired`: an echo of a blob sealed before regeneration → `RetiredKey`, no own-key event, `commits = 0`; after reopening, too.
-- T04 (covers R4, R5): `s025_t04_r04_reseal`: `outbox` in the same minute hands out the same bytes; one minute later a new nonce, `sent_at` and `client_ref`, same position; with `now` one hour before `sent_at` it is re-sealed too; a copy in flight is not re-sealed; with `fail_commits` and a `key_retired` sealed two minutes ago → `Store(Io)`, nothing handed out, the stored copy unchanged.
+- T04 (covers R4, R5): `s025_t04_r04_reseal`: `outbox` in the same minute hands out the same bytes; one minute later a new nonce, `sent_at` and `client_ref`, same position; with `now` one hour before `sent_at` it is re-sealed too; a copy in flight is not re-sealed; the echo of a superseded copy that was handed out → `RetiredKey`, nothing removed, `commits = 0`; with `fail_commits` and a `key_retired` sealed two minutes ago → `Store(Io)`, nothing handed out, the stored copy unchanged.
 - T05 (covers R5): `s025_t05_r05_ack_erases_old_key`: in-time `ack` → `RetirementDelivered`, entry and `retiring_seed` gone; late `ack` → `Ignored`, `commits = 0`; an `ack` whose `received_at` is `sent_at − ttl_ms − 360 001` → `Ignored`, `commits = 0`, `retiring_seed` kept; `ack` of the previous copy → `Ignored`, `commits = 0`.
 - T06 (covers R6): `s025_t06_r06_pending_flag_and_old_keys`: true after R1, false after R5, and after reopening the store in between; `own_old_keys` lists the old key with its time.
 - T07 (covers R7): `s025_t07_r07_old_key_only_for_retirement`: after regeneration every ordinary `encrypt` is sealed with the new key; the state written by R5 holds no old seed.
@@ -93,8 +94,7 @@ None of its own: the blob is the 013 `key_retired` layout; the flow is unit test
 
 ## Open questions
 
-- 025-R2 (from audit AD of spec 021): after a re-seal, a superseded copy of the `key_retired` is in neither the `outbox` nor a kept-signature record, so its echo, at counter `2^64 − 1`, reads at spec 021 R9 step 5 as a thief's blob and removes every ordinary entry `under_retired_key` as not delivered, although the server stored each before that copy (it stores a connection's publishes in order). The usual trigger is an `ack` lost to a reconnect; the cost is entries reported failed that were delivered, and a resend showing the text twice. A thief's `key_retired` at the same counter cannot be told apart. Options: (a) document it as a residual in 021 R9 and Security beside the lost-`ack` residual; (b) keep the signatures of the superseded copies still within the window (at most a handful) and compare them in 021's step-5 check. Spec 021 T09 pins today's behaviour.
-- 025-R1 (from audit AD of spec 021): R1 marks every ordinary entry `under_retired_key`, and specs 021 R9 and R17 read that flag as "the same key". Entries of an earlier old key still waiting for a lost `ack` when a second regeneration comes are marked again, so an `ack` or a thief's blob of the newer old key compares counters of two keys. Options: record the sealing key or epoch per entry, or have R1 drop or bound such entries.
+None.
 
 ## History
 
@@ -122,3 +122,4 @@ None of its own: the blob is the 013 `key_retired` layout; the flow is unit test
 - 2026-10-04 amended after audit AC (`docs/audit-log.md`): no own-key value held in memory to apply and no retry without it (R1); no `key_retired` copy re-sealed in memory when the `outbox` commit fails (R4, R5)
 - 2026-10-04 amended after audit AC (`docs/audit-log.md`): the old key's kept signatures are no longer filtered out by epoch; step 5 stops its echoes first (R3)
 - 2026-10-04 open questions 025-R1 and 025-R2 added from audit AD of spec 021 (`docs/audit-log.md`)
+- 2026-10-09 open questions 025-R1 and 025-R2 closed by the human reviewer: unreachable under R1 and R4 (Security), pinned by T01 and T04; Interface paths follow the channel module layout (`docs/audit-log.md`)

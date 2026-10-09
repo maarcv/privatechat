@@ -4,7 +4,8 @@
 //!
 //! Sending, receiving, the `outbox` and the reads are the later slices of
 //! spec 021, the peers spec 022's (`peers.rs`); the message list,
-//! retirement, regeneration and the peer limits are specs 023–026's.
+//! retirement and the peer limits are specs 023, 024 and 026's, and
+//! regeneration spec 025's (`regen.rs`).
 
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
@@ -24,6 +25,7 @@ mod own_key;
 mod peers;
 mod purge;
 mod receive;
+mod regen;
 mod retired;
 mod send;
 mod status;
@@ -187,6 +189,16 @@ pub struct Gap {
     pub anomalous: bool,
     /// Counted across a truncation of the history.
     pub spans_truncation: bool,
+}
+
+/// One of one's own old keys in a channel and when it was retired (spec
+/// 025-identity-regen R6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OldKey {
+    /// The old `pk_u`.
+    pub pk: PeerId,
+    /// The `now` of its regeneration.
+    pub retired_at: u64,
 }
 
 /// The in-session values a reopen of the same channel keeps (R1, spec

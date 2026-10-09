@@ -170,9 +170,10 @@ fn s021_t09_r09_retiring_key() {
         }
     }
 
-    // The echo of a superseded `key_retired` copy keeps the pending one;
-    // it reads as a thief's, so the old entries go as not delivered
-    // (open question 025-R2).
+    // A blob at the `key_retired` counter that is not the pending copy
+    // reads as a thief's and removes the old entries. Spec 025 R4 hands
+    // out no copy while they wait, so a superseded copy's echo never meets
+    // them (025 Security); this planted state tests step 5 alone.
     let (mut channel, _, _, old_seed, entries) = retiring();
     let retired = Payload {
         kind: PayloadKind::KeyRetired,
