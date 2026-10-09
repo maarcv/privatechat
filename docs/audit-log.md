@@ -32,6 +32,14 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AI12 | Four mutants survived: `forget` removing other records, a muted stranger entering the labelled budget, the total confused with the labelled budget in the room check and in the eviction (C) | Medium | One clause each in T02–T05 |
 | AI13 | R4's "create a record when 550 exist" is unreachable with at most 50 unknowns, and its test plants 51 (C) | Far-fetched | Kept, as R4 names it; the test says the state is planted |
 
+**Round 4.** Fresh passes. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI14 | R3, §7 and the `evict_stranger` doc gave a clock that was ahead as the only source of a stamp later than `now`, and Security put the "newcomer looks oldest" case while the clock is behind, where it is the newest; it holds after the correction, unseen by `clock_off` (A, B) | Low | R3, §7, the doc and Security reworded |
+| AI15 | T03's "never itself" no longer reached the hazard under the amended R3; pushing the newcomer before the eviction survived (A) | Medium | A clause with every stranger at the same `now` and the newcomer's key the smallest; T03 reworded |
+| AI16 | Five mutants survived: the server's `received_at` passed to the eviction, `first_seen` in the key, a slack in the comparison, `last_seen` kept by `update_peer`, `forget` removing every labelled record (C) | Medium | The future-stamp clause rewritten (`ahead` 0 and a year, `first_seen` before the jump, a stranger writing again, a `received_at` behind); a labelled bystander in T05 |
+
 Left as they are: the third copy of "remove a record, then its gap" (C8), one line at each place; `unknown` and the test `text` helper not shared with other test files (C17); the O(550) counts per new key (C13), below the cost of the signature check and the state rewrite.
 
 ## Spec 025 implemented

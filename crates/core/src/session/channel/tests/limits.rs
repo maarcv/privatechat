@@ -241,7 +241,8 @@ fn s026_t03_r03_lru_eviction() {
         (stranger(3), stranger(2))
     };
 
-    // `now` below every `last_seen`: the newcomer is never the oldest.
+    // `now` below every `last_seen`: every stranger ranks as stamped ahead,
+    // still oldest first, ties to the smaller key.
     let newcomer = stranger(900);
     channel.take_peers_changed();
     text(&mut channel, newcomer, 0, NOW - 3_600).unwrap();
@@ -323,20 +324,46 @@ fn s026_t03_r03_lru_eviction() {
         assert_eq!(channel.status().ignored_keys, 0);
     }
 
-    // Strangers stamped a year ahead, by a clock since corrected, go before
-    // an older newcomer: they no longer shield a flood.
+    // Never itself: every stranger heard from at the same `now` and the
+    // newcomer's key the smallest of all, the newcomer stays.
     let (mut channel, _, _) = receiver(3_600);
-    let year = 365 * 24 * 3_600_000;
-    let mut peers = crowd(0, 49, false);
+    let mut peers = crowd(0, 50, false);
     for peer in &mut peers {
-        peer.last_seen += year;
+        peer.last_seen = NOW;
     }
+    let smallest = peers.iter().map(|peer| peer.pk.0).min().unwrap();
     plant(&mut channel, peers);
-    text(&mut channel, stranger(900), 0, NOW - 3_600).unwrap();
-    text(&mut channel, stranger(901), 0, NOW).unwrap();
-    assert!(has_record(&channel, stranger(900)));
-    assert!(!has_record(&channel, stranger(1)));
-    assert_eq!(channel.status().ignored_keys, 1);
+    let newcomer = (1_000..)
+        .map(stranger)
+        .find(|seed| pk_of(*seed) < smallest)
+        .unwrap();
+    text(&mut channel, newcomer, 0, NOW).unwrap();
+    assert!(has_record(&channel, newcomer));
+    assert!(channel.peer(&PublicKey(smallest)).is_none());
+    assert_eq!(channel.state.peers.len(), MAX_UNKNOWN_PEERS);
+
+    // Strangers stamped ahead, by a clock since corrected, go before an
+    // older newcomer: they no longer shield a flood. Stamped a few ms or a
+    // year ahead, first seen before the jump; one that writes again is
+    // stamped `now`; the server's `received_at` decides nothing.
+    for ahead in [0, 365 * 24 * 3_600_000] {
+        let (mut channel, _, _) = receiver(3_600);
+        let mut peers = crowd(0, 49, false);
+        for peer in &mut peers {
+            peer.first_seen = NOW - HOUR_MS;
+            peer.last_seen += ahead;
+        }
+        plant(&mut channel, peers);
+        text(&mut channel, stranger(900), 0, NOW - 3_600).unwrap();
+        text(&mut channel, stranger(1), 11, NOW).unwrap();
+        let blob = sealed(&channel, stranger(901), 0, NOW, PayloadKind::Text, None);
+        channel
+            .decrypt(&blob, [0x91; 16], NOW - 4_000, NOW)
+            .unwrap();
+        assert!(has_record(&channel, stranger(900)) && has_record(&channel, stranger(1)));
+        assert!(!has_record(&channel, stranger(2)));
+        assert_eq!(channel.status().ignored_keys, 1);
+    }
 
     // At 550 the total stays at 550: with 500 labelled, and with 501 after
     // a retirement by hand and only 49 strangers.
@@ -465,6 +492,7 @@ fn s026_t05_r05_forget() {
                 ..unknown(stranger(1), NOW, false)
             },
             retired,
+            labelled(9),
         ],
     );
     for seed in [stranger(1), stranger(2)] {
@@ -474,6 +502,8 @@ fn s026_t05_r05_forget() {
         assert!(channel.take_peers_changed());
         assert_eq!(handle.all_commits(), commits + 1);
         assert!(!has_record(&reopened(&handle), seed));
+        // Only that record: a bystander the user named stays.
+        assert!(reopened(&handle).peer(&labelled(9).pk).is_some());
     }
     // The gap goes with the record, another's stays (spec 021 R24).
     for seed in [stranger(4), stranger(5)] {

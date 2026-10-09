@@ -75,8 +75,9 @@ impl Channel {
 /// Makes room in `next` for a peer a consumed message creates at `now`
 /// (R3): at either limit, removes the stranger heard from longest ago that
 /// is not muted, ties broken by the smaller key, and returns its key. A
-/// `last_seen` later than `now` ranks oldest: only a clock that was ahead
-/// left it, and it would otherwise shield a flood for years.
+/// `last_seen` later than `now` ranks oldest: a clock that was ahead left
+/// it, or one now behind reads it, and it would otherwise shield a flood
+/// for years.
 pub(super) fn evict_stranger(next: &mut ChannelState, now: u64) -> Option<PeerId> {
     let full = unknown_count(&next.peers) >= MAX_UNKNOWN_PEERS || next.peers.len() >= MAX_PEERS;
     if !full {
