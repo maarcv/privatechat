@@ -108,6 +108,7 @@ fn s028_t01_r01_frame_schemas() {
             );
             // An optional key left out stays out: never written as a default.
             if optional.contains(key) {
+                assert_eq!(decoded.as_ref().map(Vec::capacity), Ok(without.len()));
                 assert_eq!(decoded, Ok(without));
             }
             if value.len() > 1 {
@@ -272,16 +273,16 @@ fn s028_t02_r02_version_list() {
     for (versions, supported) in cases {
         assert_eq!(is_supported(versions), supported, "{versions:?}");
     }
-    // 13 000 items of 5 bytes each still decode; the session refuses them.
+    // 13 990 items, the most a frame holds, still decode; the session refuses them.
     let many = Frame::Hello {
         server_nonce: [1; 32],
-        proto_versions: vec![1; 13_000],
+        proto_versions: vec![1; 13_990],
     };
     let decoded = Frame::decode(&many.encode().unwrap()).unwrap();
     assert!(matches!(
         &decoded,
         Frame::Hello { proto_versions, .. }
-            if proto_versions.len() == 13_000 && !is_supported(proto_versions)
+            if proto_versions.len() == 13_990 && !is_supported(proto_versions)
     ));
 }
 

@@ -83,6 +83,7 @@ Since the decision of 2026-09-25 (`docs/spec.md` §6), this spec also fixes the 
 
 ```
 crates/core/src/session/frames.rs            Frame, encode, decode (R1–R3)
+crates/core/src/session/frames/tests.rs      s028_* tests of R1–R3 and the vectors
 crates/core/src/session/connection.rs        Session, Step, Event, Channels (R5–R18)
 crates/core/src/session/connection/tests.rs  s028_* tests
 crates/core/src/testing.rs                   MemoryServer, which implements R4 over Frame, with the rest of spec 020's testing module
@@ -237,3 +238,4 @@ Decided on 2026-09-25: the frame keys belong to this spec (`docs/spec.md` §6).
 - 2026-10-04 amended after audit AC (`docs/audit-log.md`): a store error other than `LogFull` freezes the channel, with no `check_own_key` and no in-memory `outbox` (R10, R12, R14)
 - 2026-10-04 amended after audit AC (`docs/audit-log.md`): an echo is no outcome; a lost `ack` is recovered by the republish (R11, T11)
 - 2026-10-09 slice (a) implemented; `docs/spec.md` §6 brought up to date as "Public API changes" says (audit AJ, `docs/audit-log.md`)
+- 2026-10-09 amended after audit AJ round 3 (`docs/audit-log.md`): the Interface lists the codec's tests file

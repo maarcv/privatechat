@@ -291,7 +291,7 @@ sequenceDiagram
     C->>S: WS connect (TLS 1.3, no resumption)
     S-->>C: hello(server_nonce, proto_versions)
     C->>S: subscribe(pk_ch, ttl_seconds, sig, since)
-    S-->>C: push* (the backlog since `since`), then ok(channel_id)
+    S-->>C: push* (the backlog since `since`, then the live pushes held meanwhile), then ok(channel_id)
     C->>S: publish(channel_id, client_ref, blob)
     S-->>C: ack(client_ref, server_id, received_at)
     S-->>C: push(channel_id, server_id, received_at, blob) to all subscribers
@@ -338,7 +338,7 @@ where `host` is `Config::host()`: the bytes of `server_url` between the scheme a
 
 | Scope | Limit | Response |
 | --- | --- | --- |
-| Connection | 30 `publish`/min; 16 channels; 1 authentication attempt/s; close on the 3rd failed attempt; no valid `subscribe` within 60 s of the `hello` → close; ping every 30 s, no pong within 30 s → close; send queue ≤ 256 frames or 4 MiB, otherwise close (the client resumes with `since`), the backlog and the live pushes held behind it excluded, bounded per connection by spec 030-ws-protocol R8, which ends that one subscription with `rate_limited` | `rate_limited`, close |
+| Connection | 30 `publish`/min; 16 channels; 1 authentication attempt/s; close on the 3rd failed attempt; no valid `subscribe` within 60 s of the `hello` → close; ping every 30 s, no pong within 30 s → close; send queue ≤ 256 frames or 4 MiB, otherwise close (the client resumes with `since`); the backlog and the live pushes held behind it do not count (spec 030-ws-protocol R10): the backlog is read one page of at most 256 KiB at a time as the socket drains (R7), and the held pushes are bounded per connection by R8, which ends that one subscription with `rate_limited` | `rate_limited`, close |
 | Channel (all connections) | 120 `publish`/min; 4 MiB/min; maximum retention 64 MiB or 20 000 blobs (the new one is rejected, the old one is not deleted). Counters in memory, rebuilt at startup with `GROUP BY channel_id` | `rate_limited`, `channel_quota` |
 | IP, **unauthenticated connections only** (before the first valid `subscribe`) | 20 simultaneous; 60 new/min. Not applied to connections from `127.0.0.1` (.onion service). The IP is kept in the clear in memory during the connection and is neither persisted nor logged | close |
 | Global | disk quota; `SQLITE_FULL` is never a panic | `server_full` |
@@ -537,7 +537,7 @@ impl Session {                                                                  
 
 - The UI never touches a key. The core never touches the network or the UI: it receives bytes and returns bytes. The UI groups the `Channel`s by the host and port of `server_url`, opens one TLS socket per group, passes frames in both directions and reconnects with backoff when it receives `Event::Reconnect`.
 - No server URL in the code outside the `DEFAULT_SERVER_URL` constant (spec 000).
-- The record encoding and `core::crypto` are crate-internal. `store` and `server` reach them only through `pub` functions of `core` that their own specs define (020-store-files, 030-ws-protocol); each such function that takes external bytes has a fuzz target (AGENTS 21).
+- The record encoding and `core::crypto` are crate-internal. `store` and `server` reach them only through `pub` functions of `core` that their own specs define (020-store-files, 028-session-sans-io for the frames, 030-ws-protocol); each such function that takes external bytes has a fuzz target (AGENTS 21).
 - The core does no I/O and does not read the clock: no `std::net`, `std::fs`, `tokio`, `SystemTime::now`. Time enters as a parameter (`now`). Checked by the dependency test of spec 010 R16 and clippy `disallowed_methods` (AGENTS 10).
 - One data directory per device with a `LOCK` file (advisory), one process: no widget or share extension in v1.
 - `Channel` has no state that has not gone through `commit`: in memory there is the copy loaded at `open`, and every change is written before returning the result.

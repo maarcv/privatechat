@@ -35,8 +35,8 @@ pub(crate) const U64_LEN: usize = 8;
 
 /// The encoded length of a record whose present fields have these value
 /// lengths (R1), for a writer allocated at its exact size (spec 020 R25).
-/// Saturating: every caller checks each value's bound first, so it never
-/// saturates. A writer given too short a length refuses with `TooLong`; too
+/// Saturating, so that a caller that has not yet bounded its values (the
+/// frames of spec 028) still sees a length above its maximum. A writer given too short a length refuses with `TooLong`; too
 /// long a one would only over-allocate, which the capacity tests catch.
 pub(crate) fn record_len(values: &[Option<usize>]) -> usize {
     values.iter().flatten().fold(0, |sum, len| {

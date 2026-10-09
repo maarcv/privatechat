@@ -29,6 +29,17 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AJ14 | Survivors: an absent `since` written as 0, `since` 0 dropped or read as absent; a target's `[[bin]]` removed from the fuzz manifest (C) | Low | T01 re-encodes every frame without an optional key and holds a `since` of 0; 016 T02 gains `s016_t02_r02_every_target_is_a_bin` |
 | AJ15 | `error_reference` paired `channel_quota` with a text 030 R13 does not send (A); 016 T08 did not name its frame clause (A) | Nit | "channel full"; T08 and History amended |
 
+**Round 3.** Fresh passes on the whole change. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AJ16 | The §6 limits row said 030 R8 bounds the backlog; R7 paces it a page at a time and R10 exempts it; the diagram left out the held pushes (A, B) | Low | Row and diagram reworded |
+| AJ17 | §9 named 020 and 030 as the specs that define the `pub` functions the server reaches, not 028 for `Frame` (A) | Low | 028 named |
+| AJ18 | The 028 Interface did not list `session/frames/tests.rs` (A) | Nit | Listed, with a History line |
+| AJ19 | The slice is about 1 000 net lines, over AGENTS 14 (A) | Low | Justified in the PR: one codec with its vectors and target, tests not trimmed |
+| AJ20 | Survivors: an absent optional key still counted in `encoded_len`; `proto_versions` decoded with a bound below the frame's 13 990 items (C) | Low | T01 checks the capacity of a frame without an optional key; T02 decodes 13 990 versions |
+| AJ21 | `record_len`'s doc said every caller bounds its values first; `Frame::encoded_len` relies on the saturation (C) | Nit | Reworded |
+
 ## Spec 026 implemented
 
 **2026-10-09 — Spec 026-peer-limits is `implemented`.** Its acceptance criterion is automated alone: `cargo test -p privatechat-core s026_`, clippy and the documentation lint are green on `mvp` (9137d6a), after the eight rounds of Audit AI, which the human reviewer closed at round 8.
