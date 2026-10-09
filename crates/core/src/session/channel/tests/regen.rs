@@ -6,7 +6,7 @@ use crate::Error;
 use crate::crypto::PublicKey;
 use crate::proto::envelope::{self, ChannelCtx, Content, KEY_RETIRED_COUNTER};
 use crate::proto::payload::PayloadKind;
-use crate::session::channel::{Channel, OldKey};
+use crate::session::channel::{AckOutcome, Channel, ClientRef, OldKey};
 use crate::storage::state::items::{self, OutboxKind, PeerRecord};
 use crate::storage::state::{MAX_OLD_KEYS, MAX_OUTBOX, MAX_PEERS};
 use crate::storage::{LogEntry, StoreError};
@@ -314,4 +314,214 @@ fn s025_t08_r08_failing_store() {
     assert!(!channel.status().retirement_pending);
     faults.fail_commits(false);
     channel.regenerate_identity(NOW).unwrap();
+}
+
+/// The `client_ref` of the pending `key_retired`.
+fn retirement_ref(channel: &Channel) -> ClientRef {
+    ClientRef::of(retirement_entry(channel))
+}
+
+/// The `client_ref`s `outbox` hands out at `now`.
+fn handed_out(channel: &mut Channel, now: u64, in_flight: &[ClientRef]) -> Vec<ClientRef> {
+    let step = channel.outbox(now, in_flight, false).unwrap();
+    step.publish
+        .iter()
+        .map(|(client_ref, _)| *client_ref)
+        .collect()
+}
+
+/// A regeneration at `NOW` whose retirement the server stored at `NOW`.
+fn delivered(channel: &mut Channel) {
+    channel.regenerate_identity(NOW).unwrap();
+    let outcome = channel
+        .acked(retirement_ref(channel), sid(7), NOW, NOW)
+        .unwrap();
+    assert_eq!(outcome.outcome, AckOutcome::RetirementDelivered);
+}
+
+/// Spec 025, R1 with R4 and R5: once a retirement is delivered no entry
+/// of the first old key is left, so a second regeneration marks only the
+/// second old key's.
+#[test]
+fn s025_t01_r01_second_regeneration() {
+    let (mut channel, _, _) = receiver(3_600);
+    let first = channel.encrypt("first key", None, NOW).unwrap();
+    channel.regenerate_identity(NOW).unwrap();
+    assert_eq!(handed_out(&mut channel, NOW, &[]), [first]);
+    channel.acked(first, sid(1), NOW, NOW).unwrap();
+    let retirement = retirement_ref(&channel);
+    assert_eq!(handed_out(&mut channel, NOW, &[]), [retirement]);
+    channel.acked(retirement, sid(2), NOW, NOW).unwrap();
+    channel.encrypt("second key", None, NOW).unwrap();
+    let second_pk = pk_of(own_seed(&channel));
+    channel.regenerate_identity(NOW).unwrap();
+    for entry in &channel.state.outbox {
+        assert!(entry.under_retired_key);
+        assert_eq!(sealed_by(&channel, &entry.blob).0, second_pk);
+    }
+    assert_eq!(channel.state.outbox.len(), 2);
+}
+
+/// Spec 025, R2 with R4: the `key_retired` is handed out only after the
+/// last of 31 entries of the old key leaves the `outbox`.
+#[test]
+fn s025_t02_r02_retirement_after_old_entries() {
+    let (mut channel, _, _) = receiver(3_600);
+    let old: Vec<ClientRef> = (1..MAX_OUTBOX)
+        .map(|_| channel.encrypt("old", None, NOW).unwrap())
+        .collect();
+    channel.regenerate_identity(NOW).unwrap();
+    let retirement = retirement_ref(&channel);
+    assert_eq!(handed_out(&mut channel, NOW, &[]), old);
+    assert_eq!(
+        channel.outbox(NOW, &[], true).unwrap().publish.len(),
+        old.len()
+    );
+    let (last, earlier) = old.split_last().unwrap();
+    for client_ref in earlier {
+        channel.abandon(*client_ref).unwrap();
+    }
+    assert_eq!(handed_out(&mut channel, NOW, &[]), [*last]);
+    channel.acked(*last, sid(1), NOW, NOW).unwrap();
+    assert_eq!(handed_out(&mut channel, NOW, &[]), [retirement]);
+}
+
+/// Spec 025, R4: re-sealed in place when the minute of `now` differs, in
+/// either direction, never in flight, never by `expire_outbox`; a
+/// superseded copy's echo removes nothing; a failed commit hands out
+/// nothing and keeps the stored copy.
+#[test]
+fn s025_t04_r04_reseal() {
+    let (mut channel, handle, faults) = receiver(3_600);
+    channel.regenerate_identity(NOW).unwrap();
+    let current = channel.encrypt("new key", None, NOW).unwrap();
+    let first = retirement_entry(&channel).blob.clone();
+    let commits = handle.all_commits();
+    let step = channel.outbox(NOW + 59_999, &[], false).unwrap();
+    assert_eq!(step.publish[0].1, first);
+    assert_eq!(handle.all_commits(), commits);
+
+    let superseded = retirement_ref(&channel);
+    let step = channel.outbox(NOW + 60_000, &[], false).unwrap();
+    assert_eq!(handle.all_commits(), commits + 1);
+    let entry = &channel.state.outbox[0];
+    assert_eq!(entry.kind, OutboxKind::KeyRetired);
+    assert_eq!(entry.sent_at, NOW + 60_000);
+    assert_ne!(entry.blob[..], first[..]);
+    assert_ne!(ClientRef::of(entry), superseded);
+    assert_eq!(step.publish[0], (ClientRef::of(entry), entry.blob.clone()));
+    assert!(state_eq(&reopened(&handle).state, &channel.state));
+
+    // Earlier, as after a clock set back, and in flight: none of them.
+    channel.outbox(NOW - HOUR_MS, &[], true).unwrap();
+    assert_eq!(retirement_entry(&channel).sent_at, NOW - HOUR_MS);
+    let in_flight = retirement_ref(&channel);
+    let commits = handle.all_commits();
+    let step = channel.outbox(NOW, &[in_flight], false).unwrap();
+    assert_eq!(step.publish.len(), 1);
+    assert_eq!(retirement_ref(&channel), in_flight);
+    channel.expire_outbox(NOW + 2 * 60_000, &[]).unwrap();
+    assert_eq!(retirement_ref(&channel), in_flight);
+    assert_eq!(handle.all_commits(), commits);
+
+    let commits = handle.commits();
+    assert_eq!(
+        channel.decrypt(&first, sid(3), NOW, NOW),
+        Err(Error::RetiredKey)
+    );
+    assert_eq!(handle.commits(), commits);
+    assert_eq!(channel.outbox_ref(0), Some(current));
+    assert!(channel.take_outcomes().is_empty());
+    assert!(!channel.status().own_key_used_elsewhere);
+
+    let before = channel.state.duplicate();
+    faults.fail_commits(true);
+    assert_eq!(
+        channel.outbox(NOW + 2 * 60_000, &[], false),
+        Err(Error::Store(StoreError::Io))
+    );
+    assert!(state_eq(&channel.state, &before));
+    assert!(state_eq(&reopened(&handle).state, &before));
+}
+
+/// Spec 025, R5: an `ack` of the current copy stored within one window of
+/// its `sent_at` removes the entry and the old seed, keeping no
+/// signature; a late or early one, or one of a previous copy, is
+/// `Ignored` and commits nothing.
+#[test]
+fn s025_t05_r05_ack_erases_old_key() {
+    let window = HOUR_MS + MARGIN_MS;
+    for (received_at, delivered) in [
+        (NOW, true),
+        (NOW + window, true),
+        (NOW - window, true),
+        (NOW + window + 1, false),
+        (NOW - window - 1, false),
+    ] {
+        let (mut channel, handle, _) = receiver(3_600);
+        channel.regenerate_identity(NOW).unwrap();
+        let retirement = retirement_ref(&channel);
+        let (commits, records) = (handle.all_commits(), channel.records.len());
+        let outcome = channel
+            .acked(retirement, sid(1), received_at, NOW + window + 1)
+            .unwrap();
+        assert_eq!(channel.records.len(), records);
+        if delivered {
+            assert_eq!(outcome.outcome, AckOutcome::RetirementDelivered);
+            assert_eq!(outcome.sent_at, Some(NOW));
+            assert!(channel.state.outbox.is_empty());
+            assert!(channel.state.retiring_seed.is_none());
+            assert_eq!(handle.all_commits(), commits + 1);
+        } else {
+            assert_eq!(outcome.outcome, AckOutcome::Ignored, "{received_at}");
+            assert!(channel.state.retiring_seed.is_some());
+            assert_eq!(channel.state.outbox.len(), 1);
+            assert_eq!(handle.all_commits(), commits);
+        }
+    }
+
+    let (mut channel, handle, _) = receiver(3_600);
+    channel.regenerate_identity(NOW).unwrap();
+    let previous = retirement_ref(&channel);
+    channel.outbox(NOW + 60_000, &[], false).unwrap();
+    let commits = handle.all_commits();
+    let outcome = channel.acked(previous, sid(1), NOW, NOW).unwrap();
+    assert_eq!(outcome.outcome, AckOutcome::Ignored);
+    assert_eq!(handle.all_commits(), commits);
+    assert!(channel.status().retirement_pending);
+}
+
+/// Spec 025, R6: the flag is false again after the delivery, also on
+/// reopening.
+#[test]
+fn s025_t06_r06_flag_cleared_by_delivery() {
+    let (mut channel, handle, _) = receiver(3_600);
+    delivered(&mut channel);
+    assert!(!channel.status().retirement_pending);
+    assert!(!reopened(&handle).status().retirement_pending);
+    assert_eq!(channel.own_old_keys().len(), 1);
+}
+
+/// Spec 025, R7: the state the delivery writes holds no old seed.
+#[test]
+fn s025_t07_r07_delivery_drops_old_seed() {
+    let (mut channel, handle, _) = receiver(3_600);
+    delivered(&mut channel);
+    let reopened = reopened(&handle);
+    assert!(reopened.state.retiring_seed.is_none());
+    assert!(reopened.state.outbox.is_empty());
+}
+
+/// Spec 025, R8: a delivering `ack` whose commit fails leaves the state in
+/// memory and on reopening as it was.
+#[test]
+fn s025_t08_r08_failing_ack() {
+    let (mut channel, handle, faults) = receiver(3_600);
+    channel.regenerate_identity(NOW).unwrap();
+    let before = channel.state.duplicate();
+    faults.fail_commits(true);
+    let result = channel.acked(retirement_ref(&channel), sid(1), NOW, NOW);
+    assert_eq!(result, Err(Error::Store(StoreError::Io)));
+    assert!(state_eq(&channel.state, &before));
+    assert!(state_eq(&reopened(&handle).state, &before));
 }

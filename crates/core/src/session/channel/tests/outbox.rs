@@ -241,10 +241,15 @@ fn s021_t22_r22_outbox() {
     assert!(channel.take_outcomes().is_empty());
     assert_eq!(reopened(&handle).state.outbox.len(), 3);
 
+    // The retirement waits for the old key's entries (spec 025 R4, T02).
     mark_retiring(&mut channel, &[fresh[1]]);
     let step = channel.outbox(later, &[], true).unwrap();
     let order: Vec<ClientRef> = step.publish.iter().map(|(c, _)| *c).collect();
-    assert_eq!(order, [fresh[1], ClientRef { bytes: [0xee; 16] }]);
+    assert_eq!(order, [fresh[1]]);
+    channel.abandon(fresh[1]).unwrap();
+    let step = channel.outbox(later, &[], true).unwrap();
+    let order: Vec<ClientRef> = step.publish.iter().map(|(c, _)| *c).collect();
+    assert_eq!(order, [ClientRef { bytes: [0xee; 16] }]);
 }
 
 /// Spec 021, R23: `expire_outbox` removes a stale ordinary entry, hands

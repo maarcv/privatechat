@@ -8,7 +8,7 @@ use super::{
 use crate::Error;
 use crate::crypto::PublicKey;
 use crate::proto::payload::PayloadKind;
-use crate::session::channel::{AckOutcome, Channel, ClientRef};
+use crate::session::channel::Channel;
 use crate::storage::StoreError;
 use crate::storage::state::items::PeerRecord;
 use crate::testing::record;
@@ -186,15 +186,11 @@ fn s021_t18_r18_compaction_at_purge_at() {
 }
 
 /// Spec 021, R7, R16 and R33: a pending `key_retired` takes none of the 31
-/// ordinary slots, has no `outbox_ref`, and its `ack` is spec 025's.
+/// ordinary slots and has no `outbox_ref`; its `ack` is spec 025's (T05).
 #[test]
 fn s021_t16_r16_key_retired_entry() {
     let (mut channel, _, _, _, _) = retiring();
     assert_eq!(channel.outbox_ref(u64::MAX), None);
-    let outcome = channel
-        .acked(ClientRef { bytes: [0xee; 16] }, sid(1), NOW, NOW)
-        .unwrap();
-    assert_eq!(outcome.outcome, AckOutcome::Ignored);
     for _ in 0..29 {
         channel.encrypt("more", None, NOW).unwrap();
     }

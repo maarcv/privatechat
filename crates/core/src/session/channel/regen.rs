@@ -1,10 +1,10 @@
 //! Regenerating one's own key (spec 025-identity-regen): the new key, the
-//! list of one's old keys (R1, R6), and the `key_retired` the old key seals
-//! for itself (R2). The old seed is kept only for that one message (R7);
-//! its echoes are spec 021's step 5 (R3).
+//! list of one's old keys (R1, R6), the `key_retired` the old key seals for
+//! itself (R2), its re-seal (R4) and its `ack` (R5). The old seed is kept
+//! only for that one message (R7); its echoes are spec 021's step 5 (R3).
 
 use super::send::MINUTE_MS;
-use super::{Channel, ClientRef, OldKey};
+use super::{AckOutcome, Channel, ClientRef, OldKey, Outcome};
 use crate::crypto::{self, Nonce, Secret, Signature};
 use crate::error::Error;
 use crate::proto::envelope::{self, ChannelCtx, KEY_RETIRED_COUNTER, SenderKey};
@@ -64,6 +64,78 @@ impl Channel {
                 retired_at: old.retired_at,
             })
             .collect()
+    }
+
+    /// The `ack` of the pending `key_retired` (R5): stored in time, it
+    /// removes the entry and the old seed in one commit, keeping no
+    /// signature; late, it changes nothing, so that a server answering late
+    /// cannot make the device drop the old key before the retirement has
+    /// arrived. `None` when `client_ref` is not its current copy.
+    ///
+    /// # Errors
+    ///
+    /// `Store` when the commit fails, memory unchanged.
+    pub(super) fn acked_retirement(
+        &mut self,
+        client_ref: ClientRef,
+        server_id: [u8; 16],
+        received_at: u64,
+    ) -> Result<Option<Outcome>, Error> {
+        let Some(entry) = self.state.outbox.iter().find(|entry| {
+            entry.kind == OutboxKind::KeyRetired && entry.client_ref == client_ref.bytes
+        }) else {
+            return Ok(None);
+        };
+        let sent_at = entry.sent_at;
+        if received_at.abs_diff(sent_at) > self.accept_window() {
+            return Ok(Some(Outcome {
+                client_ref,
+                outcome: AckOutcome::Ignored,
+                server_id: None,
+                received_at: None,
+                sent_at: None,
+            }));
+        }
+        let mut next = self.next_state();
+        next.outbox
+            .retain(|entry| entry.kind != OutboxKind::KeyRetired);
+        next.retiring_seed = None;
+        self.commit(next, Vec::new())?;
+        Ok(Some(Outcome {
+            client_ref,
+            outcome: AckOutcome::RetirementDelivered,
+            server_id: Some(server_id),
+            received_at: None,
+            sent_at: Some(sent_at),
+        }))
+    }
+
+    /// Re-seals in `next` the pending `key_retired` when the minute of
+    /// `now` differs from its `sent_at`, earlier or later, in place and
+    /// unless a copy is in flight (R4); `true` when it did.
+    ///
+    /// # Errors
+    ///
+    /// `Internal` when libsodium fails.
+    pub(super) fn reseal_retirement(
+        &self,
+        next: &mut ChannelState,
+        now: u64,
+        in_flight: &[ClientRef],
+    ) -> Result<bool, Error> {
+        let Some(seed) = &self.state.retiring_seed else {
+            return Ok(false);
+        };
+        let minute = now.saturating_sub(now % MINUTE_MS);
+        let Some(slot) = next.outbox.iter_mut().find(|entry| {
+            entry.kind == OutboxKind::KeyRetired
+                && entry.sent_at != minute
+                && !in_flight.contains(&ClientRef::of(entry))
+        }) else {
+            return Ok(false);
+        };
+        *slot = self.seal_retirement(seed, now)?;
+        Ok(true)
     }
 
     /// With sixteen old keys, drops the first one whose blobs no member

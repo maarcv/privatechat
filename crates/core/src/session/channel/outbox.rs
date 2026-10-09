@@ -26,7 +26,9 @@ impl Channel {
         now: u64,
     ) -> Result<Outcome, Error> {
         self.latest_now = Some(now);
-        // A `key_retired` entry is spec 025-identity-regen's.
+        if let Some(outcome) = self.acked_retirement(client_ref, server_id, received_at)? {
+            return Ok(outcome);
+        }
         let Some(entry) = self
             .ordinary_outbox()
             .find(|entry| entry.client_ref == client_ref.bytes)
@@ -86,26 +88,32 @@ impl Channel {
         })
     }
 
-    /// Removes the stale ordinary entries in one commit, then hands out the
-    /// entries to publish (R22): those not in flight, and only the
-    /// `key_retired` and the entries `under_retired_key` when
-    /// `withhold_current` is set.
+    /// Re-seals the pending `key_retired` when the minute changed and
+    /// removes the stale ordinary entries, in one commit, then hands out
+    /// the entries to publish (R22, spec 025-identity-regen R4): those not
+    /// in flight, the `key_retired` only once no entry of the old key
+    /// waits, and only the `key_retired` and the entries
+    /// `under_retired_key` when `withhold_current` is set.
     ///
     /// # Errors
     ///
-    /// `Store` when the commit fails, with nothing handed out.
+    /// `Internal` when libsodium fails; `Store` when the commit fails;
+    /// either way with nothing handed out.
     pub(crate) fn outbox(
         &mut self,
         now: u64,
         in_flight: &[ClientRef],
         withhold_current: bool,
     ) -> Result<OutboxStep, Error> {
-        let not_delivered = self.remove_stale(now, in_flight)?;
+        let not_delivered = self.remove_stale(now, in_flight, true)?;
+        // The old key's messages arrive before its retirement.
+        let old_key_waits = self.ordinary_outbox().any(|entry| entry.under_retired_key);
         let publish = self
             .state
             .outbox
             .iter()
             .filter(|entry| !in_flight.contains(&ClientRef::of(entry)))
+            .filter(|entry| entry.kind != OutboxKind::KeyRetired || !old_key_waits)
             .filter(|entry| {
                 !withhold_current || entry.kind == OutboxKind::KeyRetired || entry.under_retired_key
             })
@@ -118,7 +126,9 @@ impl Channel {
     }
 
     /// The removal of R22 alone, for a channel that is not subscribed
-    /// (R23): `publish` is always empty.
+    /// (R23): `publish` is always empty, and no re-seal, so that a device
+    /// offline does not rewrite its state every minute (spec
+    /// 025-identity-regen R4).
     ///
     /// # Errors
     ///
@@ -130,7 +140,7 @@ impl Channel {
     ) -> Result<OutboxStep, Error> {
         Ok(OutboxStep {
             publish: Vec::new(),
-            not_delivered: self.remove_stale(now, in_flight)?,
+            not_delivered: self.remove_stale(now, in_flight, false)?,
         })
     }
 
@@ -159,12 +169,14 @@ impl Channel {
     }
 
     /// Removes in one commit the ordinary entries no receiver accepts any
-    /// more, with a minute of grace for one in flight; no commit when there
-    /// is none (R22).
+    /// more, with a minute of grace for one in flight, and, when `reseal`
+    /// is set, re-seals the pending `key_retired` in the same commit; no
+    /// commit when neither happens (R22, spec 025-identity-regen R4).
     fn remove_stale(
         &mut self,
         now: u64,
         in_flight: &[ClientRef],
+        reseal: bool,
     ) -> Result<Vec<(ClientRef, u64)>, Error> {
         self.latest_now = Some(now);
         let window = self.accept_window();
@@ -176,10 +188,11 @@ impl Channel {
             };
             entry.sent_at.saturating_add(window).saturating_add(grace) < now
         };
-        if !self.ordinary_outbox().any(stale) {
+        let mut next = self.next_state();
+        let resealed = reseal && self.reseal_retirement(&mut next, now, in_flight)?;
+        if !resealed && !self.ordinary_outbox().any(stale) {
             return Ok(Vec::new());
         }
-        let mut next = self.next_state();
         let mut records = Vec::new();
         let removed = self.remove_entries(&mut next, &mut records, stale);
         self.commit(next, records)?;
