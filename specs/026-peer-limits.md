@@ -1,6 +1,6 @@
 # 026 — Peer limits: two budgets, eviction of unknowns and the ignored-keys count
 
-Status: accepted
+Status: implemented
 Phase: 2
 Related ADRs: 0006, 0043
 Depends on: 021-channel-session, 022-peers-tofu, 024-key-retired
