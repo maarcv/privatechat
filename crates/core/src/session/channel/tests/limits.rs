@@ -148,6 +148,7 @@ fn s026_t02_r02_room_check() {
         let (mut channel, handle, _) = receiver(3_600);
         plant(&mut channel, peers);
         let commits = handle.commits();
+        assert_eq!(channel.status().unknown_limit_reached, !room);
         let result = text(&mut channel, newcomer, 0, NOW);
         if room {
             assert!(matches!(result, Ok(Some(_))), "{result:?}");
@@ -392,6 +393,31 @@ fn s026_t03_r03_lru_eviction() {
         assert_eq!(channel.state.peers.len(), MAX_PEERS);
         assert!(!has_record(&channel, stranger(1)));
     }
+}
+
+/// Spec 026, R3 and R5: an eviction and a `forget` keep the other records
+/// in creation order, which spec 022 R3 and R13 read for ties of
+/// `first_seen`.
+#[test]
+fn s026_t03_r03_removal_keeps_order() {
+    let order = |channel: &Channel| -> Vec<[u8; 32]> {
+        channel.state.peers.iter().map(|peer| peer.pk.0).collect()
+    };
+    let (mut channel, _, _) = receiver(3_600);
+    let mut peers = crowd(0, 50, false);
+    for peer in &mut peers {
+        peer.first_seen = NOW;
+    }
+    plant(&mut channel, peers);
+    let mut expected = order(&channel);
+    expected.remove(0);
+    text(&mut channel, stranger(900), 0, NOW + HOUR_MS).unwrap();
+    expected.push(pk_of(stranger(900)));
+    assert_eq!(order(&channel), expected);
+
+    expected.remove(1);
+    channel.forget(pk_of(stranger(3))).unwrap();
+    assert_eq!(order(&channel), expected);
 }
 
 /// Spec 026, R4: with 500 labelled, or 501 after a retirement by hand, a

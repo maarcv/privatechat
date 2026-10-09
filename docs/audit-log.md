@@ -54,6 +54,14 @@ Findings and applied changes of every audit of the specification, newest first; 
 | --- | --- | --- | --- |
 | AI20 | The 1 024 cap was pinned only through a direct `ignore_key` call: inlining it as a bare insert at the rejection or the eviction, which would let a flood grow the set without bound, survived; `forget` dropping a counted key from the set survived (C) | Medium | A T06 clause with a full set through a rejection and an eviction; a T06 clause forgetting a counted key |
 
+**Round 7.** Fresh passes: A found nothing; B one far-fetched finding; C no production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI21 | `unknown_limit_reached` was read only with 50 unknowns, so a flag written as "50 muted" survived at 550 in all (C) | Low | T02 checks the flag on every row |
+| AI22 | An eviction or a `forget` rewritten as a `swap_remove` reordered the records, which spec 022 R3 and R13 read for ties of `first_seen` (C) | Low | A T03 test of the order after both |
+| AI23 | `SessionCarry` derives `Debug` over full keys, now up to 1 024 ignored ones; nothing formats it today (B) | Far-fetched | Listed; spec 027 or 028 redacts it if they ever log it |
+
 Left as they are: the third copy of "remove a record, then its gap" (C8), one line at each place; `unknown` and the test `text` helper not shared with other test files (C17); the O(550) counts per new key (C13), below the cost of the signature check and the state rewrite.
 
 ## Spec 025 implemented
