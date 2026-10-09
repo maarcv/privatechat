@@ -112,11 +112,11 @@ impl Session {
         let channel_id = channel.config().channel_id();
         match channel.check_own_key(blob, received_at, now) {
             Ok(true) if matches!(stop, Stop::Publishing) => {
-                let stall = Stall::LogFull {
-                    stop: stopped(channel),
-                    asked: false,
-                };
-                self.stalls.insert(channel_id, stall);
+                // Only the stop changes: a `Reconnect` already asked is not
+                // asked again.
+                if let Some(Stall::LogFull { stop, .. }) = self.stalls.get_mut(&channel_id) {
+                    *stop = stopped(channel);
+                }
             }
             Err(Error::Store(error)) => self.freeze(channel_id, error, step),
             Ok(_) | Err(_) => {}

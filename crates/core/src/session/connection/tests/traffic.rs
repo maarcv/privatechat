@@ -143,6 +143,7 @@ fn s028_t10_r10_log_full_stall() {
         .into_iter()
         .map(|text| sealed(&mut bob, text))
         .collect();
+    let mine = channels[0].encrypt("mine", None, T0).unwrap();
     channels[0].fill_log(FILL_EXPIRES, ROOM);
     let mut session = greeted(&mut channels);
 
@@ -158,6 +159,8 @@ fn s028_t10_r10_log_full_stall() {
     assert!(step.events.is_empty() && step.failed.is_empty());
     let step = session.on_frame(&ok(id), &mut channels, T0 + 400);
     assert_eq!(step.events, [Event::Subscribed { channel: id }]);
+    // A stall with no own-key alert publishes on.
+    assert_eq!(published(&mut session), [mine]);
     let mut now = T0 + 400;
     while now < FILL_EXPIRES + 1_000 {
         now += 1_000;
@@ -427,4 +430,72 @@ fn s028_t10_r10_after_send() {
     assert!(step.events.is_empty() && step.failed.is_empty());
     assert_eq!(handle.all_commits(), commits);
     assert_eq!(published(&mut session), []);
+}
+
+/// Spec 028, R10: a stall that stops after its tick asked for a new
+/// connection does not ask again.
+#[test]
+fn s028_t10_r10_stop_after_reconnect_asked() {
+    let (mut channels, handle, _) = alice();
+    let id = ids(&channels)[0];
+    let mut thief = thief_of(&handle);
+    let theirs = sealed(&mut thief, "x");
+    let mut bob = member(&channels[0]);
+    let hi = sealed(&mut bob, "hi");
+    channels[0].fill_log(FILL_EXPIRES, ROOM + 1);
+    let mut session = greeted(&mut channels);
+    session.on_frame(&push(id, 1, &hi), &mut channels, T0 + 100);
+    let mut now = T0 + 100;
+    while now < FILL_EXPIRES + 1_000 {
+        now += 1_000;
+        session.on_tick(&mut channels, now);
+    }
+    channels[0].relieve_headroom(now).unwrap();
+    assert_eq!(
+        session.on_tick(&mut channels, now + 500).events,
+        [reconnect()]
+    );
+    session.on_frame(&push(id, 2, &theirs), &mut channels, now + 600);
+    assert!(channels[0].status().own_key_used_elsewhere);
+    assert!(
+        session
+            .on_tick(&mut channels, now + 1_000)
+            .events
+            .is_empty()
+    );
+}
+
+/// Spec 028, R10: once stopped, a second theft of the new key on the same
+/// connection keeps the stop of the first, so a regeneration still asks
+/// for a new connection.
+#[test]
+fn s028_t10_r10_second_theft_after_regeneration() {
+    let (mut channels, handle, _) = alice();
+    let id = ids(&channels)[0];
+    let mut thief = thief_of(&handle);
+    let theirs = sealed(&mut thief, "x");
+    channels[0].fill_log(FILL_EXPIRES, ROOM + 1);
+    let mut session = greeted(&mut channels);
+    session.on_frame(&push(id, 1, &theirs), &mut channels, T0 + 100);
+    session.on_frame(&ok(id), &mut channels, T0 + 200);
+    channels[0].regenerate_identity(T0 + 300).unwrap();
+    // The device is copied again, with its new key.
+    let mut again = thief_of(&handle);
+    again.relieve_headroom(FILL_EXPIRES + 1).unwrap();
+    let client_ref = again.encrypt("y", None, FILL_EXPIRES + 1).unwrap();
+    let step = again.outbox(FILL_EXPIRES + 1, &[], false).unwrap();
+    let (_, blob) = step
+        .publish
+        .into_iter()
+        .find(|(entry, _)| *entry == client_ref)
+        .unwrap();
+    let frame = Frame::Push {
+        channel_id: id,
+        server_id: [2; 16],
+        received_at: T0 + 400,
+        blob,
+    };
+    session.on_frame(&frame.encode().unwrap(), &mut channels, T0 + 400);
+    let step = session.after_send(id, &mut channels, T0 + 500);
+    assert_eq!(step.events, [reconnect()]);
 }

@@ -19,6 +19,16 @@ Decisions taken without the human, by the advisor (three passes): a `LogFull` st
 | AM7 | The net diff is over AGENTS 14's 400 lines (C) | Low | Justified in the pull request: about 230 of production code, the rest the tests of R10 |
 | AM8 | `on_push` packs three arguments in a tuple where its callees take them apart; `check_room` uses `super::find` (C) | Far-fetched | None: a preference |
 
+**Round 2.** Fresh passes on the whole change. AM1–AM6 hold. Pass C ran 43 mutants: 38 killed, 5 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AM9 | A stall stopped after its tick asked for a new connection was written anew with `asked` false, so the next tick asked again (B, C) | Low | The stop changes the stall's `stop` alone; a test |
+| AM10 | No test reached the `ok` of a stall without the own-key flag with an entry waiting: stopping every stall, or withholding in every stall, passed (C) | Medium | T10's `LogFull` test publishes the waiting entry at the `ok` |
+| AM11 | A second theft of the new key after a regeneration on the same connection, re-stopping with the new epoch, untested (C) | Low | A test: `after_send` still asks for a new connection |
+| AM12 | The slice list put R14's send in (c2) while `after_send` lands here (A) | Low | (c1a) names `after_send` and its `outbox`; the module doc |
+| AM13 | On a full log, a `check_own_key` inside `decrypt` failing with `Internal` makes `decrypt` return `Internal`, not `LogFull`: no stall, and a tick's `synced` could pass the push (B) | Far-fetched | None: only libsodium failing, or a reserve of spec 021 R18 used up, reaches it; no adversary of `docs/spec.md` §2 |
+
 ## Audit AL
 
 **2026-10-09 — Audit AL, the code audit of slice (b2) of spec 028-session-sans-io (branch `028-truncation`): the truncation (R8), the `ok` and the two limits of R9, and the `session_on_frame` fuzz target (R3); round 1 of three passes (A: conformance; B: the adversary, a server sending any frame sequence and a clock set back; C: quality, tests and hand mutants).** One High finding, a hole in R16 that the code reproduced. Pass C ran 37 mutants: 27 killed, 2 equivalent, 8 survived; every survivor is killed by a clause added, or made equivalent by AL1.

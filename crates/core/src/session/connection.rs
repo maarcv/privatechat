@@ -5,9 +5,9 @@
 //!
 //! These slices hold the connection and the subscription (R1, R2 and
 //! R5–R7), the truncation (R8), the `ok` with what follows it (R9), and
-//! the traffic with its stalls (R10). Later slices of spec 028 add the
+//! the traffic with its stalls (R10) and `after_send` (R14). Later slices of spec 028 add the
 //! freeze after a failed `acked`, `outbox` or `expire_outbox` and the
-//! `write_failed` mark (R10), outcomes and the `outbox` on send and tick
+//! `write_failed` mark (R10), outcomes and the `outbox` on tick
 //! (R11–R14), the publish rate (R15), the error codes other than
 //! `nonce_expired` (R16), and, with `rate_limited`, the one clause of R7
 //! only it can reach: a `subscribe` queued again after it is released
