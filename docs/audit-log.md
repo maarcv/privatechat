@@ -29,6 +29,13 @@ Decisions taken without the human, by the advisor (three passes): a `LogFull` st
 | AM12 | The slice list put R14's send in (c2) while `after_send` lands here (A) | Low | (c1a) names `after_send` and its `outbox`; the module doc |
 | AM13 | On a full log, a `check_own_key` inside `decrypt` failing with `Internal` makes `decrypt` return `Internal`, not `LogFull`: no stall, and a tick's `synced` could pass the push (B) | Far-fetched | None: only libsodium failing, or a reserve of spec 021 R18 used up, reaches it; no adversary of `docs/spec.md` §2 |
 
+**Round 3.** Fresh passes on the whole change. AM1–AM13 hold; pass B found nothing; passes A and C found only test gaps, and no production defect. Pass C ran 46 mutants: 42 killed, 1 equivalent, 3 survived, each killed below. The audit closes with this round (`CLAUDE.md`, the audit).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AM14 | R14's send clauses tested under T10's name, and an entry in flight never shown not to be queued twice (A) | Low | `s028_t14_r14_send` with that clause; the frozen case stays in T10 |
+| AM15 | Survivors: a tick without the stalled channel, `after_send` of an unknown channel, `MemoryStore::copy` as a shared handle (C) | Low | One assertion each |
+
 ## Audit AL
 
 **2026-10-09 — Audit AL, the code audit of slice (b2) of spec 028-session-sans-io (branch `028-truncation`): the truncation (R8), the `ok` and the two limits of R9, and the `session_on_frame` fuzz target (R3); round 1 of three passes (A: conformance; B: the adversary, a server sending any frame sequence and a clock set back; C: quality, tests and hand mutants).** One High finding, a hole in R16 that the code reproduced. Pass C ran 37 mutants: 27 killed, 2 equivalent, 8 survived; every survivor is killed by a clause added, or made equivalent by AL1.

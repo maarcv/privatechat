@@ -171,6 +171,13 @@ fn s028_t10_r10_log_full_stall() {
     // The `Device` compacts the stalled channel (spec 027-core-api R12).
     assert_eq!(channels[0].relieve_headroom(now), Ok(true));
     assert!(!channels[0].status().storage_full);
+    // A tick that does not hand the channel over asks nothing.
+    assert!(
+        session
+            .on_tick(&mut Vec::new(), now + 500)
+            .events
+            .is_empty()
+    );
     assert_eq!(
         session.on_tick(&mut channels, now + 1_000).events,
         [reconnect()]
@@ -209,7 +216,10 @@ fn s028_t10_r10_own_key_stops_publishing() {
     // 021-channel-session R14).
     channels[0].encrypt("overtaken", None, T0).unwrap();
     let mine = channels[0].encrypt("mine", None, T0).unwrap();
+    // The thief's device is its own: sealing writes nothing of Alice's.
+    let before = handle.all_commits();
     let theirs = sealed(&mut thief, "x");
+    assert_eq!(handle.all_commits(), before);
     let mut bob = member(&channels[0]);
     let hi = sealed(&mut bob, "hi");
     channels[0].fill_log(FILL_EXPIRES, ROOM + 1);
@@ -387,31 +397,44 @@ fn s028_t10_r10_frozen_ok_records_truncation() {
     assert_eq!(published(&mut session), []);
 }
 
-/// Spec 028, R14 and R10: `after_send` publishes a send of a subscribed
-/// channel, and nothing for a channel awaiting `ok`, after
-/// `on_disconnect`, or frozen, which it does not commit either.
+/// Spec 028, R14: `after_send` publishes a send of a subscribed channel
+/// once, an entry in flight not again, and nothing for a channel awaiting
+/// `ok` or after `on_disconnect`.
 #[test]
-fn s028_t10_r10_after_send() {
-    let (mut channels, handle, faults) = alice();
+fn s028_t14_r14_send() {
+    let (mut channels, _, _) = alice();
     let id = ids(&channels)[0];
     let mut session = greeted(&mut channels);
     let early = channels[0].encrypt("early", None, T0).unwrap();
     assert!(session.after_send(id, &mut channels, T0).events.is_empty());
+    assert!(
+        session
+            .after_send([9; 16], &mut channels, T0)
+            .events
+            .is_empty()
+    );
     assert_eq!(published(&mut session), []);
     session.on_frame(&ok(id), &mut channels, T0 + 100);
     assert_eq!(published(&mut session), [early]);
     let sent = channels[0].encrypt("hi", None, T0 + 200).unwrap();
     session.after_send(id, &mut channels, T0 + 200);
     assert_eq!(published(&mut session), [sent]);
+    session.after_send(id, &mut channels, T0 + 250);
+    assert_eq!(published(&mut session), []);
 
     session.on_disconnect();
     channels[0].encrypt("offline", None, T0 + 300).unwrap();
     session.after_send(id, &mut channels, T0 + 300);
     assert_eq!(published(&mut session), []);
+}
 
-    // Frozen by an `Io` push.
-    session.on_connect(T0 + 400, &[]);
-    session.on_frame(&hello(2, &[1]), &mut channels, T0 + 400);
+/// Spec 028, R10: `after_send` on a channel frozen by an `Io` push
+/// publishes nothing and commits nothing.
+#[test]
+fn s028_t10_r10_after_send_frozen() {
+    let (mut channels, handle, faults) = alice();
+    let id = ids(&channels)[0];
+    let mut session = greeted(&mut channels);
     session.on_frame(&ok(id), &mut channels, T0 + 500);
     session.outgoing();
     faults.fail_commits(true);
