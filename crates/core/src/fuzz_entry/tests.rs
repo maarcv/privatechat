@@ -22,9 +22,9 @@ const ROOT_MANIFEST: &str = include_str!("../../../../Cargo.toml");
 const FUZZ_MANIFEST: &str = include_str!("../../fuzz/Cargo.toml");
 const FUZZ_WORKFLOW: &str = include_str!("../../../../.github/workflows/fuzz.yml");
 
-/// The targets of R2: three added by spec 020-store-files, the last by
-/// spec 021-channel-session.
-const TARGETS: [&str; 11] = [
+/// The targets of R2: three added by spec 020-store-files, one by spec
+/// 021-channel-session, the last by spec 028-session-sans-io.
+const TARGETS: [&str; 12] = [
     "record_decode",
     "config_parse",
     "config_parse_qr",
@@ -36,6 +36,7 @@ const TARGETS: [&str; 11] = [
     "log_record_decode",
     "settings_decode",
     "channel_decrypt",
+    "frame_decode",
 ];
 
 /// The channel of `text_k1`, built here apart from `fuzz_entry`, so that an

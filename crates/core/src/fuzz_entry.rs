@@ -19,6 +19,7 @@ use crate::proto::payload::{MAX_BLOCKS, PAD_BLOCK, Payload};
 use crate::proto::record::UnknownKeys;
 use crate::proto::record::test_schema::{TypesRecord, decode_test_record};
 use crate::session::channel::{Channel, Received};
+use crate::session::frames::Frame;
 use crate::storage::{ChannelState, LogRecord, Settings, StoreError};
 
 #[cfg(test)]
@@ -101,6 +102,11 @@ pub fn settings_decode(data: &[u8]) {
 /// 021-channel-session R29).
 pub fn channel_decrypt(data: &[u8]) {
     let _ = channel_decrypt_verdict(data);
+}
+
+/// `frame_decode`: one frame of spec 028-session-sans-io.
+pub fn frame_decode(data: &[u8]) {
+    let _ = frame_decode_verdict(data);
 }
 
 /// The verdict of `record_decode`; `None` for an input with no policy byte.
@@ -192,6 +198,11 @@ pub(crate) fn channel_decrypt_verdict(data: &[u8]) -> Option<Result<Option<Recei
         let mut channel = Channel::for_fuzzing(&config, &own)?;
         channel.decrypt(blob, *server_id, received_at, now)
     }))
+}
+
+/// The verdict of `frame_decode`.
+pub(crate) fn frame_decode_verdict(data: &[u8]) -> Result<Frame, Error> {
+    Frame::decode(data)
 }
 
 /// `verify`, then `open`, in the channel `ctx`.

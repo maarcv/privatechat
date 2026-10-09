@@ -331,6 +331,13 @@ proptest! {
     }
 }
 
+/// Spec 028, R3: the fuzz checker requires the target `frame_decode`.
+#[test]
+fn s028_t03_r03_frame_decode_target_listed() {
+    let checker = include_str!("../../../../../scripts/check_fuzz_targets.py");
+    assert!(checker.contains("\"frame_decode\""));
+}
+
 /// The vector names of keys 1 and up, by `type` (the table "Frames").
 const FIELD_NAMES: [&[&str]; 7] = [
     &["server_nonce", "proto_versions"],

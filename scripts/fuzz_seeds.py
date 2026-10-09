@@ -82,6 +82,7 @@ TARGETS: dict[str, tuple[str, Callable[[dict], bool], Seed]] = {
                         lambda v: field(v, "record")),
     "channel_decrypt": ("013", lambda v: True,
                         lambda v: times(v) + CHANNEL_SERVER_ID + field(v, "blob")),
+    "frame_decode": ("028", lambda v: True, lambda v: field(v, "frame")),
 }
 
 
@@ -120,7 +121,7 @@ def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
                 "padded": field(v, "padded")}
     whole = {"config_parse": "record", "config_parse_qr": "qr", "payload_decode": "payload",
              "verify_qr_parse": "qr", "state_decode": "record", "log_record_decode": "record",
-             "settings_decode": "record"}[target]
+             "settings_decode": "record", "frame_decode": "frame"}[target]
     return {"whole": field(v, whole)}
 
 
@@ -129,7 +130,7 @@ def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
 SEED_COUNTS = {"record_decode": 31, "config_parse": 27, "config_parse_qr": 32,
                "payload_decode": 17, "receive": 30, "receive_signed": 18, "verify_qr_parse": 6,
                "state_decode": 2, "log_record_decode": 4, "settings_decode": 2,
-               "channel_decrypt": 30}
+               "channel_decrypt": 30, "frame_decode": 14}
 
 
 def check_s016_t08_r08_corpus_is_seeded() -> None:
