@@ -1,6 +1,6 @@
 # 025 — Identity regeneration and the pending retirement
 
-Status: accepted
+Status: implemented
 Phase: 2
 Related ADRs: 0007, 0016, 0019, 0029, 0033, 0034
 Depends on: 021-channel-session, 024-key-retired
