@@ -105,6 +105,8 @@ impl Channel {
             }
             return Err(Error::RetiredKey);
         }
+        // After the retired check: one's own old keys have no record and are
+        // `RetiredKey`, never counted as ignored (spec 026-peer-limits R2).
         if !is_own && self.peer(&sender).is_none() && !self.has_room() {
             // Counted before the cursor commit: should that fail, a key the
             // server sends again is counted once all the same (R6 counts
@@ -151,7 +153,8 @@ impl Channel {
         let gap = self.gap_of(self.peer(&sender), counter, listed, arrival.now);
         let listing = self.listing(opened, arrival, Sender::Peer { pk: sender.0 }, 0);
         let mut next = self.next_state();
-        // Spec 026-peer-limits R3: a new peer at a limit evicts a stranger.
+        // Spec 026-peer-limits R3: a new peer at a limit evicts a stranger,
+        // before the newcomer is pushed, so it can never evict itself.
         let evicted = if self.peer(&sender).is_none() {
             evict_stranger(&mut next)
         } else {

@@ -26,15 +26,10 @@ fn stranger(n: u16) -> [u8; 32] {
 /// An unknown record of `seed`, last heard from at `last_seen`.
 fn unknown(seed: [u8; 32], last_seen: u64, muted: bool) -> PeerRecord {
     PeerRecord {
-        pk: PublicKey(pk_of(seed)),
-        label: None,
-        verified: false,
         muted,
-        retired_at: None,
         first_seen: last_seen,
         last_seen,
-        max_counter: Some(10),
-        last_display_name: None,
+        ..unknown_with_pk(pk_of(seed))
     }
 }
 
@@ -166,6 +161,32 @@ fn s026_t02_r02_room_check() {
     }
 }
 
+/// Spec 026, R2: the room check comes after the retired check, so one's
+/// own old key is `RetiredKey` and never counted, and before the
+/// `server_id` replay check of step 6.
+#[test]
+fn s026_t02_r02_room_check_order() {
+    let (mut channel, _, _) = receiver(3_600);
+    let old_seed = *channel.state.identity_seed.expose();
+    text(&mut channel, stranger(800), 0, NOW).unwrap();
+    channel.regenerate_identity(NOW).unwrap();
+    plant(&mut channel, crowd(0, 50, true));
+    let old = sealed(&channel, old_seed, 3, NOW, PayloadKind::Text, None);
+    assert_eq!(
+        channel.decrypt(&old, [0x77; 16], NOW, NOW),
+        Err(Error::RetiredKey)
+    );
+    assert_eq!(channel.status().ignored_keys, 0);
+    // `stranger(800)`'s message left a seen record under this `server_id`.
+    let mut seen = [0; 16];
+    seen[..2].copy_from_slice(&stranger(800)[..2]);
+    let blob = sealed(&channel, stranger(900), 0, NOW, PayloadKind::Text, None);
+    assert_eq!(
+        channel.decrypt(&blob, seen, NOW, NOW),
+        Err(Error::PeerLimit)
+    );
+}
+
 /// Spec 026, R3: a key that needs room evicts the unmuted stranger heard
 /// from longest ago, ties to the smaller key, never a muted or a retired
 /// one and never itself; the evicted key writing again is a new unknown,
@@ -210,27 +231,24 @@ fn s026_t03_r03_lru_eviction() {
     // The newcomer, heard from at `NOW - 3 600`, is now the oldest.
     text(&mut channel, stranger(901), 0, NOW).unwrap();
     assert!(!has_record(&channel, newcomer));
-    let next = channel
-        .state
-        .peers
-        .iter()
-        .filter(|p| is_unknown(p) && !p.muted);
-    let oldest = next.min_by_key(|p| (p.last_seen, p.pk.0)).unwrap().pk.0;
+    // Then the other tied stranger, at `NOW - 1`.
     text(&mut channel, stranger(902), 0, NOW).unwrap();
-    assert!(channel.peer(&PublicKey(oldest)).is_none());
+    assert!(!has_record(&channel, larger));
+    assert!(has_record(&channel, stranger(4)));
 
     // An evicted key comes back as new at any counter, and its gap is gone.
     let (mut channel, _, _) = receiver(3_600);
     plant(&mut channel, crowd(0, 50, false));
-    text(&mut channel, stranger(1), 11, NOW + 1).unwrap();
     text(&mut channel, stranger(1), 15, NOW + 1).unwrap();
-    assert_eq!(channel.gaps().len(), 1);
+    text(&mut channel, stranger(2), 15, NOW + 1).unwrap();
+    assert_eq!(channel.gaps().len(), 2);
     let mut next = channel.next_state();
     next.peers[0].last_seen = NOW - 1;
     channel.commit(next, Vec::new()).unwrap();
     text(&mut channel, stranger(900), 0, NOW).unwrap();
     assert!(!has_record(&channel, stranger(1)));
-    assert!(channel.gaps().is_empty());
+    let left: Vec<[u8; 32]> = channel.gaps().iter().map(|gap| gap.peer).collect();
+    assert_eq!(left, [pk_of(stranger(2))]);
     assert!(matches!(
         text(&mut channel, stranger(1), 3, NOW + 2),
         Ok(Some(_))
@@ -317,20 +335,40 @@ fn s026_t04_r04_labelled_budget() {
         channel.retire(pk_of(stranger(2)), NOW).unwrap();
     }
 
+    // A verified or a retired peer with no label counts as much as a
+    // labelled one (R1).
+    for verified in [true, false] {
+        let (mut channel, _, _) = receiver(3_600);
+        let mut peers = crowd(499, 1, false);
+        peers.push(PeerRecord {
+            verified,
+            retired_at: (!verified).then_some(NOW),
+            ..unknown(stranger(2), NOW, false)
+        });
+        plant(&mut channel, peers);
+        assert!(channel.status().labelled_limit_reached);
+        assert_eq!(
+            channel.label(pk_of(stranger(1)), "Ann", NOW),
+            Err(Error::PeerLimit)
+        );
+    }
+
     // Below 500 a label admits; a pre-verification that would make a 551st
-    // record does not.
+    // record does not, and commits nothing.
     let (mut channel, _, _) = receiver(3_600);
     plant(&mut channel, crowd(499, 50, false));
     channel.label(pk_of(stranger(1)), "Ann", NOW).unwrap();
-    let (mut channel, _, _) = receiver(3_600);
+    let (mut channel, handle, _) = receiver(3_600);
     let mut peers = crowd(499, 50, false);
     peers.push(unknown(stranger(51), NOW, false));
     plant(&mut channel, peers);
     let qr = verify_qr(channel.config.id(), &PublicKey(pk_of(stranger(800)))).unwrap();
+    let commits = handle.all_commits();
     assert_eq!(
         channel.verify_scanned(&qr, "Bea", NOW),
         Err(Error::PeerLimit)
     );
+    assert_eq!(handle.all_commits(), commits);
     channel.label(pk_of(stranger(1)), "Ann", NOW).unwrap();
 }
 
@@ -362,12 +400,15 @@ fn s026_t05_r05_forget() {
         assert_eq!(handle.all_commits(), commits + 1);
         assert!(!has_record(&reopened(&handle), seed));
     }
-    // The gap goes with the record (spec 021 R24).
-    text(&mut channel, stranger(4), 0, NOW).unwrap();
-    text(&mut channel, stranger(4), 5, NOW).unwrap();
-    assert_eq!(channel.gaps().len(), 1);
+    // The gap goes with the record, another's stays (spec 021 R24).
+    for seed in [stranger(4), stranger(5)] {
+        text(&mut channel, seed, 0, NOW).unwrap();
+        text(&mut channel, seed, 5, NOW).unwrap();
+    }
+    assert_eq!(channel.gaps().len(), 2);
     channel.forget(pk_of(stranger(4))).unwrap();
-    assert!(channel.gaps().is_empty());
+    let left: Vec<[u8; 32]> = channel.gaps().iter().map(|gap| gap.peer).collect();
+    assert_eq!(left, [pk_of(stranger(5))]);
     let commits = handle.all_commits();
     assert_eq!(channel.forget(pk_of(stranger(3))), Err(Error::UnknownPeer));
     assert_eq!(handle.all_commits(), commits);
@@ -398,6 +439,9 @@ fn s026_t06_r06_ignored_keys() {
     assert!(!channel.status().unknown_limit_reached);
     text(&mut channel, stranger(901), 0, NOW).unwrap();
     assert_eq!(channel.status().ignored_keys, 2);
+    // The evicted stranger is counted, not the newcomer.
+    assert!(channel.carry.ignored_keys.contains(&pk_of(stranger(1))));
+    assert!(!channel.carry.ignored_keys.contains(&pk_of(stranger(901))));
     // The newcomer took the evicted place, unmuted.
     assert!(!channel.status().unknown_limit_reached);
     // The user's own call refused by R4 is not counted.
@@ -424,9 +468,17 @@ fn s026_t06_r06_ignored_keys() {
     for n in 0..1_100u16 {
         channel.ignore_key(pk_of(stranger(n)));
     }
-    let tracked = u32::try_from(MAX_IGNORED_TRACKED).unwrap();
-    assert_eq!(channel.status().ignored_keys, tracked);
-    assert_eq!(MAX_UNKNOWN_PEERS + MAX_LABELLED_PEERS, MAX_PEERS);
+    assert_eq!(channel.status().ignored_keys, 1_024);
+    // The spec's numbers, pinned once (Interface).
+    assert_eq!(
+        (
+            MAX_UNKNOWN_PEERS,
+            MAX_LABELLED_PEERS,
+            MAX_PEERS,
+            MAX_IGNORED_TRACKED
+        ),
+        (50, 500, 550, 1_024)
+    );
 }
 
 /// Spec 026, R7: `forget` and an evicting `decrypt` whose commit fails
@@ -435,15 +487,15 @@ fn s026_t06_r06_ignored_keys() {
 fn s026_t07_r07_failing_store() {
     let (mut channel, handle, faults) = receiver(3_600);
     plant(&mut channel, crowd(1, 50, false));
-    // The oldest stranger, the one an eviction takes, has a gap.
+    // The stranger an eviction takes and the one `forget` takes have a gap.
     text(&mut channel, stranger(1), 15, NOW).unwrap();
+    text(&mut channel, stranger(2), 15, NOW + 1).unwrap();
     let gaps = channel.gaps();
-    assert_eq!(gaps.len(), 1);
+    assert_eq!(gaps.len(), 2);
     let before = channel.state.duplicate();
     faults.fail_commits(true);
-    let labelled_pk = channel.state.peers[0].pk.0;
     assert_eq!(
-        channel.forget(labelled_pk),
+        channel.forget(pk_of(stranger(2))),
         Err(Error::Store(StoreError::Io))
     );
     assert_eq!(

@@ -2,6 +2,21 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AI
+
+**2026-10-09 — Audit AI, the code audit of spec 026-peer-limits (branch `026-peer-limits`, PR #47), round 1 of three read-only passes (A: conformance with R1–R7 and T01–T07; B: the adversary, an intruder with the leaked config minting keys, a server choosing every `received_at` and `server_id`, a wrong device clock; C: code quality, tests and hand mutants).** No High finding and no production defect. The human reviewer took the recommendation of each of the three decisions (AI1–AI3). Pass C ran 33 mutants beyond the author's 29: 25 killed, 8 survived, each killed by a test added below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI1 | An eviction erases an unknown's gap, so a server dropping its messages with an intruder flooding keys hides the deletion (B1) | Low | Residual in 026 Security (decision) |
+| AI2 | `last_seen` is the device's `now`: a clock set back evicts a newcomer first; ties can be ground for (B2, B3) | Low | Residual in 026 Security (decision) |
+| AI3 | The rejected key is counted before the cursor commit, which may fail (A3, B5, C12) | Info | Left, with a comment: the set counts distinct keys (decision) |
+| AI4 | `docs/spec.md` §7 lacked the muted exception decided in audit J and the per-session count; 022 kept "until it is implemented" (A1, A2, B4) | Low | §7 and 022 amended |
+| AI5 | Tests a mutant survived or a clause the spec names: the own-key outcome, a refused label on a counted channel, the peers-changed flag, a stale and a `key_retired` newcomer at the limit, a verified or retired peer counted in the labelled budget, the evicted key counted and not the newcomer, a second gap that stays, gaps a failed commit keeps, the room check after the retired check and before step 6, 1 024 pinned, the 551st pre-verification committing nothing, an oracle that copied the rule (A4–A6, B7, C2–C6, C14–C16) | Medium | One clause each in `tests/limits.rs` |
+| AI6 | Docs: the module claimed nothing removes a named peer; `creates` and `check_label` undocumented; the eviction an associated function with no `self`; why the eviction precedes the push (A7, C1, C7, C9–C11) | Nit | Reworded; a free `evict_stranger`; comments |
+
+Left as they are: the third copy of "remove a record, then its gap" (C8), one line at each place; `unknown` and the test `text` helper not shared with other test files (C17); the O(550) counts per new key (C13), below the cost of the signature check and the state rewrite.
+
 ## Spec 025 implemented
 
 **2026-10-09 — Spec 025-identity-regen is `implemented`.** Its acceptance criterion is automated alone: `cargo test -p privatechat-core s025_`, clippy and the documentation lint are green on `mvp` (4da62ee), after the two rounds of Audit AH.

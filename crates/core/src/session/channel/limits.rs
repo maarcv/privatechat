@@ -1,7 +1,8 @@
 //! Peer limits (spec 026-peer-limits): the two budgets (R1), the room a
 //! new key finds at step 5 (R2), the eviction of a stranger (R3), the
 //! admission into the labelled budget (R4), `forget` (R5) and the ignored
-//! keys of this session (R6). Nothing here removes a peer the user named.
+//! keys of this session (R6). Only `forget`, the user's call, removes a
+//! peer the user named; the eviction touches strangers alone.
 
 use super::{Channel, PeerId};
 use crate::crypto::PublicKey;
@@ -49,7 +50,9 @@ impl Channel {
     }
 
     /// Whether a label or a verification may move an unknown peer into the
-    /// labelled budget, or create a verified one (R4).
+    /// labelled budget, or create a verified one (R4): `creates` when the
+    /// call adds a record (`verify_scanned` of a new key), which also needs
+    /// room under `MAX_PEERS`.
     pub(super) fn admits_labelled(&self, creates: bool) -> bool {
         let peers = &self.state.peers;
         labelled_count(peers) < MAX_LABELLED_PEERS && !(creates && peers.len() >= MAX_PEERS)

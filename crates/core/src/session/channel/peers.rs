@@ -319,7 +319,7 @@ impl Channel {
 
     /// The label rules of R7 after `UnknownPeer`, in order: the name, the
     /// collision unless the target is verified, then the admission of an
-    /// unknown peer.
+    /// unknown peer or a new record (spec 026-peer-limits R4).
     fn check_label(&self, peer: &PeerId, name: &str, target: Target) -> Result<(), Error> {
         let key = name_key(name);
         let valid =
