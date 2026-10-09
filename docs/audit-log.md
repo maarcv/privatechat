@@ -2,6 +2,10 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Spec 026 implemented
+
+**2026-10-09 — Spec 026-peer-limits is `implemented`.** Its acceptance criterion is automated alone: `cargo test -p privatechat-core s026_`, clippy and the documentation lint are green on `mvp` (9137d6a), after the eight rounds of Audit AI, which the human reviewer closed at round 8.
+
 ## Audit AI
 
 **2026-10-09 — Audit AI, the code audit of spec 026-peer-limits (branch `026-peer-limits`, PR #47), round 1 of three read-only passes (A: conformance with R1–R7 and T01–T07; B: the adversary, an intruder with the leaked config minting keys, a server choosing every `received_at` and `server_id`, a wrong device clock; C: code quality, tests and hand mutants).** No High finding and no production defect. The human reviewer took the recommendation of each of the three decisions (AI1–AI3). Pass C ran 33 mutants beyond the author's 29: 25 killed, 8 survived, each killed by a test added below.
