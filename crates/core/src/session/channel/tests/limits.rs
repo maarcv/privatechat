@@ -136,6 +136,7 @@ fn s026_t02_r02_room_check() {
         (crowd(0, 49, true), true),
         // Labelled peers do not count against the 50.
         (crowd(10, 40, true), true),
+        (crowd(500, 10, true), true),
         (one_unmuted, true),
         (crowd(0, 50, true), false),
         (full_one_unmuted, true),
@@ -251,11 +252,12 @@ fn s026_t03_r03_lru_eviction() {
     assert!(has_record(&channel, stranger(1)) && has_record(&channel, stranger(70)));
     assert_eq!(channel.state.peers.len(), 51);
 
-    // The newcomer, heard from at `NOW - 3 600`, is now the oldest.
-    text(&mut channel, stranger(901), 0, NOW).unwrap();
+    // An hour later, past every stamp: the newcomer, heard from at
+    // `NOW - 3 600`, is now the oldest.
+    text(&mut channel, stranger(901), 0, NOW + HOUR_MS).unwrap();
     assert!(!has_record(&channel, newcomer));
     // Then the other tied stranger, at `NOW - 1`.
-    text(&mut channel, stranger(902), 0, NOW).unwrap();
+    text(&mut channel, stranger(902), 0, NOW + HOUR_MS).unwrap();
     assert!(!has_record(&channel, larger));
     assert!(has_record(&channel, stranger(4)));
 
@@ -268,12 +270,12 @@ fn s026_t03_r03_lru_eviction() {
     let mut next = channel.next_state();
     next.peers[0].last_seen = NOW - 1;
     channel.commit(next, Vec::new()).unwrap();
-    text(&mut channel, stranger(900), 0, NOW).unwrap();
+    text(&mut channel, stranger(900), 0, NOW + HOUR_MS).unwrap();
     assert!(!has_record(&channel, stranger(1)));
     let left: Vec<[u8; 32]> = channel.gaps().iter().map(|gap| gap.peer).collect();
     assert_eq!(left, [pk_of(stranger(2))]);
     assert!(matches!(
-        text(&mut channel, stranger(1), 3, NOW + 2),
+        text(&mut channel, stranger(1), 3, NOW + HOUR_MS),
         Ok(Some(_))
     ));
     let back = channel.peer(&PublicKey(pk_of(stranger(1)))).unwrap();
@@ -311,12 +313,30 @@ fn s026_t03_r03_lru_eviction() {
     assert_eq!(channel.status().ignored_keys, 0);
 
     // Below both limits nobody is evicted, whatever the labelled peers.
+    for (count, unknowns) in [(10u16, 40u16), (500, 10)] {
+        let (mut channel, _, _) = receiver(3_600);
+        plant(&mut channel, crowd(count, unknowns, false));
+        text(&mut channel, stranger(900), 0, NOW).unwrap();
+        let total = usize::from(count + unknowns) + 1;
+        assert_eq!(channel.state.peers.len(), total);
+        assert!((1..=unknowns).all(|n| has_record(&channel, stranger(n))));
+        assert_eq!(channel.status().ignored_keys, 0);
+    }
+
+    // Strangers stamped a year ahead, by a clock since corrected, go before
+    // an older newcomer: they no longer shield a flood.
     let (mut channel, _, _) = receiver(3_600);
-    plant(&mut channel, crowd(10, 40, false));
-    text(&mut channel, stranger(900), 0, NOW).unwrap();
-    assert_eq!(channel.state.peers.len(), 51);
-    assert!((1..=40).all(|n| has_record(&channel, stranger(n))));
-    assert_eq!(channel.status().ignored_keys, 0);
+    let year = 365 * 24 * 3_600_000;
+    let mut peers = crowd(0, 49, false);
+    for peer in &mut peers {
+        peer.last_seen += year;
+    }
+    plant(&mut channel, peers);
+    text(&mut channel, stranger(900), 0, NOW - 3_600).unwrap();
+    text(&mut channel, stranger(901), 0, NOW).unwrap();
+    assert!(has_record(&channel, stranger(900)));
+    assert!(!has_record(&channel, stranger(1)));
+    assert_eq!(channel.status().ignored_keys, 1);
 
     // At 550 the total stays at 550: with 500 labelled, and with 501 after
     // a retirement by hand and only 49 strangers.
@@ -367,6 +387,17 @@ fn s026_t04_r04_labelled_budget() {
         assert_eq!(handle.all_commits(), commits);
         assert!(channel.status().labelled_limit_reached);
 
+        // A muted stranger is unknown too (R1).
+        channel.mute(pk_of(stranger(2)), true).unwrap();
+        let commits = handle.all_commits();
+        let muted = pk_of(stranger(2));
+        assert_eq!(channel.label(muted, "Mut", NOW), Err(Error::PeerLimit));
+        assert_eq!(
+            channel.verify(muted, Some("Mut"), NOW),
+            Err(Error::PeerLimit)
+        );
+        assert_eq!(handle.all_commits(), commits);
+
         // Already in the budget: a new label and a verification add nothing.
         let inside = channel.state.peers[0].pk.0;
         channel.label(inside, "Renamed", NOW).unwrap();
@@ -397,7 +428,8 @@ fn s026_t04_r04_labelled_budget() {
     }
 
     // Below 500 a label admits; a pre-verification that would make a 551st
-    // record does not, and commits nothing.
+    // record does not, and commits nothing. 51 strangers is a planted
+    // state no flow reaches: it checks the defence R4 names.
     let (mut channel, _, _) = receiver(3_600);
     plant(&mut channel, crowd(499, 50, false));
     channel.label(pk_of(stranger(1)), "Ann", NOW).unwrap();
@@ -449,9 +481,12 @@ fn s026_t05_r05_forget() {
         text(&mut channel, seed, 5, NOW).unwrap();
     }
     assert_eq!(channel.gaps().len(), 2);
+    let peers = channel.state.peers.len();
     channel.forget(pk_of(stranger(4))).unwrap();
     let left: Vec<[u8; 32]> = channel.gaps().iter().map(|gap| gap.peer).collect();
     assert_eq!(left, [pk_of(stranger(5))]);
+    assert_eq!(channel.state.peers.len(), peers - 1);
+    assert!(has_record(&reopened(&handle), stranger(5)));
     let commits = handle.all_commits();
     assert_eq!(channel.forget(pk_of(stranger(3))), Err(Error::UnknownPeer));
     assert_eq!(handle.all_commits(), commits);

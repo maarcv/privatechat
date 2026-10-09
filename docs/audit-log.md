@@ -23,6 +23,15 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AI8 | `forget` of a retired record lets its stolen key write again as an unknown, and R4's hard limit leads the user to forget (B) | Low (partly far-fetched: the user's own call) | 026 Security; the wording is spec 055's |
 | AI9 | Five mutants survived: a known peer at the all-muted limit, labelled peers counted against the 50 in the room check and the eviction, a retired unlabelled peer counted as entering, `verify_scanned` of an existing unknown, the order name–collision–admission at the limit (C) | Medium | One clause each in T02–T04 |
 
+**Round 3.** Fresh passes on the whole change. No production defect; one finding changed a rule.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI10 | A clock that ran ahead leaves strangers stamped in the future; once it is corrected they look newest for years, so one fresh key evicts each real newcomer instead of fifty, and the AI2 text ("until the clock is right again", "no more than a plain flood") was wrong (B) | Low | R3: a `last_seen` later than `now` ranks oldest; T03; Security and §7 reworded. Three advisors: all three escalated, two recommended the rule and one the text alone; the human reviewer took the rule (decision). Clamping the stamp to `now`, as 021 R24 does for `truncated_at`, was rejected: it keeps the stamped strangers newest |
+| AI11 | 026 History had no line for round 2; the Interface left out `status.rs` (A) | Nit | Added |
+| AI12 | Four mutants survived: `forget` removing other records, a muted stranger entering the labelled budget, the total confused with the labelled budget in the room check and in the eviction (C) | Medium | One clause each in T02–T05 |
+| AI13 | R4's "create a record when 550 exist" is unreachable with at most 50 unknowns, and its test plants 51 (C) | Far-fetched | Kept, as R4 names it; the test says the state is planted |
+
 Left as they are: the third copy of "remove a record, then its gap" (C8), one line at each place; `unknown` and the test `text` helper not shared with other test files (C17); the O(550) counts per new key (C13), below the cost of the signature check and the state rewrite.
 
 ## Spec 025 implemented

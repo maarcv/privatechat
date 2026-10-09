@@ -156,7 +156,7 @@ impl Channel {
         // Spec 026-peer-limits R3: a new peer at a limit evicts a stranger,
         // before the newcomer is pushed, so it can never evict itself.
         let evicted = if self.peer(&sender).is_none() {
-            evict_stranger(&mut next)
+            evict_stranger(&mut next, arrival.now)
         } else {
             None
         };
