@@ -2,7 +2,7 @@
 
 use core::fmt;
 
-use crate::session::channel::{ClientRef, key_prefix};
+use crate::session::channel::{ClientRef, Received, key_prefix};
 
 /// What the session tells the client, by channel or by connection. Its
 /// `Debug` shows a channel by the 4-byte prefix of its id (AGENTS 19).
@@ -10,6 +10,19 @@ use crate::session::channel::{ClientRef, key_prefix};
 pub enum Event {
     /// The channel's backlog arrived and live messages follow (R9).
     Subscribed {
+        /// The channel.
+        channel: [u8; 16],
+    },
+    /// A message `decrypt` consumed (R10).
+    Message {
+        /// The channel.
+        channel: [u8; 16],
+        /// What it holds.
+        received: Received,
+    },
+    /// A push met a full log: the channel takes no more on this
+    /// connection, and asks for one once there is room (R10).
+    StorageFailed {
         /// The channel.
         channel: [u8; 16],
     },
@@ -48,6 +61,10 @@ impl fmt::Debug for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Event::Subscribed { channel } => write!(f, "Subscribed({})", key_prefix(channel)),
+            Event::Message { channel, .. } => write!(f, "Message({})", key_prefix(channel)),
+            Event::StorageFailed { channel } => {
+                write!(f, "StorageFailed({})", key_prefix(channel))
+            }
             Event::HistoryTruncated { channel, before } => {
                 write!(f, "HistoryTruncated({}, {before})", key_prefix(channel))
             }

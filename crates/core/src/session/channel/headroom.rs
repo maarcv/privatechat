@@ -94,3 +94,28 @@ impl Channel {
         }
     }
 }
+
+#[cfg(test)]
+impl Channel {
+    /// Commits records of `purge_at` until the log is exactly `target`
+    /// bytes, for the tests of a full log.
+    pub(crate) fn fill_log(&mut self, purge_at: u64, target: u64) {
+        // The largest body a log record holds (spec 020-store-files Limits).
+        const MAX_BODY: u64 = 64_511;
+        let base = crate::testing::record(0, 0).entry_len();
+        let mut remaining = target - self.store.log_len();
+        let mut records = Vec::new();
+        while remaining > 0 {
+            let mut len = remaining.min(base + MAX_BODY);
+            if remaining > len && remaining - len < base {
+                len -= base;
+            }
+            records.push(crate::testing::record(
+                purge_at,
+                usize::try_from(len - base).unwrap(),
+            ));
+            remaining -= len;
+        }
+        self.commit(self.next_state(), records).unwrap();
+    }
+}

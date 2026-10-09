@@ -214,9 +214,10 @@ pub(crate) fn frame_decode_verdict(data: &[u8]) -> Result<Frame, Error> {
 }
 
 /// The verdict of `session_on_frame`: the events of a fixed `hello` and
-/// `ok` at `text_k1`'s `now`, then of the input's frames; a trailing part
-/// shorter than its length is dropped.
-pub(crate) fn session_on_frame_verdict(data: &[u8]) -> Result<Vec<Event>, Error> {
+/// `ok` at `text_k1`'s `now`, then of the input's frames, a trailing part
+/// shorter than its length dropped; and the channel's cursor after them,
+/// which only `decrypt` moves.
+pub(crate) fn session_on_frame_verdict(data: &[u8]) -> Result<(Vec<Event>, Option<u64>), Error> {
     let config = text_k1_config()?;
     let own = Secret::from_bytes(text_k1::SENDER_SEED);
     let mut channels = vec![Channel::for_fuzzing(&config, &own)?];
@@ -243,7 +244,8 @@ pub(crate) fn session_on_frame_verdict(data: &[u8]) -> Result<Vec<Event>, Error>
         session.outgoing();
         rest = tail;
     }
-    Ok(events)
+    let cursor = channels.first().and_then(Channel::cursor);
+    Ok((events, cursor))
 }
 
 /// `verify`, then `open`, in the channel `ctx`.

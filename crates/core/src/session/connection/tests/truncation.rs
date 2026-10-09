@@ -2,10 +2,13 @@
 //! is queued and again at its `ok`, and what the `ok` and the ticks call.
 
 use super::{DAY, SERVER, T0, channel, connected, error, hello, ids, ok};
-use crate::crypto::Secret;
+use crate::crypto::{Nonce, Secret};
 use crate::proto::config::Config;
+use crate::proto::envelope::{self, ChannelCtx, SenderKey};
+use crate::proto::payload::{Payload, PayloadKind};
 use crate::session::channel::Channel;
 use crate::session::connection::{Channels, Event};
+use crate::session::frames::Frame;
 use crate::storage::Vault;
 use crate::testing::{MemoryStore, MemoryVault};
 
@@ -187,4 +190,59 @@ fn stored_channel(ttl_seconds: u32, created_at: u64) -> (Channels, MemoryStore) 
     let store = vault.create(&config.channel_id()).unwrap();
     let handle = MemoryStore::handle(&vault, vault.dir_name(&config.channel_id()).unwrap());
     (vec![Channel::create(&config, store).unwrap().0], handle)
+}
+
+/// The blob Bob seals with `counter` at `sent_at`, a whole minute.
+fn bob_blob(channel: &Channel, counter: u64, sent_at: u64) -> Vec<u8> {
+    let ctx = ChannelCtx::from_config(channel.config()).unwrap();
+    let bob = SenderKey::from_seed(&Secret::from_bytes([0x42; 32])).unwrap();
+    let payload = Payload {
+        kind: PayloadKind::Text,
+        display_name: None,
+        sent_at,
+        body: b"hi".to_vec(),
+    };
+    let nonce = Nonce(core::array::from_fn(|i| {
+        counter.to_be_bytes()[i % 8] ^ u8::try_from(i).unwrap()
+    }));
+    envelope::seal(&ctx, &bob, counter, &nonce, &payload)
+        .unwrap()
+        .blob
+}
+
+/// Spec 028, R8 and R10: a cursor older than `ttl_ms + 360 000`, then a
+/// backlog of Bob's counters 250–300 over a `max_counter` of 100 → the
+/// truncation is recorded before the backlog is decrypted, and no gap is
+/// recorded for 250.
+#[test]
+fn s028_t08_r08_backlog_after_truncation_no_gap() {
+    let mut channels = vec![channel(1, DAY, T0)];
+    let id = ids(&channels)[0];
+    let first = bob_blob(&channels[0], 100, T0);
+    assert!(
+        channels[0]
+            .decrypt(&first, [1; 16], T0 + 1, T0 + 1)
+            .unwrap()
+            .is_some()
+    );
+    let at = T0 + 86_400_000 + 420_000;
+    let mut session = connected(&channels, at);
+    let step = session.on_frame(&hello(1, &[1]), &mut channels, at);
+    assert_eq!(step.events, [truncated(id, at, DAY)]);
+    for counter in 250..=300 {
+        let push = Frame::Push {
+            channel_id: id,
+            server_id: [u8::try_from(counter - 200).unwrap(); 16],
+            received_at: at + 1,
+            blob: bob_blob(&channels[0], counter, at),
+        }
+        .encode()
+        .unwrap();
+        let step = session.on_frame(&push, &mut channels, at + 2);
+        assert!(
+            matches!(step.events[..], [Event::Message { .. }]),
+            "{counter}"
+        );
+    }
+    assert_eq!(channels[0].gaps(), []);
 }

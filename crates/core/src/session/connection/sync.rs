@@ -49,9 +49,11 @@ impl Session {
         }
         if !self.sync_stopped {
             for (channel_id, state) in &self.subscriptions {
-                if let (Subscription::Subscribed, Some(channel)) =
-                    (state, find_mut(channels, channel_id))
-                {
+                if let (Subscription::Subscribed, false, Some(channel)) = (
+                    state,
+                    self.is_stalled(channel_id),
+                    find_mut(channels, channel_id),
+                ) {
                     sync(channel, now, step);
                 }
             }
@@ -113,18 +115,23 @@ impl Session {
         if truncated {
             truncate(channel, now, step);
         }
-        if syncs && !self.sync_stopped {
+        // A dropped push lies after the cursor: `synced` would mark it
+        // fetched (R10).
+        if syncs && !self.sync_stopped && !self.is_stalled(&channel_id) {
             sync(channel, now, step);
         }
         step.events.push(Event::Subscribed {
             channel: channel_id,
         });
-        self.publish_outbox(channel, now, step);
+        if !self.is_frozen(&channel_id) {
+            self.publish_outbox(channel, now, step);
+        }
     }
 
-    /// Queues a `publish` for each `outbox` entry not in flight and reports
-    /// the entries that left it unsent (R9).
-    fn publish_outbox(&mut self, channel: &mut Channel, now: u64, step: &mut Step) {
+    /// Queues a `publish` for each `outbox` entry not in flight, only those
+    /// R10's stop lets leave, and reports the entries that left it unsent
+    /// (R9, R14).
+    pub(super) fn publish_outbox(&mut self, channel: &mut Channel, now: u64, step: &mut Step) {
         let channel_id = channel.config().channel_id();
         let in_flight: Vec<ClientRef> = self
             .in_flight
@@ -135,7 +142,7 @@ impl Session {
         let OutboxStep {
             publish,
             not_delivered,
-        } = match channel.outbox(now, &in_flight, false) {
+        } = match channel.outbox(now, &in_flight, self.withholds_current(&channel_id)) {
             Ok(outbox) => outbox,
             Err(Error::Store(error)) => {
                 step.failed.push((channel_id, error));

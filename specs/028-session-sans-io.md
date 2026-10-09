@@ -87,7 +87,8 @@ crates/core/src/session/frames/tests.rs      s028_* tests of R1–R3 and the vec
 crates/core/src/session/connection.rs        Session, Step, Event, Channels (R5–R18)
 crates/core/src/session/connection/event.rs  Event and its redacted Debug
 crates/core/src/session/connection/sync.rs   the truncation, the ok and the limits of R9 (R8, R9)
-crates/core/src/session/connection/tests.rs  s028_* tests, with those of R8 and R9 in tests/truncation.rs and tests/ok.rs
+crates/core/src/session/connection/traffic.rs the push routed to decrypt and the stalls of R10
+crates/core/src/session/connection/tests.rs  s028_* tests, with those of R8, R9 and R10 in tests/truncation.rs, tests/ok.rs and tests/traffic.rs
 crates/core/src/testing/server.rs            MemoryServer, which implements R4 over Frame, re-exported by testing.rs beside spec 020's doubles
 crates/core/fuzz/fuzz_targets/frame_decode.rs
 crates/core/fuzz/fuzz_targets/session_on_frame.rs
@@ -136,7 +137,7 @@ impl Session {
 
 A `Step` never fails as a whole: a store failure in one channel goes to `failed` and the session carries on with the others, so no event already produced is lost. `Frame` derives no `PartialEq`; the tests compare encodings.
 
-**PR slices** (AGENTS 14): (a) the frames, their vectors and the `frame_decode` target (R1, R2, R3's first target); (b1) `MemoryServer`, the connection and the subscription (R4–R7); (b2) truncation, `ok` and the `session_on_frame` target (R3's second target, R8, R9); (c1a) traffic, the `LogFull` stall and the stop after an own-key alert (R10's first half); (c1b) the freeze after another store error and the `write_failed` mark (R10's second half); (c2) outcomes, acks and status (R11–R14, R17); (d) rate and errors (R15, R16); (e) the no-oracle property (R18). Each test clause lands in the slice that implements the last behaviour it needs; the list above names where each requirement is implemented, and a test that spans slices is completed clause by clause.
+**PR slices** (AGENTS 14): (a) the frames, their vectors and the `frame_decode` target (R1, R2, R3's first target); (b1) `MemoryServer`, the connection and the subscription (R4–R7); (b2) truncation, `ok` and the `session_on_frame` target (R3's second target, R8, R9); (c1a) traffic, the `LogFull` stall, the stop after an own-key alert and the freeze after a store error of a push (R10's first half); (c1b) the freeze after a failed `acked`, `outbox` or `expire_outbox` and the `write_failed` mark (R10's second half); (c2) outcomes, acks and status (R11–R14, R17); (d) rate and errors (R15, R16); (e) the no-oracle property (R18). Each test clause lands in the slice that implements the last behaviour it needs; the list above names where each requirement is implemented, and a test that spans slices is completed clause by clause.
 
 ## Security
 
@@ -251,3 +252,4 @@ Decided on 2026-09-25: the frame keys belong to this spec (`docs/spec.md` §6).
 - 2026-10-09 slice (b2) implemented; R9 says how a clock set back counts for its two limits, that the gap's `Reconnect` comes once and where a failed `synced` goes, and T09 checks them (`docs/audit-log.md`, decisions taken without the human)
 - 2026-10-09 amended after audit AL round 1 (`docs/audit-log.md`): a `nonce_expired` naming a subscribed channel is a `Reconnect` (R16); the `ok` after a truncation found at the `subscribe` syncs (R9); the `session_on_frame` seeds reach the channel it holds and `decrypt` (R3)
 - 2026-10-09 amended after audit AL round 2 (`docs/audit-log.md`): at the `ok`, a truncation found at the `subscribe` is recorded again with the `ok`'s `now`, then the channel syncs (R9, T08); R3, T06 and T09 reworded
+- 2026-10-09 slice (c1a) implemented: the push routed to `decrypt`, the `LogFull` stall and its stop, and the freeze after a store error of `decrypt` or `check_own_key` (R10); `after_send` (R10, R14); the `session_on_frame` verdict reports the cursor, so that T03 sees a seed reach `decrypt`
