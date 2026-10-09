@@ -632,6 +632,8 @@ fn s028_t10_r10_write_failed_mark() {
     session.on_disconnect();
     session.on_connect(T0 + 4_000, &[]);
     session.on_frame(&hello(3, &[1]), &mut channels, T0 + 4_000);
+    // Clearing a channel not marked changes nothing.
+    session.set_write_failed(&channels[0], false, false);
     let step = session.on_frame(&push(id, 1, &hi), &mut channels, T0 + 4_100);
     assert!(is_message(&step.events, 1), "{:?}", step.events);
 }
@@ -648,6 +650,7 @@ fn s028_t10_r10_write_failed_storage_full() {
     let theirs = sealed(&mut thief, "x");
     let mut bob = member(&channels[0]);
     let hi = sealed(&mut bob, "hi");
+    let mine = channels[0].encrypt("mine", None, T0).unwrap();
     channels[0].fill_log(FILL_EXPIRES, ROOM + 1);
     let mut session = greeted(&mut channels);
     session.on_frame(&push(id, 1, &hi), &mut channels, T0 + 100);
@@ -657,6 +660,9 @@ fn s028_t10_r10_write_failed_storage_full() {
     assert!(!channels[0].status().own_key_used_elsewhere);
 
     session.set_write_failed(&channels[0], false, true);
+    // No own-key alert: the stall begun at the clearing publishes on.
+    session.on_frame(&ok(id), &mut channels, T0 + 200);
+    assert_eq!(published(&mut session), [mine]);
     let mut now = T0 + 200;
     while now < FILL_EXPIRES + 1_000 {
         now += 1_000;

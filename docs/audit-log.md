@@ -2,6 +2,21 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AN
+
+**2026-10-10 — Audit AN, the code audit of slice (c1b) of spec 028-session-sans-io (branch `028-write-failed`): the `write_failed` mark and the freeze after a failed `outbox` (R10's second half); round 1 of three passes (A: conformance; B: the adversary, a key thief on a failing disk; C: quality, tests and hand mutants).** No High finding and no production defect. Pass C ran 13 mutants: 11 killed, 2 survived, each killed below.
+
+Decisions taken without the human, by the advisor (three passes): `set_write_failed` takes the channel, and a mark cleared with `storage_full` begins a `LogFull` stall whose stop reads the own-key flag at the clearing (unanimous on reading the flag; two to one on not restoring a stall the mark overrode — the minority would keep an earlier stop, so that a regeneration made while marked still asks for a new connection, and raises no privacy or security risk: the regeneration clears the flag, and the new key is not known elsewhere); the freeze after a failed `acked` or `expire_outbox` moves to slice (c2), the first to call them (unanimous).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AN1 | A mark cleared with `storage_full` publishes the current key's entries before a thief's push dropped while frozen, or whose check's commit failed, is checked again (B) | Far-fetched | None: it needs an `Io` write failure, which no adversary of `docs/spec.md` §2 causes, and a server can hold the thief's push back anyway |
+| AN2 | T10 did not name the clearing with `storage_full` of a channel whose own-key flag is set, which a test covers (A) | Low | A T10 clause |
+| AN3 | T16 had the entry of a failed `abandon` published again after `set_write_failed(false)`, which R10 denies on that connection (A) | Low | T16 says on this connection, the clearing included |
+| AN4 | `storage_full` duplicates what the channel passed alongside it holds (A) | Far-fetched | None: spec 027 R12 has the `Device` pass the value it just read |
+| AN5 | No test checked that a clearing with `storage_full` and no own-key alert still publishes: always stopping passed (C) | Medium | The test publishes the waiting entry at the `ok` after the clearing |
+| AN6 | Clearing a channel never marked, which must change nothing, untested (C) | Low | A clearing before the next connection's push |
+
 ## Audit AM
 
 **2026-10-09 — Audit AM, the code audit of slice (c1a) of spec 028-session-sans-io (branch `028-traffic`): the `push` routed to `decrypt`, the `LogFull` stall, the stop after one's own key is used elsewhere and the freeze after a push's store error (R10's first half), with `after_send`; round 1 of three passes (A: conformance; B: the adversary, a key thief and a server; C: quality, tests and hand mutants).** No High finding and no production defect beyond AM1. Pass C ran 31 mutants: 24 killed, 1 equivalent, 6 survived, each killed below or removed with the code it mutated.
