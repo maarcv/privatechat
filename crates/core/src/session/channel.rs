@@ -157,9 +157,10 @@ pub enum AckOutcome {
     Delivered,
     /// It was not stored, or not in time: it failed.
     NotDelivered,
-    /// The `key_retired` was stored (spec 025-identity-regen).
+    /// The `key_retired` was stored in time (spec 025-identity-regen R5).
     RetirementDelivered,
-    /// An `ack` for no current `outbox` entry.
+    /// An `ack` for no current `outbox` entry, or for a `key_retired` copy
+    /// not stored in time (spec 025-identity-regen R5).
     Ignored,
 }
 

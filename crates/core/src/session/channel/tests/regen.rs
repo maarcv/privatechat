@@ -459,8 +459,15 @@ fn s025_t04_r04_reseal() {
     assert_eq!(reopened(&handle).cursor(), Some(NOW - 5));
 
     // Earlier, as after a clock set back, and in flight: none of them.
+    let (later_blob, later_ref) = (
+        retirement_entry(&channel).blob.clone(),
+        retirement_ref(&channel),
+    );
     channel.outbox(NOW - HOUR_MS, &[], true).unwrap();
-    assert_eq!(retirement_entry(&channel).sent_at, NOW - HOUR_MS);
+    let entry = &channel.state.outbox[0];
+    assert_eq!(entry.sent_at, NOW - HOUR_MS);
+    assert_ne!(entry.blob[NONCE_RANGE], later_blob[NONCE_RANGE]);
+    assert_ne!(ClientRef::of(entry), later_ref);
     let in_flight = retirement_ref(&channel);
     let commits = handle.all_commits();
     let step = channel.outbox(NOW, &[in_flight], false).unwrap();
@@ -572,6 +579,7 @@ fn s025_t05_r05_ack_erases_old_key() {
     let commits = handle.all_commits();
     let outcome = channel.acked(previous, sid(1), NOW, NOW).unwrap();
     assert_eq!(outcome.outcome, AckOutcome::Ignored);
+    assert_eq!(outcome.sent_at, None);
     assert_eq!(handle.all_commits(), commits);
     assert!(channel.status().retirement_pending);
 }

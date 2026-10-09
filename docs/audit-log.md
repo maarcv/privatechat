@@ -18,6 +18,16 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AH8 | A late `ack` of the current copy returned `sent_at: None`, which spec 028 R12 needs to hold that copy (A7, C10) | Low | `sent_at: Some`; the field's doc names the earlier copy |
 | AH9 | Docs and duplication: `acked`'s doc, `# Errors` of an epoch overflow, "oldest first", the marking comment, the minute rounding in three places (A10, A11, C11, C12, C15, C17, C18, C20, C22) | Nit | Reworded; `minute_of` shared; `NONCE_RANGE` reused by the test |
 
+**Round 2.** A fresh reading of the final state with the round-1 fixes: no Blocker, High or Medium finding.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AH10 | The docs of `AckOutcome::Ignored` and `RetirementDelivered` still read as before AH1 (R2-1) | Low | Both name R5's "in time" |
+| AH11 | T04's backward re-seal checked `sent_at` alone; no test pinned `sent_at: None` for an earlier copy's `ack` (R2-2, R2-3) | Nit | Nonce and `client_ref` asserted; `None` asserted |
+| AH12 | `docs/spec.md` §4 read as if the copy were re-sealed "before the stale check", and re-sealed "in the next minute" after a late `ack`, while R4 re-seals it only as it is handed out (R2-4) | Nit | §4: never judged stale, sealed again when next handed out in another minute |
+
+Spec 028 R12 and R16 hold an ignored copy "until its next re-seal or until the minute changes"; under R4 only the minute change releases it, which 028 may say when it is implemented (R2-5).
+
 Left as they are: `seal_retirement` repeats `encrypt`'s sealing and the `LogFull → Internal` closure is in two places, below the third caller (C13, C14); the old key derived twice in R1 (C16); `OldKey` beside `Gap` in `channel.rs` (C19); the test helpers of `tests/regen.rs` not shared (C21). M13 of pass C, the re-seal without its kind check, is equivalent once R4 re-seals only a copy no old-key entry precedes.
 
 ## Spec 025 open questions
