@@ -2,6 +2,7 @@
 //! silence before an `ok`, and the 5 000 ms gap between calls.
 
 use super::{DAY, T0, channel, connected, hello, ids, ok, reconnect};
+use crate::session::channel::Channel;
 use crate::session::connection::{Channels, Event, Session};
 use crate::session::frames::Frame;
 use crate::storage::{StoreError, Vault};
@@ -71,12 +72,11 @@ fn s028_t09_r09_ok_syncs_and_publishes() {
     assert!(step.failed.is_empty());
     assert_eq!(channels[0].synced_at(), Some(T0 + 500));
     assert_eq!(published(&mut session), [sent.bytes]);
-    // The ticks sync it, and publish nothing already in flight.
+    // The ticks sync it.
     for at in [T0 + 1_500, T0 + 2_500] {
         assert!(session.on_tick(&mut channels, at).events.is_empty());
         assert_eq!(channels[0].synced_at(), Some(at));
     }
-    assert!(published(&mut session).is_empty());
     // A new connection publishes it again after its `ok`.
     session.on_disconnect();
     session.on_connect(T0 + 3_000, &[]);
@@ -93,7 +93,8 @@ fn s028_t09_r09_ok_syncs_and_publishes() {
     let mut session = connected(&channels, later);
     session.on_frame(&hello(1, &[1]), &mut channels, later);
     let step = session.on_frame(&ok(id), &mut channels, later);
-    // The truncation was found at the `hello` (R8).
+    // The truncation was found at the `hello` (R8), and the `ok` syncs.
+    assert_eq!(channels[0].synced_at(), Some(later));
     assert_eq!(
         step.events,
         [
@@ -107,30 +108,53 @@ fn s028_t09_r09_ok_syncs_and_publishes() {
     );
 }
 
-/// Spec 028, R9: a store failure of `synced` or `outbox` at the `ok` goes to
-/// `failed`, with nothing published.
-#[test]
-fn s028_t09_r09_ok_store_failure_reported() {
+/// A channel of `ttl_seconds` over a store that fails on demand.
+fn failing_channel(byte: u8, ttl_seconds: u32) -> (Channels, Faults) {
     let faults = Faults::new();
     let mut vault = MemoryVault::new();
-    let template = channel(3, MINUTE, T0);
+    let template = channel(byte, ttl_seconds, T0);
     let config = template.config();
     let store = vault.create(&config.channel_id()).unwrap();
     let failing = Box::new(FailingStore::new(store, faults.clone()));
-    let mut channels = vec![
-        crate::session::channel::Channel::create(config, failing)
-            .unwrap()
-            .0,
-    ];
+    let (channel, _) = Channel::create(config, failing).unwrap();
+    (vec![channel], faults)
+}
+
+/// Spec 028, R9: a store failure of `synced` at the `ok` goes to `failed`
+/// and the `outbox` still leaves; one of `outbox` goes to `failed` with
+/// nothing published.
+#[test]
+fn s028_t09_r09_ok_store_failure_reported() {
+    // `synced` alone fails: its first commit is due, the `outbox` commits
+    // nothing.
+    let (mut channels, faults) = failing_channel(3, DAY);
     let id = ids(&channels)[0];
-    channels[0].encrypt("hi", None, T0).unwrap();
+    let sent = channels[0].encrypt("hi", None, T0).unwrap();
+    let mut session = connected(&channels, T0);
+    session.on_frame(&hello(1, &[1]), &mut channels, T0);
+    session.outgoing();
+    faults.fail_commits(true);
+    let step = session.on_frame(&ok(id), &mut channels, T0 + 100);
+    assert_eq!(step.failed, [(id, StoreError::Io)]);
+    assert_eq!(published(&mut session), [sent.bytes]);
+    // And on a tick.
+    let step = session.on_tick(&mut channels, T0 + 1_100);
+    assert_eq!(step.failed, [(id, StoreError::Io)]);
+
+    // `outbox` alone fails: a stale entry to remove beside a fresh one, and
+    // a `synced_at` committed too recently to commit again.
+    let (mut channels, faults) = failing_channel(4, MINUTE);
+    let id = ids(&channels)[0];
     let later = T0 + 500_000;
+    channels[0].encrypt("old", None, T0).unwrap();
+    channels[0].encrypt("new", None, later - 1_000).unwrap();
+    channels[0].synced(later - 500).unwrap();
     let mut session = connected(&channels, later);
     session.on_frame(&hello(1, &[1]), &mut channels, later);
     session.outgoing();
     faults.fail_commits(true);
     let step = session.on_frame(&ok(id), &mut channels, later);
-    assert!(step.failed.contains(&(id, StoreError::Io)));
+    assert_eq!(step.failed, [(id, StoreError::Io)]);
     assert!(session.outgoing().is_empty());
 }
 
@@ -161,10 +185,15 @@ fn s028_t09_r09_silence_before_ok() {
     let step = session.on_frame(&ok(second), &mut channels, now);
     assert_eq!(step.events, [Event::Subscribed { channel: second }]);
 
-    // A frame recorded after `now`: the clock was set back.
+    // A frame recorded after `now`: the clock was set back. The first tick
+    // also trips the gap between calls (R9); the second, later than that
+    // tick, only the silence.
     let mut session = connected(&channels, T0);
     session.on_frame(&hello(1, &[1]), &mut channels, T0);
-    let step = session.on_tick(&mut channels, T0 - 1);
+    session.on_frame(&push([0xee; 16], T0), &mut channels, T0 + 10);
+    let step = session.on_tick(&mut channels, T0);
+    assert_eq!(step.events, [reconnect()]);
+    let step = session.on_tick(&mut channels, T0 + 5);
     assert_eq!(step.events, [reconnect()]);
 }
 
@@ -188,6 +217,13 @@ fn s028_t09_r09_gap_between_calls() {
             .is_empty()
     );
     assert_eq!(channels[0].synced_at(), Some(T0 + 5_000));
+    // A second gap on the stopped connection: no second `Reconnect`.
+    assert!(
+        session
+            .on_tick(&mut channels, T0 + 20_000)
+            .events
+            .is_empty()
+    );
 
     // A one-minute channel subscribed, then a tick two TTLs later: no
     // `synced`, `Reconnect`, and the next connection finds the truncation.

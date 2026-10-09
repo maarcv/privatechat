@@ -725,15 +725,18 @@ fn s028_t06_r06_subscribe_contents_and_pacing() {
     assert_eq!(again.len(), 2);
     assert!(again.contains(&refused));
 
-    // A `nonce_expired` naming a channel that had its `ok` frees it too.
+    // A `nonce_expired` naming a channel that had its `ok` → `Reconnect`,
+    // the channel still subscribed and the queue kept (R16).
     let mut session = connected(&two, T0);
     session.on_frame(&hello(1, &[1]), &mut two, T0);
     let done = subscribed_ids(&mut session, &two)[0];
     session.on_frame(&ok(done), &mut two, T0 + 100);
-    session.on_frame(&error("nonce_expired", Some(done)), &mut two, T0 + 200);
-    session.on_frame(&hello(2, &[1]), &mut two, T0 + 1_100);
-    session.on_tick(&mut two, T0 + 2_200);
-    assert!(subscribed_ids(&mut session, &two).contains(&done));
+    let step = session.on_frame(&error("nonce_expired", Some(done)), &mut two, T0 + 200);
+    assert_eq!(step.events, [reconnect()]);
+    session.on_tick(&mut two, T0 + 1_100);
+    assert_eq!(subscribed_ids(&mut session, &two).len(), 1);
+    let step = session.on_frame(&ok(done), &mut two, T0 + 1_200);
+    assert!(step.events.is_empty());
 
     // A session subscribes its own channels alone, whatever the `Device`
     // holds.

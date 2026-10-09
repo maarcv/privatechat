@@ -76,6 +76,21 @@ fn s028_t08_r08_truncation_before_backlog() {
         assert_eq!(found_now, found, "{created_at}");
     }
 
+    // Every channel queued is judged: two away longer than a TTL, in queue
+    // order.
+    let mut channels = vec![
+        channel(3, DAY, T0 - 2 * 86_400_000),
+        channel(4, DAY, T0 - 2 * 86_400_000),
+    ];
+    let [a, b] = [ids(&channels)[0], ids(&channels)[1]];
+    let events = hello_events(&mut channels, T0);
+    assert_eq!(events, [truncated(a, T0, DAY), truncated(b, T0, DAY)]);
+    assert!(
+        channels
+            .iter()
+            .all(|c| c.status().truncated_before.is_some())
+    );
+
     // One decision a connection: a channel subscribed again under a second
     // `hello` gives no second event; a new connection decides again.
     let mut channels = vec![channel(1, DAY, T0 - 2 * 86_400_000)];
@@ -107,6 +122,9 @@ fn s028_t08_r08_truncation_before_backlog() {
     for at in (1..=30).map(|second| T0 + second * 1_000) {
         assert!(session.on_tick(&mut channels, at).events.is_empty());
     }
+    // A backlog push dated after the expired stretch, before the `ok`, does
+    // not hide it: the `ok` judges by the `last` of the `subscribe`.
+    read_up_to(&mut channels[0], T0 + 29_000);
     let step = session.on_frame(&ok(id), &mut channels, T0 + 30_000);
     assert_eq!(
         step.events,
