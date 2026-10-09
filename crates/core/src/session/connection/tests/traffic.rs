@@ -172,6 +172,13 @@ fn s028_t10_r10_log_full_stall() {
         session.on_tick(&mut channels, now + 1_000).events,
         [reconnect()]
     );
+    // Asked once: a close reported late gets no second one.
+    assert!(
+        session
+            .on_tick(&mut channels, now + 1_500)
+            .events
+            .is_empty()
+    );
 
     session.on_disconnect();
     session.on_connect(now + 2_000, &[]);
@@ -195,6 +202,9 @@ fn s028_t10_r10_own_key_stops_publishing() {
     let id = ids(&channels)[0];
     channels[0].regenerate_identity(T0).unwrap();
     let mut thief = thief_of(&handle);
+    // The thief's counter overtakes the first entry alone (spec
+    // 021-channel-session R14).
+    channels[0].encrypt("overtaken", None, T0).unwrap();
     let mine = channels[0].encrypt("mine", None, T0).unwrap();
     let theirs = sealed(&mut thief, "x");
     let mut bob = member(&channels[0]);
@@ -213,6 +223,7 @@ fn s028_t10_r10_own_key_stops_publishing() {
     // The `key_retired` alone.
     assert_eq!(refs.len(), 1);
     assert_ne!(refs[0], mine);
+    assert_eq!(channels[0].outbox_ref(1), Some(mine));
     // `after_send` stops it too, the `key_retired` being in flight, and
     // no `Reconnect` before a regeneration.
     let step = session.after_send(id, &mut channels, T0 + 400);
@@ -306,4 +317,114 @@ fn s028_t10_r10_store_error_freezes() {
             .events
             .is_empty()
     );
+}
+
+/// Spec 028, R10: with the own-key flag already set by an earlier push, a
+/// thief's push that begins the `LogFull` stall stops the current key's
+/// entries, as it would one push later.
+#[test]
+fn s028_t10_r10_stall_with_flag_already_set() {
+    let (mut channels, handle, _) = alice();
+    let id = ids(&channels)[0];
+    let mut thief = thief_of(&handle);
+    for text in ["one", "two", "three"] {
+        channels[0].encrypt(text, None, T0).unwrap();
+    }
+    let theirs = [sealed(&mut thief, "x"), sealed(&mut thief, "y")];
+    let mut session = greeted(&mut channels);
+    session.on_frame(&push(id, 1, &theirs[0]), &mut channels, T0 + 100);
+    assert!(channels[0].status().own_key_used_elsewhere);
+    channels[0].fill_log(FILL_EXPIRES, ROOM + 1);
+
+    let step = session.on_frame(&push(id, 2, &theirs[1]), &mut channels, T0 + 200);
+    assert_eq!(step.events, [Event::StorageFailed { channel: id }]);
+    let waiting = channels[0].outbox_ref(2).unwrap();
+    session.on_frame(&ok(id), &mut channels, T0 + 300);
+    assert!(!published(&mut session).contains(&waiting));
+}
+
+/// Spec 028, R10 and R9: a channel frozen before its `ok`, whose `ok`
+/// finds the history truncated → `HistoryTruncated`, with no commit, no
+/// `synced` and no `outbox`.
+#[test]
+fn s028_t10_r10_frozen_ok_records_truncation() {
+    let (mut channels, handle, faults) = alice();
+    let id = ids(&channels)[0];
+    let at = T0 + 86_400_000 + 360_000;
+    channels[0].encrypt("mine", None, at - 1_000).unwrap();
+    let mut session = connected(&channels, at);
+    let step = session.on_frame(&hello(1, &[1]), &mut channels, at);
+    assert_eq!(step.events, []);
+    session.outgoing();
+    faults.fail_commits(true);
+    let push = Frame::Push {
+        channel_id: id,
+        server_id: [1; 16],
+        received_at: at,
+        blob: vec![0; 8],
+    };
+    let step = session.on_frame(&push.encode().unwrap(), &mut channels, at + 100);
+    faults.fail_commits(false);
+    assert_eq!(step.failed, [(id, StoreError::Io)]);
+    let commits = handle.all_commits();
+    let late = at + 1_000;
+    let step = session.on_frame(&ok(id), &mut channels, late);
+    assert_eq!(
+        step.events,
+        [
+            Event::HistoryTruncated {
+                channel: id,
+                before: late - 86_400_000,
+            },
+            Event::Subscribed { channel: id },
+        ]
+    );
+    assert_eq!(handle.all_commits(), commits);
+    assert_eq!(channels[0].synced_at(), None);
+    assert_eq!(published(&mut session), []);
+}
+
+/// Spec 028, R14 and R10: `after_send` publishes a send of a subscribed
+/// channel, and nothing for a channel awaiting `ok`, after
+/// `on_disconnect`, or frozen, which it does not commit either.
+#[test]
+fn s028_t10_r10_after_send() {
+    let (mut channels, handle, faults) = alice();
+    let id = ids(&channels)[0];
+    let mut session = greeted(&mut channels);
+    let early = channels[0].encrypt("early", None, T0).unwrap();
+    assert!(session.after_send(id, &mut channels, T0).events.is_empty());
+    assert_eq!(published(&mut session), []);
+    session.on_frame(&ok(id), &mut channels, T0 + 100);
+    assert_eq!(published(&mut session), [early]);
+    let sent = channels[0].encrypt("hi", None, T0 + 200).unwrap();
+    session.after_send(id, &mut channels, T0 + 200);
+    assert_eq!(published(&mut session), [sent]);
+
+    session.on_disconnect();
+    channels[0].encrypt("offline", None, T0 + 300).unwrap();
+    session.after_send(id, &mut channels, T0 + 300);
+    assert_eq!(published(&mut session), []);
+
+    // Frozen by an `Io` push.
+    session.on_connect(T0 + 400, &[]);
+    session.on_frame(&hello(2, &[1]), &mut channels, T0 + 400);
+    session.on_frame(&ok(id), &mut channels, T0 + 500);
+    session.outgoing();
+    faults.fail_commits(true);
+    let bad = Frame::Push {
+        channel_id: id,
+        server_id: [1; 16],
+        received_at: T0 + 600,
+        blob: vec![0; 8],
+    };
+    let step = session.on_frame(&bad.encode().unwrap(), &mut channels, T0 + 600);
+    faults.fail_commits(false);
+    assert_eq!(step.failed, [(id, StoreError::Io)]);
+    channels[0].encrypt("frozen", None, T0 + 700).unwrap();
+    let commits = handle.all_commits();
+    let step = session.after_send(id, &mut channels, T0 + 700);
+    assert!(step.events.is_empty() && step.failed.is_empty());
+    assert_eq!(handle.all_commits(), commits);
+    assert_eq!(published(&mut session), []);
 }

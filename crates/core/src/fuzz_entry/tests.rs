@@ -493,17 +493,20 @@ fn s028_t03_r03_session_on_frame_reads_frames() {
     assert_eq!(session_on_frame_verdict(&other).unwrap().0, [subscribed()]);
     // A seed's `push` of a 013 blob reaches `decrypt`, which alone moves
     // the cursor (R10).
+    // As `scripts/fuzz_seeds.py` builds it, from the vector itself.
+    let vector = crate::vectors::load("013", "text_k1");
+    let received_at = vector.input("received_at").u64_hex();
     let push = Frame::Push {
         channel_id,
         server_id: [0; 16],
-        received_at: text_k1::RECEIVED_AT,
-        blob: text_k1_blob(),
+        received_at,
+        blob: vector.expected("blob").bytes().to_vec(),
     }
     .encode()
     .unwrap();
     assert_eq!(session_on_frame_verdict(&framed(&ok)).unwrap().1, None);
     assert_eq!(
         session_on_frame_verdict(&framed(&push)).unwrap().1,
-        Some(text_k1::RECEIVED_AT)
+        Some(received_at)
     );
 }

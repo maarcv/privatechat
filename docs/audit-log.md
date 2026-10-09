@@ -2,6 +2,23 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AM
+
+**2026-10-09 — Audit AM, the code audit of slice (c1a) of spec 028-session-sans-io (branch `028-traffic`): the `push` routed to `decrypt`, the `LogFull` stall, the stop after one's own key is used elsewhere and the freeze after a push's store error (R10's first half), with `after_send`; round 1 of three passes (A: conformance; B: the adversary, a key thief and a server; C: quality, tests and hand mutants).** No High finding and no production defect beyond AM1. Pass C ran 31 mutants: 24 killed, 1 equivalent, 6 survived, each killed below or removed with the code it mutated.
+
+Decisions taken without the human, by the advisor (three passes): a `LogFull` stall begun with the own-key flag set stops, whether the `decrypt` that began it set the flag or it was set before (unanimous; spec 021 R19 has `check_own_key` return `true` whatever the flag, and audit J69 put the stop there for a thief's blob); the `ok` of a frozen channel still records its truncation, which sets memory alone (two to one; the minority would skip it so that a frozen channel calls nothing, and raises no privacy or security risk: the next connection finds the same truncation).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AM1 | A thief's blob beginning a `LogFull` stall on a channel whose own-key flag was already set did not stop the current key's entries, which the same blob one push later did (A, B) | Medium | The stop reads the flag after that `decrypt` alone; R10 and T10 amended; a test |
+| AM2 | The test of the stop by `check_own_key` passed with no stop: the thief's counter removed the only entry it watched; `after_send`'s publish, its `Subscribed` check and its freeze check untested (A, C) | Medium | The test watches an entry above the thief's counter; a test of `after_send` subscribed, awaiting `ok`, disconnected and frozen, with no commit |
+| AM3 | R10 says nothing of a frozen channel is called, while the `ok` records its truncation (A) | Low | R10 names the truncation record as the exception (decision above); T10 and a test with no commit |
+| AM4 | T03's push clause rebuilt the seed's blob instead of reading the vector (A) | Low | Blob and `received_at` read from `013.json`, as `fuzz_seeds.py` does |
+| AM5 | The tick `Reconnect` of a relieved stall repeated each tick until `on_disconnect` (B) | Low | Asked once a stall; a T10 clause |
+| AM6 | Regeneration told by comparing the last old key with `!=` (AGENTS 22) and a cloned list; a mutant to `.first()` survived (B, C) | Low | `Channel::identity_epoch`, which every regeneration raises |
+| AM7 | The net diff is over AGENTS 14's 400 lines (C) | Low | Justified in the pull request: about 230 of production code, the rest the tests of R10 |
+| AM8 | `on_push` packs three arguments in a tuple where its callees take them apart; `check_room` uses `super::find` (C) | Far-fetched | None: a preference |
+
 ## Audit AL
 
 **2026-10-09 — Audit AL, the code audit of slice (b2) of spec 028-session-sans-io (branch `028-truncation`): the truncation (R8), the `ok` and the two limits of R9, and the `session_on_frame` fuzz target (R3); round 1 of three passes (A: conformance; B: the adversary, a server sending any frame sequence and a clock set back; C: quality, tests and hand mutants).** One High finding, a hole in R16 that the code reproduced. Pass C ran 37 mutants: 27 killed, 2 equivalent, 8 survived; every survivor is killed by a clause added, or made equivalent by AL1.

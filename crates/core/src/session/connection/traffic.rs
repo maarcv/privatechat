@@ -10,8 +10,10 @@ use crate::storage::StoreError;
 /// Why a channel takes no more pushes on this connection (R10).
 #[derive(Clone, Copy)]
 pub(super) enum Stall {
-    /// A push met a full log: later pushes go to `check_own_key` alone.
-    LogFull(Stop),
+    /// A push met a full log: later pushes go to `check_own_key` alone;
+    /// `asked` once a tick found room again and asked for a new
+    /// connection.
+    LogFull { stop: Stop, asked: bool },
     /// Another store error: nothing of the channel is called.
     Frozen,
 }
@@ -22,10 +24,10 @@ pub(super) enum Stop {
     Publishing,
     /// One's own key was used elsewhere: only the pending `key_retired`
     /// and the entries `under_retired_key` leave, until a
-    /// `regenerate_identity`, told by the last of one's old keys, which
-    /// it appends (spec 025-identity-regen R1).
+    /// `regenerate_identity`, told by the epoch it raises (spec
+    /// 025-identity-regen R1).
     Stopped {
-        last_old_key: Option<[u8; 32]>,
+        epoch: u32,
     },
 }
 
@@ -50,7 +52,7 @@ impl Session {
         let (blob, server_id, received_at) = arrival;
         match self.stalls.get(&channel_id).copied() {
             Some(Stall::Frozen) => {}
-            Some(Stall::LogFull(stop)) => {
+            Some(Stall::LogFull { stop, .. }) => {
                 self.check_stalled(channel, stop, blob, received_at, now, step);
             }
             None => self.decrypt(channel, blob, server_id, received_at, now, step),
@@ -69,20 +71,23 @@ impl Session {
         step: &mut Step,
     ) {
         let channel_id = channel.config().channel_id();
-        let alerted = channel.status().own_key_used_elsewhere;
         match channel.decrypt(blob, server_id, received_at, now) {
             Ok(Some(received)) => step.events.push(Event::Message {
                 channel: channel_id,
                 received,
             }),
             Err(Error::Store(StoreError::LogFull)) => {
-                // `decrypt` ran the own-key check on this blob already.
-                let stop = if !alerted && channel.status().own_key_used_elsewhere {
+                // `decrypt` ran the own-key check on this blob but reports
+                // only `LogFull`: a flag set now, by it or from before,
+                // stops the channel, a key not yet regenerated being one
+                // known to be used elsewhere.
+                let stop = if channel.status().own_key_used_elsewhere {
                     stopped(channel)
                 } else {
                     Stop::Publishing
                 };
-                self.stalls.insert(channel_id, Stall::LogFull(stop));
+                let stall = Stall::LogFull { stop, asked: false };
+                self.stalls.insert(channel_id, stall);
                 step.events.push(Event::StorageFailed {
                     channel: channel_id,
                 });
@@ -107,8 +112,11 @@ impl Session {
         let channel_id = channel.config().channel_id();
         match channel.check_own_key(blob, received_at, now) {
             Ok(true) if matches!(stop, Stop::Publishing) => {
-                self.stalls
-                    .insert(channel_id, Stall::LogFull(stopped(channel)));
+                let stall = Stall::LogFull {
+                    stop: stopped(channel),
+                    asked: false,
+                };
+                self.stalls.insert(channel_id, stall);
             }
             Err(Error::Store(error)) => self.freeze(channel_id, error, step),
             Ok(_) | Err(_) => {}
@@ -123,16 +131,23 @@ impl Session {
         step.failed.push((channel_id, error));
     }
 
-    /// On a tick, a `LogFull` stall whose channel has room again asks for
-    /// a new connection, which fetches the pushes it dropped (R10).
-    pub(super) fn check_room(&self, channels: &Channels, step: &mut Step) {
-        for (channel_id, stall) in &self.stalls {
-            let relieved = matches!(stall, Stall::LogFull(_))
+    /// On a tick, a `LogFull` stall whose channel has room again asks
+    /// once for a new connection, which fetches the pushes it dropped
+    /// (R10).
+    pub(super) fn check_room(&mut self, channels: &Channels, step: &mut Step) {
+        let mut relieved = false;
+        for (channel_id, stall) in &mut self.stalls {
+            if let Stall::LogFull { asked, .. } = stall
+                && !*asked
                 && super::find(channels, channel_id)
-                    .is_some_and(|channel| !channel.status().storage_full);
-            if relieved {
-                self.reconnect(step);
+                    .is_some_and(|channel| !channel.status().storage_full)
+            {
+                *asked = true;
+                relieved = true;
             }
+        }
+        if relieved {
+            self.reconnect(step);
         }
     }
 
@@ -147,7 +162,10 @@ impl Session {
     pub(super) fn withholds_current(&self, channel_id: &[u8; 16]) -> bool {
         matches!(
             self.stalls.get(channel_id),
-            Some(Stall::LogFull(Stop::Stopped { .. }))
+            Some(Stall::LogFull {
+                stop: Stop::Stopped { .. },
+                ..
+            })
         )
     }
 
@@ -155,9 +173,10 @@ impl Session {
     /// which only a new connection resumes (R10).
     pub(super) fn regenerated(&self, channel: &Channel) -> bool {
         match self.stalls.get(&channel.config().channel_id()) {
-            Some(Stall::LogFull(Stop::Stopped { last_old_key })) => {
-                last_old_key_of(channel) != *last_old_key
-            }
+            Some(Stall::LogFull {
+                stop: Stop::Stopped { epoch },
+                ..
+            }) => channel.identity_epoch() != *epoch,
             _ => false,
         }
     }
@@ -171,11 +190,6 @@ impl Session {
 /// The stop of `channel`, with its key as it stands.
 fn stopped(channel: &Channel) -> Stop {
     Stop::Stopped {
-        last_old_key: last_old_key_of(channel),
+        epoch: channel.identity_epoch(),
     }
-}
-
-/// The last of one's old keys, which each `regenerate_identity` appends.
-fn last_old_key_of(channel: &Channel) -> Option<[u8; 32]> {
-    channel.own_old_keys().last().map(|old| old.pk)
 }
