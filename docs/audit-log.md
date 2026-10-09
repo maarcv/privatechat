@@ -2,6 +2,10 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Spec 025 open questions
+
+**2026-10-09 — The open questions 025-R1 and 025-R2 of spec 025-identity-regen (Audit AD, AD14) are closed before its implementation.** Both need an entry `under_retired_key` beside a `key_retired` copy that has left, or beside a second old key's entries, and spec 025 already rules both out: R4 hands out no copy of the `key_retired` while an entry `under_retired_key` is still in the `outbox`, no entry is marked after R1, and R1 refuses a second regeneration until R5 has removed the `key_retired`. The echo of a superseded copy therefore finds nothing to remove, and the flag always names the key being retired. The human reviewer took the recommendation: no new field and no kept signatures for superseded copies; the reason goes into 025 Security, and T01 and T04 pin it. Spec 021 T09 keeps its planted state, which tests step 5 alone.
+
 ## Spec 024 implemented
 
 **2026-10-06 — Spec 024-key-retired is `implemented`.** Its acceptance criterion is automated alone: `cargo test -p privatechat-core s024_`, clippy and the documentation lint are green on `mvp` (b6c1173), after the two rounds of Audit AG.
