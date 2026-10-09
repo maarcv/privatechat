@@ -571,10 +571,16 @@ fn derive_channel_keypair(k_ch: &Secret<32>) -> Result<(PublicKey, Secret<64>), 
     Ok(crypto::sign_keypair_from_seed(&seed)?)
 }
 
-/// The first 16 bytes of `BLAKE2b(CHANNEL_ID_TAG ‖ pk_ch ‖ BE32(ttl_seconds))`
-/// (R8): self-certifying, and bound to the TTL (ADR 0014).
+/// The `channel_id` of the key pair of `k_ch` (R8).
 fn derive_channel_id(k_ch: &Secret<32>, ttl_seconds: u32) -> Result<ChannelId, Error> {
     let (pk_ch, _) = derive_channel_keypair(k_ch)?;
+    channel_id_of(&pk_ch, ttl_seconds)
+}
+
+/// The first 16 bytes of `BLAKE2b(CHANNEL_ID_TAG ‖ pk_ch ‖ BE32(ttl_seconds))`
+/// (R8): self-certifying, and bound to the TTL (ADR 0014). The one
+/// derivation, which the test server of spec 028 also calls.
+pub(crate) fn channel_id_of(pk_ch: &PublicKey, ttl_seconds: u32) -> Result<ChannelId, Error> {
     let input = [
         CHANNEL_ID_TAG.as_slice(),
         &pk_ch.0,

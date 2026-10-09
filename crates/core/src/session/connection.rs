@@ -4,19 +4,22 @@
 //! frames to write and the events to show.
 //!
 //! This slice holds the connection and the subscription (R1, R2 and R5–R7)
-//! and marks a channel subscribed at its `ok`; truncation, `synced`,
-//! traffic, outcomes, the publish rate and the error codes other than
-//! `nonce_expired` are the later slices of spec 028.
+//! and marks a channel subscribed at its `ok`. Later slices of spec 028
+//! add truncation and `synced` (R8, R9), traffic and outcomes (R10–R14),
+//! the publish rate (R15), the error codes other than `nonce_expired`
+//! (R16), and, with `rate_limited`, the one clause of R7 only it can
+//! reach: a `subscribe` queued again after it is released however old its
+//! nonce.
 
+use core::fmt;
 use std::collections::{BTreeMap, VecDeque};
 
-use super::channel::{Channel, ClientRef, Received};
-use super::frames::{Frame, is_supported};
+use super::channel::Channel;
+use super::frames::{CODE_NONCE_EXPIRED, Frame, is_supported};
 use crate::Error;
 use crate::crypto;
 use crate::proto::auth::auth_message;
 use crate::proto::envelope::ttl_ms;
-use crate::storage::StoreError;
 
 #[cfg(test)]
 mod tests;
@@ -36,78 +39,14 @@ pub(crate) const HELLO_WAIT_MS: u64 = 50_000;
 /// `since` is the cursor rounded down to the minute (R6).
 const MINUTE_MS: u64 = 60_000;
 
-/// The `code` of `error` that asks for a fresh `hello` (R16).
-const NONCE_EXPIRED: &str = "nonce_expired";
-
-/// What the session tells the client, by channel or by connection.
-#[derive(Debug, PartialEq, Eq)]
+/// What the session tells the client, by channel or by connection. Its
+/// `Debug` shows a channel by the 4-byte prefix of its id (AGENTS 19).
+#[derive(PartialEq, Eq)]
 pub enum Event {
     /// The channel's backlog arrived and live messages follow (R9).
     Subscribed {
         /// The channel.
         channel: [u8; 16],
-    },
-    /// Messages before `before` may have expired unseen (R8).
-    HistoryTruncated {
-        /// The channel.
-        channel: [u8; 16],
-        /// The local time before which history may be missing.
-        before: u64,
-    },
-    /// A message the channel consumed (R10).
-    Message {
-        /// The channel.
-        channel: [u8; 16],
-        /// The message.
-        received: Received,
-    },
-    /// The server stored one of the user's messages (R12).
-    Delivered {
-        /// The channel.
-        channel: [u8; 16],
-        /// The `outbox` entry.
-        client_ref: ClientRef,
-        /// The server's identifier.
-        server_id: [u8; 16],
-        /// When the server stored it, clamped as the outcome carries it.
-        received_at: u64,
-        /// When it leaves the server.
-        expires_at: u64,
-    },
-    /// One of the user's messages will not be delivered (R12).
-    NotDelivered {
-        /// The channel.
-        channel: [u8; 16],
-        /// The `outbox` entry.
-        client_ref: ClientRef,
-        /// When the user sent it, so that the client can report a row it
-        /// no longer lists.
-        sent_at: u64,
-    },
-    /// The channel's status or peers changed (R13).
-    StatusChanged {
-        /// The channel.
-        channel: [u8; 16],
-    },
-    /// The channel stopped reading for lack of disk (R10).
-    StorageFailed {
-        /// The channel.
-        channel: [u8; 16],
-    },
-    /// The server refused the channel's subscription (R16).
-    SubscribeRefused {
-        /// The channel.
-        channel: [u8; 16],
-    },
-    /// The channel is over its quota on the server (R16).
-    ChannelFull {
-        /// The channel.
-        channel: [u8; 16],
-    },
-    /// The server's disk is full (R16).
-    ServerFull {
-        /// The connection.
-        connection: u64,
     },
     /// The server speaks no version of this app (R2).
     UnsupportedServer {
@@ -121,15 +60,25 @@ pub enum Event {
     },
 }
 
+impl fmt::Debug for Event {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Event::Subscribed { channel } => write!(f, "Subscribed({})", id_prefix(channel)),
+            Event::UnsupportedServer { connection } => {
+                write!(f, "UnsupportedServer({connection})")
+            }
+            Event::Reconnect { connection } => write!(f, "Reconnect({connection})"),
+        }
+    }
+}
+
 /// The `Device`'s open channels, found by `channel_id`.
 pub(crate) type Channels = Vec<Channel>;
 
-/// What one call produced. It never fails as a whole: a store failure in
-/// one channel goes to `failed` and the session carries on with the others.
+/// What one call produced.
 #[derive(Debug, Default)]
 pub(crate) struct Step {
     pub(crate) events: Vec<Event>,
-    pub(crate) failed: Vec<([u8; 16], StoreError)>,
 }
 
 /// Where a channel's subscription stands on this connection.
@@ -146,20 +95,26 @@ struct Hello {
     at: u64,
 }
 
+/// Where the socket stands.
+#[derive(Clone, Copy)]
+enum Link {
+    /// No socket: nothing is queued (R5).
+    Closed,
+    /// The server failed R2: nothing is sent until the next `on_connect`.
+    Unsupported,
+    /// Waiting for a `hello` since this time (R7).
+    AwaitingHello { since: u64 },
+    /// A `hello` holds the nonce the `subscribe`s sign (R6).
+    Ready(Hello),
+}
+
 /// One planned connection's protocol state (ADR 0037).
 pub(crate) struct Session {
     connection: u64,
     channel_ids: Vec<[u8; 16]>,
-    connected: bool,
-    /// The server failed R2: nothing is sent until the next `on_connect`.
-    unsupported: bool,
-    /// `Reconnect` was produced on this connection: once is enough.
-    reconnect_sent: bool,
+    link: Link,
     /// The channels the `Device` refuses to subscribe again (R5).
     skip: Vec<[u8; 16]>,
-    hello: Option<Hello>,
-    /// When the wait for a `hello` started (R7).
-    hello_wait_from: Option<u64>,
     /// The `subscribe`s not yet released, in release order (R6).
     queue: VecDeque<[u8; 16]>,
     /// When the last `subscribe` of the connection was released (R6).
@@ -175,12 +130,8 @@ impl Session {
         Session {
             connection,
             channel_ids,
-            connected: false,
-            unsupported: false,
-            reconnect_sent: false,
+            link: Link::Closed,
             skip: Vec::new(),
-            hello: None,
-            hello_wait_from: None,
             queue: VecDeque::new(),
             last_release: None,
             subscriptions: BTreeMap::new(),
@@ -191,22 +142,19 @@ impl Session {
     /// A new socket is open (R5): everything of the last connection is
     /// forgotten, and the wait for its `hello` starts at `now` (R7).
     pub(crate) fn on_connect(&mut self, now: u64, skip: &[[u8; 16]]) {
-        self.forget_connection();
-        self.connected = true;
+        self.forget_connection(Link::AwaitingHello { since: now });
         self.skip = skip.to_vec();
-        self.hello_wait_from = Some(now);
     }
 
     /// The socket is closed (R5): nothing is queued until `on_connect`.
     pub(crate) fn on_disconnect(&mut self) {
-        self.forget_connection();
-        self.connected = false;
+        self.forget_connection(Link::Closed);
     }
 
     /// One frame the socket received.
     pub(crate) fn on_frame(&mut self, frame: &[u8], channels: &mut Channels, now: u64) -> Step {
         let mut step = Step::default();
-        if !self.connected || self.unsupported {
+        if matches!(self.link, Link::Closed | Link::Unsupported) {
             return step;
         }
         match Frame::decode(frame) {
@@ -225,20 +173,17 @@ impl Session {
         step
     }
 
-    /// The clock moved: release the next `subscribe` and check the waits
-    /// of R7.
+    /// The clock moved: check the wait for a `hello` (R7) and release the
+    /// next `subscribe` (R6).
     pub(crate) fn on_tick(&mut self, channels: &mut Channels, now: u64) -> Step {
         let mut step = Step::default();
-        if !self.connected || self.unsupported {
-            return step;
+        match self.link {
+            Link::AwaitingHello { since } if expired(since, HELLO_WAIT_MS, now) => {
+                self.reconnect(&mut step);
+            }
+            Link::Ready(hello) => self.release(hello, channels, now, &mut step),
+            _ => {}
         }
-        let waited_too_long = self
-            .hello_wait_from
-            .is_some_and(|from| now > from.saturating_add(HELLO_WAIT_MS));
-        if waited_too_long {
-            self.reconnect(&mut step);
-        }
-        self.release(channels, now, &mut step);
         step
     }
 
@@ -258,19 +203,17 @@ impl Session {
         step: &mut Step,
     ) {
         if !is_supported(proto_versions) {
-            self.unsupported = true;
-            self.queue.clear();
-            self.outgoing.clear();
+            self.forget_connection(Link::Unsupported);
             step.events.push(Event::UnsupportedServer {
                 connection: self.connection,
             });
             return;
         }
-        self.hello = Some(Hello {
+        let hello = Hello {
             server_nonce,
             at: now,
-        });
-        self.hello_wait_from = None;
+        };
+        self.link = Link::Ready(hello);
         let mut pending: Vec<(u64, [u8; 16])> = self
             .channel_ids
             .iter()
@@ -280,7 +223,7 @@ impl Session {
         // Stable: equal expiries keep the `Device`'s order.
         pending.sort_by_key(|(order, _)| *order);
         self.queue = pending.into_iter().map(|(_, id)| id).collect();
-        self.release(channels, now, step);
+        self.release(hello, channels, now, step);
     }
 
     /// An `ok` of a channel awaiting one marks it subscribed (R9); any other
@@ -296,9 +239,9 @@ impl Session {
 
     /// `nonce_expired` (R16): the unreleased `subscribe`s are discarded, the
     /// named channel is again not subscribed, and the wait for a fresh
-    /// `hello` starts (R7).
+    /// `hello` starts (R7), unless one is already running.
     fn on_error(&mut self, code: &str, channel_id: Option<[u8; 16]>, now: u64, step: &mut Step) {
-        if code != NONCE_EXPIRED {
+        if code != CODE_NONCE_EXPIRED {
             return;
         }
         let Some(channel_id) = channel_id else {
@@ -306,27 +249,28 @@ impl Session {
             return;
         };
         self.queue.clear();
-        if self.subscriptions.get(&channel_id) == Some(&Subscription::AwaitingOk) {
-            self.subscriptions.remove(&channel_id);
+        self.subscriptions.remove(&channel_id);
+        if let Link::Ready(_) = self.link {
+            self.link = Link::AwaitingHello { since: now };
         }
-        self.hello = None;
-        self.hello_wait_from = Some(now);
     }
 
     /// Releases the next `subscribe` when the spacing of R6 allows it, or
-    /// produces `Reconnect` when its `hello` is too old to sign (R7).
-    fn release(&mut self, channels: &Channels, now: u64, step: &mut Step) {
-        let (Some(hello), Some(channel_id)) = (self.hello, self.queue.front().copied()) else {
+    /// produces `Reconnect` when its `hello` is too old to sign (R7). A time
+    /// recorded later than `now` counts as long past, so that a clock set
+    /// back cannot hold the queue.
+    fn release(&mut self, hello: Hello, channels: &Channels, now: u64, step: &mut Step) {
+        let Some(channel_id) = self.queue.front().copied() else {
             return;
         };
-        if now > hello.at.saturating_add(NONCE_WINDOW_MS) {
+        if expired(hello.at, NONCE_WINDOW_MS, now) {
             self.queue.clear();
             self.reconnect(step);
             return;
         }
         let spaced = self
             .last_release
-            .is_none_or(|last| now >= last.saturating_add(SUBSCRIBE_SPACING_MS));
+            .is_none_or(|last| last > now || now.saturating_sub(last) >= SUBSCRIBE_SPACING_MS);
         if !spaced {
             return;
         }
@@ -346,28 +290,37 @@ impl Session {
         }
     }
 
-    /// `Event::Reconnect`, once per connection.
-    fn reconnect(&mut self, step: &mut Step) {
-        if !self.reconnect_sent {
-            self.reconnect_sent = true;
-            step.events.push(Event::Reconnect {
-                connection: self.connection,
-            });
-        }
+    fn reconnect(&self, step: &mut Step) {
+        step.events.push(Event::Reconnect {
+            connection: self.connection,
+        });
     }
 
     /// Everything that belongs to one socket (R5).
-    fn forget_connection(&mut self) {
-        self.unsupported = false;
-        self.reconnect_sent = false;
+    fn forget_connection(&mut self, link: Link) {
+        self.link = link;
         self.skip.clear();
-        self.hello = None;
-        self.hello_wait_from = None;
         self.queue.clear();
         self.last_release = None;
         self.subscriptions.clear();
         self.outgoing.clear();
     }
+}
+
+/// Whether more than `limit` ms passed from `from` to `now`; a `from` later
+/// than `now`, which only a clock set back gives, counts as long past.
+fn expired(from: u64, limit: u64, now: u64) -> bool {
+    from > now || now.saturating_sub(from) > limit
+}
+
+/// The hex of the first 4 bytes of a channel id, all a `Debug` may show
+/// (AGENTS 19).
+fn id_prefix(channel_id: &[u8; 16]) -> String {
+    channel_id
+        .iter()
+        .take(4)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// The channel of `channel_id` among the `Device`'s.

@@ -9,15 +9,12 @@ use std::collections::{BTreeMap, VecDeque};
 
 use crate::crypto::{self, PublicKey, Signature};
 use crate::proto::auth::auth_message;
-use crate::proto::config::{CHANNEL_ID_TAG, ChannelId};
+use crate::proto::config::{self, ChannelId};
 use crate::proto::envelope::ttl_ms;
-use crate::session::frames::Frame;
+use crate::session::frames::{CODE_BAD_AUTH, CODE_NONCE_EXPIRED, CODE_NOT_SUBSCRIBED, Frame};
 
 /// How long a `hello`'s nonce is valid (`docs/spec.md` §6).
 const NONCE_VALIDITY_MS: u64 = 60_000;
-
-/// The one `proto_version` this server speaks.
-const PROTO_VERSIONS: [u8; 1] = [1];
 
 /// One stored blob.
 #[derive(Clone)]
@@ -48,7 +45,7 @@ struct Connection {
 /// The server: blobs per channel, connections by number.
 pub struct MemoryServer {
     hosts: Vec<String>,
-    channels: BTreeMap<[u8; 16], (u64, Vec<Stored>)>,
+    channels: BTreeMap<[u8; 16], Vec<Stored>>,
     connections: BTreeMap<u64, Connection>,
     last_received_at: u64,
     /// Numbers the `server_id`s and the nonces, so that runs repeat.
@@ -90,7 +87,7 @@ impl MemoryServer {
     pub fn stored(&self, channel_id: &[u8; 16]) -> Vec<([u8; 16], u64)> {
         self.channels
             .get(channel_id)
-            .map(|(_, blobs)| {
+            .map(|blobs| {
                 blobs
                     .iter()
                     .map(|stored| (stored.server_id, stored.received_at))
@@ -147,7 +144,10 @@ impl MemoryServer {
         since: Option<u64>,
         now: u64,
     ) {
-        let channel_id = derive_channel_id(pk_ch, ttl_seconds);
+        let Ok(ChannelId(channel_id)) = config::channel_id_of(&PublicKey(*pk_ch), ttl_seconds)
+        else {
+            return;
+        };
         let fresh_nonce = self.draw();
         let channels = &mut self.channels;
         let hosts = &self.hosts;
@@ -157,7 +157,7 @@ impl MemoryServer {
         if now > socket.hello_at.saturating_add(NONCE_VALIDITY_MS) {
             socket
                 .ready
-                .push_back(error("nonce_expired", channel_id, None));
+                .push_back(error(CODE_NONCE_EXPIRED, channel_id, None));
             socket.server_nonce = fresh_nonce;
             socket.hello_at = now;
             socket.ready.push_back(hello(fresh_nonce));
@@ -173,11 +173,13 @@ impl MemoryServer {
             crypto::verify_detached(&PublicKey(*pk_ch), &message, &Signature(*sig)).is_ok()
         });
         if !signed {
-            socket.ready.push_back(error("bad_auth", channel_id, None));
+            socket
+                .ready
+                .push_back(error(CODE_BAD_AUTH, channel_id, None));
             return;
         }
         let ttl = ttl_ms(ttl_seconds);
-        let (_, blobs) = channels.entry(channel_id).or_insert((ttl, Vec::new()));
+        let blobs = channels.entry(channel_id).or_default();
         let from = since.unwrap_or(0).min(now);
         let backlog = blobs
             .iter()
@@ -210,7 +212,7 @@ impl MemoryServer {
             .is_some_and(|socket| socket.subscriptions.contains_key(&channel_id));
         if !subscribed {
             if let Some(socket) = self.connections.get_mut(&connection) {
-                let refusal = error("not_subscribed", channel_id, Some(client_ref));
+                let refusal = error(CODE_NOT_SUBSCRIBED, channel_id, Some(client_ref));
                 socket.ready.push_back(refusal);
             }
             return;
@@ -222,7 +224,7 @@ impl MemoryServer {
             received_at,
             blob,
         };
-        if let Some((_, blobs)) = self.channels.get_mut(&channel_id) {
+        if let Some(blobs) = self.channels.get_mut(&channel_id) {
             blobs.push(stored.clone());
         }
         if let Some(socket) = self.connections.get_mut(&connection) {
@@ -288,17 +290,10 @@ impl Connection {
     }
 }
 
-/// The `channel_id` of a subscription (spec 011 R8).
-fn derive_channel_id(pk_ch: &[u8; 32], ttl_seconds: u32) -> [u8; 16] {
-    let input = [CHANNEL_ID_TAG.as_slice(), pk_ch, &ttl_seconds.to_be_bytes()].concat();
-    let digest = crypto::hash(&input).unwrap_or([0; 32]);
-    digest.first_chunk::<16>().copied().unwrap_or_default()
-}
-
 fn hello(server_nonce: [u8; 32]) -> Vec<u8> {
     encoded(&Frame::Hello {
         server_nonce,
-        proto_versions: PROTO_VERSIONS.to_vec(),
+        proto_versions: vec![config::VERSION],
     })
 }
 

@@ -2,6 +2,23 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AK
+
+**2026-10-09 — Audit AK, the code audit of slice (b1) of spec 028-session-sans-io (branch `028-connection`): `MemoryServer`, the connection and the subscription (R4–R7, with the session clauses of R1 and R2); round 1 of three passes (A: conformance; B: the adversary, a server sending any frame sequence and a clock set back; C: quality, tests and hand mutants).** No High finding and no production defect. Pass C ran 72 mutants: 37 killed, 8 equivalent, 27 survived; every survivor named below is killed by a clause added.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AK1 | Tests that could not fail: T05's `skip` and T06's discard read an `outgoing()` already drained; `ok` → `Subscribed` untested; the refused channel never shown to come again; `Reconnect` on a new connection, the frames left unwritten at a disconnect or an unsupported `hello`, the spacing reset, the release order by cursor and `created_at` (A, C) | Medium | T05–T07 rewritten to assert what they release; `s028_t09_r09_ok_marks_subscribed` |
+| AK2 | T06 checked the signature with `auth_message`, the function under test (A) | Medium | T06 builds the §6 bytes by hand |
+| AK3 | `MemoryServer` branches untested: the hosts, the nonce's age, `not_subscribed`, `since` and its clamp, the TTL filter, live pushes, `disconnect` (C) | Low | `s028_t04_r04_memory_server_checks` |
+| AK4 | A clock set back stalled the queue and the waits of R7 with no `Reconnect` (B) | Low | A time recorded later than `now` counts as long past, as 021 R18 and 027 R12 do; T07 |
+| AK5 | Each `nonce_expired` restarted the wait for a `hello`, so a server could hold every channel off (B) | Far-fetched | Fixed anyway: the wait starts only when none runs |
+| AK6 | `Event`'s derived `Debug` printed the full `channel_id` (B) | Low | A `Debug` with the 4-byte prefix; T09 checks it |
+| AK7 | `nonce_expired` naming a subscribed channel left it subscribed (A); `Reconnect` once per connection was no rule (A) | Low | Removed whatever its state; the once-only flag removed |
+| AK8 | Four flags and options for one connection state; a second copy of the `channel_id` derivation; protocol literals repeated; a dead TTL; nine `Event` variants and `Step::failed` with no producer (C) | Low | `enum Link`; `config::channel_id_of`; `CODE_*` in `frames.rs`; variants added by the slices that produce them |
+| AK9 | 028 R6 did not name `auth_message`, which 031 R2 asks it to sign; R7's clause on a subscribe queued again after `rate_limited` deferred without a word (A) | Low | R6 amended, 031 History; the module doc names the clause for slice (d), whose `rate_limited` alone reaches it |
+| AK10 | `docs/spec.md` §9 still sketches a `pub` `Session` and `Channel::auth_subscribe` (A) | Low | Left: spec 027 brings §9 up to date (audit S) |
+
 ## Review during development
 
 **2026-10-09 — Decision of the human reviewer: until the first release, the audit of `CLAUDE.md` replaces the human review before merging.** The human still accepts every spec before it is implemented, decides what an audit escalates and approves every ADR; the human review before merging returns at the first release. `AGENTS.md` "Per-feature flow", `docs/spec.md` §10 "Per-feature flow" and governance, the `architecture` skill and `.github/CODEOWNERS` say so. GitHub required no approving review on `mvp` already (0), so its settings do not change.

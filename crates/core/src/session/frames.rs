@@ -29,6 +29,11 @@ pub(crate) const MAX_ERROR_CODE: usize = 32;
 /// The largest `error.message`, in bytes of UTF-8 (R1).
 pub(crate) const MAX_ERROR_MESSAGE: usize = 256;
 
+/// The `error.code`s of R16 that the session and the test server name.
+pub(crate) const CODE_NONCE_EXPIRED: &str = "nonce_expired";
+pub(crate) const CODE_BAD_AUTH: &str = "bad_auth";
+pub(crate) const CODE_NOT_SUBSCRIBED: &str = "not_subscribed";
+
 /// The values of key 0, `type` (the table "Frames").
 const TYPE_HELLO: u8 = 0;
 const TYPE_SUBSCRIBE: u8 = 1;
