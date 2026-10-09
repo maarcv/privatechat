@@ -618,6 +618,30 @@ fn s028_t06_r06_subscribe_contents_and_pacing() {
         assert_eq!(out == synced, first_out, "{synced_at} {cursor:?}");
     }
 
+    // A `synced_at` equal to `now` counts.
+    let mut pair = vec![channel(1, DAY, T0 + 5), channel(2, DAY, T0 + 10)];
+    pair[1].synced(T0).unwrap();
+    let synced = pair[1].config().channel_id();
+    let mut session = connected(&pair, T0);
+    session.on_frame(&hello(1, &[1]), &mut pair, T0);
+    assert_eq!(subscribed_ids(&mut session, &pair), [synced]);
+
+    // A channel the `Device` closed before its turn is skipped, quietly.
+    let mut three = vec![
+        channel(1, DAY, T0),
+        channel(2, DAY, T0),
+        channel(3, DAY, T0),
+    ];
+    let last = three[2].config().channel_id();
+    let mut session = connected(&three, T0);
+    session.on_frame(&hello(1, &[1]), &mut three, T0);
+    session.outgoing();
+    three.remove(1);
+    assert!(session.on_tick(&mut three, T0 + 1_100).events.is_empty());
+    assert!(session.outgoing().is_empty());
+    assert!(session.on_tick(&mut three, T0 + 1_200).events.is_empty());
+    assert_eq!(subscribed_ids(&mut session, &three), [last]);
+
     // A `nonce_expired` and a new `hello` 300 ms after a release: the next
     // one waits 1 100 ms from that release, and the refused channel comes
     // again; an error of another code changes nothing.
@@ -696,6 +720,21 @@ fn s028_t07_r07_nonce_window() {
         assert!(session.outgoing().is_empty());
     }
 
+    // Past the window within 1 100 ms of a release: `Reconnect` at once.
+    let mut three = vec![
+        channel(1, DAY, T0),
+        channel(2, DAY, T0),
+        channel(3, DAY, T0),
+    ];
+    let mut session = connected(&three, T0);
+    session.on_frame(&hello(1, &[1]), &mut three, T0);
+    session.on_tick(&mut three, T0 + 49_500);
+    assert_eq!(session.outgoing().len(), 2);
+    assert_eq!(
+        session.on_tick(&mut three, T0 + 50_001).events,
+        [reconnect()]
+    );
+
     // No `hello` after `on_connect`.
     let mut session = connected(&two, T0);
     assert!(
@@ -730,6 +769,10 @@ fn s028_t07_r07_nonce_window() {
     session.on_frame(&hello(1, &[1]), &mut two, T0);
     let step = session.on_frame(&error("nonce_expired", None), &mut two, T0 + 1_000);
     assert_eq!(step.events, [reconnect()]);
+    // ... and the queue is gone: no subscribe leaves under the old nonce.
+    session.outgoing();
+    session.on_tick(&mut two, T0 + 2_000);
+    assert!(session.outgoing().is_empty());
 
     // The clock set back: before the `hello` → `Reconnect`; before
     // `on_connect` → `Reconnect`; before the last release only → the next
@@ -803,4 +846,9 @@ fn s028_t09_r09_ok_marks_subscribed() {
         }
     );
     assert_eq!(shown, "Subscribed(abababab)");
+    assert_eq!(format!("{:?}", reconnect()), "Reconnect(7)");
+    let unsupported = Event::UnsupportedServer {
+        connection: CONNECTION,
+    };
+    assert_eq!(format!("{unsupported:?}"), "UnsupportedServer(7)");
 }

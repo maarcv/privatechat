@@ -31,6 +31,17 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AK16 | Clock set back: a new `hello` can release two subscribes less than 1 100 ms apart; a repeated nonce restarts the client's window; a 1 ms step back during a wait gives a `Reconnect` (B) | Far-fetched | None: a `rate_limited` or a reconnect at most, the AK4 rule as decided |
 | AK17 | The queue outside `Link::Ready` makes two of its clears equivalent mutants (C) | Far-fetched | Kept: they are R16's and R5's words; a preference |
 
+**Round 3.** Fresh passes on the whole change. No production defect. Pass C ran 50 mutants: 43 killed, 1 equivalent, 6 survived; five are killed below, the sixth (no clear of the queue at `nonce_expired`) is equivalent, as AK17.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AK18 | The clock-set-back rule of AK4 was in the code, not in R7 (A) | Low | R7 says how such a time counts; T07 names its clauses |
+| AK19 | An unnamed `nonce_expired` kept the queue and started no wait (A, C) | Low | It discards the queue and starts the wait as a named one, then `Reconnect`; T07 |
+| AK20 | Spec 011 did not name `ChannelId::derive`, which 031 R3 asks it to (A) | Low | 011 R8, Interface and History |
+| AK21 | Survivors: a `synced_at` equal to `now`; a channel closed before its release; the window passing within 1 100 ms of a release; the `Debug` of `Reconnect` and `UnsupportedServer` (C) | Low | One clause each in T06, T07, T09 |
+| AK22 | The 028 Interface named `testing.rs` for `MemoryServer` (A) | Nit | `testing/server.rs` |
+| AK23 | A channel id repeated in `Session::new` would be subscribed twice (B) | Far-fetched | None: no input reaches it; the `Device` opens each channel once |
+
 ## Review during development
 
 **2026-10-09 — Decision of the human reviewer: until the first release, the audit of `CLAUDE.md` replaces the human review before merging.** The human still accepts every spec before it is implemented, decides what an audit escalates and approves every ADR; the human review before merging returns at the first release. `AGENTS.md` "Per-feature flow", `docs/spec.md` §10 "Per-feature flow" and governance, the `architecture` skill and `.github/CODEOWNERS` say so. GitHub required no approving review on `mvp` already (0), so its settings do not change.

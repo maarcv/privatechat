@@ -244,14 +244,15 @@ impl Session {
         if code != CODE_NONCE_EXPIRED {
             return;
         }
-        let Some(channel_id) = channel_id else {
-            self.reconnect(step);
-            return;
-        };
         self.queue.clear();
-        self.subscriptions.remove(&channel_id);
         if let Link::Ready(_) = self.link {
             self.link = Link::AwaitingHello { since: now };
+        }
+        match channel_id {
+            Some(channel_id) => {
+                self.subscriptions.remove(&channel_id);
+            }
+            None => self.reconnect(step),
         }
     }
 
