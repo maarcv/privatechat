@@ -38,7 +38,7 @@ WORD_LIST = ROOT / "crates" / "core" / "src" / "proto" / "bip39_english.txt"
 WORD_LIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"  # 011 R17
 
 PROTO_VERSION = 1
-FORMAT_SPECS = ("011", "012", "013", "014", "017", "020")
+FORMAT_SPECS = ("011", "012", "013", "014", "017", "020", "028")
 KINDS = ("positive", "negative")
 SOURCES = ("published", "derived", "pinned")
 # The fields whose strings are text; every other string is hexadecimal (R1).
@@ -1332,6 +1332,99 @@ def check_s020_t30_r30_section_produces_020_json() -> list[dict]:
 
 
 SECTIONS["020"] = check_s020_t30_r30_section_produces_020_json
+
+
+# --- Spec 028: frames ---------------------------------------------------------------
+
+# The frames of 028, the table "Frames": name → (`type`, schema of keys 1 and up in key order).
+FRAME_SCHEMAS = {
+    "hello": (0, {"server_nonce": (1, "bytes32"), "proto_versions": (2, "list")}),
+    "subscribe": (1, {"pk_ch": (1, "bytes32"), "ttl_seconds": (2, "u32"), "sig": (3, "bytes64"),
+                      "since": (4, "u64")}),
+    "ok": (2, {"channel_id": (1, "bytes16")}),
+    "publish": (3, {"channel_id": (1, "bytes16"), "client_ref": (2, "bytes16"),
+                    "blob": (3, "bytes")}),
+    "ack": (4, {"client_ref": (1, "bytes16"), "server_id": (2, "bytes16"),
+                "received_at": (3, "u64")}),
+    "push": (5, {"channel_id": (1, "bytes16"), "server_id": (2, "bytes16"),
+                 "received_at": (3, "u64"), "blob": (4, "bytes")}),
+    "error": (6, {"code": (1, "text"), "message": (2, "text"), "channel_id": (3, "bytes16"),
+                  "client_ref": (4, "bytes16")}),
+}
+MAX_ERROR_CODE = 32  # 028 R1, Limits
+
+
+def encode_frame(kind: str, values: dict) -> bytes:
+    """Key 0 `type`, then the frame's fields by its schema (028 R1); `proto_versions` is given
+    as its numbers, each one `u8` item."""
+    frame_type, schema = FRAME_SCHEMAS[kind]
+    fields = {**values}
+    if "proto_versions" in fields:
+        fields["proto_versions"] = [bytes([version]) for version in fields["proto_versions"]]
+    return record_field(0, bytes([frame_type])) + encode_020(schema, fields)
+
+
+def frames_section_028() -> list[dict]:
+    """The vectors of spec 028 (its section "Vectors"): one frame of each type, and one case per
+    schema rule, each with its `frame_type` and, for a `hello` or a rule, its `event`."""
+    def raw(name: str, kind: str, origin: str, frame_type: int, frame: bytes,
+            expected: dict) -> dict:
+        return {"name": name, "kind": kind, "source": "derived", "origin": f"spec 028: {origin}",
+                "inputs": {"frame_type": frame_type, "frame": frame}, "expected": expected}
+
+    channel_id, client_ref = bytes(range(0x10, 0x20)), bytes(range(0x20, 0x30))
+    server_id = bytes(range(0x30, 0x40))
+    references = {
+        "hello": {"server_nonce": bytes(range(0x40, 0x60)), "proto_versions": [1]},
+        "subscribe": {"pk_ch": bytes(range(0x60, 0x80)), "ttl_seconds": 86_400,
+                      "sig": bytes(range(0x80, 0xc0)), "since": U64(1_790_000_040_000)},
+        "ok": {"channel_id": channel_id},
+        "publish": {"channel_id": channel_id, "client_ref": client_ref,
+                    "blob": bytes(range(0xc0, 0xff))},
+        "ack": {"client_ref": client_ref, "server_id": server_id,
+                "received_at": U64(1_790_000_100_000)},
+        "push": {"channel_id": channel_id, "server_id": server_id,
+                 "received_at": U64(1_790_000_100_000), "blob": bytes(range(0xc0, 0xff))},
+        "error": {"code": "channel_quota", "message": "channel over its quota",
+                  "channel_id": channel_id, "client_ref": client_ref},
+    }
+    vectors = []
+    for kind, values in references.items():
+        expected = {name: value.encode("utf-8") if isinstance(value, str) else value
+                    for name, value in values.items()}
+        if kind == "hello":
+            expected["event"] = "accepted"
+        vectors.append(raw(f"{kind}_reference", "positive", f"a {kind} with every key",
+                           FRAME_SCHEMAS[kind][0], encode_frame(kind, values), expected))
+    nonce = references["hello"]["server_nonce"]
+    hellos = [
+        ("hello_nine_versions", "nine versions, 1 among them", [1, 2, 3, 4, 5, 6, 7, 8, 9]),
+        ("hello_no_version", "an empty list", []),
+        ("hello_without_1", "the list [2]", [2]),
+    ]
+    for name, origin, versions in hellos:
+        vectors.append(raw(name, "positive", f"a hello with {origin}", 0,
+                           encode_frame("hello", {"server_nonce": nonce,
+                                                  "proto_versions": versions}),
+                           {"server_nonce": nonce, "proto_versions": versions,
+                            "event": "unsupported_server"}))
+    ok = encode_frame("ok", {"channel_id": channel_id})
+    long_code = {**references["error"], "code": "c" * (MAX_ERROR_CODE + 1)}
+    reconnect = {"error": "BadPayload", "event": "reconnect"}
+    vectors += [
+        raw("ok_unknown_key", "positive", "ok_reference and a key 9, ignored", 2,
+            ok + record_field(9, b"\x01"), {"channel_id": channel_id, "event": "accepted"}),
+        raw("type_unknown", "negative", "a frame of type 7", 7, record_field(0, b"\x07"),
+            reconnect),
+        raw("ok_missing_channel_id", "negative", "an ok without its key 1", 2,
+            record_field(0, b"\x02"), reconnect),
+        raw("error_code_too_long", "negative", "error_reference with a 33-byte code", 6,
+            encode_frame("error", long_code), reconnect),
+    ]
+    return vectors
+
+
+SECTIONS["028"] = frames_section_028
 
 
 def words() -> list[str]:
