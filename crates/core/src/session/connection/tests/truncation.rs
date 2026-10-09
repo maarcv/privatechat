@@ -136,12 +136,43 @@ fn s028_t08_r08_truncation_before_backlog() {
     assert_eq!(channels[0].synced_at(), Some(T0 - 40_000));
     assert!(channels[0].status().truncated_before.is_some());
 
+    // Found at the `hello`, with the `ok` 31 s later: recorded again at the
+    // `ok`, since what expired meanwhile is missing too, then synced.
+    let mut channels = vec![channel(5, MINUTE, T0 - 600_000)];
+    let id = ids(&channels)[0];
+    let mut session = connected(&channels, T0);
+    let step = session.on_frame(&hello(1, &[1]), &mut channels, T0);
+    assert_eq!(step.events, [truncated(id, T0, MINUTE)]);
+    for at in (1..=31).map(|second| T0 + second * 1_000) {
+        assert!(session.on_tick(&mut channels, at).events.is_empty());
+    }
+    let step = session.on_frame(&ok(id), &mut channels, T0 + 31_000);
+    assert_eq!(
+        step.events,
+        [
+            truncated(id, T0 + 31_000, MINUTE),
+            Event::Subscribed { channel: id }
+        ]
+    );
+    assert_eq!(channels[0].synced_at(), Some(T0 + 31_000));
+
     // A quiet channel whose `synced_at` is recent, reopened from its store.
     let (mut channels, handle) = stored_channel(DAY, T0 - 2 * 86_400_000);
     channels[0].synced(T0 - 3_600_000).unwrap();
     let mut reopened = vec![Channel::open_stored(Box::new(handle.reopen())).unwrap()];
     assert_eq!(reopened[0].synced_at(), Some(T0 - 3_600_000));
-    assert!(hello_events(&mut reopened, T0).is_empty());
+    let id = ids(&reopened)[0];
+    let mut session = connected(&reopened, T0);
+    assert!(
+        session
+            .on_frame(&hello(1, &[1]), &mut reopened, T0)
+            .events
+            .is_empty()
+    );
+    // Its `ok` judges again by that `synced_at`: no truncation, synced.
+    let step = session.on_frame(&ok(id), &mut reopened, T0 + 500);
+    assert_eq!(step.events, [Event::Subscribed { channel: id }]);
+    assert_eq!(reopened[0].synced_at(), Some(T0 + 500));
 }
 
 /// A channel of `ttl_seconds` and `created_at`, with a handle on its store.

@@ -95,16 +95,25 @@ impl Session {
         let Some(channel) = find_mut(channels, &channel_id) else {
             return;
         };
-        let late = match self.truncations.get(&channel_id) {
-            Some(Truncation::Found) => false,
-            Some(Truncation::NotFound { last }) => is_truncated(channel, *last, now),
+        let (truncated, syncs) = match self.truncations.get(&channel_id) {
+            // Found at the `subscribe`: what expired while it waited is
+            // truncated too, and the backlog after it is whole.
+            Some(Truncation::Found) => (true, true),
+            Some(Truncation::NotFound { last }) => {
+                let late = is_truncated(channel, *last, now);
+                (late, !late)
+            }
             // Every queued channel is decided (R8); a missing decision is
             // taken now rather than skipped.
-            None => is_truncated(channel, last_complete(channel, now), now),
+            None => {
+                let late = is_truncated(channel, last_complete(channel, now), now);
+                (late, !late)
+            }
         };
-        if late {
+        if truncated {
             truncate(channel, now, step);
-        } else if !self.sync_stopped {
+        }
+        if syncs && !self.sync_stopped {
             sync(channel, now, step);
         }
         step.events.push(Event::Subscribed {

@@ -93,11 +93,16 @@ fn s028_t09_r09_ok_syncs_and_publishes() {
     let mut session = connected(&channels, later);
     session.on_frame(&hello(1, &[1]), &mut channels, later);
     let step = session.on_frame(&ok(id), &mut channels, later);
-    // The truncation was found at the `hello` (R8), and the `ok` syncs.
+    // The truncation was found at the `hello` (R8); the `ok` records it
+    // again and syncs.
     assert_eq!(channels[0].synced_at(), Some(later));
     assert_eq!(
         step.events,
         [
+            Event::HistoryTruncated {
+                channel: id,
+                before: later - 60_000,
+            },
             Event::Subscribed { channel: id },
             Event::NotDelivered {
                 channel: id,
@@ -155,6 +160,7 @@ fn s028_t09_r09_ok_store_failure_reported() {
     faults.fail_commits(true);
     let step = session.on_frame(&ok(id), &mut channels, later);
     assert_eq!(step.failed, [(id, StoreError::Io)]);
+    assert_eq!(step.events, [Event::Subscribed { channel: id }]);
     assert!(session.outgoing().is_empty());
 }
 
@@ -245,6 +251,9 @@ fn s028_t09_r09_gap_between_calls() {
             before
         }]
     );
+    // The new connection syncs again at its `ok`.
+    session.on_frame(&ok(id), &mut channels, later);
+    assert_eq!(channels[0].synced_at(), Some(later));
 
     // The same gap seen first by a `push` frame, then a tick.
     let mut channels = vec![channel(3, MINUTE, T0)];

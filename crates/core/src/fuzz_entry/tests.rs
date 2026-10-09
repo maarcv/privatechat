@@ -464,4 +464,20 @@ fn s028_t03_r03_session_on_frame_reads_frames() {
     let input = [framed(&ok), framed(&bad), framed(&bad)[..5].to_vec()].concat();
     assert_eq!(session_on_frame_verdict(&input).unwrap(), reconnect);
     assert_eq!(session_on_frame_verdict(&[0]).unwrap(), []);
+    // The channel subscribed is `text_k1`'s: a `nonce_expired` naming it is
+    // a `Reconnect` (R16), one naming another channel is not.
+    let nonce_expired = |channel_id| {
+        Frame::Error {
+            code: "nonce_expired".to_owned(),
+            message: String::new(),
+            channel_id: Some(channel_id),
+            client_ref: None,
+        }
+        .encode()
+        .unwrap()
+    };
+    let named = framed(&nonce_expired(channel_id));
+    assert_eq!(session_on_frame_verdict(&named).unwrap(), reconnect);
+    let other = framed(&nonce_expired([0x10; 16]));
+    assert_eq!(session_on_frame_verdict(&other).unwrap(), []);
 }

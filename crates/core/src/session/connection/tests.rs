@@ -965,6 +965,17 @@ fn s028_t09_r09_ok_marks_subscribed() {
         }
     );
     assert_eq!(shown, "Subscribed(abababab)");
+    let truncated = Event::HistoryTruncated {
+        channel: [0xab; 16],
+        before: 5,
+    };
+    assert_eq!(format!("{truncated:?}"), "HistoryTruncated(abababab, 5)");
+    let lost = Event::NotDelivered {
+        channel: [0xab; 16],
+        client_ref: crate::session::channel::ClientRef { bytes: [0xcd; 16] },
+        sent_at: 5,
+    };
+    assert_eq!(format!("{lost:?}"), "NotDelivered(abababab, 5)");
     assert_eq!(format!("{:?}", reconnect()), "Reconnect(7)");
     let unsupported = Event::UnsupportedServer {
         connection: CONNECTION,

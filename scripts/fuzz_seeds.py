@@ -92,6 +92,8 @@ def framed(frame: bytes) -> bytes:
     return len(frame).to_bytes(2, "big") + frame
 
 
+# The `channel_id` every frame of `028.json` names.
+VECTOR_028_CHANNEL = bytes(range(0x10, 0x20))
 # The key of `channel_id` by frame `type` (spec 028, table "Frames").
 CHANNEL_KEY = {2: 1, 3: 1, 5: 1, 6: 3}
 PUSH_TYPE = 5
@@ -167,7 +169,17 @@ def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
         return {"received_at": field(v, "received_at"), "now": field(v, "now"),
                 "server_id": CHANNEL_SERVER_ID, "blob": field(v, "blob")}
     if target == "session_on_frame":
-        frame = session_frame(v)
+        # Written out apart from `session_frame`, so that a retargeting that breaks fails here.
+        channel = text_k1_channel()
+        if "frame" in v["inputs"]:
+            frame = field(v, "frame")
+            if v["inputs"]["frame_type"] in (2, 3, 5, 6):  # `ok`, `publish`, `push`, `error`
+                frame = frame.replace(VECTOR_028_CHANNEL, channel)
+        else:
+            blob, received_at = field(v, "blob"), field(v, "received_at")
+            frame = (b"\x00\x00\x00\x00\x01\x05" + b"\x01\x00\x00\x00\x10" + channel
+                     + b"\x02\x00\x00\x00\x10" + bytes(16) + b"\x03\x00\x00\x00\x08" + received_at
+                     + b"\x04" + len(blob).to_bytes(4, "big") + blob)
         return {"len": len(frame).to_bytes(2, "big"), "frame": frame}
     if target == "receive_signed":
         return {"counter": field(v, "counter"), "nonce": field(v, "nonce"),

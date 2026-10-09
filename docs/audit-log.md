@@ -17,6 +17,17 @@ Decisions taken without the human, by the advisor (`.claude/agents/advisor.md`, 
 | AL5 | A device clock that jumps ahead and back leaves `truncated_at` in the future, read as `now` by spec 021's gap rule (B) | Far-fetched | None: no adversary of `docs/spec.md` §2, and spec 021's rule |
 | AL6 | The net diff is over AGENTS 14's 400 lines (A) | Low | Justified in the commits and the pull request: about 300 of production code, the rest the tests of R8 and R9, kept whole |
 
+**Round 2.** Fresh passes on the whole change. The round 1 fixes hold; no production defect outside AL7. Pass C ran 64 mutants: 45 killed, 8 equivalent, 11 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AL7 | A truncation R8 found at the `hello` was not judged again at the `ok`: a `subscribe` held past its TTL by a nonce cycle, a `rate_limited` or a server let the `ok` call `synced` over a stretch that expired while it waited, with the banner's `before` older than the loss (B) | Medium | At the `ok`, such a channel records the truncation again with the `ok`'s `now`, then syncs; R9 and T08 |
+| AL8 | The `session_on_frame` seed check rebuilt the expected frame with the function that wrote the seed, so a broken retargeting passed (A, C) | Medium | `fuzz_seeds.py` writes the expected frames apart: the vector frame with its channel replaced for the types that carry one, the push field by field; the five seed mutants fail it |
+| AL9 | Survivors: a gap's stop kept on the next connection; the `last` captured at the `subscribe` never shown to clear a truncation at the `ok`; the `Debug` of `HistoryTruncated` and `NotDelivered`; the events of a failed `outbox`; the fuzz session never shown to hold `text_k1`'s channel (C) | Medium | One clause each in T03, T08, T09 and the `Debug` checks |
+| AL10 | T09 said a failed `synced` publishes nothing, where R9 and the test publish; R9's "waiting in memory" ignored the reopen of spec 027 R14; T06 did not name AL1's clause; R3's sentence attached its seeds to `decrypt` (A) | Low | T09, R9, T06 and R3 reworded |
+| AL11 | `last_call = now` at `on_connect` is an equivalent mutant: nothing is subscribed before a call has run the gap check (C) | Far-fetched | Kept: R5's words; a preference |
+
+
 ## Audit AK
 
 **2026-10-09 — Audit AK, the code audit of slice (b1) of spec 028-session-sans-io (branch `028-connection`): `MemoryServer`, the connection and the subscription (R4–R7, with the session clauses of R1 and R2); round 1 of three passes (A: conformance; B: the adversary, a server sending any frame sequence and a clock set back; C: quality, tests and hand mutants).** No High finding and no production defect. Pass C ran 72 mutants: 37 killed, 8 equivalent, 27 survived; every survivor named below is killed by a clause added.
