@@ -58,7 +58,7 @@ impl fmt::Debug for Peer {
             .field("retired_at", &self.retired_at)
             .field(
                 "claims_name_of",
-                &self.claims_name_of.as_ref().map(key_prefix),
+                &self.claims_name_of.as_ref().map(|pk| key_prefix(pk)),
             )
             .field("claims_own_name", &self.claims_own_name)
             .field("label_collides", &self.label_collides)

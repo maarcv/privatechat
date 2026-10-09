@@ -52,7 +52,7 @@ impl fmt::Debug for Stranger {
         f.debug_struct("Stranger")
             .field(
                 "claims_name_of",
-                &self.claims_name_of.as_ref().map(key_prefix),
+                &self.claims_name_of.as_ref().map(|pk| key_prefix(pk)),
             )
             .field("claims_own_name", &self.claims_own_name)
             .finish_non_exhaustive()

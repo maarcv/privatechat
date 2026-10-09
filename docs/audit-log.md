@@ -2,6 +2,76 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AK
+
+**2026-10-09 — Audit AK, the code audit of slice (b1) of spec 028-session-sans-io (branch `028-connection`): `MemoryServer`, the connection and the subscription (R4–R7, with the session clauses of R1 and R2); round 1 of three passes (A: conformance; B: the adversary, a server sending any frame sequence and a clock set back; C: quality, tests and hand mutants).** No High finding and no production defect. Pass C ran 72 mutants: 37 killed, 8 equivalent, 27 survived; every survivor named below is killed by a clause added.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AK1 | Tests that could not fail: T05's `skip` and T06's discard read an `outgoing()` already drained; `ok` → `Subscribed` untested; the refused channel never shown to come again; `Reconnect` on a new connection, the frames left unwritten at a disconnect or an unsupported `hello`, the spacing reset, the release order by cursor and `created_at` (A, C) | Medium | T05–T07 rewritten to assert what they release; `s028_t09_r09_ok_marks_subscribed` |
+| AK2 | T06 checked the signature with `auth_message`, the function under test (A) | Medium | T06 builds the §6 bytes by hand |
+| AK3 | `MemoryServer` branches untested: the hosts, the nonce's age, `not_subscribed`, `since` and its clamp, the TTL filter, live pushes, `disconnect` (C) | Low | `s028_t04_r04_memory_server_checks` |
+| AK4 | A clock set back stalled the queue and the waits of R7 with no `Reconnect` (B) | Low | A time recorded later than `now` counts as long past, as 021 R18 and 027 R12 do; T07 |
+| AK5 | Each `nonce_expired` restarted the wait for a `hello`, so a server could hold every channel off (B) | Far-fetched | Fixed anyway: the wait starts only when none runs |
+| AK6 | `Event`'s derived `Debug` printed the full `channel_id` (B) | Low | A `Debug` with the 4-byte prefix; T09 checks it |
+| AK7 | `nonce_expired` naming a subscribed channel left it subscribed (A); `Reconnect` once per connection was no rule (A) | Low | Removed whatever its state; the once-only flag removed |
+| AK8 | Four flags and options for one connection state; a second copy of the `channel_id` derivation; protocol literals repeated; a dead TTL; nine `Event` variants and `Step::failed` with no producer (C) | Low | `enum Link`; one derivation (`ChannelId::derive`, AK11); `CODE_*` in `frames.rs`; variants added by the slices that produce them |
+| AK9 | 028 R6 did not name `auth_message`, which 031 R2 asks it to sign; R7's clause on a subscribe queued again after `rate_limited` deferred without a word (A) | Low | R6 amended, 031 History; the module doc names the clause for slice (d), whose `rate_limited` alone reaches it |
+| AK10 | `docs/spec.md` §9 still sketches a `pub` `Session` and `Channel::auth_subscribe` (A) | Low | Left: spec 027 brings §9 up to date (audit S) |
+
+**Round 2.** Fresh passes on the whole change. No production defect; the round 1 fixes hold. Pass C ran 59 mutants: 48 killed, 3 equivalent, 8 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AK11 | The derivation of AK8 was `config::channel_id_of`, where spec 031 R3 names it `ChannelId::derive` (A) | Low | Renamed; 031 History |
+| AK12 | AK5's fix departed from R7 and R16 as written (A) | Low | R7 and R16 amended: a `nonce_expired` does not restart a running wait |
+| AK13 | `MemoryServer`'s docs claimed every check of 031 R5; it has neither `bad_ttl` nor the previous nonce's window (A, C) | Low | Docs say the two checks it makes |
+| AK14 | Survivors: `synced_at` in the release order (a future one ignored, `max` with the cursor); one `Reconnect` past the nonce window; a valid frame of another type ignored; the test server's nonce renewal and its 60 000 ms edge; distinct `server_id`s (C) | Low | One clause each in T04, T06, T07, T09 |
+| AK15 | Constants and `last_complete` wider than needed (A, C) | Nit | Private |
+| AK16 | Clock set back: a new `hello` can release two subscribes less than 1 100 ms apart; a repeated nonce restarts the client's window; a 1 ms step back during a wait gives a `Reconnect` (B) | Far-fetched | None: a `rate_limited` or a reconnect at most, the AK4 rule as decided |
+| AK17 | The queue outside `Link::Ready` makes two of its clears equivalent mutants (C) | Far-fetched | Kept: they are R16's and R5's words; a preference |
+
+**Round 3.** Fresh passes on the whole change. No production defect. Pass C ran 50 mutants: 43 killed, 1 equivalent, 6 survived; five are killed below, the sixth (no clear of the queue at `nonce_expired`) is equivalent, as AK17.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AK18 | The clock-set-back rule of AK4 was in the code, not in R7 (A) | Low | R7 says how such a time counts; T07 names its clauses |
+| AK19 | An unnamed `nonce_expired` kept the queue and started no wait (A, C) | Low | It discards the queue and starts the wait as a named one, then `Reconnect`; T07 |
+| AK20 | Spec 011 did not name `ChannelId::derive`, which 031 R3 asks it to (A) | Low | 011 R8, Interface and History |
+| AK21 | Survivors: a `synced_at` equal to `now`; a channel closed before its release; the window passing within 1 100 ms of a release; the `Debug` of `Reconnect` and `UnsupportedServer` (C) | Low | One clause each in T06, T07, T09 |
+| AK22 | The 028 Interface named `testing.rs` for `MemoryServer` (A) | Nit | `testing/server.rs` |
+| AK23 | A channel id repeated in `Session::new` would be subscribed twice (B) | Far-fetched | None: no input reaches it; the `Device` opens each channel once |
+
+**Round 4.** Fresh passes on the whole change. No production defect; pass B found nothing.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AK24 | After `UnsupportedServer` a bad frame gets no `Reconnect`, as 027 R11 wants, but R1 read alone asked for one (A) | Low | R2 says frames are then ignored with no event; T02 |
+| AK25 | `Event` derives `PartialEq` and `Eq` that only the tests use; T09's push of an unknown channel cannot fail until pushes are routed (A) | Far-fetched | None now: `Received` already compares; the slice that routes pushes checks a known channel's |
+| AK26 | Survivors: a named `nonce_expired` also giving `Reconnect`; `max(cursor, synced_at)` with the cursor the larger; `since` taken from `synced_at` (C; 94 mutants, 88 killed, 3 equivalent) | Low | One clause each in T06, T07 |
+| AK27 | `Link::Unsupported` behaved as `Closed`; `id_prefix` copied `key_prefix` (C) | Low | One `Closed`; `key_prefix` takes a slice |
+
+**Round 5.** Fresh passes on the whole change. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AK28 | `docs/spec.md` §2 and `docs/threat-model.md` promised that one connection per server does not reveal its number of channels; one `subscribe` and one `ok` per channel, 1 100 ms apart, show it through TLS, and an absent `since` marks a new or imported channel by size (B) | Medium | Three advisors escalated, all recommending the second option; the human reviewer took it (decision): the observer row says the count shows, `since` is always sent (0 with no cursor) so every `subscribe` has one size; 028 R6, T06 and Security amended; cover traffic stays v2 |
+| AK29 | A stale `tests.rs.orig` committed in round 4, read by the requirement gate (A, B, C) | Low | Removed |
+| AK30 | A second `hello` never shown to set the nonce and window of the `subscribe`s a tick releases: three survivors (A, C; 64 mutants, 59 killed, 2 equivalent) | Medium | T07 checks the signature of a tick-released subscribe over the second nonce, late in its window |
+| AK31 | `Subscription` derived traits nothing uses; `key_prefix`'s doc and the test module's doc out of date (A, C) | Nit | Removed; reworded |
+
+**Round 6.** Fresh passes on the whole change. No production defect; pass B checked AK28 from the observer's side (every `subscribe` one size); pass C ran 73 mutants, 71 killed, 2 equivalent, none surviving.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AK32 | T06's doc comment still said `since` is absent with no cursor; T07 did not name the AK30 clause (A, B, C) | Nit | Reworded, in the test and in 028 T07 |
+
+**Round 7.** Fresh passes on the whole change. Passes A and B found nothing but two far-fetched points (a 028 History line for round 6, two lines over 100 columns that no check enforces), fixed anyway; pass C found test gaps only, no production defect (30 mutants: 20 killed, 4 equivalent, 6 survived). The audit ends here, as `CLAUDE.md` says for such a round, once the tests below killed the survivors and the local CI was clean.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AK33 | Survivors: a `nonce_expired` naming a channel that had its `ok`; a session subscribing channels not its own; an `ok` arriving while a fresh `hello` is awaited; the test server's `ack` before its echo and the echo itself; two subscriptions catching up at once; a `subscribe` without `since` (C) | Low | One clause each in T04, T06, T09 |
+
 ## Review during development
 
 **2026-10-09 — Decision of the human reviewer: until the first release, the audit of `CLAUDE.md` replaces the human review before merging.** The human still accepts every spec before it is implemented, decides what an audit escalates and approves every ADR; the human review before merging returns at the first release. `AGENTS.md` "Per-feature flow", `docs/spec.md` §10 "Per-feature flow" and governance, the `architecture` skill and `.github/CODEOWNERS` say so. GitHub required no approving review on `mvp` already (0), so its settings do not change.

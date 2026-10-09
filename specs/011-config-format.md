@@ -45,7 +45,7 @@ In plain words: a config is a short list of numbered fields: the channel key, th
 - R5 `server_url` MUST be at most 256 bytes and MUST be, now or in any later `config_version`, either `wss://` ‖ host ‖ optional `:` port ‖ end, where host MUST be at least one byte of `a-z`, `0-9`, `-` and `.` (the URL bound is the only bound on its length) and port MUST NOT be 443, or `ws://` ‖ onion host ‖ optional `:` port ‖ end, where the onion host MUST be exactly 56 bytes of `a-z` and `2-7` followed by `.onion` and port MUST NOT be 80 (ADR 0038); in both forms port MUST be a decimal number within 1..=65535 with no leading zero. Any other text MUST return `Error::BadConfig`.
 - R6 `host()` MUST return the host of `server_url` without the scheme or the port, and `channel_key()` MUST borrow `K_ch` for the derivations of specs 012-message-keys and 013-wire-message. The host is the string the subscription signature covers (`docs/spec.md` §6, spec 031-auth-channel-signature), not the key that groups channels on one connection, which is the scheme, the host and the port together (spec 027-core-api R10).
 - R7 The encoded record MUST be at most 512 bytes, and a longer one MUST return `Error::BadConfig` before any byte of it is decoded.
-- R8 `sk_ch` and `pk_ch` MUST be `sign_keypair_from_seed(kdf_derive(K_ch, CHANNEL_AUTH_CONTEXT))`, and `channel_id` MUST be the first 16 bytes of `hash(CHANNEL_ID_TAG ‖ pk_ch ‖ BE32(ttl_seconds))`, held in the type `ChannelId` and compared only with `ct_eq` (`docs/spec.md` §4).
+- R8 `sk_ch` and `pk_ch` MUST be `sign_keypair_from_seed(kdf_derive(K_ch, CHANNEL_AUTH_CONTEXT))`, and `channel_id` MUST be the first 16 bytes of `hash(CHANNEL_ID_TAG ‖ pk_ch ‖ BE32(ttl_seconds))`, computed by the one function `ChannelId::derive(pk_ch, ttl_seconds)` (spec 031-auth-channel-signature R3), held in the type `ChannelId` and compared only with `ct_eq` (`docs/spec.md` §4).
 - R9 `CHANNEL_ID_TAG` MUST be the 19 ASCII bytes `privatechat/chid/v1` and `CHANNEL_AUTH_CONTEXT` the 8 ASCII bytes `chauth__`, as named constants next to the code that uses them, equal to the literals of `docs/spec.md` §4.
 - R10 `parse`, `parse_qr` and `open_encrypted` MUST return `Error::InviteExpired` for an `invite_expires_at` lower than the `now` they receive. A `Config` they return MUST NOT hold `invite_expires_at`, so that a config stored after import never expires as an invitation (ADR 0028).
 - R11 The QR form MUST be the base64url, with no padding, of the config record, with no prefix and no URL scheme, carried in both directions as ASCII bytes and never as a `String` (ADR 0028). `parse_qr` MUST return `Error::BadConfig` for more than 683 bytes, for a length that leaves one character over (length mod 4 = 1), for a byte outside the base64url alphabet, for padding and for final bits that are not zero, so that each config has exactly one QR text.
@@ -106,6 +106,9 @@ pub(crate) const CHANNEL_ID_TAG: &[u8; 19] = b"privatechat/chid/v1";
 pub(crate) const CHANNEL_AUTH_CONTEXT: KdfContext = KdfContext::new(*b"chauth__");
 
 pub(crate) struct ChannelId(pub(crate) [u8; 16]);
+impl ChannelId {
+    pub(crate) fn derive(pk_ch: &PublicKey, ttl_seconds: u32) -> Result<ChannelId, Error>;   // spec 031 R3
+}
 
 pub struct Config { /* K_ch: Secret<32>, the fields of §5 except invite_expires_at, and the derived channel_id and host */ }
 
@@ -126,6 +129,7 @@ impl Config {
     pub(crate) fn seal_file_with_key(&self, key: &Secret<32>, salt: &Salt, nonce: &Nonce, now: u64) -> Result<Vec<u8>, Error>;
     pub(crate) fn open_file_with_key(bytes: &[u8], key: &Secret<32>, now: u64) -> Result<Config, Error>;
     pub(crate) fn host(&self) -> &str;
+    pub(crate) fn created_at(&self) -> u64;   // spec 028-session-sans-io R8
     pub(crate) fn channel_key(&self) -> &Secret<32>;
     pub(crate) fn record(&self, invite_expires_at: Option<u64>) -> Result<Zeroizing<Vec<u8>>, Error>;
     pub(crate) fn padded_record(&self, now: u64) -> Result<Zeroizing<Vec<u8>>, Error>;   // R19, what the file seals
@@ -251,3 +255,5 @@ None. Decided in audit F (`docs/audit-log.md`):
 - 2026-09-29 implemented: slices (a)–(e) with the audit S fixes, reviewed (Marc Vilardebó)
 - 2026-09-30 amended by spec 020-store-files R1 and R26: `RecordError` does not leave the core's decoders, since `StoreError` joins `Error` as a `pub` error; R20 and T20 count `Store`
 - 2026-10-01 revised after audit Y (`docs/audit-log.md`): R20 names `BadEncoding` among the errors a call site matches first; R22 and the Vectors paragraph name `chatcfg_reference` as the one record without its QR text; T05 lists the scheme case, percent and onion cases its table holds; T15 checks every code point
+- 2026-10-09 amended by spec 028-session-sans-io R8: `created_at()`, crate-internal, for the order of subscribes and the truncation check
+- 2026-10-09 amended by spec 031-auth-channel-signature R3: R8's derivation is the one function `ChannelId::derive`

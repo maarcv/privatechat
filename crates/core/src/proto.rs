@@ -1,8 +1,10 @@
 //! The formats of the protocol other than the primitives: the record encoding
 //! (spec 017-record-encoding), the config built on it (spec 011), the keys
 //! and header of each message (spec 012), and, with specs 013 and 014, the
-//! envelope, which is a fixed layout and not a record, and the fingerprint.
+//! envelope, which is a fixed layout and not a record, and the fingerprint;
+//! the message a subscription signs (specs 028 and 031).
 
+pub(crate) mod auth;
 pub(crate) mod config;
 pub(crate) mod envelope;
 pub(crate) mod fingerprint;
