@@ -368,11 +368,12 @@ proptest! {
     }
 }
 
-/// Spec 028, R3: the fuzz checker requires the target `frame_decode`.
+/// Spec 028, R3: the fuzz checker requires both targets.
 #[test]
-fn s028_t03_r03_frame_decode_target_listed() {
+fn s028_t03_r03_fuzz_targets_listed() {
     let checker = include_str!("../../../../../scripts/check_fuzz_targets.py");
     assert!(checker.contains("\"frame_decode\""));
+    assert!(checker.contains("\"session_on_frame\""));
 }
 
 /// The vector names of keys 1 and up, by `type` (the table "Frames").

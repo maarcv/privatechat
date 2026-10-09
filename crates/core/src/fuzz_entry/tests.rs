@@ -7,7 +7,8 @@ use proptest::prelude::{ProptestConfig, any, proptest};
 use super::{
     QR_CHANNEL, config_parse_qr_verdict, config_parse_verdict, frame_decode_verdict,
     log_record_decode_verdict, payload_decode_verdict, receive_signed_verdict, receive_verdict,
-    record_decode_verdict, settings_decode_verdict, state_decode_verdict, verify_qr_parse_verdict,
+    record_decode_verdict, session_on_frame_verdict, settings_decode_verdict, state_decode_verdict,
+    verify_qr_parse_verdict,
 };
 use crate::Error;
 use crate::crypto::{self, Nonce, PublicKey, Secret};
@@ -24,8 +25,8 @@ const FUZZ_MANIFEST: &str = include_str!("../../fuzz/Cargo.toml");
 const FUZZ_WORKFLOW: &str = include_str!("../../../../.github/workflows/fuzz.yml");
 
 /// The targets of R2: three added by spec 020-store-files, one by spec
-/// 021-channel-session, the last by spec 028-session-sans-io.
-const TARGETS: [&str; 12] = [
+/// 021-channel-session, the last two by spec 028-session-sans-io.
+const TARGETS: [&str; 13] = [
     "record_decode",
     "config_parse",
     "config_parse_qr",
@@ -38,20 +39,25 @@ const TARGETS: [&str; 12] = [
     "settings_decode",
     "channel_decrypt",
     "frame_decode",
+    "session_on_frame",
 ];
 
-/// The channel of `text_k1`, built here apart from `fuzz_entry`, so that an
+/// The config of `text_k1`, built here apart from `fuzz_entry`, so that an
 /// entry sealing or opening in another channel fails the tests.
-fn text_k1_context() -> ChannelCtx {
-    let config = Config::from_parts(
+fn text_k1_config() -> Config {
+    Config::from_parts(
         Secret::from_bytes(text_k1::K_CH),
         text_k1::SERVER_URL,
         text_k1::TTL_SECONDS,
         text_k1::SUGGESTED_NAME,
         text_k1::CREATED_AT,
     )
-    .unwrap();
-    ChannelCtx::from_config(&config).unwrap()
+    .unwrap()
+}
+
+/// The channel of `text_k1`.
+fn text_k1_context() -> ChannelCtx {
+    ChannelCtx::from_config(&text_k1_config()).unwrap()
 }
 
 /// The blob of `text_k1`, sealed from its inputs.
@@ -434,4 +440,28 @@ fn s020_t29_r29_storage_entries_reach_their_decoders() {
     ] {
         assert_eq!(verdict(&[]), Err(crate::StoreError::Corrupt));
     }
+}
+
+/// Spec 028, R3: `session_on_frame` reads its input as `BE16(len) ‖ frame`
+/// pieces, past the fixed `hello` and `ok`: a bad frame → `Reconnect`, the
+/// `ok` of the subscribed channel → nothing, a trailing piece shorter than
+/// its length → dropped.
+#[test]
+fn s028_t03_r03_session_on_frame_reads_frames() {
+    let framed = |frame: &[u8]| {
+        [
+            &u16::try_from(frame.len()).unwrap().to_be_bytes()[..],
+            frame,
+        ]
+        .concat()
+    };
+    let channel_id = text_k1_config().channel_id();
+    let ok = Frame::Ok { channel_id }.encode().unwrap();
+    let bad = [0u8, 0, 0, 0, 1, 7];
+    let reconnect = [crate::Event::Reconnect { connection: 0 }];
+    assert_eq!(session_on_frame_verdict(&framed(&ok)).unwrap(), []);
+    assert_eq!(session_on_frame_verdict(&framed(&bad)).unwrap(), reconnect);
+    let input = [framed(&ok), framed(&bad), framed(&bad)[..5].to_vec()].concat();
+    assert_eq!(session_on_frame_verdict(&input).unwrap(), reconnect);
+    assert_eq!(session_on_frame_verdict(&[0]).unwrap(), []);
 }

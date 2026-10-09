@@ -83,7 +83,13 @@ TARGETS: dict[str, tuple[str, Callable[[dict], bool], Seed]] = {
     "channel_decrypt": ("013", lambda v: True,
                         lambda v: times(v) + CHANNEL_SERVER_ID + field(v, "blob")),
     "frame_decode": ("028", lambda v: True, lambda v: field(v, "frame")),
+    "session_on_frame": ("028", lambda v: True, lambda v: framed(field(v, "frame"))),
 }
+
+
+def framed(frame: bytes) -> bytes:
+    """One frame in the layout of `session_on_frame`: `BE16(len) ‖ frame` (spec 028 R3)."""
+    return len(frame).to_bytes(2, "big") + frame
 
 
 # The `server_id` of every `channel_decrypt` seed (spec 021-channel-session R29).
@@ -99,6 +105,8 @@ def read_back(target: str, seed: bytes) -> dict[str, bytes]:
     if target == "channel_decrypt":
         return {"received_at": seed[:8], "now": seed[8:16], "server_id": seed[16:32],
                 "blob": seed[32:]}
+    if target == "session_on_frame":
+        return {"len": seed[:2], "frame": seed[2:]}
     if target == "receive_signed":
         return {"counter": seed[:8], "nonce": seed[8:32], "received_at": seed[32:40],
                 "now": seed[40:48], "padded": seed[48:]}
@@ -115,6 +123,9 @@ def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
     if target == "channel_decrypt":
         return {"received_at": field(v, "received_at"), "now": field(v, "now"),
                 "server_id": CHANNEL_SERVER_ID, "blob": field(v, "blob")}
+    if target == "session_on_frame":
+        frame = field(v, "frame")
+        return {"len": len(frame).to_bytes(2, "big"), "frame": frame}
     if target == "receive_signed":
         return {"counter": field(v, "counter"), "nonce": field(v, "nonce"),
                 "received_at": field(v, "received_at"), "now": field(v, "now"),
@@ -130,7 +141,7 @@ def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
 SEED_COUNTS = {"record_decode": 31, "config_parse": 27, "config_parse_qr": 32,
                "payload_decode": 17, "receive": 30, "receive_signed": 18, "verify_qr_parse": 6,
                "state_decode": 2, "log_record_decode": 4, "settings_decode": 2,
-               "channel_decrypt": 30, "frame_decode": 14}
+               "channel_decrypt": 30, "frame_decode": 14, "session_on_frame": 14}
 
 
 def check_s016_t08_r08_corpus_is_seeded() -> None:

@@ -101,3 +101,10 @@ path = "fuzz_targets/frame_decode.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "session_on_frame"
+path = "fuzz_targets/session_on_frame.rs"
+test = false
+doc = false
+bench = false
