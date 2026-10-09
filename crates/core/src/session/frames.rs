@@ -10,7 +10,9 @@
 use crate::Error;
 use crate::proto::config::VERSION as PROTO_VERSION;
 use crate::proto::envelope::MAX_BLOB;
-use crate::proto::record::{Reader, RecordError, UnknownKeys, Writer};
+use crate::proto::record::{
+    Reader, RecordError, U8_LEN, U32_LEN, U64_LEN, UnknownKeys, Writer, list_len, record_len,
+};
 
 #[cfg(test)]
 mod tests;
@@ -131,13 +133,48 @@ impl Frame {
     /// # Ok::<(), privatechat_core::Error>(())
     /// ```
     pub fn encode(&self) -> Result<Vec<u8>, Error> {
-        let mut writer = Writer::with_capacity(MAX_FRAME);
+        let len = self.encoded_len();
+        if len > MAX_FRAME {
+            return Err(Error::BadPayload);
+        }
+        // Allocated at the frame's length, so that neither the writer nor a
+        // queue of small frames holds 70 000 bytes each (spec 020 R25).
+        let mut writer = Writer::with_capacity(len);
         writer.u8(KEY_TYPE, self.type_byte()).map_err(bad_payload)?;
         self.write_fields(&mut writer).map_err(bad_payload)?;
-        // A frame is ciphertext and public fields: it leaves the wiping
-        // buffer, copied at its length, so that a queue of small frames does
-        // not hold 70 000 bytes each.
-        Ok(writer.finish().to_vec())
+        // A frame is ciphertext and public fields: it leaves the wiping buffer.
+        Ok(core::mem::take(&mut *writer.finish()))
+    }
+
+    /// The bytes `encode` writes; saturating, so a frame past `usize` is
+    /// above `MAX_FRAME` too.
+    fn encoded_len(&self) -> usize {
+        let id = Some(16);
+        let values = match self {
+            Frame::Hello { proto_versions, .. } => vec![
+                Some(32),
+                Some(list_len(proto_versions.iter().map(|_| VERSION_ITEM_LEN))),
+            ],
+            Frame::Subscribe { since, .. } => {
+                vec![Some(32), Some(U32_LEN), Some(64), since.map(|_| U64_LEN)]
+            }
+            Frame::Ok { .. } => vec![id],
+            Frame::Publish { blob, .. } => vec![id, id, Some(blob.len())],
+            Frame::Ack { .. } => vec![id, id, Some(U64_LEN)],
+            Frame::Push { blob, .. } => vec![id, id, Some(U64_LEN), Some(blob.len())],
+            Frame::Error {
+                code,
+                message,
+                channel_id,
+                client_ref,
+            } => vec![
+                Some(code.len()),
+                Some(message.len()),
+                channel_id.map(|_| 16),
+                client_ref.map(|_| 16),
+            ],
+        };
+        record_len(&[Some(U8_LEN)]).saturating_add(record_len(&values))
     }
 
     /// The frame of a record, under `UnknownKeys::Ignore` (R1).

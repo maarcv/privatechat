@@ -303,6 +303,17 @@ fn s016_t08_r08_seeds_reach_their_entries() {
     assert!(matches!(frame_decode_verdict(&ok), Ok(Frame::Ok { .. })));
 }
 
+/// Spec 016, R2: each target is one `[[bin]]` of the fuzz crate, built
+/// from its own file, so that no target is missing from `cargo fuzz build`.
+#[test]
+fn s016_t02_r02_every_target_is_a_bin() {
+    assert_eq!(FUZZ_MANIFEST.matches("[[bin]]").count(), TARGETS.len());
+    for target in TARGETS {
+        let bin = format!("name = \"{target}\"\npath = \"fuzz_targets/{target}.rs\"");
+        assert!(FUZZ_MANIFEST.contains(&bin), "{target}");
+    }
+}
+
 /// Spec 016, R9: one nightly job per target, each installing the dated
 /// nightly and `cargo-fuzz`, seeding the corpus, building from `crates/core`
 /// and running for an hour; no other workflow and not the toolchain file

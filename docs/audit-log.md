@@ -18,6 +18,17 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AJ8 | `is_supported`'s lower bound is dead (an empty list contains no 1); `bytes64` rewrote `any::<[u8; 64]>()` (C) | Nit | Removed |
 | AJ9 | `Debug` prints `sig` and blobs; `error.message` may hold control characters (B) | Far-fetched | None: no secret, and no path shows `message` in this slice; spec 056 must not render it |
 
+**Round 2.** The same three passes, fresh, on the whole change. No production defect; the round 1 fixes hold. Pass C ran 19 mutants: 13 killed, 1 equivalent, 5 survived, each killed by a clause added below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AJ10 | The new §6 cursor sentence left out 021 R20's exceptions (a store failure, a push expired by the local clock) and said "at most once a minute" (A, B) | Low | §6 reworded after R20 |
+| AJ11 | §6 streams the whole backlog before `ok` but its limits row still closed at 4 MiB, without 028 R4's exemption (B) | Low | The row names the exemption and 030 R8 |
+| AJ12 | §6 gave `proto_versions` as `[uint], ≤ 8` and left out the empty list (A) | Low | `list of u8`, 1 to 8 items accepted, R2 cited |
+| AJ13 | `encode` still allocated and wiped 70 000 bytes for every frame (B) | Low | The writer sized at the frame's length with `record_len` and `list_len`, as spec 020 R25 |
+| AJ14 | Survivors: an absent `since` written as 0, `since` 0 dropped or read as absent; a target's `[[bin]]` removed from the fuzz manifest (C) | Low | T01 re-encodes every frame without an optional key and holds a `since` of 0; 016 T02 gains `s016_t02_r02_every_target_is_a_bin` |
+| AJ15 | `error_reference` paired `channel_quota` with a text 030 R13 does not send (A); 016 T08 did not name its frame clause (A) | Nit | "channel full"; T08 and History amended |
+
 ## Spec 026 implemented
 
 **2026-10-09 — Spec 026-peer-limits is `implemented`.** Its acceptance criterion is automated alone: `cargo test -p privatechat-core s026_`, clippy and the documentation lint are green on `mvp` (9137d6a), after the eight rounds of Audit AI, which the human reviewer closed at round 8.

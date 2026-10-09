@@ -1385,7 +1385,7 @@ def frames_section_028() -> list[dict]:
                 "received_at": U64(1_790_000_100_000)},
         "push": {"channel_id": channel_id, "server_id": server_id,
                  "received_at": U64(1_790_000_100_000), "blob": bytes(range(0xc0, 0xff))},
-        "error": {"code": "channel_quota", "message": "channel over its quota",
+        "error": {"code": "channel_quota", "message": "channel full",
                   "channel_id": channel_id, "client_ref": client_ref},
     }
     vectors = []

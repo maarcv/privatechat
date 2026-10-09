@@ -99,12 +99,17 @@ fn s028_t01_r01_frame_schemas() {
         for (index, (key, value)) in fields.iter().enumerate().skip(1) {
             let mut without = fields.clone();
             without.remove(index);
-            let decoded = Frame::decode(&record(&without));
+            let without = record(&without);
+            let decoded = reencoded(&without);
             assert_eq!(
                 decoded.is_ok(),
                 optional.contains(key),
                 "{frame:?} without {key}"
             );
+            // An optional key left out stays out: never written as a default.
+            if optional.contains(key) {
+                assert_eq!(decoded, Ok(without));
+            }
             if value.len() > 1 {
                 // One byte short: a fixed width broken, optional or not, or
                 // a blob or text that still fits.
@@ -193,6 +198,14 @@ fn s028_t01_r01_frame_schemas() {
             (2, vec![7; 16]),
             (3, vec![0; 8]),
             (4, vec![0; MAX_BLOB]),
+        ]),
+        // `since` 0 is present, not absent (the table "Frames").
+        record(&[
+            (0, vec![1]),
+            (1, vec![2; 32]),
+            (2, vec![0; 4]),
+            (3, vec![3; 64]),
+            (4, vec![0; 8]),
         ]),
     ];
     for bytes in &at_bounds {
