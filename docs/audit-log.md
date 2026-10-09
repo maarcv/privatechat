@@ -2,6 +2,10 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Spec 025 implemented
+
+**2026-10-09 — Spec 025-identity-regen is `implemented`.** Its acceptance criterion is automated alone: `cargo test -p privatechat-core s025_`, clippy and the documentation lint are green on `mvp` (4da62ee), after the two rounds of Audit AH.
+
 ## Audit AH
 
 **2026-10-09 — Audit AH, the code audit of spec 025-identity-regen (branches `025-identity-regen` and `025-retirement`, PRs #42 and #43), round 1 of three read-only passes (A: conformance with R1–R8 and T01–T08; B: the adversary, a server choosing every `received_at` and the timing of acks, an intruder with the config, a thief of the old key, a wrong clock; C: code quality, tests and hand mutants).** One High finding (AH1), no production defect beyond it. The human reviewer took the recommendation of each of the four decisions (AH1–AH4). Pass C ran 27 mutants: 15 killed, 4 equivalent, 8 survived, each killed by a test added below; the author's mutants of the round-1 changes are killed too, but for `retiring_seed.is_some()` in `is_retiring`, equivalent since no old-key entry is left once it is cleared.

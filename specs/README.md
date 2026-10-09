@@ -25,7 +25,7 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 022 | 022-peers-tofu | 2 | implemented |
 | 023 | 023-ttl-purge | 2 | implemented |
 | 024 | 024-key-retired | 2 | implemented |
-| 025 | 025-identity-regen | 2 | accepted |
+| 025 | 025-identity-regen | 2 | implemented |
 | 026 | 026-peer-limits | 2 | accepted |
 | 027 | 027-core-api | 2 | accepted |
 | 028 | 028-session-sans-io | 2 | accepted |
