@@ -104,7 +104,8 @@ impl Channel {
             }
             return Err(Error::RetiredKey);
         }
-        if !is_own && self.peer(&sender).is_none() && !self.has_room_for(&sender) {
+        if !is_own && self.peer(&sender).is_none() && !self.has_room() {
+            self.ignore_key(sender.0);
             return Err(Error::PeerLimit);
         }
         // Step 6.
@@ -146,8 +147,19 @@ impl Channel {
         let gap = self.gap_of(self.peer(&sender), counter, listed, arrival.now);
         let listing = self.listing(opened, arrival, Sender::Peer { pk: sender.0 }, 0);
         let mut next = self.next_state();
+        // Spec 026-peer-limits R3: a new peer at a limit evicts a stranger.
+        let evicted = if self.peer(&sender).is_none() {
+            Channel::evict_for_new_peer(&mut next)
+        } else {
+            None
+        };
         update_peer(&mut next, &sender, counter, listing.name, arrival.now);
         self.commit(next, listing.records)?;
+        if let Some(evicted) = evicted {
+            // Spec 021 R24: the gap goes with the record.
+            self.carry.gaps.remove(&evicted);
+            self.ignore_key(evicted);
+        }
         if let Some(gap) = gap {
             self.add_gap(gap);
         }
@@ -239,12 +251,6 @@ impl Channel {
     fn is_retired(&self, pk: &PublicKey) -> bool {
         self.peer(pk).is_some_and(|peer| peer.retired_at.is_some())
             || self.state.own_old_keys.iter().any(|old| old.pk.0 == pk.0)
-    }
-
-    /// Whether an unknown key finds room: spec 026-peer-limits R2 decides,
-    /// and until it does every unknown does.
-    fn has_room_for(&self, _pk: &PublicKey) -> bool {
-        true
     }
 
     /// A retained message or seen record with this `server_id` (step 6).

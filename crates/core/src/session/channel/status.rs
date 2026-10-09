@@ -28,9 +28,8 @@ impl Channel {
             retirement_pending: self.state.retiring_seed.is_some(),
             storage_full: !self.has_headroom(),
             ignored_keys: u32::try_from(self.carry.ignored_keys.len()).unwrap_or(u32::MAX),
-            // Spec 026-peer-limits sets the two limits.
-            unknown_limit_reached: false,
-            labelled_limit_reached: false,
+            unknown_limit_reached: !self.has_room(),
+            labelled_limit_reached: self.labelled_limit_reached(),
             clock_off: self.carry.clock_off != ClockOff::No,
             truncated_before: self.truncated_before(),
         }
