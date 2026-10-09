@@ -137,6 +137,7 @@ fn s026_t02_r02_room_check() {
         // Labelled peers do not count against the 50.
         (crowd(10, 40, true), true),
         (crowd(500, 10, true), true),
+        (crowd(500, 49, true), true),
         (one_unmuted, true),
         (crowd(0, 50, true), false),
         (full_one_unmuted, true),
@@ -314,7 +315,7 @@ fn s026_t03_r03_lru_eviction() {
     assert_eq!(channel.status().ignored_keys, 0);
 
     // Below both limits nobody is evicted, whatever the labelled peers.
-    for (count, unknowns) in [(10u16, 40u16), (500, 10)] {
+    for (count, unknowns) in [(10u16, 40u16), (500, 10), (500, 49)] {
         let (mut channel, _, _) = receiver(3_600);
         plant(&mut channel, crowd(count, unknowns, false));
         text(&mut channel, stranger(900), 0, NOW).unwrap();
@@ -345,7 +346,8 @@ fn s026_t03_r03_lru_eviction() {
     // Strangers stamped ahead, by a clock since corrected, go before an
     // older newcomer: they no longer shield a flood. Stamped a few ms or a
     // year ahead, first seen before the jump; one that writes again is
-    // stamped `now`; the server's `received_at` decides nothing.
+    // stamped `now`; neither the server's `received_at` nor the sender's
+    // `sent_at` decides.
     for ahead in [0, 365 * 24 * 3_600_000] {
         let (mut channel, _, _) = receiver(3_600);
         let mut peers = crowd(0, 49, false);
@@ -356,7 +358,14 @@ fn s026_t03_r03_lru_eviction() {
         plant(&mut channel, peers);
         text(&mut channel, stranger(900), 0, NOW - 3_600).unwrap();
         text(&mut channel, stranger(1), 11, NOW).unwrap();
-        let blob = sealed(&channel, stranger(901), 0, NOW, PayloadKind::Text, None);
+        let blob = sealed(
+            &channel,
+            stranger(901),
+            0,
+            NOW - HOUR_MS / 2,
+            PayloadKind::Text,
+            None,
+        );
         channel
             .decrypt(&blob, [0x91; 16], NOW - 4_000, NOW)
             .unwrap();
@@ -364,6 +373,15 @@ fn s026_t03_r03_lru_eviction() {
         assert!(!has_record(&channel, stranger(2)));
         assert_eq!(channel.status().ignored_keys, 1);
     }
+
+    // A muted stranger already known writes at the limit: nobody goes.
+    let (mut channel, _, _) = receiver(3_600);
+    let mut peers = crowd(0, 50, false);
+    peers[0].muted = true;
+    plant(&mut channel, peers);
+    text(&mut channel, stranger(1), 11, NOW).unwrap();
+    assert_eq!(channel.state.peers.len(), MAX_UNKNOWN_PEERS);
+    assert_eq!(channel.status().ignored_keys, 0);
 
     // At 550 the total stays at 550: with 500 labelled, and with 501 after
     // a retirement by hand and only 49 strangers.
@@ -460,6 +478,11 @@ fn s026_t04_r04_labelled_budget() {
     let (mut channel, _, _) = receiver(3_600);
     plant(&mut channel, crowd(499, 50, false));
     channel.label(pk_of(stranger(1)), "Ann", NOW).unwrap();
+    let (mut channel, _, _) = receiver(3_600);
+    plant(&mut channel, crowd(499, 50, false));
+    let qr = verify_qr(channel.config.id(), &PublicKey(pk_of(stranger(800)))).unwrap();
+    channel.verify_scanned(&qr, "Bea", NOW).unwrap();
+    assert_eq!(channel.state.peers.len(), MAX_PEERS);
     let (mut channel, handle, _) = receiver(3_600);
     let mut peers = crowd(499, 50, false);
     peers.push(unknown(stranger(51), NOW, false));
@@ -526,6 +549,7 @@ fn s026_t05_r05_forget() {
     ));
     let back = channel.peer(&PublicKey(pk_of(stranger(2)))).unwrap();
     assert!(is_unknown(back));
+    assert_eq!(channel.status().ignored_keys, 0);
 }
 
 /// Spec 026, R6: distinct keys rejected or evicted, not the user's own

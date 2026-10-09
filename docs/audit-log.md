@@ -40,6 +40,14 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AI15 | T03's "never itself" no longer reached the hazard under the amended R3; pushing the newcomer before the eviction survived (A) | Medium | A clause with every stranger at the same `now` and the newcomer's key the smallest; T03 reworded |
 | AI16 | Five mutants survived: the server's `received_at` passed to the eviction, `first_seen` in the key, a slack in the comparison, `last_seen` kept by `update_peer`, `forget` removing every labelled record (C) | Medium | The future-stamp clause rewritten (`ahead` 0 and a year, `first_seen` before the jump, a stranger writing again, a `received_at` behind); a labelled bystander in T05 |
 
+**Round 5.** Fresh passes. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI17 | 021's Context still said the hooks of 024 and 026 change nothing until implemented (A) | Low | Removed, with a History line |
+| AI18 | Five mutants survived: the sender's `sent_at` passed to the eviction, off-by-ones at 549 peers in the room check, the eviction and `admits_labelled`, `forget` counting its key as ignored (C) | Medium | A backdated `sent_at` in the future-stamp clause; 549-peer rows in T02 and T03; a 550th pre-verification admitted in T04; `ignored_keys` read in T05 |
+| AI19 | A muted known stranger writing at the limit could be made to evict (C, contrived mutant); an eviction ends `short_collides` against the evicted stranger, which a key ground to its 4 words (about 2^44 tries) and a flood could use (B) | Far-fetched | A clause in T03 for the first; the second listed here, unknowns carrying no trust (spec 014) |
+
 Left as they are: the third copy of "remove a record, then its gap" (C8), one line at each place; `unknown` and the test `text` helper not shared with other test files (C17); the O(550) counts per new key (C13), below the cost of the signature check and the state rewrite.
 
 ## Spec 025 implemented
