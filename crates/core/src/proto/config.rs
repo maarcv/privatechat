@@ -86,6 +86,28 @@ const KEY_SUGGESTED_NAME: u8 = 7;
 /// `ct_eq` (AGENTS 22).
 pub(crate) struct ChannelId(pub(crate) [u8; 16]);
 
+impl ChannelId {
+    /// The first 16 bytes of `BLAKE2b(CHANNEL_ID_TAG ‖ pk_ch ‖
+    /// BE32(ttl_seconds))` (R8): self-certifying, and bound to the TTL (ADR
+    /// 0014). The one derivation, named as spec 031-auth-channel-signature
+    /// R3 names it; the test server of spec 028 also calls it.
+    ///
+    /// # Errors
+    ///
+    /// `Internal` when libsodium fails.
+    pub(crate) fn derive(pk_ch: &PublicKey, ttl_seconds: u32) -> Result<ChannelId, Error> {
+        let input = [
+            CHANNEL_ID_TAG.as_slice(),
+            &pk_ch.0,
+            &ttl_seconds.to_be_bytes(),
+        ]
+        .concat();
+        let digest = crypto::hash(&input)?;
+        let (id, _) = digest.split_first_chunk().ok_or(Error::Internal)?;
+        Ok(ChannelId(*id))
+    }
+}
+
 /// A channel config: the only secret of the system (`docs/spec.md` §5).
 ///
 /// It holds every field of the record but `invite_expires_at`, which an
@@ -574,22 +596,7 @@ fn derive_channel_keypair(k_ch: &Secret<32>) -> Result<(PublicKey, Secret<64>), 
 /// The `channel_id` of the key pair of `k_ch` (R8).
 fn derive_channel_id(k_ch: &Secret<32>, ttl_seconds: u32) -> Result<ChannelId, Error> {
     let (pk_ch, _) = derive_channel_keypair(k_ch)?;
-    channel_id_of(&pk_ch, ttl_seconds)
-}
-
-/// The first 16 bytes of `BLAKE2b(CHANNEL_ID_TAG ‖ pk_ch ‖ BE32(ttl_seconds))`
-/// (R8): self-certifying, and bound to the TTL (ADR 0014). The one
-/// derivation, which the test server of spec 028 also calls.
-pub(crate) fn channel_id_of(pk_ch: &PublicKey, ttl_seconds: u32) -> Result<ChannelId, Error> {
-    let input = [
-        CHANNEL_ID_TAG.as_slice(),
-        &pk_ch.0,
-        &ttl_seconds.to_be_bytes(),
-    ]
-    .concat();
-    let digest = crypto::hash(&input)?;
-    let (id, _) = digest.split_first_chunk().ok_or(Error::Internal)?;
-    Ok(ChannelId(*id))
+    ChannelId::derive(&pk_ch, ttl_seconds)
 }
 
 /// A mandatory key: absent or malformed, the record is not a config (R2).

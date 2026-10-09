@@ -225,6 +225,12 @@ fn s028_t04_r04_memory_server_contract() {
         })
         .collect();
     assert_eq!(acks, [[1; 16], [2; 16]]);
+    let ids: std::collections::BTreeSet<[u8; 16]> = server
+        .stored(&channel_id)
+        .iter()
+        .map(|(id, _)| *id)
+        .collect();
+    assert_eq!(ids.len(), 2, "each blob its own server_id");
     let stored = server.stored(&channel_id);
     assert_eq!(
         stored.iter().map(|(_, at)| *at).collect::<Vec<_>>(),
@@ -331,8 +337,8 @@ fn subscribe_at(
     pump(server, connection, &mut session, &mut channels, now)
 }
 
-/// Spec 028, R4: the test server checks what spec 031 checks (the
-/// configured hosts, the nonce's age), answers a `publish` of a channel not
+/// Spec 028, R4: the test server checks the configured hosts and the
+/// nonce's age, answers a `publish` of a channel not
 /// subscribed with `not_subscribed`, and streams the backlog from `since`
 /// (read as `now` when later) of the blobs a TTL has not expired.
 #[test]
@@ -373,6 +379,23 @@ fn s028_t04_r04_memory_server_checks() {
         matches!(&answer[1], Frame::Hello { server_nonce, .. } if server_nonce.to_vec() != hellos[0][10..42])
     );
     assert!(server.read(1, 10).is_empty());
+    // Under the new nonce, 59 000 ms after it, the channel is accepted.
+    let renewed = T0 + 60_001;
+    for frame in answer.iter().map(|frame| frame.encode().unwrap()) {
+        session.on_frame(&frame, &mut channels, renewed);
+    }
+    server.receive(1, &session.outgoing()[0], renewed + 59_000);
+    let accepted = decoded(server.read(1, 10));
+    assert!(matches!(accepted[..], [Frame::Ok { .. }]));
+    // A subscribe exactly 60 000 ms after its `hello` is accepted.
+    let mut other = vec![channel(2, DAY, T0)];
+    let mut late = connected(&other, T0);
+    late.on_frame(&hellos[1], &mut other, T0);
+    server.receive(2, &late.outgoing()[0], T0 + 60_000);
+    assert!(matches!(
+        decoded(server.read(2, 10))[..],
+        [Frame::Ok { .. }]
+    ));
 
     // A publish before any subscribe is refused, naming both.
     let channel_id = channels[0].config().channel_id();
@@ -572,6 +595,28 @@ fn s028_t06_r06_subscribe_contents_and_pacing() {
     let mut session = connected(&by_cursor, T0);
     session.on_frame(&hello(1, &[1]), &mut by_cursor, T0);
     assert_eq!(subscribed_ids(&mut session, &by_cursor), [behind]);
+    // `last` is `max(cursor, synced_at)`, a `synced_at` later than `now`
+    // ignored. The synced channel is created at +10, the other at
+    // `created`: a `synced_at` before +0 puts it first; one in the future
+    // counts for nothing, so its `created_at` puts it first again; a cursor
+    // older than the other's `created_at`, under a later `synced_at`, does
+    // not.
+    for (synced_at, cursor, created, first_out) in [
+        (T0 - 5, None, T0, true),
+        (T0 + 10_000_000, None, T0 + 20, true),
+        (T0 - 5, Some(T0 - 10), T0 - 7, false),
+    ] {
+        let mut pair = vec![channel(1, DAY, created), channel(2, DAY, T0 + 10)];
+        if let Some(cursor) = cursor {
+            pair[1].decrypt(&[0; 8], [9; 16], cursor, cursor).ok();
+        }
+        pair[1].synced(synced_at).unwrap();
+        let synced = pair[1].config().channel_id();
+        let mut session = connected(&pair, T0);
+        session.on_frame(&hello(1, &[1]), &mut pair, T0);
+        let out = subscribed_ids(&mut session, &pair)[0];
+        assert_eq!(out == synced, first_out, "{synced_at} {cursor:?}");
+    }
 
     // A `nonce_expired` and a new `hello` 300 ms after a release: the next
     // one waits 1 100 ms from that release, and the refused channel comes
@@ -641,6 +686,14 @@ fn s028_t07_r07_nonce_window() {
         assert_eq!(session.outgoing().len(), usize::from(leaves));
         let expected: Vec<Event> = if leaves { vec![] } else { vec![reconnect()] };
         assert_eq!(step.events, expected);
+        // Past the window the queue is gone: one `Reconnect`, not one a tick.
+        assert!(
+            session
+                .on_tick(&mut two, T0 + late + 1_000)
+                .events
+                .is_empty()
+        );
+        assert!(session.outgoing().is_empty());
     }
 
     // No `hello` after `on_connect`.
@@ -731,6 +784,17 @@ fn s028_t09_r09_ok_marks_subscribed() {
             .events
             .is_empty()
     );
+    // A well-formed push of a channel the session does not know: ignored.
+    let push = Frame::Push {
+        channel_id: [0xee; 16],
+        server_id: [1; 16],
+        received_at: T0,
+        blob: vec![1],
+    };
+    session.outgoing();
+    let step = session.on_frame(&push.encode().unwrap(), &mut channels, T0 + 50);
+    assert!(step.events.is_empty());
+    assert!(session.outgoing().is_empty());
     // Its `Debug` shows the channel's 4-byte prefix alone (AGENTS 19).
     let shown = format!(
         "{:?}",

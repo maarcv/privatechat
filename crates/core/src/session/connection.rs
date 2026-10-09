@@ -27,14 +27,14 @@ mod tests;
 /// The least time between two `subscribe`s released on one connection
 /// (R6): the server's one authentication attempt a second, with a margin
 /// for network jitter.
-pub(crate) const SUBSCRIBE_SPACING_MS: u64 = 1_100;
+const SUBSCRIBE_SPACING_MS: u64 = 1_100;
 
 /// How long after its `hello` a `subscribe` may still be released (R7).
-pub(crate) const NONCE_WINDOW_MS: u64 = 50_000;
+const NONCE_WINDOW_MS: u64 = 50_000;
 
 /// How long the session waits for a `hello` after `on_connect` or
 /// `error{nonce_expired}` (R7).
-pub(crate) const HELLO_WAIT_MS: u64 = 50_000;
+const HELLO_WAIT_MS: u64 = 50_000;
 
 /// `since` is the cursor rounded down to the minute (R6).
 const MINUTE_MS: u64 = 60_000;
@@ -331,7 +331,7 @@ fn find<'a>(channels: &'a Channels, channel_id: &[u8; 16]) -> Option<&'a Channel
 }
 
 /// `max(cursor, synced_at)`, a `synced_at` later than `now` ignored (R8).
-pub(crate) fn last_complete(channel: &Channel, now: u64) -> Option<u64> {
+fn last_complete(channel: &Channel, now: u64) -> Option<u64> {
     let synced_at = channel.synced_at().filter(|synced_at| *synced_at <= now);
     channel.cursor().max(synced_at)
 }

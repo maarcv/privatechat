@@ -164,3 +164,4 @@ None.
 - 2026-09-25 revised after audit K round 1 (`docs/audit-log.md`): a subscribe signed with the previous nonce gets `nonce_expired`, not `bad_auth`; the server tests run over `AuthState` with no socket; hosts and URLs as hex in the vectors; 016 R8 and R9 amended
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-10-09 `AUTH_TAG` and `auth_message` (R2) written by slice (b1) of spec 028-session-sans-io, whose R6 signs them; their tests and `031.json` stay this spec's; R2's amendment of 028 R6 applied
+- 2026-10-09 `ChannelId::derive` (R3) written by slice (b1) of spec 028-session-sans-io, whose test server derives `channel_id` through it, and `Config` too; its tests stay this spec's

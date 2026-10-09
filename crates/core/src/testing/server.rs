@@ -2,8 +2,10 @@
 //! for the tests of the session and of the `Device`: it keeps the server
 //! contract of R4 (the backlog in order, then the live pushes held behind
 //! it, then `ok`; publishes stored and acknowledged in the order received)
-//! and checks every subscription signature as spec 031 does. It holds no
-//! quota and no rate limit; time is a parameter, as everywhere in `core`.
+//! and checks two things of spec 031 R5: the nonce's age, and the signature
+//! over the configured hosts. It has no TTL range check, no window for the
+//! previous nonce, no quota and no rate limit; the slices that need them add
+//! them. Time is a parameter, as everywhere in `core`.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -133,8 +135,8 @@ impl MemoryServer {
         out
     }
 
-    /// Checks a `subscribe` as spec 031 R5 does: the nonce's age, then the
-    /// signature over each configured host.
+    /// Checks a `subscribe`'s nonce age, then its signature over each
+    /// configured host (two of the checks of spec 031 R5).
     fn subscribe(
         &mut self,
         connection: u64,
@@ -144,8 +146,7 @@ impl MemoryServer {
         since: Option<u64>,
         now: u64,
     ) {
-        let Ok(ChannelId(channel_id)) = config::channel_id_of(&PublicKey(*pk_ch), ttl_seconds)
-        else {
+        let Ok(ChannelId(channel_id)) = ChannelId::derive(&PublicKey(*pk_ch), ttl_seconds) else {
             return;
         };
         let fresh_nonce = self.draw();

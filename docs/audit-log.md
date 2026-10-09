@@ -15,9 +15,21 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AK5 | Each `nonce_expired` restarted the wait for a `hello`, so a server could hold every channel off (B) | Far-fetched | Fixed anyway: the wait starts only when none runs |
 | AK6 | `Event`'s derived `Debug` printed the full `channel_id` (B) | Low | A `Debug` with the 4-byte prefix; T09 checks it |
 | AK7 | `nonce_expired` naming a subscribed channel left it subscribed (A); `Reconnect` once per connection was no rule (A) | Low | Removed whatever its state; the once-only flag removed |
-| AK8 | Four flags and options for one connection state; a second copy of the `channel_id` derivation; protocol literals repeated; a dead TTL; nine `Event` variants and `Step::failed` with no producer (C) | Low | `enum Link`; `config::channel_id_of`; `CODE_*` in `frames.rs`; variants added by the slices that produce them |
+| AK8 | Four flags and options for one connection state; a second copy of the `channel_id` derivation; protocol literals repeated; a dead TTL; nine `Event` variants and `Step::failed` with no producer (C) | Low | `enum Link`; one derivation (`ChannelId::derive`, AK11); `CODE_*` in `frames.rs`; variants added by the slices that produce them |
 | AK9 | 028 R6 did not name `auth_message`, which 031 R2 asks it to sign; R7's clause on a subscribe queued again after `rate_limited` deferred without a word (A) | Low | R6 amended, 031 History; the module doc names the clause for slice (d), whose `rate_limited` alone reaches it |
 | AK10 | `docs/spec.md` §9 still sketches a `pub` `Session` and `Channel::auth_subscribe` (A) | Low | Left: spec 027 brings §9 up to date (audit S) |
+
+**Round 2.** Fresh passes on the whole change. No production defect; the round 1 fixes hold. Pass C ran 59 mutants: 48 killed, 3 equivalent, 8 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AK11 | The derivation of AK8 was `config::channel_id_of`, where spec 031 R3 names it `ChannelId::derive` (A) | Low | Renamed; 031 History |
+| AK12 | AK5's fix departed from R7 and R16 as written (A) | Low | R7 and R16 amended: a `nonce_expired` does not restart a running wait |
+| AK13 | `MemoryServer`'s docs claimed every check of 031 R5; it has neither `bad_ttl` nor the previous nonce's window (A, C) | Low | Docs say the two checks it makes |
+| AK14 | Survivors: `synced_at` in the release order (a future one ignored, `max` with the cursor); one `Reconnect` past the nonce window; a valid frame of another type ignored; the test server's nonce renewal and its 60 000 ms edge; distinct `server_id`s (C) | Low | One clause each in T04, T06, T07, T09 |
+| AK15 | Constants and `last_complete` wider than needed (A, C) | Nit | Private |
+| AK16 | Clock set back: a new `hello` can release two subscribes less than 1 100 ms apart; a repeated nonce restarts the client's window; a 1 ms step back during a wait gives a `Reconnect` (B) | Far-fetched | None: a `rate_limited` or a reconnect at most, the AK4 rule as decided |
+| AK17 | The queue outside `Link::Ready` makes two of its clears equivalent mutants (C) | Far-fetched | Kept: they are R16's and R5's words; a preference |
 
 ## Review during development
 
