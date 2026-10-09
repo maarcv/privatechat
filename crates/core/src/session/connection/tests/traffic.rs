@@ -634,6 +634,7 @@ fn s028_t10_r10_write_failed_mark() {
     session.on_frame(&hello(3, &[1]), &mut channels, T0 + 4_000);
     // Clearing a channel not marked changes nothing.
     session.set_write_failed(&channels[0], false, false);
+    session.set_write_failed(&channels[0], false, true);
     let step = session.on_frame(&push(id, 1, &hi), &mut channels, T0 + 4_100);
     assert!(is_message(&step.events, 1), "{:?}", step.events);
 }

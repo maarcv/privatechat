@@ -81,11 +81,7 @@ impl Session {
                 // only `LogFull`: a flag set now, by it or from before,
                 // stops the channel, a key not yet regenerated being one
                 // known to be used elsewhere.
-                let stop = if channel.status().own_key_used_elsewhere {
-                    stopped(channel)
-                } else {
-                    Stop::Publishing
-                };
+                let stop = stop_for(channel);
                 let stall = Stall::LogFull { stop, asked: false };
                 self.stalls.insert(channel_id, stall);
                 step.events.push(Event::StorageFailed {
@@ -147,11 +143,7 @@ impl Session {
             return;
         }
         let stall = if storage_full {
-            let stop = if channel.status().own_key_used_elsewhere {
-                stopped(channel)
-            } else {
-                Stop::Publishing
-            };
+            let stop = stop_for(channel);
             Stall::LogFull { stop, asked: false }
         } else {
             Stall::Frozen
@@ -212,6 +204,16 @@ impl Session {
     /// Whether nothing of the channel is called (R10).
     pub(super) fn is_frozen(&self, channel_id: &[u8; 16]) -> bool {
         matches!(self.stalls.get(channel_id), Some(Stall::Frozen))
+    }
+}
+
+/// The stop of a `LogFull` stall begun now: one's own key known to be
+/// used elsewhere stops it (R10).
+fn stop_for(channel: &Channel) -> Stop {
+    if channel.status().own_key_used_elsewhere {
+        stopped(channel)
+    } else {
+        Stop::Publishing
     }
 }
 
