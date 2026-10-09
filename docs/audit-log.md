@@ -50,6 +50,8 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AJ25 | The AJ21 rewording left a 124-character line; `Writer::with_capacity`'s doc said `max` is never an unbounded length (A, C) | Low | Rewrapped; the doc names a length checked against the schema's maximum |
 | AJ26 | §9's "their own specs" did not fit 028 (A) | Nit | "that a spec defines" |
 
+**Round 5.** Fresh passes on the whole change. No finding in any pass; pass C ran 21 mutants, 17 killed and 4 equivalent. The audit ends here.
+
 ## Spec 026 implemented
 
 **2026-10-09 — Spec 026-peer-limits is `implemented`.** Its acceptance criterion is automated alone: `cargo test -p privatechat-core s026_`, clippy and the documentation lint are green on `mvp` (9137d6a), after the eight rounds of Audit AI, which the human reviewer closed at round 8.
