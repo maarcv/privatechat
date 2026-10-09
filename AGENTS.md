@@ -42,9 +42,9 @@ The read copy linked from the header of `docs/spec.md` may lag behind; nothing i
 
 ## Per-feature flow
 
-spec written → human review → tests T* red → implementation → CI green → human review (+ ADR if needed) → merge.
+spec written → human review → tests T* red → implementation → CI green → audit (+ ADR if needed) → merge.
 
-Human review before implementing and before merging is mandatory in `crates/core`, `crates/store` and `crates/server`. In the clients (`clients/`) review before merge is enough.
+Human review of the spec before implementing is mandatory in `crates/core`, `crates/store` and `crates/server`. Until the first release, the review before merging is the audit of `CLAUDE.md` (rounds of three independent passes, recorded in `docs/audit-log.md`), in the clients too: a human decides what the audit escalates and approves every ADR (rule 3), and does not review the PR itself. At the first release the human review before merging returns, mandatory in `crates/core`, `crates/store` and `crates/server`, and enough on its own in the clients (`clients/`).
 
 ## Structure and order of work
 

@@ -2,6 +2,9 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Review during development
+
+**2026-10-09 — Decision of the human reviewer: until the first release, the audit of `CLAUDE.md` replaces the human review before merging.** The human still accepts every spec before it is implemented, decides what an audit escalates and approves every ADR; the human review before merging returns at the first release. `AGENTS.md` "Per-feature flow", `docs/spec.md` §10 "Per-feature flow" and governance, the `architecture` skill and `.github/CODEOWNERS` say so. GitHub required no approving review on `mvp` already (0), so its settings do not change.
 ## Audit AJ
 
 **2026-10-09 — Audit AJ, the code audit of slice (a) of spec 028-session-sans-io (branch `028-frames`): the frame codec, `028.json` and the `frame_decode` target (R1, R2, R3's first target); round 1 of three passes (A: conformance; B: the adversary, a server or an observer sending any frame; C: quality, tests and hand mutants).** No High finding. Pass C ran 40 mutants: 29 killed, 3 equivalent, 8 survived, each killed by a clause added below.
