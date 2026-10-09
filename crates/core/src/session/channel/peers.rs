@@ -6,6 +6,7 @@
 
 use core::fmt;
 
+use super::limits::is_unknown;
 use super::{Channel, PeerId, key_prefix};
 use crate::crypto::{self, PublicKey};
 use crate::error::Error;
@@ -174,7 +175,7 @@ impl Channel {
         } else {
             Target::Unverified
         };
-        self.check_label(&peer, name, target, now)?;
+        self.check_label(&peer, name, target)?;
         let mut next = self.next_state();
         if let Some(record) = find(&mut next.peers, &peer) {
             record.label = Some(name.to_owned());
@@ -202,7 +203,7 @@ impl Channel {
             None
         } else {
             let name = label.ok_or(Error::BadPayload)?;
-            self.check_label(&peer, name, Target::Verified, now)?;
+            self.check_label(&peer, name, Target::Verified)?;
             Some(name)
         };
         let mut next = self.next_state();
@@ -237,7 +238,7 @@ impl Channel {
         }
         let has_label = self.peer(&pk).is_some_and(|peer| peer.label.is_some());
         if !has_label {
-            self.check_label(&pk.0, label, Target::Verified, now)?;
+            self.check_label(&pk.0, label, Target::Verified)?;
         }
         let mut next = self.next_state();
         if let Some(record) = find(&mut next.peers, &pk.0) {
@@ -318,14 +319,8 @@ impl Channel {
 
     /// The label rules of R7 after `UnknownPeer`, in order: the name, the
     /// collision unless the target is verified, then the admission of an
-    /// unknown peer.
-    fn check_label(
-        &self,
-        peer: &PeerId,
-        name: &str,
-        target: Target,
-        now: u64,
-    ) -> Result<(), Error> {
+    /// unknown peer or a new record (spec 026-peer-limits R4).
+    fn check_label(&self, peer: &PeerId, name: &str, target: Target) -> Result<(), Error> {
         let key = name_key(name);
         let valid =
             name.len() <= MAX_NAME && !name.chars().any(char::is_control) && !key.is_empty();
@@ -347,18 +342,12 @@ impl Channel {
         }
         // Only an unknown peer, or a new record, enters the labelled budget
         // (spec 026-peer-limits R4).
-        let enters = self.peer(&PublicKey(*peer)).is_none_or(is_unknown);
-        if enters && !self.admits(peer, now) {
+        let record = self.peer(&PublicKey(*peer));
+        let enters = record.is_none_or(is_unknown);
+        if enters && !self.admits_labelled(record.is_none()) {
             return Err(Error::PeerLimit);
         }
         Ok(())
-    }
-
-    /// Whether a label or a verification may move the unknown or new `peer`
-    /// into the labelled budget: spec 026-peer-limits R4 decides, and until
-    /// it does every call finds room.
-    fn admits(&self, _peer: &PeerId, _now: u64) -> bool {
-        true
     }
 }
 
@@ -366,11 +355,6 @@ impl Channel {
 fn suggested_name(peer: &PeerRecord) -> Option<&str> {
     let name = peer.last_display_name.as_deref()?;
     core::str::from_utf8(name).ok()
-}
-
-/// §7: a peer with no label, not verified and not retired is unknown.
-fn is_unknown(peer: &PeerRecord) -> bool {
-    peer.label.is_none() && !peer.verified && peer.retired_at.is_none()
 }
 
 /// The key two names collide on, when it is not empty (R4).

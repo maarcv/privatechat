@@ -18,6 +18,7 @@ mod edges;
 mod extremes;
 mod gaps;
 mod headroom;
+mod limits;
 mod outbox;
 mod own_key;
 mod peers;

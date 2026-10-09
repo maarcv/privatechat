@@ -2,6 +2,75 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AI
+
+**2026-10-09 — Audit AI, the code audit of spec 026-peer-limits (branch `026-peer-limits`, PR #47), round 1 of three read-only passes (A: conformance with R1–R7 and T01–T07; B: the adversary, an intruder with the leaked config minting keys, a server choosing every `received_at` and `server_id`, a wrong device clock; C: code quality, tests and hand mutants).** No High finding and no production defect. The human reviewer took the recommendation of each of the three decisions (AI1–AI3). Pass C ran 33 mutants beyond the author's 29: 25 killed, 8 survived, each killed by a test added below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI1 | An eviction erases an unknown's gap, so a server dropping its messages with an intruder flooding keys hides the deletion (B1) | Low | Residual in 026 Security (decision) |
+| AI2 | `last_seen` is the device's `now`: a clock set back evicts a newcomer first; ties can be ground for (B2, B3) | Low | Residual in 026 Security (decision) |
+| AI3 | The rejected key is counted before the cursor commit, which may fail (A3, B5, C12) | Info | Left, with a comment: the set counts distinct keys (decision) |
+| AI4 | `docs/spec.md` §7 lacked the muted exception decided in audit J and the per-session count; 022 kept "until it is implemented" (A1, A2, B4) | Low | §7 and 022 amended |
+| AI5 | Tests a mutant survived or a clause the spec names: the own-key outcome, a refused label on a counted channel, the peers-changed flag, a stale and a `key_retired` newcomer at the limit, a verified or retired peer counted in the labelled budget, the evicted key counted and not the newcomer, a second gap that stays, gaps a failed commit keeps, the room check after the retired check and before step 6, 1 024 pinned, the 551st pre-verification committing nothing, an oracle that copied the rule (A4–A6, B7, C2–C6, C14–C16) | Medium | One clause each in `tests/limits.rs` |
+| AI6 | Docs: the module claimed nothing removes a named peer; `creates` and `check_label` undocumented; the eviction an associated function with no `self`; why the eviction precedes the push (A7, C1, C7, C9–C11) | Nit | Reworded; a free `evict_stranger`; comments |
+
+**Round 2.** The same three passes, fresh, with the agents of `.claude/agents/`, on the whole change. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI7 | `docs/spec.md` §7 said no key can be labelled at 500, and that new keys are rejected only when all 50 are muted; 022 gave a stale reason for `label`'s `now` (A) | Low | §7: no unknown key, and the 550 case; 022 reworded |
+| AI8 | `forget` of a retired record lets its stolen key write again as an unknown, and R4's hard limit leads the user to forget (B) | Low (partly far-fetched: the user's own call) | 026 Security; the wording is spec 055's |
+| AI9 | Five mutants survived: a known peer at the all-muted limit, labelled peers counted against the 50 in the room check and the eviction, a retired unlabelled peer counted as entering, `verify_scanned` of an existing unknown, the order name–collision–admission at the limit (C) | Medium | One clause each in T02–T04 |
+
+**Round 3.** Fresh passes on the whole change. No production defect; one finding changed a rule.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI10 | A clock that ran ahead leaves strangers stamped in the future; once it is corrected they look newest for years, so one fresh key evicts each real newcomer instead of fifty, and the AI2 text ("until the clock is right again", "no more than a plain flood") was wrong (B) | Low | R3: a `last_seen` later than `now` ranks oldest; T03; Security and §7 reworded. Three advisors: all three escalated, two recommended the rule and one the text alone; the human reviewer took the rule (decision). Clamping the stamp to `now`, as 021 R24 does for `truncated_at`, was rejected: it keeps the stamped strangers newest |
+| AI11 | 026 History had no line for round 2; the Interface left out `status.rs` (A) | Nit | Added |
+| AI12 | Four mutants survived: `forget` removing other records, a muted stranger entering the labelled budget, the total confused with the labelled budget in the room check and in the eviction (C) | Medium | One clause each in T02–T05 |
+| AI13 | R4's "create a record when 550 exist" is unreachable with at most 50 unknowns, and its test plants 51 (C) | Far-fetched | Kept, as R4 names it; the test says the state is planted |
+
+**Round 4.** Fresh passes. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI14 | R3, §7 and the `evict_stranger` doc gave a clock that was ahead as the only source of a stamp later than `now`, and Security put the "newcomer looks oldest" case while the clock is behind, where it is the newest; it holds after the correction, unseen by `clock_off` (A, B) | Low | R3, §7, the doc and Security reworded |
+| AI15 | T03's "never itself" no longer reached the hazard under the amended R3; pushing the newcomer before the eviction survived (A) | Medium | A clause with every stranger at the same `now` and the newcomer's key the smallest; T03 reworded |
+| AI16 | Five mutants survived: the server's `received_at` passed to the eviction, `first_seen` in the key, a slack in the comparison, `last_seen` kept by `update_peer`, `forget` removing every labelled record (C) | Medium | The future-stamp clause rewritten (`ahead` 0 and a year, `first_seen` before the jump, a stranger writing again, a `received_at` behind); a labelled bystander in T05 |
+
+**Round 5.** Fresh passes. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI17 | 021's Context still said the hooks of 024 and 026 change nothing until implemented (A) | Low | Removed, with a History line |
+| AI18 | Five mutants survived: the sender's `sent_at` passed to the eviction, off-by-ones at 549 peers in the room check, the eviction and `admits_labelled`, `forget` counting its key as ignored (C) | Medium | A backdated `sent_at` in the future-stamp clause; 549-peer rows in T02 and T03; a 550th pre-verification admitted in T04; `ignored_keys` read in T05 |
+| AI19 | A muted known stranger writing at the limit could be made to evict (C, contrived mutant); an eviction ends `short_collides` against the evicted stranger, which a key ground to its 4 words (about 2^44 tries) and a flood could use (B) | Far-fetched | A clause in T03 for the first; the second listed here, unknowns carrying no trust (spec 014) |
+
+**Round 6.** Fresh passes: A and B found nothing; C, no production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI20 | The 1 024 cap was pinned only through a direct `ignore_key` call: inlining it as a bare insert at the rejection or the eviction, which would let a flood grow the set without bound, survived; `forget` dropping a counted key from the set survived (C) | Medium | A T06 clause with a full set through a rejection and an eviction; a T06 clause forgetting a counted key |
+
+**Round 7.** Fresh passes: A found nothing; B one far-fetched finding; C no production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI21 | `unknown_limit_reached` was read only with 50 unknowns, so a flag written as "50 muted" survived at 550 in all (C) | Low | T02 checks the flag on every row |
+| AI22 | An eviction or a `forget` rewritten as a `swap_remove` reordered the records, which spec 022 R3 and R13 read for ties of `first_seen` (C) | Low | A T03 test of the order after both |
+| AI23 | `SessionCarry` derives `Debug` over full keys, now up to 1 024 ignored ones; nothing formats it today (B) | Far-fetched | Listed; spec 027 or 028 redacts it if they ever log it |
+
+**Round 8.** Fresh passes: A and B found nothing; C no production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI24 | The server's `received_at` was tested only behind `now`: taking the later of the two clocks in the eviction, which would let a server stamping ahead restore the shield R3 removed, survived; a pre-verified key's first message treated as a new peer survived (C) | Medium | The future-stamp clause runs with a `received_at` two years ahead too; a T03 clause for a pre-verified key's first message |
+| AI25 | `labelled_limit_reached` as `!admits_labelled(true)` differs only with more than 50 unknowns (C) | Far-fetched | Listed (as AI13) |
+
+Left as they are: the third copy of "remove a record, then its gap" (C8), one line at each place; `unknown` and the test `text` helper not shared with other test files (C17); the O(550) counts per new key (C13), below the cost of the signature check and the state rewrite.
+
 ## Spec 025 implemented
 
 **2026-10-09 — Spec 025-identity-regen is `implemented`.** Its acceptance criterion is automated alone: `cargo test -p privatechat-core s025_`, clippy and the documentation lint are green on `mvp` (4da62ee), after the two rounds of Audit AH.

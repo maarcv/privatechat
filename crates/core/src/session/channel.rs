@@ -4,8 +4,8 @@
 //!
 //! Sending, receiving, the `outbox` and the reads are the later slices of
 //! spec 021, the peers spec 022's (`peers.rs`); the message list,
-//! retirement and the peer limits are specs 023, 024 and 026's, and
-//! regeneration spec 025's (`regen.rs`).
+//! retirement spec 024's, regeneration spec 025's (`regen.rs`) and the
+//! peer limits spec 026's (`limits.rs`).
 
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,6 +20,7 @@ use crate::storage::{ChannelState, DirName, LogRecord, Store, StoreError, WriteB
 
 mod gaps;
 mod headroom;
+mod limits;
 mod outbox;
 mod own_key;
 mod peers;
