@@ -164,23 +164,9 @@ fn sid(n: u8) -> [u8; 16] {
     [n; 16]
 }
 
-/// The largest body a log record holds (spec 020-store-files Limits).
-const MAX_BODY: u64 = 64_511;
-
 /// Commits records of `purge_at` until the log is exactly `target` bytes.
 fn fill(channel: &mut Channel, purge_at: u64, target: u64) {
-    let base = record(0, 0).entry_len();
-    let mut remaining = target - channel.store.log_len();
-    let mut records = Vec::new();
-    while remaining > 0 {
-        let mut len = remaining.min(base + MAX_BODY);
-        if remaining > len && remaining - len < base {
-            len -= base;
-        }
-        records.push(record(purge_at, usize::try_from(len - base).unwrap()));
-        remaining -= len;
-    }
-    channel.commit(channel.next_state(), records).unwrap();
+    channel.fill_log(purge_at, target);
 }
 
 /// `pk_u` of `seed`.

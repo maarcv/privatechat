@@ -4,10 +4,11 @@
 //! frames to write and the events to show.
 //!
 //! These slices hold the connection and the subscription (R1, R2 and
-//! R5–R7), the truncation (R8) and the `ok` with what follows it (R9).
-//! Later slices of spec 028 add traffic, its stalls and the freeze after a
-//! store failure (R10), outcomes and the `outbox` on send and tick
-//! (R11–R14), the publish rate (R15), the error codes other than
+//! R5–R7), the truncation (R8), the `ok` with what follows it (R9), the
+//! traffic with its stalls (R10) and `after_send` (R14). Later slices of
+//! spec 028 add the freeze after a failed `acked`, `outbox` or
+//! `expire_outbox` and the `write_failed` mark (R10), outcomes and the
+//! `outbox` on tick (R11–R14), the publish rate (R15), the error codes other than
 //! `nonce_expired` (R16), and, with `rate_limited`, the one clause of R7
 //! only it can reach: a `subscribe` queued again after it is released
 //! however old its nonce.
@@ -22,6 +23,7 @@ use crate::proto::auth::auth_message;
 use crate::proto::envelope::ttl_ms;
 use crate::storage::StoreError;
 use sync::Truncation;
+use traffic::Stall;
 
 pub use event::Event;
 
@@ -29,6 +31,7 @@ mod event;
 mod sync;
 #[cfg(test)]
 mod tests;
+mod traffic;
 
 /// The least time between two `subscribe`s released on one connection
 /// (R6): the server's one authentication attempt a second, with a margin
@@ -105,6 +108,8 @@ pub(crate) struct Session {
     /// The entries published on this connection and not yet answered, with
     /// their channel.
     in_flight: BTreeMap<ClientRef, [u8; 16]>,
+    /// The channels whose pushes are dropped on this connection (R10).
+    stalls: BTreeMap<[u8; 16], Stall>,
     outgoing: Vec<Vec<u8>>,
 }
 
@@ -125,6 +130,7 @@ impl Session {
             last_frame: 0,
             sync_stopped: false,
             in_flight: BTreeMap::new(),
+            stalls: BTreeMap::new(),
             outgoing: Vec::new(),
         }
     }
@@ -158,6 +164,18 @@ impl Session {
                 proto_versions,
             }) => self.on_hello(server_nonce, &proto_versions, channels, now, &mut step),
             Ok(Frame::Ok { channel_id }) => self.on_ok(channel_id, channels, now, &mut step),
+            Ok(Frame::Push {
+                channel_id,
+                server_id,
+                received_at,
+                blob,
+            }) => self.on_push(
+                channel_id,
+                (&blob, server_id, received_at),
+                channels,
+                now,
+                &mut step,
+            ),
             Ok(Frame::Error {
                 code, channel_id, ..
             }) => self.on_error(&code, channel_id, now, &mut step),
@@ -173,12 +191,39 @@ impl Session {
         let mut step = Step::default();
         self.check_gap(now, &mut step);
         self.keep_synced(channels, now, &mut step);
+        self.check_room(channels, &mut step);
         match self.link {
             Link::AwaitingHello { since } if expired(since, HELLO_WAIT_MS, now) => {
                 self.reconnect(&mut step);
             }
             Link::Ready(hello) => self.release(hello, channels, now, &mut step),
             _ => {}
+        }
+        step
+    }
+
+    /// After `encrypt` or `regenerate_identity` of a channel: a stopped
+    /// channel that regenerated its key asks for a new connection and
+    /// queues nothing (R10); a subscribed one publishes its `outbox`
+    /// (R14).
+    pub(crate) fn after_send(
+        &mut self,
+        channel_id: [u8; 16],
+        channels: &mut Channels,
+        now: u64,
+    ) -> Step {
+        let mut step = Step::default();
+        let Some(channel) = find_mut(channels, &channel_id) else {
+            return step;
+        };
+        if self.regenerated(channel) {
+            self.reconnect(&mut step);
+        } else if matches!(
+            self.subscriptions.get(&channel_id),
+            Some(Subscription::Subscribed)
+        ) && !self.is_frozen(&channel_id)
+        {
+            self.publish_outbox(channel, now, &mut step);
         }
         step
     }
@@ -308,6 +353,7 @@ impl Session {
         self.truncations.clear();
         self.sync_stopped = false;
         self.in_flight.clear();
+        self.stalls.clear();
         self.outgoing.clear();
     }
 }

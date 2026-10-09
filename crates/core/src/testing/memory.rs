@@ -177,6 +177,15 @@ impl MemoryStore {
         self.clone()
     }
 
+    /// A copy of these bytes in a vault of its own: another device
+    /// restored from a copy of this one, holding the same key.
+    pub fn copy(&self) -> MemoryStore {
+        let vault = MemoryVault::new();
+        let (state, log) = self.with_files(|files| (files.state.clone(), files.log.clone()));
+        vault.put_raw(&self.name, state.as_deref(), log.as_deref());
+        vault.store(self.name)
+    }
+
     /// The commits of AGENTS 23: those that appended a record or changed the
     /// state beyond `cursor` and `synced_at`.
     pub fn commits(&self) -> u32 {

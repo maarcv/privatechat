@@ -11,6 +11,7 @@ use crate::storage::Vault;
 use crate::testing::{MemoryServer, MemoryVault};
 
 mod ok;
+mod traffic;
 mod truncation;
 
 const SERVER: &str = "wss://chat.example.org:9001";

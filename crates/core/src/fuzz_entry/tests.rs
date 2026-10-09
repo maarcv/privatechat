@@ -465,13 +465,16 @@ fn s028_t03_r03_session_on_frame_reads_frames() {
     };
     let reconnect = [subscribed(), crate::Event::Reconnect { connection: 0 }];
     assert_eq!(
-        session_on_frame_verdict(&framed(&ok)).unwrap(),
+        session_on_frame_verdict(&framed(&ok)).unwrap().0,
         [subscribed()]
     );
-    assert_eq!(session_on_frame_verdict(&framed(&bad)).unwrap(), reconnect);
+    assert_eq!(
+        session_on_frame_verdict(&framed(&bad)).unwrap().0,
+        reconnect
+    );
     let input = [framed(&ok), framed(&bad), framed(&bad)[..5].to_vec()].concat();
-    assert_eq!(session_on_frame_verdict(&input).unwrap(), reconnect);
-    assert_eq!(session_on_frame_verdict(&[0]).unwrap(), [subscribed()]);
+    assert_eq!(session_on_frame_verdict(&input).unwrap().0, reconnect);
+    assert_eq!(session_on_frame_verdict(&[0]).unwrap().0, [subscribed()]);
     // The channel subscribed is `text_k1`'s: a `nonce_expired` naming it is
     // a `Reconnect` (R16), one naming another channel is not.
     let nonce_expired = |channel_id| {
@@ -485,7 +488,25 @@ fn s028_t03_r03_session_on_frame_reads_frames() {
         .unwrap()
     };
     let named = framed(&nonce_expired(channel_id));
-    assert_eq!(session_on_frame_verdict(&named).unwrap(), reconnect);
+    assert_eq!(session_on_frame_verdict(&named).unwrap().0, reconnect);
     let other = framed(&nonce_expired([0x10; 16]));
-    assert_eq!(session_on_frame_verdict(&other).unwrap(), [subscribed()]);
+    assert_eq!(session_on_frame_verdict(&other).unwrap().0, [subscribed()]);
+    // A seed's `push` of a 013 blob reaches `decrypt`, which alone moves
+    // the cursor (R10).
+    // As `scripts/fuzz_seeds.py` builds it, from the vector itself.
+    let vector = crate::vectors::load("013", "text_k1");
+    let received_at = vector.input("received_at").u64_hex();
+    let push = Frame::Push {
+        channel_id,
+        server_id: [0; 16],
+        received_at,
+        blob: vector.expected("blob").bytes().to_vec(),
+    }
+    .encode()
+    .unwrap();
+    assert_eq!(session_on_frame_verdict(&framed(&ok)).unwrap().1, None);
+    assert_eq!(
+        session_on_frame_verdict(&framed(&push)).unwrap().1,
+        Some(received_at)
+    );
 }

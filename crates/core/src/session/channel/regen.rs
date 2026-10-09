@@ -56,6 +56,11 @@ impl Channel {
         })
     }
 
+    /// How many times one's key was regenerated (R1).
+    pub(crate) fn identity_epoch(&self) -> u32 {
+        self.state.identity_epoch
+    }
+
     /// One's own old keys in the order of regeneration, each with its
     /// `retired_at` (R6).
     pub(crate) fn own_old_keys(&self) -> Vec<OldKey> {
