@@ -93,7 +93,7 @@ pub(crate) fn shown_name(text: &str) -> Option<String>;            // an optiona
 pub(crate) const INVISIBLE: &[(u32, u32)];
 ```
 
-`core::Error` gains `UnknownPeer`, `LabelInUse` and `OwnKey`. `label` takes `now` because it shares the admission path of spec 026-peer-limits with `verify_scanned`. `verify_scanned` is the call spec 014-fingerprint left open, defined here and exposed by spec 027-core-api; it returns the `PeerId` it verified.
+`core::Error` gains `UnknownPeer`, `LabelInUse` and `OwnKey`. `label` takes `now`, which it records as the latest `now` of spec 021-channel-session R1, like the other calls here. `verify_scanned` is the call spec 014-fingerprint left open, defined here and exposed by spec 027-core-api; it returns the `PeerId` it verified.
 
 **PR slices** (AGENTS 14): (a) `name_key`, `INVISIBLE` and `clean_name` (R4, R5, R16, and R6 tested on `clean_name` directly); (b) the record and the calls (R1–R3, R7–R12, and T06's `peers()` and `Received` half); (c) the warnings (R13–R15). Each test clause lands in the slice that implements the last behaviour it needs; the list above names where each requirement is implemented, and a test that spans slices is completed clause by clause.
 
@@ -176,4 +176,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-10-04 amended by ADR 0043 (`docs/audit-log.md`, audit AB): `name_key` is lowercase with white space and `INVISIBLE` removed, with no Unicode crate, skeleton or fold; look-alikes a stated residual; no fuzz target and no amendment of specs 010 and 016; `INVISIBLE` pinned to the toolchain's Unicode version
 - 2026-10-05 revised after audit AE (`docs/audit-log.md`): the final sigma and the Turkish I folded in R4 (ADR 0043 amended), accentless capitals a stated residual, ties in creation order in R3 and R13, the admission of an unknown peer in R8 and R9, a blank name in R2, the withdrawn claim a stated residual, the Interface paths and helpers
-- 2026-10-09 the note that every call finds room until spec 026 is implemented removed (`docs/audit-log.md`, audit AI)
+- 2026-10-09 the note that every call finds room until spec 026 is implemented removed, and why `label` takes `now` (`docs/audit-log.md`, audit AI)

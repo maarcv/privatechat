@@ -134,6 +134,8 @@ fn s026_t02_r02_room_check() {
     full_one_unmuted[503].muted = false;
     for (peers, room) in [
         (crowd(0, 49, true), true),
+        // Labelled peers do not count against the 50.
+        (crowd(10, 40, true), true),
         (one_unmuted, true),
         (crowd(0, 50, true), false),
         (full_one_unmuted, true),
@@ -159,6 +161,27 @@ fn s026_t02_r02_room_check() {
             assert!(channel.status().own_key_used_elsewhere);
         }
     }
+}
+
+/// Spec 026, R2: only a key with no record is checked for room: at a
+/// limit with every stranger muted, a labelled peer and a muted stranger
+/// already known still write.
+#[test]
+fn s026_t02_r02_known_keys_need_no_room() {
+    let (mut channel, _, _) = receiver(3_600);
+    let mut peers = crowd(499, 50, true);
+    peers.push(PeerRecord {
+        label: Some("Ann".to_owned()),
+        ..unknown(stranger(700), NOW, false)
+    });
+    plant(&mut channel, peers);
+    assert!(channel.status().unknown_limit_reached);
+    assert!(matches!(
+        text(&mut channel, stranger(700), 11, NOW),
+        Ok(Some(_))
+    ));
+    assert!(text(&mut channel, stranger(1), 11, NOW).is_ok());
+    assert_eq!(channel.status().ignored_keys, 0);
 }
 
 /// Spec 026, R2: the room check comes after the retired check, so one's
@@ -287,6 +310,14 @@ fn s026_t03_r03_lru_eviction() {
     assert!(has_record(&channel, stranger(1)));
     assert_eq!(channel.status().ignored_keys, 0);
 
+    // Below both limits nobody is evicted, whatever the labelled peers.
+    let (mut channel, _, _) = receiver(3_600);
+    plant(&mut channel, crowd(10, 40, false));
+    text(&mut channel, stranger(900), 0, NOW).unwrap();
+    assert_eq!(channel.state.peers.len(), 51);
+    assert!((1..=40).all(|n| has_record(&channel, stranger(n))));
+    assert_eq!(channel.status().ignored_keys, 0);
+
     // At 550 the total stays at 550: with 500 labelled, and with 501 after
     // a retirement by hand and only 49 strangers.
     for (count, unknowns) in [(500, 50), (501, 49)] {
@@ -315,8 +346,16 @@ fn s026_t04_r04_labelled_budget() {
         }
         let target = pk_of(stranger(1));
         let qr = verify_qr(channel.config.id(), &PublicKey(pk_of(stranger(800)))).unwrap();
+        let known_qr = verify_qr(channel.config.id(), &PublicKey(target)).unwrap();
         let commits = handle.all_commits();
+        // The name and the collision come first (spec 022 R7).
+        assert_eq!(channel.label(target, "", NOW), Err(Error::BadPayload));
+        assert_eq!(channel.label(target, "peer 0", NOW), Err(Error::LabelInUse));
         assert_eq!(channel.label(target, "Ann", NOW), Err(Error::PeerLimit));
+        assert_eq!(
+            channel.verify_scanned(&known_qr, "Ann", NOW),
+            Err(Error::PeerLimit)
+        );
         assert_eq!(
             channel.verify(target, Some("Ann"), NOW),
             Err(Error::PeerLimit)
@@ -333,6 +372,10 @@ fn s026_t04_r04_labelled_budget() {
         channel.label(inside, "Renamed", NOW).unwrap();
         channel.verify(inside, None, NOW).unwrap();
         channel.retire(pk_of(stranger(2)), NOW).unwrap();
+        // A retired peer with no label is already in the budget.
+        if retired_by_hand {
+            channel.label(pk_of(stranger(3)), "Old", NOW).unwrap();
+        }
     }
 
     // A verified or a retired peer with no label counts as much as a

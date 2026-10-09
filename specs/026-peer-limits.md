@@ -61,6 +61,7 @@ Retirement can take the labelled budget past 500, since R4 never refuses it, but
 - Nothing a message can do adds a permanent record without the user: a received retirement promotes only peers the user named (spec 024-key-retired R1, R2), so the 500 are the user's choices.
 - Eviction erases an unknown's `max_counter` and gap (spec 021 R24): a server that drops an unknown member's messages, with an intruder flooding fresh keys until that member is evicted, hides the deletion, since its next message starts a new record. Only a peer the user named keeps deletion detection for good. Accepted residual.
 - `last_seen` is this device's `now`, which no sender or server chooses; a device clock set back makes a newcomer look oldest and evicts it first, one set ahead does the reverse, until the clock is right again (`clock_off`, spec 021 R25). Ties go to the smaller key, which a flooder could grind for; neither gains more than a plain flood. Accepted residuals.
+- `forget` of a retired record lifts the block on its key (R5): a thief of that key writes again and shows as an unknown, under the four words members knew for its owner. The hard limit of R4 leads the user to forget someone, so spec 055-verify-ui words the choice. Documented.
 - The quota protects the device, not the channel: a leaked config can keep newcomers out; the answer is a new channel (ADR 0008).
 
 ## Public API changes

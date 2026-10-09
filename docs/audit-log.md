@@ -15,6 +15,14 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AI5 | Tests a mutant survived or a clause the spec names: the own-key outcome, a refused label on a counted channel, the peers-changed flag, a stale and a `key_retired` newcomer at the limit, a verified or retired peer counted in the labelled budget, the evicted key counted and not the newcomer, a second gap that stays, gaps a failed commit keeps, the room check after the retired check and before step 6, 1 024 pinned, the 551st pre-verification committing nothing, an oracle that copied the rule (A4–A6, B7, C2–C6, C14–C16) | Medium | One clause each in `tests/limits.rs` |
 | AI6 | Docs: the module claimed nothing removes a named peer; `creates` and `check_label` undocumented; the eviction an associated function with no `self`; why the eviction precedes the push (A7, C1, C7, C9–C11) | Nit | Reworded; a free `evict_stranger`; comments |
 
+**Round 2.** The same three passes, fresh, with the agents of `.claude/agents/`, on the whole change. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AI7 | `docs/spec.md` §7 said no key can be labelled at 500, and that new keys are rejected only when all 50 are muted; 022 gave a stale reason for `label`'s `now` (A) | Low | §7: no unknown key, and the 550 case; 022 reworded |
+| AI8 | `forget` of a retired record lets its stolen key write again as an unknown, and R4's hard limit leads the user to forget (B) | Low (partly far-fetched: the user's own call) | 026 Security; the wording is spec 055's |
+| AI9 | Five mutants survived: a known peer at the all-muted limit, labelled peers counted against the 50 in the room check and the eviction, a retired unlabelled peer counted as entering, `verify_scanned` of an existing unknown, the order name–collision–admission at the limit (C) | Medium | One clause each in T02–T04 |
+
 Left as they are: the third copy of "remove a record, then its gap" (C8), one line at each place; `unknown` and the test `text` helper not shared with other test files (C17); the O(550) counts per new key (C13), below the cost of the signature check and the state rewrite.
 
 ## Spec 025 implemented
