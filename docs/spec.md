@@ -642,7 +642,7 @@ Monorepo with the specs as the source of truth; agents implement against the spe
 └─ landing/                  ← static multilingual site (Astro); outside the Cargo workspace, no protocol code; src/content/download/ the public links (spec 064), src/content/legal/ the requests-from-authorities page (spec 066), public/security.atom the security-release feed (spec 065)
 ```
 
-**Governance of the specification.** Since the creation of the repository, `docs/spec.md` on the default branch (`mvp` until the first release) is the only canonical version. Claude's living document is a read copy that may lag behind; nothing is edited there. Every change to `docs/spec.md` is made by PR with human review; if it changes a decision of §3–§6, the PR includes a new ADR and a row in `docs/audit-log.md`. The `Version · Updated` header is brought up to date on every change and the doc lint checks it.
+**Governance of the specification.** Since the creation of the repository, `docs/spec.md` on the default branch (`mvp` until the first release) is the only canonical version. Claude's living document is a read copy that may lag behind; nothing is edited there. Every change to `docs/spec.md` is made by PR, reviewed as the per-feature flow below says; if it changes a decision of §3–§6, the PR includes a new ADR and a row in `docs/audit-log.md`. The `Version · Updated` header is brought up to date on every change and the doc lint checks it.
 
 **Source precedence** (also in `AGENTS.md`): 1) the accepted spec `specs/NNN-*.md` for its feature; 2) `docs/spec.md`; 3) the ADRs (historical context). If a spec contradicts `docs/spec.md`, the agent stops and opens an open question; it does not decide.
 
@@ -654,11 +654,11 @@ flowchart LR
     B --> C[Agent: T* tests in red]
     C --> D[Agent: implementation]
     D --> E[Green CI]
-    E --> F[Human review + ADR if needed]
+    E --> F[Audit + ADR if needed]
     F --> G[Merge]
 ```
 
-Human review at B and F is mandatory in `core`, `store` and `server`; in the clients it may be only F.
+Human review at B is mandatory in `core`, `store` and `server`. Until the first release, F is the audit of `CLAUDE.md` (rounds of three independent passes, `docs/audit-log.md`): a human decides what it escalates and approves every ADR, and does not review the PR itself. At the first release F becomes a human review again, mandatory in `core`, `store` and `server`; in the clients it may then be the only review.
 
 ## 12. Open decisions and risks
 
