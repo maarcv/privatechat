@@ -5,7 +5,7 @@
 use super::super::limits::{
     MAX_IGNORED_TRACKED, MAX_LABELLED_PEERS, MAX_UNKNOWN_PEERS, is_unknown,
 };
-use super::{NOW, own_text, pk_of, receiver, reopened, sealed};
+use super::{HOUR_MS, NOW, own_text, pk_of, receiver, reopened, sealed};
 use crate::Error;
 use crate::crypto::PublicKey;
 use crate::proto::fingerprint::verify_qr;
@@ -157,11 +157,11 @@ fn s026_t02_r02_room_check() {
             assert_eq!(result, Err(Error::PeerLimit));
             assert_eq!(handle.commits(), commits);
             assert!(!has_record(&channel, newcomer));
+            // Sealed elsewhere: the own-key alert, never a peer.
             let own = own_text(&channel, 0, NOW);
-            assert_ne!(
-                channel.decrypt(&own, [0xee; 16], NOW, NOW),
-                Err(Error::PeerLimit)
-            );
+            let result = channel.decrypt(&own, [0xee; 16], NOW, NOW);
+            assert!(matches!(result, Ok(Some(_))), "{result:?}");
+            assert!(channel.status().own_key_used_elsewhere);
         }
     }
 }
@@ -198,7 +198,9 @@ fn s026_t03_r03_lru_eviction() {
 
     // `now` below every `last_seen`: the newcomer is never the oldest.
     let newcomer = stranger(900);
+    channel.take_peers_changed();
     text(&mut channel, newcomer, 0, NOW - 3_600).unwrap();
+    assert!(channel.take_peers_changed());
     assert!(has_record(&channel, newcomer));
     assert!(!has_record(&channel, smaller));
     assert!(has_record(&channel, larger));
@@ -235,6 +237,37 @@ fn s026_t03_r03_lru_eviction() {
     ));
     let back = channel.peer(&PublicKey(pk_of(stranger(1)))).unwrap();
     assert_eq!(back.max_counter, Some(3));
+
+    // At the limit, a stale message and a `key_retired` from a new key
+    // create and evict nothing: only a consumed, not stale message does.
+    let (mut channel, handle, _) = receiver(3_600);
+    plant(&mut channel, crowd(0, 50, false));
+    let stale = sealed(
+        &channel,
+        stranger(900),
+        0,
+        NOW - 2 * HOUR_MS,
+        PayloadKind::Text,
+        None,
+    );
+    assert_eq!(
+        channel.decrypt(&stale, [0x90; 16], NOW, NOW),
+        Err(Error::Expired)
+    );
+    let retired = sealed(
+        &channel,
+        stranger(901),
+        u64::MAX,
+        NOW,
+        PayloadKind::KeyRetired,
+        None,
+    );
+    let commits = handle.commits();
+    assert_eq!(channel.decrypt(&retired, [0x91; 16], NOW, NOW), Ok(None));
+    assert_eq!(handle.commits(), commits);
+    assert_eq!(channel.state.peers.len(), MAX_UNKNOWN_PEERS);
+    assert!(has_record(&channel, stranger(1)));
+    assert_eq!(channel.status().ignored_keys, 0);
 
     // At 550 the total stays at 550: with 500 labelled, and with 501 after
     // a retirement by hand and only 49 strangers.
@@ -323,7 +356,9 @@ fn s026_t05_r05_forget() {
     );
     for seed in [stranger(1), stranger(2)] {
         let commits = handle.all_commits();
+        channel.take_peers_changed();
         channel.forget(pk_of(seed)).unwrap();
+        assert!(channel.take_peers_changed());
         assert_eq!(handle.all_commits(), commits + 1);
         assert!(!has_record(&reopened(&handle), seed));
     }
@@ -365,6 +400,13 @@ fn s026_t06_r06_ignored_keys() {
     assert_eq!(channel.status().ignored_keys, 2);
     // The newcomer took the evicted place, unmuted.
     assert!(!channel.status().unknown_limit_reached);
+    // The user's own call refused by R4 is not counted.
+    plant(&mut channel, crowd(500, 1, false));
+    assert_eq!(
+        channel.label(pk_of(stranger(1)), "Ann", NOW),
+        Err(Error::PeerLimit)
+    );
+    assert_eq!(channel.status().ignored_keys, 2);
 
     let (mut full, _, _) = receiver(3_600);
     plant(&mut full, crowd(500, 1, false));
@@ -393,6 +435,10 @@ fn s026_t06_r06_ignored_keys() {
 fn s026_t07_r07_failing_store() {
     let (mut channel, handle, faults) = receiver(3_600);
     plant(&mut channel, crowd(1, 50, false));
+    // The oldest stranger, the one an eviction takes, has a gap.
+    text(&mut channel, stranger(1), 15, NOW).unwrap();
+    let gaps = channel.gaps();
+    assert_eq!(gaps.len(), 1);
     let before = channel.state.duplicate();
     faults.fail_commits(true);
     let labelled_pk = channel.state.peers[0].pk.0;
@@ -407,4 +453,5 @@ fn s026_t07_r07_failing_store() {
     assert!(state_eq(&channel.state, &before));
     assert!(state_eq(&reopened(&handle).state, &before));
     assert_eq!(channel.status().ignored_keys, 0);
+    assert_eq!(channel.gaps(), gaps);
 }

@@ -55,24 +55,6 @@ impl Channel {
         labelled_count(peers) < MAX_LABELLED_PEERS && !(creates && peers.len() >= MAX_PEERS)
     }
 
-    /// Makes room in `next` for a peer a consumed message creates (R3):
-    /// at either limit, removes the stranger heard from longest ago that is
-    /// not muted, ties broken by the smaller key, and returns its key.
-    pub(super) fn evict_for_new_peer(next: &mut ChannelState) -> Option<PeerId> {
-        let full = unknown_count(&next.peers) >= MAX_UNKNOWN_PEERS || next.peers.len() >= MAX_PEERS;
-        if !full {
-            return None;
-        }
-        let evicted = next
-            .peers
-            .iter()
-            .filter(|peer| is_evictable(peer))
-            .min_by_key(|peer| (peer.last_seen, peer.pk.0))
-            .map(|peer| peer.pk.0)?;
-        next.peers.retain(|peer| peer.pk.0 != evicted);
-        Some(evicted)
-    }
-
     /// Counts `pk` among the keys ignored in this session (R6), up to
     /// [`MAX_IGNORED_TRACKED`].
     pub(super) fn ignore_key(&mut self, pk: PeerId) {
@@ -85,6 +67,24 @@ impl Channel {
     pub(super) fn labelled_limit_reached(&self) -> bool {
         labelled_count(&self.state.peers) >= MAX_LABELLED_PEERS
     }
+}
+
+/// Makes room in `next` for a peer a consumed message creates (R3):
+/// at either limit, removes the stranger heard from longest ago that is
+/// not muted, ties broken by the smaller key, and returns its key.
+pub(super) fn evict_stranger(next: &mut ChannelState) -> Option<PeerId> {
+    let full = unknown_count(&next.peers) >= MAX_UNKNOWN_PEERS || next.peers.len() >= MAX_PEERS;
+    if !full {
+        return None;
+    }
+    let evicted = next
+        .peers
+        .iter()
+        .filter(|peer| is_evictable(peer))
+        .min_by_key(|peer| (peer.last_seen, peer.pk.0))
+        .map(|peer| peer.pk.0)?;
+    next.peers.retain(|peer| peer.pk.0 != evicted);
+    Some(evicted)
 }
 
 /// §7: a peer with no label, not verified and not retired is unknown,

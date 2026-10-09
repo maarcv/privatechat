@@ -5,6 +5,7 @@
 
 use zeroize::Zeroizing;
 
+use super::limits::evict_stranger;
 use super::peers::find;
 use super::purge::content_of;
 use super::retired::is_key_retired;
@@ -105,6 +106,9 @@ impl Channel {
             return Err(Error::RetiredKey);
         }
         if !is_own && self.peer(&sender).is_none() && !self.has_room() {
+            // Counted before the cursor commit: should that fail, a key the
+            // server sends again is counted once all the same (R6 counts
+            // distinct keys).
             self.ignore_key(sender.0);
             return Err(Error::PeerLimit);
         }
@@ -149,7 +153,7 @@ impl Channel {
         let mut next = self.next_state();
         // Spec 026-peer-limits R3: a new peer at a limit evicts a stranger.
         let evicted = if self.peer(&sender).is_none() {
-            Channel::evict_for_new_peer(&mut next)
+            evict_stranger(&mut next)
         } else {
             None
         };

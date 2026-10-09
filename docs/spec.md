@@ -384,8 +384,8 @@ stateDiagram-v2
 **Peer limits** (spec 026). Two counters per channel at the receiver:
 
 - Labelled, verified or retired peers: maximum 500 (hard limit; visible error; no key can be labelled or verified until the user forgets some; retiring is never refused).
-- Unknown peers (muted ones count): maximum 50, with LRU eviction by `last_seen`. Eviction erases that `pk`'s `max_counter`; if it writes again it reappears as a new unknown.
-- Nothing is ever ignored silently: the channel card always shows "X new keys ignored" when a limit has been reached.
+- Unknown peers (muted ones count): maximum 50, with LRU eviction by `last_seen`. Muted unknowns are never evicted, so a muted spammer does not come back unmuted; when all 50 are muted, new keys are rejected (`PeerLimit`) until the user forgets some. Eviction erases that `pk`'s `max_counter` and gap; if it writes again it reappears as a new unknown.
+- Nothing is ever ignored silently: the channel card always shows "X new keys ignored", counted since the channel was opened in this session, and whether a limit has been reached.
 
 **Verification.** Screen with one's own `verify:` QR and the 12 words. The screen only accepts `verify:v1:` QRs with the `channel_id` of the open channel; any other is rejected with a message. On scanning: if the `pk` exists → `verified = true` keeping the local label; if it does not exist → the peer is created as verified with the label the user types, except that one's own `pk_u` is rejected, since it is never a peer (**pre-verification**: allows verifying a friend's "new phone" before their first message, which is the real remedy to the impersonation vector). Verification is mutual: each scans the other. No verification goes through the server.
 

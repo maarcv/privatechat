@@ -59,6 +59,8 @@ Retirement can take the labelled budget past 500, since R4 never refuses it, but
 - Muted unknowns are never evicted, so muting is durable; the price is that 50 muted keys close the channel to new strangers, which `unknown_limit_reached` shows, and the user can `forget` some.
 - The room check reads state only after the signature (step 5 of `docs/spec.md` §4), and the eviction happens only for a consumed, not stale message, so no unauthenticated header can evict anybody (ADR 0027).
 - Nothing a message can do adds a permanent record without the user: a received retirement promotes only peers the user named (spec 024-key-retired R1, R2), so the 500 are the user's choices.
+- Eviction erases an unknown's `max_counter` and gap (spec 021 R24): a server that drops an unknown member's messages, with an intruder flooding fresh keys until that member is evicted, hides the deletion, since its next message starts a new record. Only a peer the user named keeps deletion detection for good. Accepted residual.
+- `last_seen` is this device's `now`, which no sender or server chooses; a device clock set back makes a newcomer look oldest and evicts it first, one set ahead does the reverse, until the clock is right again (`clock_off`, spec 021 R25). Ties go to the smaller key, which a flooder could grind for; neither gains more than a plain flood. Accepted residuals.
 - The quota protects the device, not the channel: a leaked config can keep newcomers out; the answer is a new channel (ADR 0008).
 
 ## Public API changes
@@ -115,3 +117,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-10-04 ADR 0036 superseded by ADR 0043 (`docs/audit-log.md`, audit AB): the name comparison of spec 022-peers-tofu R4 is lowercase with white space and invisible characters removed
 - 2026-10-09 Interface paths follow the channel module layout, and `MAX_PEERS` is the one of spec 020-store-files
+- 2026-10-09 audit AI round 1 (`docs/audit-log.md`, decisions of the human reviewer): the residuals of eviction and of the device clock in Security
