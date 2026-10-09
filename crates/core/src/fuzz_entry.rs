@@ -213,9 +213,9 @@ pub(crate) fn frame_decode_verdict(data: &[u8]) -> Result<Frame, Error> {
     Frame::decode(data)
 }
 
-/// The verdict of `session_on_frame`: the events of the input's frames,
-/// read after a fixed `hello` and `ok` at `text_k1`'s `now`; a trailing
-/// part shorter than its length is dropped.
+/// The verdict of `session_on_frame`: the events of a fixed `hello` and
+/// `ok` at `text_k1`'s `now`, then of the input's frames; a trailing part
+/// shorter than its length is dropped.
 pub(crate) fn session_on_frame_verdict(data: &[u8]) -> Result<Vec<Event>, Error> {
     let config = text_k1_config()?;
     let own = Secret::from_bytes(text_k1::SENDER_SEED);
@@ -228,9 +228,11 @@ pub(crate) fn session_on_frame_verdict(data: &[u8]) -> Result<Vec<Event>, Error>
         server_nonce: [0; 32],
         proto_versions: vec![1],
     };
-    session.on_frame(&hello.encode()?, &mut channels, now);
-    session.on_frame(&Frame::Ok { channel_id }.encode()?, &mut channels, now);
-    let mut events = Vec::new();
+    let mut events = session
+        .on_frame(&hello.encode()?, &mut channels, now)
+        .events;
+    let ok = Frame::Ok { channel_id }.encode()?;
+    events.extend(session.on_frame(&ok, &mut channels, now).events);
     let mut rest = data;
     while let Some((len, tail)) = rest.split_first_chunk::<2>() {
         let Some((frame, tail)) = tail.split_at_checked(usize::from(u16::from_be_bytes(*len)))

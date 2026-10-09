@@ -50,7 +50,7 @@ fn s028_t08_r08_truncation_before_backlog() {
         };
         assert_eq!(events, expected, "{age}");
         let before = channels[0].status().truncated_before;
-        assert_eq!(before.is_some(), found, "{age}");
+        assert_eq!(before, found.then_some(T0 - 86_400_000), "{age}");
     }
 
     // A recent `synced_at` hides an old cursor; one in the future does not.
@@ -137,8 +137,9 @@ fn s028_t08_r08_truncation_before_backlog() {
     assert!(channels[0].status().truncated_before.is_some());
 
     // Found at the `hello`, with the `ok` 31 s later: recorded again at the
-    // `ok`, since what expired meanwhile is missing too, then synced.
-    let mut channels = vec![channel(5, MINUTE, T0 - 600_000)];
+    // `ok`, since what expired meanwhile is missing too, then synced, so
+    // that the commit of `synced` writes the new truncation.
+    let (mut channels, handle) = stored_channel(MINUTE, T0 - 600_000);
     let id = ids(&channels)[0];
     let mut session = connected(&channels, T0);
     let step = session.on_frame(&hello(1, &[1]), &mut channels, T0);
@@ -155,6 +156,9 @@ fn s028_t08_r08_truncation_before_backlog() {
         ]
     );
     assert_eq!(channels[0].synced_at(), Some(T0 + 31_000));
+    let reopened = Channel::open_stored(Box::new(handle.reopen())).unwrap();
+    let before = reopened.status().truncated_before;
+    assert_eq!(before, Some(T0 + 31_000 - 60_000));
 
     // A quiet channel whose `synced_at` is recent, reopened from its store.
     let (mut channels, handle) = stored_channel(DAY, T0 - 2 * 86_400_000);

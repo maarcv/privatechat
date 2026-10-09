@@ -27,6 +27,17 @@ Decisions taken without the human, by the advisor (`.claude/agents/advisor.md`, 
 | AL10 | T09 said a failed `synced` publishes nothing, where R9 and the test publish; R9's "waiting in memory" ignored the reopen of spec 027 R14; T06 did not name AL1's clause; R3's sentence attached its seeds to `decrypt` (A) | Low | T09, R9, T06 and R3 reworded |
 | AL11 | `last_call = now` at `on_connect` is an equivalent mutant: nothing is subscribed before a call has run the gap check (C) | Far-fetched | Kept: R5's words; a preference |
 
+**Round 3.** Fresh passes on the whole change. AL1 and AL7 hold; no production defect. Pass B found only AL15, far-fetched; passes A and C found only test gaps and a History line. Pass C ran 84 mutants: 74 killed, 7 equivalent, 3 survived, two killed below and the third AL16. The audit closes with this round (`CLAUDE.md`, the audit).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AL12 | Clauses that could not fail: the order of the truncation and `synced` at the `ok` (only the store shows it), the frame that trips the gap still processed, the value of the stored `truncated_at`, the fuzz entry's `now` (A, C) | Medium | T08 reopens the store after the `ok` and checks `truncated_before` by value; T09 trips the gap with an `ok`; the `session_on_frame` verdict returns the fixed `hello`'s and `ok`'s events too, so a `now` with a truncation fails T03 |
+| AL13 | No History line for the round 2 amendments (A) | Low | Added |
+| AL14 | `keep_synced` both checks the silence and syncs (C) | Far-fetched | None: a preference |
+| AL15 | A clock set back at the `hello` and set right before the `ok` gives a false truncation, and with it no gap counted for a long-silent peer (B) | Far-fetched | None: two clock jumps in one handshake, no adversary of `docs/spec.md` §2; the same family as AL5 |
+| AL16 | The one-line `session_on_frame` wrapper is not called by a test, as no target's is (C) | Far-fetched | None: the convention of every target of spec 016 |
+
+
 
 ## Audit AK
 

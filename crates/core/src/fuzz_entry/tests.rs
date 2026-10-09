@@ -458,12 +458,20 @@ fn s028_t03_r03_session_on_frame_reads_frames() {
     let channel_id = text_k1_config().channel_id();
     let ok = Frame::Ok { channel_id }.encode().unwrap();
     let bad = [0u8, 0, 0, 0, 1, 7];
-    let reconnect = [crate::Event::Reconnect { connection: 0 }];
-    assert_eq!(session_on_frame_verdict(&framed(&ok)).unwrap(), []);
+    // The fixed `hello` and `ok` subscribe the channel with no truncation
+    // at `text_k1`'s `now`, then the input's events follow.
+    let subscribed = || crate::Event::Subscribed {
+        channel: channel_id,
+    };
+    let reconnect = [subscribed(), crate::Event::Reconnect { connection: 0 }];
+    assert_eq!(
+        session_on_frame_verdict(&framed(&ok)).unwrap(),
+        [subscribed()]
+    );
     assert_eq!(session_on_frame_verdict(&framed(&bad)).unwrap(), reconnect);
     let input = [framed(&ok), framed(&bad), framed(&bad)[..5].to_vec()].concat();
     assert_eq!(session_on_frame_verdict(&input).unwrap(), reconnect);
-    assert_eq!(session_on_frame_verdict(&[0]).unwrap(), []);
+    assert_eq!(session_on_frame_verdict(&[0]).unwrap(), [subscribed()]);
     // The channel subscribed is `text_k1`'s: a `nonce_expired` naming it is
     // a `Reconnect` (R16), one naming another channel is not.
     let nonce_expired = |channel_id| {
@@ -479,5 +487,5 @@ fn s028_t03_r03_session_on_frame_reads_frames() {
     let named = framed(&nonce_expired(channel_id));
     assert_eq!(session_on_frame_verdict(&named).unwrap(), reconnect);
     let other = framed(&nonce_expired([0x10; 16]));
-    assert_eq!(session_on_frame_verdict(&other).unwrap(), []);
+    assert_eq!(session_on_frame_verdict(&other).unwrap(), [subscribed()]);
 }

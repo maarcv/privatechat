@@ -287,6 +287,19 @@ fn s028_t09_r09_gap_between_calls() {
     assert_eq!(step.events, [Event::Subscribed { channel: id }]);
     assert_eq!(channels[0].synced_at(), Some(T0 + 61_000));
 
+    // The frame that trips the gap is still processed: an `ok` 5 001 ms
+    // after the `hello` subscribes, with no `synced`.
+    let mut channels = vec![channel(8, DAY, T0)];
+    let id = ids(&channels)[0];
+    let mut session = connected(&channels, T0);
+    session.on_frame(&hello(1, &[1]), &mut channels, T0);
+    let step = session.on_frame(&ok(id), &mut channels, T0 + 5_001);
+    assert_eq!(
+        step.events,
+        [reconnect(), Event::Subscribed { channel: id }]
+    );
+    assert_eq!(channels[0].synced_at(), None);
+
     // A suspension between `subscribe` and `ok`, seen first by a push
     // frame: `Reconnect`, and the `ok` after it, on the same connection,
     // marks the channel subscribed with no `synced`.

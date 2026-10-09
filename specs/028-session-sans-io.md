@@ -250,3 +250,4 @@ Decided on 2026-09-25: the frame keys belong to this spec (`docs/spec.md` §6).
 - 2026-10-09 amended after audit AK round 6 (`docs/audit-log.md`): T07 names its clause on a second `hello`
 - 2026-10-09 slice (b2) implemented; R9 says how a clock set back counts for its two limits, that the gap's `Reconnect` comes once and where a failed `synced` goes, and T09 checks them (`docs/audit-log.md`, decisions taken without the human)
 - 2026-10-09 amended after audit AL round 1 (`docs/audit-log.md`): a `nonce_expired` naming a subscribed channel is a `Reconnect` (R16); the `ok` after a truncation found at the `subscribe` syncs (R9); the `session_on_frame` seeds reach the channel it holds and `decrypt` (R3)
+- 2026-10-09 amended after audit AL round 2 (`docs/audit-log.md`): at the `ok`, a truncation found at the `subscribe` is recorded again with the `ok`'s `now`, then the channel syncs (R9, T08); R3, T06 and T09 reworded
