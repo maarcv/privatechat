@@ -128,7 +128,8 @@ step catches a class of mistake the next one cannot:
 3. **Implement** the smallest thing that turns them green.
 4. **Property and fuzz** (AGENTS 21). Every path that rejects input asserts
    `commits == 0`; every stateful spec has a `FailingStore` test (AGENTS 23).
-5. **CI green, then human review.** Commit and PR shape: AGENTS 7 and 14.
+5. **CI green, then the audit** (a human review again from the first
+   release, AGENTS "Per-feature flow"). Commit and PR shape: AGENTS 7 and 14.
 
 When the implementation reveals the spec was wrong, do not quietly fix the code.
 Add the question to `## Open questions` in the spec; if the change touches the

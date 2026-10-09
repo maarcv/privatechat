@@ -1,2 +1,3 @@
-# Mandatory human review (AGENTS.md "Per-feature flow")
+# Review requests (AGENTS.md "Per-feature flow": until the first release the audit
+# replaces the review before merge; the human review returns at the release)
 * @maarcv

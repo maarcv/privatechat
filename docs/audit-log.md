@@ -2,6 +2,10 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Review during development
+
+**2026-10-09 — Decision of the human reviewer: until the first release, the audit of `CLAUDE.md` replaces the human review before merging.** The human still accepts every spec before it is implemented, decides what an audit escalates and approves every ADR; the human review before merging returns at the first release. `AGENTS.md` "Per-feature flow", `docs/spec.md` §10 "Per-feature flow" and governance, the `architecture` skill and `.github/CODEOWNERS` say so. GitHub required no approving review on `mvp` already (0), so its settings do not change.
+
 ## Spec 026 implemented
 
 **2026-10-09 — Spec 026-peer-limits is `implemented`.** Its acceptance criterion is automated alone: `cargo test -p privatechat-core s026_`, clippy and the documentation lint are green on `mvp` (9137d6a), after the eight rounds of Audit AI, which the human reviewer closed at round 8.
