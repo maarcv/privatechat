@@ -522,3 +522,207 @@ fn s028_t10_r10_second_theft_after_regeneration() {
     let step = session.after_send(id, &mut channels, T0 + 500);
     assert_eq!(step.events, [reconnect()]);
 }
+
+/// Spec 028, R14 and R10: an `outbox` whose commit fails → nothing
+/// queued, `(channel, Io)` in `failed` and the channel frozen: a later
+/// push is not decrypted and `after_send` publishes nothing.
+#[test]
+fn s028_t14_r14_outbox_failure_freezes() {
+    let (mut channels, handle, faults) = alice();
+    let id = ids(&channels)[0];
+    channels[0].encrypt("stale", None, T0).unwrap();
+    let mut bob = member(&channels[0]);
+    let hi = sealed(&mut bob, "hi");
+    let late = T0 + 86_400_000 + 361_000;
+    let mut session = connected(&channels, late);
+    session.on_frame(&hello(1, &[1]), &mut channels, late);
+    session.outgoing();
+
+    faults.fail_commits(true);
+    let step = session.on_frame(&ok(id), &mut channels, late + 100);
+    faults.fail_commits(false);
+    // The `synced` after the truncation, then the `outbox`.
+    assert_eq!(step.failed, [(id, StoreError::Io), (id, StoreError::Io)]);
+    assert!(
+        !step
+            .events
+            .iter()
+            .any(|event| matches!(event, Event::NotDelivered { .. }))
+    );
+    assert_eq!(published(&mut session), []);
+    let commits = handle.all_commits();
+    let step = session.on_frame(&push(id, 1, &hi), &mut channels, late + 200);
+    assert!(step.events.is_empty() && step.failed.is_empty());
+    channels[0].encrypt("after", None, late + 300).unwrap();
+    let after = handle.all_commits();
+    assert_eq!(after, commits + 1);
+    let step = session.after_send(id, &mut channels, late + 300);
+    assert!(step.events.is_empty() && step.failed.is_empty());
+    assert_eq!(handle.all_commits(), after);
+    assert_eq!(published(&mut session), []);
+}
+
+/// Spec 028, R10: a channel set `write_failed` → pushes dropped with no
+/// call to the channel, a foreign own-key push raising no alert, nothing
+/// published, no `synced` at its `ok` or on a tick, and no `Reconnect`;
+/// the mark kept across `on_disconnect` and `on_connect`; once cleared, a
+/// push on the same connection still not decrypted.
+#[test]
+fn s028_t10_r10_write_failed_mark() {
+    let (mut channels, handle, _) = alice();
+    let id = ids(&channels)[0];
+    let mut thief = thief_of(&handle);
+    let theirs = sealed(&mut thief, "x");
+    let mut bob = member(&channels[0]);
+    let hi = sealed(&mut bob, "hi");
+    channels[0].encrypt("mine", None, T0).unwrap();
+    let mut session = greeted(&mut channels);
+    session.set_write_failed(&channels[0], true, false);
+    let commits = handle.all_commits();
+
+    for (n, blob) in [(1, &hi), (2, &theirs)] {
+        let step = session.on_frame(&push(id, n, blob), &mut channels, T0 + 100);
+        assert!(step.events.is_empty() && step.failed.is_empty());
+    }
+    let step = session.on_frame(&ok(id), &mut channels, T0 + 200);
+    assert_eq!(step.events, [Event::Subscribed { channel: id }]);
+    assert!(
+        session
+            .after_send(id, &mut channels, T0 + 300)
+            .events
+            .is_empty()
+    );
+    assert!(session.on_tick(&mut channels, T0 + 1_200).events.is_empty());
+    assert_eq!(published(&mut session), []);
+    assert_eq!(handle.all_commits(), commits);
+    assert_eq!(channels[0].cursor(), None);
+    assert_eq!(channels[0].synced_at(), None);
+    assert!(!channels[0].status().own_key_used_elsewhere);
+
+    // A new connection: still frozen, an empty backlog's `ok` calling no
+    // `synced` either.
+    session.on_disconnect();
+    session.on_connect(T0 + 2_000, &[]);
+    session.on_frame(&hello(2, &[1]), &mut channels, T0 + 2_000);
+    session.outgoing();
+    let step = session.on_frame(&ok(id), &mut channels, T0 + 2_100);
+    assert_eq!(step.events, [Event::Subscribed { channel: id }]);
+    assert_eq!(channels[0].synced_at(), None);
+    session.on_frame(&push(id, 1, &hi), &mut channels, T0 + 2_200);
+    assert_eq!(published(&mut session), []);
+    assert_eq!(handle.all_commits(), commits);
+
+    // Cleared: frozen until the connection ends, with no `Reconnect`.
+    session.set_write_failed(&channels[0], false, false);
+    let step = session.on_frame(&push(id, 2, &theirs), &mut channels, T0 + 2_300);
+    assert!(step.events.is_empty());
+    assert!(
+        session
+            .after_send(id, &mut channels, T0 + 2_400)
+            .events
+            .is_empty()
+    );
+    assert!(session.on_tick(&mut channels, T0 + 3_000).events.is_empty());
+    assert_eq!(published(&mut session), []);
+    assert_eq!(handle.all_commits(), commits);
+    assert_eq!(channels[0].cursor(), None);
+    assert!(!channels[0].status().own_key_used_elsewhere);
+
+    // The next connection decrypts again.
+    session.on_disconnect();
+    session.on_connect(T0 + 4_000, &[]);
+    session.on_frame(&hello(3, &[1]), &mut channels, T0 + 4_000);
+    // Clearing a channel not marked changes nothing.
+    session.set_write_failed(&channels[0], false, false);
+    session.set_write_failed(&channels[0], false, true);
+    let step = session.on_frame(&push(id, 1, &hi), &mut channels, T0 + 4_100);
+    assert!(is_message(&step.events, 1), "{:?}", step.events);
+}
+
+/// Spec 028, R10: a channel marked in a `LogFull` stall is frozen — its
+/// own-key check no longer called and no `Reconnect` when room returns;
+/// cleared with `storage_full` → back in the stall, no `Reconnect` while
+/// the log is full, one on the first tick after room returns.
+#[test]
+fn s028_t10_r10_write_failed_storage_full() {
+    let (mut channels, handle, _) = alice();
+    let id = ids(&channels)[0];
+    let mut thief = thief_of(&handle);
+    let theirs = sealed(&mut thief, "x");
+    let mut bob = member(&channels[0]);
+    let hi = sealed(&mut bob, "hi");
+    let mine = channels[0].encrypt("mine", None, T0).unwrap();
+    channels[0].fill_log(FILL_EXPIRES, ROOM + 1);
+    let mut session = greeted(&mut channels);
+    session.on_frame(&push(id, 1, &hi), &mut channels, T0 + 100);
+    assert!(channels[0].status().storage_full);
+    session.set_write_failed(&channels[0], true, false);
+    session.on_frame(&push(id, 2, &theirs), &mut channels, T0 + 200);
+    assert!(!channels[0].status().own_key_used_elsewhere);
+
+    session.set_write_failed(&channels[0], false, true);
+    // No own-key alert: the stall begun at the clearing publishes on.
+    session.on_frame(&ok(id), &mut channels, T0 + 200);
+    assert_eq!(published(&mut session), [mine]);
+    let mut now = T0 + 200;
+    while now < FILL_EXPIRES + 1_000 {
+        now += 1_000;
+        assert!(session.on_tick(&mut channels, now).events.is_empty());
+    }
+    assert_eq!(channels[0].relieve_headroom(now), Ok(true));
+    assert_eq!(
+        session.on_tick(&mut channels, now + 1_000).events,
+        [reconnect()]
+    );
+
+    // Marked again in the stall: no `Reconnect` once room returns.
+    let (mut channels, _, _) = alice();
+    channels[0].fill_log(FILL_EXPIRES, ROOM + 1);
+    let mut session = greeted(&mut channels);
+    session.on_frame(&push(id, 1, &hi), &mut channels, T0 + 100);
+    session.set_write_failed(&channels[0], true, false);
+    let mut now = T0 + 100;
+    while now < FILL_EXPIRES + 1_000 {
+        now += 1_000;
+        session.on_tick(&mut channels, now);
+    }
+    assert_eq!(channels[0].relieve_headroom(now), Ok(true));
+    assert!(
+        session
+            .on_tick(&mut channels, now + 1_000)
+            .events
+            .is_empty()
+    );
+}
+
+/// Spec 028, R10: a mark cleared with `storage_full` while the own-key
+/// flag is set begins a stopped stall: no ordinary entry of the current
+/// key is published, and a regeneration → `Reconnect`.
+#[test]
+fn s028_t10_r10_write_failed_cleared_stopped() {
+    let (mut channels, handle, _) = alice();
+    let id = ids(&channels)[0];
+    let mut thief = thief_of(&handle);
+    let theirs = sealed(&mut thief, "x");
+    let mut session = greeted(&mut channels);
+    session.on_frame(&push(id, 1, &theirs), &mut channels, T0 + 100);
+    assert!(channels[0].status().own_key_used_elsewhere);
+    session.on_frame(&ok(id), &mut channels, T0 + 200);
+    session.outgoing();
+    session.set_write_failed(&channels[0], true, false);
+    session.set_write_failed(&channels[0], false, true);
+
+    let mine = channels[0].encrypt("mine", None, T0 + 300).unwrap();
+    assert!(
+        session
+            .after_send(id, &mut channels, T0 + 300)
+            .events
+            .is_empty()
+    );
+    assert!(!published(&mut session).contains(&mine));
+    channels[0].regenerate_identity(T0 + 400).unwrap();
+    assert_eq!(
+        session.after_send(id, &mut channels, T0 + 400).events,
+        [reconnect()]
+    );
+}

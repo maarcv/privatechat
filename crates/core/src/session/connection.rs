@@ -5,15 +5,15 @@
 //!
 //! These slices hold the connection and the subscription (R1, R2 and
 //! R5–R7), the truncation (R8), the `ok` with what follows it (R9), the
-//! traffic with its stalls (R10) and `after_send` (R14). Later slices of
-//! spec 028 add the freeze after a failed `acked`, `outbox` or
-//! `expire_outbox` and the `write_failed` mark (R10), outcomes and the
-//! `outbox` on tick (R11–R14), the publish rate (R15), the error codes other than
-//! `nonce_expired` (R16), and, with `rate_limited`, the one clause of R7
-//! only it can reach: a `subscribe` queued again after it is released
+//! traffic with its stalls and the `write_failed` mark (R10) and
+//! `after_send` (R14). Later slices of spec 028 add outcomes, acks and
+//! the `outbox` on tick (R11–R14), with the freeze after a failed `acked`
+//! or `expire_outbox` (R10), the publish rate (R15), the error codes other
+//! than `nonce_expired` (R16), and, with `rate_limited`, the one clause of
+//! R7 only it can reach: a `subscribe` queued again after it is released
 //! however old its nonce.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use super::channel::{Channel, ClientRef};
 use super::frames::{CODE_NONCE_EXPIRED, Frame, is_supported};
@@ -110,6 +110,9 @@ pub(crate) struct Session {
     in_flight: BTreeMap<ClientRef, [u8; 16]>,
     /// The channels whose pushes are dropped on this connection (R10).
     stalls: BTreeMap<[u8; 16], Stall>,
+    /// The channels the `Device` marks `write_failed`, frozen on every
+    /// connection until it clears them (R5, R10).
+    write_failed: BTreeSet<[u8; 16]>,
     outgoing: Vec<Vec<u8>>,
 }
 
@@ -131,6 +134,7 @@ impl Session {
             sync_stopped: false,
             in_flight: BTreeMap::new(),
             stalls: BTreeMap::new(),
+            write_failed: BTreeSet::new(),
             outgoing: Vec::new(),
         }
     }
@@ -343,7 +347,8 @@ impl Session {
         }
     }
 
-    /// Everything that belongs to one socket (R5).
+    /// Everything that belongs to one socket (R5); a `write_failed` channel
+    /// stays frozen (R10).
     fn forget_connection(&mut self, link: Link) {
         self.link = link;
         self.skip.clear();
@@ -353,7 +358,11 @@ impl Session {
         self.truncations.clear();
         self.sync_stopped = false;
         self.in_flight.clear();
-        self.stalls.clear();
+        self.stalls = self
+            .write_failed
+            .iter()
+            .map(|channel_id| (*channel_id, Stall::Frozen))
+            .collect();
         self.outgoing.clear();
     }
 }

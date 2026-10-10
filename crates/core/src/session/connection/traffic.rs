@@ -81,11 +81,7 @@ impl Session {
                 // only `LogFull`: a flag set now, by it or from before,
                 // stops the channel, a key not yet regenerated being one
                 // known to be used elsewhere.
-                let stop = if channel.status().own_key_used_elsewhere {
-                    stopped(channel)
-                } else {
-                    Stop::Publishing
-                };
+                let stop = stop_for(channel);
                 let stall = Stall::LogFull { stop, asked: false };
                 self.stalls.insert(channel_id, stall);
                 step.events.push(Event::StorageFailed {
@@ -126,9 +122,30 @@ impl Session {
     /// R10's stall for a store error other than `LogFull`: the error goes
     /// to `failed` and nothing of the channel is called again on this
     /// connection.
-    fn freeze(&mut self, channel_id: [u8; 16], error: StoreError, step: &mut Step) {
+    pub(super) fn freeze(&mut self, channel_id: [u8; 16], error: StoreError, step: &mut Step) {
         self.stalls.insert(channel_id, Stall::Frozen);
         step.failed.push((channel_id, error));
+    }
+
+    /// The `Device`'s `write_failed` mark (R10, spec 027-core-api R12,
+    /// R14): a marked channel is frozen, a `LogFull` stall included, on
+    /// this connection and every later one. Clearing it leaves the channel
+    /// frozen until `on_disconnect`, or, with `storage_full`, back in a
+    /// `LogFull` stall begun now, its stop read from the flag as it stands.
+    pub(crate) fn set_write_failed(&mut self, channel: &Channel, on: bool, storage_full: bool) {
+        let channel_id = channel.config().channel_id();
+        if on {
+            self.write_failed.insert(channel_id);
+            self.stalls.insert(channel_id, Stall::Frozen);
+            return;
+        }
+        // A marked channel holds `Frozen` already, which a clearing
+        // without `storage_full` keeps.
+        if self.write_failed.remove(&channel_id) && storage_full {
+            let stop = stop_for(channel);
+            self.stalls
+                .insert(channel_id, Stall::LogFull { stop, asked: false });
+        }
     }
 
     /// On a tick, a `LogFull` stall whose channel has room again asks
@@ -184,6 +201,16 @@ impl Session {
     /// Whether nothing of the channel is called (R10).
     pub(super) fn is_frozen(&self, channel_id: &[u8; 16]) -> bool {
         matches!(self.stalls.get(channel_id), Some(Stall::Frozen))
+    }
+}
+
+/// The stop of a `LogFull` stall begun now: one's own key known to be
+/// used elsewhere stops it (R10).
+fn stop_for(channel: &Channel) -> Stop {
+    if channel.status().own_key_used_elsewhere {
+        stopped(channel)
+    } else {
+        Stop::Publishing
     }
 }
 

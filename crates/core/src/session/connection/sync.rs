@@ -130,7 +130,7 @@ impl Session {
 
     /// Queues a `publish` for each `outbox` entry not in flight, only those
     /// R10's stop lets leave, and reports the entries that left it unsent
-    /// (R9, R14).
+    /// (R9, R14); a store error freezes the channel (R10).
     pub(super) fn publish_outbox(&mut self, channel: &mut Channel, now: u64, step: &mut Step) {
         let channel_id = channel.config().channel_id();
         let in_flight: Vec<ClientRef> = self
@@ -144,10 +144,7 @@ impl Session {
             not_delivered,
         } = match channel.outbox(now, &in_flight, self.withholds_current(&channel_id)) {
             Ok(outbox) => outbox,
-            Err(Error::Store(error)) => {
-                step.failed.push((channel_id, error));
-                return;
-            }
+            Err(Error::Store(error)) => return self.freeze(channel_id, error, step),
             // Only libsodium failing can get here.
             Err(_) => return self.reconnect(step),
         };
