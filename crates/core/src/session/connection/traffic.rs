@@ -139,16 +139,13 @@ impl Session {
             self.stalls.insert(channel_id, Stall::Frozen);
             return;
         }
-        if !self.write_failed.remove(&channel_id) {
-            return;
-        }
-        let stall = if storage_full {
+        // A marked channel holds `Frozen` already, which a clearing
+        // without `storage_full` keeps.
+        if self.write_failed.remove(&channel_id) && storage_full {
             let stop = stop_for(channel);
-            Stall::LogFull { stop, asked: false }
-        } else {
-            Stall::Frozen
-        };
-        self.stalls.insert(channel_id, stall);
+            self.stalls
+                .insert(channel_id, Stall::LogFull { stop, asked: false });
+        }
     }
 
     /// On a tick, a `LogFull` stall whose channel has room again asks

@@ -26,6 +26,14 @@ Decisions taken without the human, by the advisor (three passes): `set_write_fai
 | AN9 | Clearing a channel never marked with `storage_full` set, which must change nothing, untested (C) | Medium | The test clears it both ways |
 | AN10 | The rule that picks a stall's stop written out twice (C) | Low | One `stop_for` |
 
+**Round 3.** Fresh passes on the whole change. AN1–AN10 hold; passes A and B found only far-fetched findings, pass C no test gap and no production defect. Pass C ran 16 mutants: 15 killed, 1 equivalent, which AN13 removes. The audit closes with this round (`CLAUDE.md`, the audit).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AN11 | The spec's History did not record the T10 and T16 amendments of rounds 1–2 (A) | Far-fetched | A History line all the same: the file's habit, though no rule asks it |
+| AN12 | A mark cleared with `storage_full` between an `UnsupportedServer` `hello` and the client's `on_disconnect` leaves a `LogFull` stall on a closed link, whose tick could ask one `Reconnect` (B) | Far-fetched | None: it needs an `Io` write failure, as AN1, a probe landing in that window, and a tick of a closed session, which spec 027 R12 does not make |
+| AN13 | A clearing without `storage_full` wrote again the `Frozen` stall every marked channel holds; its mutant was equivalent (C) | Low | The write removed; no behaviour changes, as the equivalent mutant showed |
+
 ## Audit AM
 
 **2026-10-09 — Audit AM, the code audit of slice (c1a) of spec 028-session-sans-io (branch `028-traffic`): the `push` routed to `decrypt`, the `LogFull` stall, the stop after one's own key is used elsewhere and the freeze after a push's store error (R10's first half), with `after_send`; round 1 of three passes (A: conformance; B: the adversary, a key thief and a server; C: quality, tests and hand mutants).** No High finding and no production defect beyond AM1. Pass C ran 31 mutants: 24 killed, 1 equivalent, 6 survived, each killed below or removed with the code it mutated.
