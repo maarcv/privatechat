@@ -22,8 +22,11 @@ const MAX_PUBLISHES: usize = 30;
 const PAUSE_MS: u64 = 60_000;
 
 impl Session {
-    /// An `error` (R16): the named entry leaves the in-flight set, then the
-    /// session acts by its `code`; an unknown code does nothing.
+    /// An `error` (R16): the named entry leaves the in-flight set, held
+    /// until the minute it was published in ends, as R12 holds a late
+    /// `key_retired` copy, so that an `error` sent every second cannot
+    /// turn into a publish every tick; then the session acts by its
+    /// `code`, an unknown code doing nothing.
     pub(super) fn on_error(
         &mut self,
         code: &str,
@@ -34,6 +37,16 @@ impl Session {
         step: &mut Step,
     ) {
         let flight = client_ref.and_then(|client_ref| self.in_flight.remove(&client_ref));
+        if let (Some(client_ref), Some(flight)) = (client_ref, &flight) {
+            let hold = Hold {
+                channel: flight.channel,
+                // `outbox` re-seals a `key_retired` copy of an earlier
+                // minute before handing it out: the minute it was
+                // published in is the one it was sealed in (R12).
+                minute: flight.published_at / MINUTE_MS,
+            };
+            self.held.insert(client_ref, hold);
+        }
         match code {
             CODE_NONCE_EXPIRED => self.nonce_expired(channel_id, now, step),
             CODE_BAD_AUTH | CODE_BAD_TTL => self.refuse(channel_id, step),
@@ -52,7 +65,7 @@ impl Session {
             }
             CODE_BAD_BLOB => match (client_ref, flight) {
                 (Some(client_ref), Some(flight)) => {
-                    self.bad_blob(client_ref, flight, channels, step);
+                    self.bad_blob(client_ref, flight.channel, channels, step);
                 }
                 (Some(_), None) => {}
                 (None, _) => self.reconnect(step),
@@ -165,19 +178,16 @@ impl Session {
     }
 
     /// A `bad_blob` of an entry published on this connection: an ordinary
-    /// entry leaves the `outbox` unsent; the pending `key_retired` copy is
-    /// held within the minute it was sealed in, as a late `ack` holds it
-    /// (R12): `outbox` re-seals a copy of an earlier minute before handing
-    /// it out, so that minute is the one it was published in. A store
-    /// error freezes the channel, as a failed `acked` does (R10).
+    /// entry leaves the `outbox` unsent; the pending `key_retired` copy
+    /// stays, held as every named entry is; a store error freezes the
+    /// channel, as a failed `acked` does (R10).
     fn bad_blob(
         &mut self,
         client_ref: ClientRef,
-        flight: Flight,
+        channel_id: [u8; 16],
         channels: &mut Channels,
         step: &mut Step,
     ) {
-        let channel_id = flight.channel;
         if self.is_frozen(&channel_id) {
             return;
         }
@@ -186,18 +196,12 @@ impl Session {
         };
         self.watch(channel);
         match channel.abandon(client_ref) {
+            Ok(None) => {}
             Ok(Some(sent_at)) => step.events.push(Event::NotDelivered {
                 channel: channel_id,
                 client_ref,
                 sent_at,
             }),
-            Ok(None) => {
-                let hold = Hold {
-                    channel: channel_id,
-                    minute: flight.published_at / MINUTE_MS,
-                };
-                self.held.insert(client_ref, hold);
-            }
             Err(Error::Store(error)) => self.freeze(channel_id, error, step),
             // `abandon` fails only by its commit.
             Err(_) => {}

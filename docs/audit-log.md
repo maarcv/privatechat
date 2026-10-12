@@ -31,7 +31,21 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AP16 | A re-queued `subscribe` at the front, waiting for a stale one's answer, holds back R7's `Reconnect` for a `subscribe` queued behind it at the `hello` (A) | Far-fetched | None: it needs about ten re-queues within the window, and that `subscribe` then leaves under the fresh `hello` |
 | AP17 | R16 does not say what a `rate_limited` naming a channel neither awaiting `ok` nor subscribed, and no entry, does; the code does nothing (A) | Far-fetched | None: a server of spec 030 R8 names only a channel awaiting `ok` |
 
-Decisions taken without the human, by the advisor (three passes, unanimous): a paused channel calls `expire_outbox` on a tick (AP4), since §2's malicious server must not hold back the client's own TTL; R14 and spec 021 R23 amended. Taken by the author against the spec, which pass A found consistent: `channel_quota` pauses the named entry's channel, else the named channel when it is the session's, else every channel; a `bad_auth`, `bad_ttl` or `channel_quota` naming a channel not of the session does nothing; `bad_blob` acts only on an entry in flight on this connection, and an `abandon` that finds no ordinary entry holds the copy for the minute of `now`; under R15, `outbox` is still called and the blobs past the limit come back later.
+**Round 3.** Fresh passes on the whole change. AP1–AP17 hold; no production defect against the spec. Pass C ran 12 new mutants: 8 killed, 4 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AP18 | An `error` that does nothing with the entry it names (an unknown code, a `bad_auth` naming a stranger's channel) still took it out of flight, so a server sending one every second had it published again every tick, up to R15's 30 a minute: the loop R12's hold prevents for a late `ack` (B) | Low | Every entry an `error` names is held until the minute it was published in ends, as R12 holds a late `key_retired` copy; `bad_blob`'s own hold folds into it; R16 and T16 amended |
+| AP19 | AP12 amended R12 and R16 with no History line, and this entry's decisions still said "the minute of `now`" (A) | Low | Both written |
+| AP20 | R13 did not list `abandon`, after which a `bad_blob` reports a changed status (A) | Low | R13 names it |
+| AP21 | A `rate_limited` or `channel_quota` renewed after its pause ended pausing again was untested (C) | Medium | A test of both |
+| AP22 | A fresh re-queued `subscribe` awaiting its `ok` not holding back a stale one was untested (C) | Medium | The delayed-endings test runs a second case, the first ending within the window |
+| AP23 | A `rate_limited` naming a subscribed channel and an entry not in flight pausing, not reconnecting, was untested (C) | Low | A case in the pause test |
+| AP24 | Two identical `ServerFull` values with different names in a test (C) | Low | One |
+
+Decisions taken without the human, by the advisor (three passes, unanimous): every entry an `error` names is held for the minute it was published in (AP18), since §2's malicious server must not turn its frames into the user's uploads.
+
+Decisions taken without the human, by the advisor (three passes, unanimous): a paused channel calls `expire_outbox` on a tick (AP4), since §2's malicious server must not hold back the client's own TTL; R14 and spec 021 R23 amended. Taken by the author against the spec, which pass A found consistent: `channel_quota` pauses the named entry's channel, else the named channel when it is the session's, else every channel; a `bad_auth`, `bad_ttl` or `channel_quota` naming a channel not of the session does nothing; `bad_blob` acts only on an entry in flight on this connection, and an `abandon` that finds no ordinary entry holds the copy for the minute it was published in (AP12); under R15, `outbox` is still called and the blobs past the limit come back later.
 
 ## Audit AO
 
