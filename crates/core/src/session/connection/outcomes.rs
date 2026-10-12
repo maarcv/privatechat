@@ -1,7 +1,8 @@
 //! What became of the entries this device published and what the client
 //! re-reads, in spec 028-session-sans-io (R11–R13): an `ack` routed to its
 //! channel, the clock samples, the outcomes a channel queued, the hold on
-//! a late `key_retired` copy, and `Event::StatusChanged`.
+//! a late `key_retired` copy or an entry an `error` names (R16), and
+//! `Event::StatusChanged`.
 
 use super::{Channels, Event, MINUTE_MS, Session, Step, find_mut};
 use crate::Error;
@@ -17,9 +18,10 @@ pub(super) struct Flight {
     pub(super) published_at: u64,
 }
 
-/// A `key_retired` copy not published again on this connection while the
-/// minute it was sealed in lasts (R12): the minute after, `outbox`
-/// re-seals it as another copy (spec 025-identity-regen R4).
+/// An entry not published again on this connection while the minute it
+/// was published in lasts: a `key_retired` copy whose `ack` came late
+/// (R12), which `outbox` re-seals as another copy the minute after (spec
+/// 025-identity-regen R4), or an entry an `error` named (R16).
 pub(super) struct Hold {
     pub(super) channel: [u8; 16],
     pub(super) minute: u64,
@@ -144,7 +146,7 @@ impl Session {
     }
 
     /// The entries of `channel_id` its `outbox` must not hand out at `now`:
-    /// in flight, or held within their minute (R12, R14). The holds whose
+    /// in flight, or held within their minute (R12, R14, R16). The holds whose
     /// minute is not `now`'s are forgotten on the way.
     pub(super) fn unanswered(&mut self, channel_id: &[u8; 16], now: u64) -> Vec<ClientRef> {
         let minute = now / MINUTE_MS;

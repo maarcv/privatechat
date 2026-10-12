@@ -6,6 +6,25 @@ If `assistant.md` exists at the repository root, read it too. It holds the perso
 
 These rules apply to every session, on top of `AGENTS.md`.
 
+### Autonomy: the whole cycle is yours
+
+You run the whole cycle without handing steps to the human: branch,
+commit, push, open the PR, set the `adr-not-needed` label (with a comment
+giving the reason) when the PR implements an accepted spec without changing
+a format, wait for every CI check, merge (merge commit) once the audit has
+closed and the CI is green, check the PR is `MERGED`, then delete the
+branch. Never ask the human to run a git or `gh` command, and never ask them
+to review a PR (`AGENTS.md`, "Flow"). If a tool call is denied, split it
+into smaller commands and retry; only a single, isolated command that is
+still denied goes to the human, explained.
+
+The human decides only what the advisor cannot: a question where the rules
+below say to ask, a spec to accept, an ADR to approve (`AGENTS.md` rule 3),
+or a change to a format, keys, the channel config or a promise of
+`docs/spec.md` §1 or §2. An advisor `ESCALATE` on an internal detail (test
+scripts, fuzz seeds, tooling) whose recommendations converge is yours to
+decide and list under `Decisions taken without the human`.
+
 ### Questions: the advisor
 
 Before asking the human a development question, ask three `advisor` agents

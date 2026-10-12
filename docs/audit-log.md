@@ -2,6 +2,62 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AP
+
+**2026-10-12 — Audit AP, the code audit of slice (d) of spec 028-session-sans-io (branch `028-rate-errors`): the publish rate (R15), every `error` code with its pause, refusal, hold or new `subscribe` (R16), and the `subscribe` queued again after a `rate_limited`, released however old its nonce, one stale at a time (R7); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** No production defect against the spec; one spec gap (AP4). Pass C ran 44 mutants: 27 killed, 5 equivalent, 12 survived; each survivor that is not far-fetched is killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AP1 | T16 did not send `nonce_expired`, `bad_auth`, `bad_ttl` or `server_full` naming an entry, `not_subscribed` naming none, or `channel_quota` naming an unknown entry and no channel (A) | Medium | Each case added; the named entry is published again once nothing blocks it |
+| AP2 | A pause or a publish recorded later than `now` counting as past was in the code, not in R15 or R16 (A) | Low | R15 and R16 say so, as R7 does; a test of the pause with a clock set back |
+| AP3 | A `subscribe` queued again after a `rate_limited` went to the back of the queue, not in R6's expiry order (A) | Low | It takes its place by `last + ttl_ms`; a test with a one-minute channel among one-day ones |
+| AP4 | A server renewing a `rate_limited` every 59 s kept a subscribed channel paused, so neither `outbox` nor `expire_outbox` ran and a stale entry was never reported `NotDelivered` (B) | Low | A paused channel expires its stale entries on a tick (R14, spec 021 R23); a T14 test, with the freeze after a failed commit there |
+| AP5 | The refused channel left out of the next `hello`'s queue was untested: the test dropped the `subscribe`s it read (C) | Medium | The test reads them |
+| AP6 | A refusal of a channel still queued, or awaiting its `ok`, was untested (C) | Medium | Both cases, and a refused channel's send publishing nothing |
+| AP7 | A `bad_blob` of a frozen channel's entry calling `abandon` was untested (C) | Medium | A test: no event, no commit |
+| AP8 | A pause running at an `ok`, and a new connection forgetting a `server_full` pause, were untested (C) | Medium | Both cases |
+| AP9 | A set of re-queued channels was kept beside the queue by hand, and a guard in it was dead (C) | Low | Each queued item carries its flag; the guard removed |
+| AP10 | `on_error` took its names as a tuple; the test helper `refusal` built every `error` (C) | Low | Two parameters; the helper renamed `error_frame` |
+| AP11 | A `bad_blob` that frees room watching the status for R13, and a stale `subscribe` blocking a fresh one, are untested (C) | Far-fetched | None: the first needs a log at its headroom limit, the second a `hello` not caused by the stale `subscribe` |
+
+**Round 2.** Fresh passes on the whole change. AP1–AP11 hold; pass B found nothing. Pass C ran 28 new mutants: 23 killed, 1 equivalent, 1 not compiling, 3 survived, one of them AP11's far-fetched case and two killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AP12 | A `bad_blob` of the `key_retired` copy held it for the minute of `now`, where R12's hold since AO1 lasts the minute the copy was sealed in: a copy sealed at :59.5 and refused at :00.5 blocked its re-seal for a minute (A) | Low | The hold takes the minute of the copy's publish, which `outbox`'s re-seal makes its sealing minute; R12 and R16 say "the minute it was sealed in"; a T16 case |
+| AP13 | A stale re-queued `subscribe` waiting for a fresh one's `ok`, which R7 does not allow, was untested (C) | Medium | The delayed-endings test checks the first one leaves at once |
+| AP14 | A re-queued `subscribe` with the latest expiry going to the back of the queue was untested (C) | Low | A case with three channels expiring together |
+| AP15 | `on_error` handled `channel_quota` inline, where every other code has a helper (C) | Low | `channel_full` |
+| AP16 | A re-queued `subscribe` at the front, waiting for a stale one's answer, holds back R7's `Reconnect` for a `subscribe` queued behind it at the `hello` (A) | Far-fetched | None: it needs about ten re-queues within the window, and that `subscribe` then leaves under the fresh `hello` |
+| AP17 | R16 does not say what a `rate_limited` naming a channel neither awaiting `ok` nor subscribed, and no entry, does; the code does nothing (A) | Far-fetched | None: a server of spec 030 R8 names only a channel awaiting `ok` |
+
+**Round 3.** Fresh passes on the whole change. AP1–AP17 hold; no production defect against the spec. Pass C ran 12 new mutants: 8 killed, 4 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AP18 | An `error` that does nothing with the entry it names (an unknown code, a `bad_auth` naming a stranger's channel) still took it out of flight, so a server sending one every second had it published again every tick, up to R15's 30 a minute: the loop R12's hold prevents for a late `ack` (B) | Low | Every entry an `error` names is held until the minute it was published in ends, as R12 holds a late `key_retired` copy; `bad_blob`'s own hold folds into it; R16 and T16 amended |
+| AP19 | AP12 amended R12 and R16 with no History line, and this entry's decisions still said "the minute of `now`" (A) | Low | Both written |
+| AP20 | R13 did not list `abandon`, after which a `bad_blob` reports a changed status (A) | Low | R13 names it |
+| AP21 | A `rate_limited` or `channel_quota` renewed after its pause ended pausing again was untested (C) | Medium | A test of both |
+| AP22 | A fresh re-queued `subscribe` awaiting its `ok` not holding back a stale one was untested (C) | Medium | The delayed-endings test runs a second case, the first ending within the window |
+| AP23 | A `rate_limited` naming a subscribed channel and an entry not in flight pausing, not reconnecting, was untested (C) | Low | A case in the pause test |
+| AP24 | Two identical `ServerFull` values with different names in a test (C) | Low | One |
+
+Decisions taken without the human, by the advisor (three passes, unanimous): every entry an `error` names is held for the minute it was published in (AP18), since §2's malicious server must not turn its frames into the user's uploads.
+
+**Round 4.** Fresh passes on the whole change. AP1–AP24 hold; pass B found nothing; pass A found wording behind AP18, no code defect; pass C found test gaps only. Pass C ran 9 new mutants: 5 killed, 4 survived, each killed below. The audit closes with this round (`CLAUDE.md`, the audit): pass A's findings change no behaviour, and the rest are test gaps, now closed.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AP25 | Since AP18 a held ordinary entry reaches `outbox` and `expire_outbox` as in flight, with R22's minute of grace, where R9 and R14 said "in flight or queued" (A) | Low | R9 and R14 say "in flight, queued or held"; a `NotDelivered` comes at most a minute later, the grace an entry in flight already has |
+| AP26 | The comments of the hold still spoke of the `key_retired` copy alone (A) | Low | They name the entries an `error` names |
+| AP27 | The Interface did not say tests/limits.rs holds R14's test of a paused channel (A) | Low | It says so |
+| AP28 | A pause renewed while it runs was untested, for `rate_limited`, `server_full` and `channel_quota` (C) | Medium | A case for each |
+| AP29 | A `bad_blob` naming another channel than its entry's was untested (C) | Medium | A case: the entry's own channel abandons it |
+| AP30 | `Queued::again` did not read as a predicate (C) | Low | Renamed `requeued` |
+
+Decisions taken without the human, by the advisor (three passes, unanimous): a paused channel calls `expire_outbox` on a tick (AP4), since §2's malicious server must not hold back the client's own TTL; R14 and spec 021 R23 amended. Taken by the author against the spec, which pass A found consistent: `channel_quota` pauses the named entry's channel, else the named channel when it is the session's, else every channel; a `bad_auth`, `bad_ttl` or `channel_quota` naming a channel not of the session does nothing; `bad_blob` acts only on an entry in flight on this connection, and an `abandon` that finds no ordinary entry holds the copy for the minute it was published in (AP12); under R15, `outbox` is still called and the blobs past the limit come back later.
+
 ## Audit AO
 
 **2026-10-12 — Audit AO, the code audit of slice (c2) of spec 028-session-sans-io (branch `028-acks`): the `ack` routed to its channel, the clock samples, the outcomes and the hold on a late `key_retired` copy (R11, R12), `Event::StatusChanged` (R13), the `outbox` and `expire_outbox` on every tick (R14), and the freeze after a failed `acked` or `expire_outbox` (R10); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** One production defect (AO1), no High finding. Pass C ran 38 mutants: 26 killed, 6 equivalent, 6 survived, each killed below, as is pass A's.

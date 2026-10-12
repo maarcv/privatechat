@@ -63,7 +63,24 @@ pub enum Event {
         /// The channel.
         channel: [u8; 16],
     },
-    /// The server speaks no version of this app (R2).
+    /// The server refused the channel's `subscribe`: it is not subscribed
+    /// again on this connection (R16).
+    SubscribeRefused {
+        /// The channel.
+        channel: [u8; 16],
+    },
+    /// The channel is over its quota on the server: it publishes nothing
+    /// for a minute (R16).
+    ChannelFull {
+        /// The channel.
+        channel: [u8; 16],
+    },
+    /// The server is full: nothing is published for a minute (R16).
+    ServerFull {
+        /// The connection.
+        connection: u64,
+    },
+    /// The server speaks no version of this app (R2, R16).
     UnsupportedServer {
         /// The connection.
         connection: u64,
@@ -97,6 +114,11 @@ impl fmt::Debug for Event {
             Event::StatusChanged { channel } => {
                 write!(f, "StatusChanged({})", key_prefix(channel))
             }
+            Event::SubscribeRefused { channel } => {
+                write!(f, "SubscribeRefused({})", key_prefix(channel))
+            }
+            Event::ChannelFull { channel } => write!(f, "ChannelFull({})", key_prefix(channel)),
+            Event::ServerFull { connection } => write!(f, "ServerFull({connection})"),
             Event::UnsupportedServer { connection } => {
                 write!(f, "UnsupportedServer({connection})")
             }

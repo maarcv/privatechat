@@ -44,7 +44,7 @@ impl Session {
         let awaiting = self
             .subscriptions
             .values()
-            .any(|state| matches!(state, Subscription::AwaitingOk));
+            .any(|state| matches!(state, Subscription::AwaitingOk { .. }));
         if awaiting && expired(self.last_frame, SILENCE_MS, now) {
             self.reconnect(step);
         }
@@ -91,7 +91,8 @@ impl Session {
         now: u64,
         step: &mut Step,
     ) {
-        let Some(state @ Subscription::AwaitingOk) = self.subscriptions.get_mut(&channel_id) else {
+        let Some(state @ Subscription::AwaitingOk { .. }) = self.subscriptions.get_mut(&channel_id)
+        else {
             return;
         };
         *state = Subscription::Subscribed;
@@ -128,14 +129,16 @@ impl Session {
         step.events.push(Event::Subscribed {
             channel: channel_id,
         });
-        if !self.is_frozen(&channel_id) {
+        if !self.is_frozen(&channel_id) && !self.is_paused(&channel_id, now) {
             self.publish_outbox(channel, now, step);
         }
     }
 
     /// Queues a `publish` for each `outbox` entry not in flight, only those
-    /// R10's stop lets leave, and reports the entries that left it unsent
-    /// (R9, R14); a store error freezes the channel (R10).
+    /// R10's stop lets leave and as many as R15's rate lets out, and
+    /// reports the entries that left it unsent (R9, R14); a store error
+    /// freezes the channel (R10). The entries held back stay in the
+    /// `outbox` for a later call.
     pub(super) fn publish_outbox(&mut self, channel: &mut Channel, now: u64, step: &mut Step) {
         let channel_id = channel.config().channel_id();
         let in_flight = self.unanswered(&channel_id, now);
@@ -156,7 +159,8 @@ impl Session {
                 sent_at,
             });
         }
-        for (client_ref, blob) in publish {
+        let left = self.publishes_left(now);
+        for (client_ref, blob) in publish.into_iter().take(left) {
             let frame = Frame::Publish {
                 channel_id,
                 client_ref: client_ref.bytes,
@@ -170,6 +174,7 @@ impl Session {
                         published_at: now,
                     };
                     self.in_flight.insert(client_ref, flight);
+                    self.published.push(now);
                 }
                 // A blob the channel sealed always fits a frame.
                 Err(_) => return self.reconnect(step),
@@ -177,9 +182,10 @@ impl Session {
         }
     }
 
-    /// R14 on a tick: every subscribed channel publishes its `outbox`, and
-    /// every other channel of the session drops its stale entries; a
-    /// frozen channel is not called (R10).
+    /// R14 on a tick: every subscribed channel not paused publishes its
+    /// `outbox`, and every other channel drops its stale entries, so that
+    /// a server renewing a pause cannot hold back their `NotDelivered`
+    /// (R16); a frozen channel is not called (R10).
     pub(super) fn tick_outboxes(&mut self, channels: &mut Channels, now: u64, step: &mut Step) {
         for channel_id in self.channel_ids.clone() {
             if self.is_frozen(&channel_id) {
@@ -188,7 +194,11 @@ impl Session {
             let Some(channel) = find_mut(channels, &channel_id) else {
                 continue;
             };
-            if let Some(Subscription::Subscribed) = self.subscriptions.get(&channel_id) {
+            let subscribed = matches!(
+                self.subscriptions.get(&channel_id),
+                Some(Subscription::Subscribed)
+            );
+            if subscribed && !self.is_paused(&channel_id, now) {
                 self.publish_outbox(channel, now, step);
             } else {
                 self.expire_outbox(channel, now, step);
@@ -196,8 +206,8 @@ impl Session {
         }
     }
 
-    /// The stale entries of a channel not subscribed leave its `outbox`
-    /// unsent (R14); a store error freezes it (R10).
+    /// The stale entries of a channel not subscribed, or paused, leave its
+    /// `outbox` unsent (R14); a store error freezes it (R10).
     fn expire_outbox(&mut self, channel: &mut Channel, now: u64, step: &mut Step) {
         let channel_id = channel.config().channel_id();
         // `on_tick`, its one caller, watched the channel already (R13).

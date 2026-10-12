@@ -11,6 +11,7 @@ use crate::storage::Vault;
 use crate::testing::{MemoryServer, MemoryVault};
 
 mod acks;
+mod limits;
 mod ok;
 mod tick;
 mod traffic;
@@ -84,7 +85,7 @@ fn subscribes(session: &mut Session) -> Vec<([u8; 32], Option<u64>, [u8; 64])> {
 }
 
 /// The `channel_id` each written `subscribe` names, by its `pk_ch`.
-fn subscribed_ids(session: &mut Session, channels: &Channels) -> Vec<[u8; 16]> {
+pub(super) fn subscribed_ids(session: &mut Session, channels: &Channels) -> Vec<[u8; 16]> {
     subscribes(session)
         .iter()
         .map(|(pk_ch, ..)| {
@@ -1003,4 +1004,16 @@ fn s028_t09_r09_ok_marks_subscribed() {
         connection: CONNECTION,
     };
     assert_eq!(format!("{unsupported:?}"), "UnsupportedServer(7)");
+    let refused = Event::SubscribeRefused {
+        channel: [0xab; 16],
+    };
+    assert_eq!(format!("{refused:?}"), "SubscribeRefused(abababab)");
+    let full = Event::ChannelFull {
+        channel: [0xab; 16],
+    };
+    assert_eq!(format!("{full:?}"), "ChannelFull(abababab)");
+    let server_full = Event::ServerFull {
+        connection: CONNECTION,
+    };
+    assert_eq!(format!("{server_full:?}"), "ServerFull(7)");
 }

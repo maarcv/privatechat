@@ -59,7 +59,7 @@ The peers are spec 022-peers-tofu's, the message list 023-ttl-purge's, a receive
 **The `outbox`**
 
 - R22 `outbox(now, in_flight, withhold_current)` MUST remove, in one commit, every ordinary entry whose `sent_at + ttl_ms + 360 000 < now` when it is not in `in_flight`, or `sent_at + ttl_ms + 420 000 < now` when it is (a minute of grace for its `ack`), appending its kept signature and a not-delivered record, and return an `OutboxStep` with, in `outbox` order, the (`ClientRef`, blob) of every remaining entry not in `in_flight`, except the pending `key_retired` while spec 025-identity-regen R4 holds it back — only the pending `key_retired` and the entries `under_retired_key` when `withhold_current` is set (spec 028-session-sans-io R10) — and the (`ClientRef`, `sent_at`) of every entry it removed; with nothing to remove, and no re-seal of spec 025-identity-regen, it MUST NOT commit. When that commit fails, `outbox` MUST return its `Error::Store(e)` and hand out nothing, memory unchanged (R2), so that a channel whose disk cannot be written publishes nothing until it is reopened and probed (spec 027-core-api R12, R14).
-- R23 `expire_outbox(now, in_flight)` MUST do the removal of R22 alone — no blob handed out, no re-seal — for a channel that is not subscribed (spec 027-core-api R12), and, when the commit fails, R22's error with nothing reported.
+- R23 `expire_outbox(now, in_flight)` MUST do the removal of R22 alone — no blob handed out, no re-seal — for a channel that is not subscribed (spec 027-core-api R12) or whose publishing is paused (spec 028-session-sans-io R14, R16), and, when the commit fails, R22's error with nothing reported.
 
 **Gaps and status**
 
@@ -282,3 +282,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-10-06 amended after audit AG round 2 (`docs/audit-log.md`, decision of the human reviewer): a gap goes with its peer's record (R24)
 - 2026-10-09 amended after audit AH round 1 (`docs/audit-log.md`): R22 names the `key_retired` that spec 025-identity-regen R4 holds back
 - 2026-10-09 the note that the hooks of specs 024 and 026 change nothing until they are implemented removed (`docs/audit-log.md`, audit AI)
+- 2026-10-12 R23 names the paused channel of spec 028-session-sans-io R14 among the callers of `expire_outbox` (`docs/audit-log.md`, audit AP)

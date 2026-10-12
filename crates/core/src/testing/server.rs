@@ -4,8 +4,8 @@
 //! it, then `ok`; publishes stored and acknowledged in the order received)
 //! and checks two things of spec 031 R5: the nonce's age, and the signature
 //! over the configured hosts. It has no TTL range check, no window for the
-//! previous nonce, no quota and no rate limit; the slices that need them add
-//! them. Time is a parameter, as everywhere in `core`.
+//! previous nonce and no quota; its one rate limit is [`MemoryServer::end`],
+//! called by the test. Time is a parameter, as everywhere in `core`.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -13,7 +13,9 @@ use crate::crypto::{self, PublicKey, Signature};
 use crate::proto::auth::auth_message;
 use crate::proto::config::{self, ChannelId};
 use crate::proto::envelope::ttl_ms;
-use crate::session::frames::{CODE_BAD_AUTH, CODE_NONCE_EXPIRED, CODE_NOT_SUBSCRIBED, Frame};
+use crate::session::frames::{
+    CODE_BAD_AUTH, CODE_NONCE_EXPIRED, CODE_NOT_SUBSCRIBED, CODE_RATE_LIMITED, Frame,
+};
 
 /// How long a `hello`'s nonce is valid (`docs/spec.md` §6).
 const NONCE_VALIDITY_MS: u64 = 60_000;
@@ -82,6 +84,21 @@ impl MemoryServer {
     /// The socket closed.
     pub fn disconnect(&mut self, connection: u64) {
         self.connections.remove(&connection);
+    }
+
+    /// Ends the subscription of `channel_id` on `connection` while it
+    /// catches up, as one whose held pushes overflow (spec 030-ws-protocol
+    /// R8): `error{rate_limited, channel_id}`, and no push or `ok` of it
+    /// after; a subscription past its `ok`, or none, is left alone.
+    pub fn end(&mut self, connection: u64, channel_id: &[u8; 16]) {
+        let Some(socket) = self.connections.get_mut(&connection) else {
+            return;
+        };
+        if let Some(Subscription::CatchingUp { .. }) = socket.subscriptions.get(channel_id) {
+            socket.subscriptions.remove(channel_id);
+            let ending = error(CODE_RATE_LIMITED, *channel_id, None);
+            socket.ready.push_back(ending);
+        }
     }
 
     /// The blobs stored for `channel_id`, as `(server_id, received_at)`, in

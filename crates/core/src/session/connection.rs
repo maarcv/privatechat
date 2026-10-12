@@ -6,16 +6,14 @@
 //! These slices hold the connection and the subscription (R1, R2 and
 //! R5–R7), the truncation (R8), the `ok` with what follows it (R9), the
 //! traffic with its stalls and the `write_failed` mark (R10), the acks,
-//! outcomes and status events (R11–R13), and the `outbox` after a send
-//! and on every tick (R14). Later slices of spec 028 add the publish rate
-//! (R15), the error codes other than `nonce_expired` (R16), and, with
-//! `rate_limited`, the one clause of R7 only it can reach: a `subscribe`
-//! queued again after it is released however old its nonce.
+//! outcomes and status events (R11–R13), the `outbox` after a send and on
+//! every tick (R14), the publish rate (R15) and the error codes (R16). A
+//! later slice of spec 028 checks the no-oracle property (R18).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use super::channel::{Channel, ChannelStatus, ClientRef};
-use super::frames::{CODE_NONCE_EXPIRED, Frame, is_supported};
+use super::frames::{Frame, is_supported};
 use crate::Error;
 use crate::crypto;
 use crate::proto::auth::auth_message;
@@ -28,6 +26,7 @@ use traffic::Stall;
 pub use event::Event;
 
 mod event;
+mod limits;
 mod outcomes;
 mod sync;
 #[cfg(test)]
@@ -63,8 +62,21 @@ pub(crate) struct Step {
 
 /// Where a channel's subscription stands on this connection.
 enum Subscription {
-    AwaitingOk,
+    /// `stale` when its `subscribe` was queued again after a
+    /// `rate_limited` and signed a nonce past R7's window.
+    AwaitingOk {
+        stale: bool,
+    },
     Subscribed,
+}
+
+/// A `subscribe` not yet released.
+#[derive(Clone, Copy)]
+struct Queued {
+    channel_id: [u8; 16],
+    /// Queued again after a `rate_limited` ended its subscription:
+    /// released however old the nonce (R7, R16).
+    requeued: bool,
 }
 
 /// The latest `hello` of the connection.
@@ -94,7 +106,9 @@ pub(crate) struct Session {
     /// The channels the `Device` refuses to subscribe again (R5).
     skip: Vec<[u8; 16]>,
     /// The `subscribe`s not yet released, in release order (R6).
-    queue: VecDeque<[u8; 16]>,
+    queue: VecDeque<Queued>,
+    /// The channels a `bad_auth` or `bad_ttl` refused (R6, R16).
+    refused: BTreeSet<[u8; 16]>,
     /// When the last `subscribe` of the connection was released (R6).
     last_release: Option<u64>,
     subscriptions: BTreeMap<[u8; 16], Subscription>,
@@ -108,7 +122,8 @@ pub(crate) struct Session {
     sync_stopped: bool,
     /// The entries published on this connection and not yet answered.
     in_flight: BTreeMap<ClientRef, Flight>,
-    /// The `key_retired` copies held after a late `ack` (R12).
+    /// The entries held after a late `ack` of a `key_retired` copy (R12)
+    /// or an `error` naming them (R16).
     held: BTreeMap<ClientRef, Hold>,
     /// The channels the current step called, with their status before
     /// (R13).
@@ -118,6 +133,13 @@ pub(crate) struct Session {
     /// The channels the `Device` marks `write_failed`, frozen on every
     /// connection until it clears them (R5, R10).
     write_failed: BTreeSet<[u8; 16]>,
+    /// When each channel's `channel_quota` came (R16).
+    paused: BTreeMap<[u8; 16], u64>,
+    /// When the latest `rate_limited` or `server_full` that stops every
+    /// channel came (R16).
+    paused_all: Option<u64>,
+    /// When each `publish` of the last minute was queued (R15).
+    published: Vec<u64>,
     outgoing: Vec<Vec<u8>>,
 }
 
@@ -131,6 +153,7 @@ impl Session {
             link: Link::Closed,
             skip: Vec::new(),
             queue: VecDeque::new(),
+            refused: BTreeSet::new(),
             last_release: None,
             subscriptions: BTreeMap::new(),
             truncations: BTreeMap::new(),
@@ -142,6 +165,9 @@ impl Session {
             watched: Vec::new(),
             stalls: BTreeMap::new(),
             write_failed: BTreeSet::new(),
+            paused: BTreeMap::new(),
+            paused_all: None,
+            published: Vec::new(),
             outgoing: Vec::new(),
         }
     }
@@ -199,8 +225,14 @@ impl Session {
                 &mut step,
             ),
             Ok(Frame::Error {
-                code, channel_id, ..
-            }) => self.on_error(&code, channel_id, now, &mut step),
+                code,
+                channel_id,
+                client_ref,
+                ..
+            }) => {
+                let client_ref = client_ref.map(|bytes| ClientRef { bytes });
+                self.on_error(&code, channel_id, client_ref, channels, now, &mut step);
+            }
             Ok(_) => {}
         }
         self.finish(channels, &mut step);
@@ -240,8 +272,8 @@ impl Session {
 
     /// After `encrypt` or `regenerate_identity` of a channel: a stopped
     /// channel that regenerated its key asks for a new connection and
-    /// queues nothing (R10); a subscribed one publishes its `outbox`
-    /// (R14).
+    /// queues nothing (R10); a subscribed one not paused publishes its
+    /// `outbox` (R14, R16).
     pub(crate) fn after_send(
         &mut self,
         channel_id: [u8; 16],
@@ -258,6 +290,7 @@ impl Session {
             self.subscriptions.get(&channel_id),
             Some(Subscription::Subscribed)
         ) && !self.is_frozen(&channel_id)
+            && !self.is_paused(&channel_id, now)
         {
             self.publish_outbox(channel, now, &mut step);
         }
@@ -281,11 +314,7 @@ impl Session {
         step: &mut Step,
     ) {
         if !is_supported(proto_versions) {
-            self.forget_connection(Link::Closed);
-            step.events.push(Event::UnsupportedServer {
-                connection: self.connection,
-            });
-            return;
+            return self.unsupported(step);
         }
         let hello = Hello {
             server_nonce,
@@ -295,7 +324,11 @@ impl Session {
         let mut pending: Vec<(u64, [u8; 16])> = self
             .channel_ids
             .iter()
-            .filter(|id| !self.subscriptions.contains_key(*id) && !self.skip.contains(id))
+            .filter(|id| {
+                !self.subscriptions.contains_key(*id)
+                    && !self.refused.contains(*id)
+                    && !self.skip.contains(id)
+            })
             .filter_map(|id| find(channels, id).map(|channel| (release_order(channel, now), *id)))
             .collect();
         // Stable: equal expiries keep the `Device`'s order.
@@ -305,47 +338,55 @@ impl Session {
                 self.decide_truncation(channel, now, step);
             }
         }
-        self.queue = pending.into_iter().map(|(_, id)| id).collect();
+        // A channel queued again after a `rate_limited` waits under this
+        // fresh nonce like any other (R7).
+        self.queue = pending
+            .into_iter()
+            .map(|(_, channel_id)| Queued {
+                channel_id,
+                requeued: false,
+            })
+            .collect();
         self.release(hello, channels, now, step);
     }
 
-    /// `nonce_expired` (R16): the unreleased `subscribe`s are discarded, the
-    /// named channel is again not subscribed, and the wait for a fresh
-    /// `hello` starts (R7), unless one is already running. One naming a
-    /// subscribed channel, which no `subscribe` awaits, is a `Reconnect`:
-    /// subscribing it again would judge its truncation by a `last` older
-    /// than the ticks' `synced`, and hide a deletion (R8, R9).
-    fn on_error(&mut self, code: &str, channel_id: Option<[u8; 16]>, now: u64, step: &mut Step) {
-        if code != CODE_NONCE_EXPIRED {
-            return;
-        }
-        let named = channel_id.and_then(|channel_id| self.subscriptions.get(&channel_id));
-        if let Some(Subscription::Subscribed) = named {
-            return self.reconnect(step);
-        }
-        self.queue.clear();
-        if let Link::Ready(_) = self.link {
-            self.link = Link::AwaitingHello { since: now };
-        }
-        match channel_id {
-            Some(channel_id) => {
-                self.subscriptions.remove(&channel_id);
-            }
-            None => self.reconnect(step),
-        }
+    /// R2: a server that speaks no version of this app; nothing is sent
+    /// until the next `on_connect`.
+    fn unsupported(&mut self, step: &mut Step) {
+        self.forget_connection(Link::Closed);
+        step.events.push(Event::UnsupportedServer {
+            connection: self.connection,
+        });
     }
 
     /// Releases the next `subscribe` when the spacing of R6 allows it, or
-    /// produces `Reconnect` when its `hello` is too old to sign (R7). A time
-    /// recorded later than `now` counts as long past, so that a clock set
-    /// back cannot hold the queue.
+    /// produces `Reconnect` when its `hello` is too old to sign (R7), but
+    /// for one queued again after a `rate_limited`, released however old
+    /// the nonce, one such at a time. A time recorded later than `now`
+    /// counts as long past, so that a clock set back cannot hold the
+    /// queue.
     fn release(&mut self, hello: Hello, channels: &Channels, now: u64, step: &mut Step) {
-        let Some(channel_id) = self.queue.front().copied() else {
+        let Some(Queued {
+            channel_id,
+            requeued,
+        }) = self.queue.front().copied()
+        else {
             return;
         };
-        if expired(hello.at, NONCE_WINDOW_MS, now) {
+        let stale = expired(hello.at, NONCE_WINDOW_MS, now);
+        if stale && !requeued {
             self.queue.clear();
             self.reconnect(step);
+            return;
+        }
+        // The server answers a stale `subscribe` with `nonce_expired` and a
+        // fresh `hello`; a second one meeting that `hello` before the
+        // client reads it would get `bad_auth` (R7).
+        let stale_unanswered = self
+            .subscriptions
+            .values()
+            .any(|state| matches!(state, Subscription::AwaitingOk { stale: true }));
+        if stale && stale_unanswered {
             return;
         }
         let spaced = self
@@ -362,7 +403,7 @@ impl Session {
             Ok(frame) => {
                 self.outgoing.push(frame);
                 self.subscriptions
-                    .insert(channel_id, Subscription::AwaitingOk);
+                    .insert(channel_id, Subscription::AwaitingOk { stale });
                 self.last_release = Some(now);
             }
             // Only libsodium failing can get here.
@@ -386,6 +427,7 @@ impl Session {
         self.link = link;
         self.skip.clear();
         self.queue.clear();
+        self.refused.clear();
         self.last_release = None;
         self.subscriptions.clear();
         self.truncations.clear();
@@ -397,6 +439,9 @@ impl Session {
             .iter()
             .map(|channel_id| (*channel_id, Stall::Frozen))
             .collect();
+        self.paused.clear();
+        self.paused_all = None;
+        self.published.clear();
         self.outgoing.clear();
     }
 }
