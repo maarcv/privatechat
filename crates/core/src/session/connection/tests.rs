@@ -10,7 +10,9 @@ use crate::session::frames::Frame;
 use crate::storage::Vault;
 use crate::testing::{MemoryServer, MemoryVault};
 
+mod acks;
 mod ok;
+mod tick;
 mod traffic;
 mod truncation;
 
@@ -26,7 +28,14 @@ fn channel(byte: u8, ttl_seconds: u32, created_at: u64) -> Channel {
     let k_ch = crypto::Secret::from_bytes([byte; 32]);
     let config = Config::from_parts(k_ch, SERVER, ttl_seconds, "room", created_at).unwrap();
     let store = MemoryVault::new().create(&config.channel_id()).unwrap();
-    Channel::create(&config, store).unwrap().0
+    opened(Channel::create(&config, store).unwrap().0)
+}
+
+/// `channel` once the `Device` read its lists, so that its first step
+/// reports no `StatusChanged` (spec 021-channel-session R1).
+fn opened(mut channel: Channel) -> Channel {
+    channel.take_peers_changed();
+    channel
 }
 
 /// The ids of `channels`, in order.
@@ -977,6 +986,18 @@ fn s028_t09_r09_ok_marks_subscribed() {
         sent_at: 5,
     };
     assert_eq!(format!("{lost:?}"), "NotDelivered(abababab, 5)");
+    let delivered = Event::Delivered {
+        channel: [0xab; 16],
+        client_ref: crate::session::channel::ClientRef { bytes: [0xcd; 16] },
+        server_id: [0xef; 16],
+        received_at: 5,
+        expires_at: 6,
+    };
+    assert_eq!(format!("{delivered:?}"), "Delivered(abababab, 5)");
+    let changed = Event::StatusChanged {
+        channel: [0xab; 16],
+    };
+    assert_eq!(format!("{changed:?}"), "StatusChanged(abababab)");
     assert_eq!(format!("{:?}", reconnect()), "Reconnect(7)");
     let unsupported = Event::UnsupportedServer {
         connection: CONNECTION,

@@ -1,7 +1,7 @@
 //! Tests of spec 028 R9: what an `ok` and the ticks after it call, the
 //! silence before an `ok`, and the 5 000 ms gap between calls.
 
-use super::{DAY, T0, channel, connected, hello, ids, ok, reconnect};
+use super::{DAY, T0, channel, connected, hello, ids, ok, opened, reconnect};
 use crate::session::channel::Channel;
 use crate::session::connection::{Channels, Event, Session};
 use crate::session::frames::Frame;
@@ -122,7 +122,7 @@ fn failing_channel(byte: u8, ttl_seconds: u32) -> (Channels, Faults) {
     let store = vault.create(&config.channel_id()).unwrap();
     let failing = Box::new(FailingStore::new(store, faults.clone()));
     let (channel, _) = Channel::create(config, failing).unwrap();
-    (vec![channel], faults)
+    (vec![opened(channel)], faults)
 }
 
 /// Spec 028, R9: a store failure of `synced` at the `ok` goes to `failed`

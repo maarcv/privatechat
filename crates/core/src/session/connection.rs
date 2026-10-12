@@ -5,29 +5,30 @@
 //!
 //! These slices hold the connection and the subscription (R1, R2 and
 //! R5–R7), the truncation (R8), the `ok` with what follows it (R9), the
-//! traffic with its stalls and the `write_failed` mark (R10) and
-//! `after_send` (R14). Later slices of spec 028 add outcomes, acks and
-//! the `outbox` on tick (R11–R14), with the freeze after a failed `acked`
-//! or `expire_outbox` (R10), the publish rate (R15), the error codes other
-//! than `nonce_expired` (R16), and, with `rate_limited`, the one clause of
-//! R7 only it can reach: a `subscribe` queued again after it is released
-//! however old its nonce.
+//! traffic with its stalls and the `write_failed` mark (R10), the acks,
+//! outcomes and status events (R11–R13), and the `outbox` after a send
+//! and on every tick (R14). Later slices of spec 028 add the publish rate
+//! (R15), the error codes other than `nonce_expired` (R16), and, with
+//! `rate_limited`, the one clause of R7 only it can reach: a `subscribe`
+//! queued again after it is released however old its nonce.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use super::channel::{Channel, ClientRef};
+use super::channel::{Channel, ChannelStatus, ClientRef};
 use super::frames::{CODE_NONCE_EXPIRED, Frame, is_supported};
 use crate::Error;
 use crate::crypto;
 use crate::proto::auth::auth_message;
 use crate::proto::envelope::ttl_ms;
 use crate::storage::StoreError;
+use outcomes::{Flight, Hold};
 use sync::Truncation;
 use traffic::Stall;
 
 pub use event::Event;
 
 mod event;
+mod outcomes;
 mod sync;
 #[cfg(test)]
 mod tests;
@@ -105,9 +106,13 @@ pub(crate) struct Session {
     /// R9's stop after a gap between calls: no `synced` until the next
     /// connection.
     sync_stopped: bool,
-    /// The entries published on this connection and not yet answered, with
-    /// their channel.
-    in_flight: BTreeMap<ClientRef, [u8; 16]>,
+    /// The entries published on this connection and not yet answered.
+    in_flight: BTreeMap<ClientRef, Flight>,
+    /// The `key_retired` copies held after a late `ack` (R12).
+    held: BTreeMap<ClientRef, Hold>,
+    /// The channels the current step called, with their status before
+    /// (R13).
+    watched: Vec<([u8; 16], ChannelStatus)>,
     /// The channels whose pushes are dropped on this connection (R10).
     stalls: BTreeMap<[u8; 16], Stall>,
     /// The channels the `Device` marks `write_failed`, frozen on every
@@ -133,6 +138,8 @@ impl Session {
             last_frame: 0,
             sync_stopped: false,
             in_flight: BTreeMap::new(),
+            held: BTreeMap::new(),
+            watched: Vec::new(),
             stalls: BTreeMap::new(),
             write_failed: BTreeSet::new(),
             outgoing: Vec::new(),
@@ -180,21 +187,45 @@ impl Session {
                 now,
                 &mut step,
             ),
+            Ok(Frame::Ack {
+                client_ref,
+                server_id,
+                received_at,
+            }) => self.on_ack(
+                ClientRef { bytes: client_ref },
+                (server_id, received_at),
+                channels,
+                now,
+                &mut step,
+            ),
             Ok(Frame::Error {
                 code, channel_id, ..
             }) => self.on_error(&code, channel_id, now, &mut step),
             Ok(_) => {}
         }
+        self.finish(channels, &mut step);
         step
     }
 
     /// The clock moved: check the gap since the last call and the silence
-    /// before an `ok`, sync the subscribed channels (R9), check the wait
-    /// for a `hello` (R7) and release the next `subscribe` (R6).
+    /// before an `ok`, sync the subscribed channels (R9), publish or expire
+    /// every `outbox` (R14), check the wait for a `hello` (R7) and release
+    /// the next `subscribe` (R6).
     pub(crate) fn on_tick(&mut self, channels: &mut Channels, now: u64) -> Step {
         let mut step = Step::default();
+        // Before `synced`, which moves the time the truncation banner is
+        // judged by: a banner that lapses on a tick changes the status
+        // (R13). Only this session's channels: the others belong to other
+        // connections' steps.
+        for channel in channels.iter() {
+            let channel_id = channel.config().channel_id();
+            if self.channel_ids.contains(&channel_id) && !self.is_frozen(&channel_id) {
+                self.watch(channel);
+            }
+        }
         self.check_gap(now, &mut step);
         self.keep_synced(channels, now, &mut step);
+        self.tick_outboxes(channels, now, &mut step);
         self.check_room(channels, &mut step);
         match self.link {
             Link::AwaitingHello { since } if expired(since, HELLO_WAIT_MS, now) => {
@@ -203,6 +234,7 @@ impl Session {
             Link::Ready(hello) => self.release(hello, channels, now, &mut step),
             _ => {}
         }
+        self.finish(channels, &mut step);
         step
     }
 
@@ -229,6 +261,7 @@ impl Session {
         {
             self.publish_outbox(channel, now, &mut step);
         }
+        self.finish(channels, &mut step);
         step
     }
 
@@ -358,6 +391,7 @@ impl Session {
         self.truncations.clear();
         self.sync_stopped = false;
         self.in_flight.clear();
+        self.held.clear();
         self.stalls = self
             .write_failed
             .iter()

@@ -50,7 +50,13 @@ impl Session {
             return;
         };
         let (blob, server_id, received_at) = arrival;
-        match self.stalls.get(&channel_id).copied() {
+        let stall = self.stalls.get(&channel_id).copied();
+        if !matches!(stall, Some(Stall::Frozen)) {
+            // A push may be backlog, held or buffered: never a live sample
+            // (R11).
+            self.sample(channel, received_at, now, false);
+        }
+        match stall {
             Some(Stall::Frozen) => {}
             Some(Stall::LogFull { stop, .. }) => {
                 self.check_stalled(channel, stop, blob, received_at, now, step);

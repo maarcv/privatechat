@@ -1,7 +1,7 @@
 //! Tests of spec 028 R8 and R9: the truncation decided when a `subscribe`
 //! is queued and again at its `ok`, and what the `ok` and the ticks call.
 
-use super::{DAY, SERVER, T0, channel, connected, error, hello, ids, ok};
+use super::{DAY, SERVER, T0, channel, connected, error, hello, ids, ok, opened};
 use crate::crypto::{Nonce, Secret};
 use crate::proto::config::Config;
 use crate::proto::envelope::{self, ChannelCtx, SenderKey};
@@ -166,7 +166,9 @@ fn s028_t08_r08_truncation_before_backlog() {
     // A quiet channel whose `synced_at` is recent, reopened from its store.
     let (mut channels, handle) = stored_channel(DAY, T0 - 2 * 86_400_000);
     channels[0].synced(T0 - 3_600_000).unwrap();
-    let mut reopened = vec![Channel::open_stored(Box::new(handle.reopen())).unwrap()];
+    let mut reopened = vec![opened(
+        Channel::open_stored(Box::new(handle.reopen())).unwrap(),
+    )];
     assert_eq!(reopened[0].synced_at(), Some(T0 - 3_600_000));
     let id = ids(&reopened)[0];
     let mut session = connected(&reopened, T0);
@@ -189,7 +191,10 @@ fn stored_channel(ttl_seconds: u32, created_at: u64) -> (Channels, MemoryStore) 
     let mut vault = MemoryVault::new();
     let store = vault.create(&config.channel_id()).unwrap();
     let handle = MemoryStore::handle(&vault, vault.dir_name(&config.channel_id()).unwrap());
-    (vec![Channel::create(&config, store).unwrap().0], handle)
+    (
+        vec![opened(Channel::create(&config, store).unwrap().0)],
+        handle,
+    )
 }
 
 /// The blob Bob seals with `counter` at `sent_at`, a whole minute.
@@ -225,6 +230,8 @@ fn s028_t08_r08_backlog_after_truncation_no_gap() {
             .unwrap()
             .is_some()
     );
+    // Bob's first message, seen by the client.
+    channels[0].take_peers_changed();
     let at = T0 + 86_400_000 + 420_000;
     let mut session = connected(&channels, at);
     let step = session.on_frame(&hello(1, &[1]), &mut channels, at);
