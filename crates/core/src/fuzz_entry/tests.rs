@@ -459,22 +459,37 @@ fn s028_t03_r03_session_on_frame_reads_frames() {
     let ok = Frame::Ok { channel_id }.encode().unwrap();
     let bad = [0u8, 0, 0, 0, 1, 7];
     // The fixed `hello` and `ok` subscribe the channel with no truncation
-    // at `text_k1`'s `now`, then the input's events follow.
-    let subscribed = || crate::Event::Subscribed {
-        channel: channel_id,
+    // at `text_k1`'s `now`, its first step telling the client to read its
+    // status (spec 028 R13), then the input's events follow.
+    let subscribed = || {
+        [
+            crate::Event::Subscribed {
+                channel: channel_id,
+            },
+            crate::Event::StatusChanged {
+                channel: channel_id,
+            },
+        ]
     };
-    let reconnect = [subscribed(), crate::Event::Reconnect { connection: 0 }];
+    let reconnect = || {
+        let [subscribed, status] = subscribed();
+        [
+            subscribed,
+            status,
+            crate::Event::Reconnect { connection: 0 },
+        ]
+    };
     assert_eq!(
         session_on_frame_verdict(&framed(&ok)).unwrap().0,
-        [subscribed()]
+        subscribed()
     );
     assert_eq!(
         session_on_frame_verdict(&framed(&bad)).unwrap().0,
-        reconnect
+        reconnect()
     );
     let input = [framed(&ok), framed(&bad), framed(&bad)[..5].to_vec()].concat();
-    assert_eq!(session_on_frame_verdict(&input).unwrap().0, reconnect);
-    assert_eq!(session_on_frame_verdict(&[0]).unwrap().0, [subscribed()]);
+    assert_eq!(session_on_frame_verdict(&input).unwrap().0, reconnect());
+    assert_eq!(session_on_frame_verdict(&[0]).unwrap().0, subscribed());
     // The channel subscribed is `text_k1`'s: a `nonce_expired` naming it is
     // a `Reconnect` (R16), one naming another channel is not.
     let nonce_expired = |channel_id| {
@@ -488,9 +503,9 @@ fn s028_t03_r03_session_on_frame_reads_frames() {
         .unwrap()
     };
     let named = framed(&nonce_expired(channel_id));
-    assert_eq!(session_on_frame_verdict(&named).unwrap().0, reconnect);
+    assert_eq!(session_on_frame_verdict(&named).unwrap().0, reconnect());
     let other = framed(&nonce_expired([0x10; 16]));
-    assert_eq!(session_on_frame_verdict(&other).unwrap().0, [subscribed()]);
+    assert_eq!(session_on_frame_verdict(&other).unwrap().0, subscribed());
     // A seed's `push` of a 013 blob reaches `decrypt`, which alone moves
     // the cursor (R10).
     // As `scripts/fuzz_seeds.py` builds it, from the vector itself.

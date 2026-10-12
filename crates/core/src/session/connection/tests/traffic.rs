@@ -2,7 +2,7 @@
 //! stall, the stop after one's own key is used elsewhere, and the freeze
 //! after another store error.
 
-use super::{DAY, T0, channel, connected, hello, ids, ok, reconnect};
+use super::{DAY, T0, channel, connected, hello, ids, ok, opened, reconnect};
 use crate::session::channel::{Channel, ClientRef, key_prefix};
 use crate::session::connection::{Channels, Event, Session};
 use crate::session::frames::Frame;
@@ -18,7 +18,7 @@ const FILL_EXPIRES: u64 = T0 + 5_000;
 
 /// A one-day channel of key 1 over a store that fails on demand, a handle
 /// to its bytes, and its faults.
-fn alice() -> (Channels, MemoryStore, Faults) {
+pub(super) fn alice() -> (Channels, MemoryStore, Faults) {
     let faults = Faults::new();
     let mut vault = MemoryVault::new();
     let template = channel(1, DAY, T0);
@@ -27,11 +27,11 @@ fn alice() -> (Channels, MemoryStore, Faults) {
     let handle = MemoryStore::handle(&vault, *store.name());
     let failing = Box::new(FailingStore::new(store, faults.clone()));
     let (channel, _) = Channel::create(config, failing).unwrap();
-    (vec![channel], handle, faults)
+    (vec![opened(channel)], handle, faults)
 }
 
 /// Another member of `channel`'s channel, with a key of its own.
-fn member(channel: &Channel) -> Channel {
+pub(super) fn member(channel: &Channel) -> Channel {
     let config = channel.config();
     let store = MemoryVault::new().create(&config.channel_id()).unwrap();
     Channel::create(config, store).unwrap().0
@@ -39,12 +39,12 @@ fn member(channel: &Channel) -> Channel {
 
 /// A device holding a copy of the channel behind `handle`, its key
 /// included: a thief of one's key.
-fn thief_of(handle: &MemoryStore) -> Channel {
+pub(super) fn thief_of(handle: &MemoryStore) -> Channel {
     Channel::open_stored(Box::new(handle.copy())).unwrap()
 }
 
 /// The blob `sender` seals for `text` at `T0`.
-fn sealed(sender: &mut Channel, text: &str) -> Vec<u8> {
+pub(super) fn sealed(sender: &mut Channel, text: &str) -> Vec<u8> {
     let client_ref = sender.encrypt(text, None, T0).unwrap();
     let step = sender.outbox(T0, &[], false).unwrap();
     let (_, blob) = step
@@ -57,7 +57,7 @@ fn sealed(sender: &mut Channel, text: &str) -> Vec<u8> {
 
 /// The `push` of `blob` to `channel_id` as server message `n`, stored at
 /// `T0 + n`.
-fn push(channel_id: [u8; 16], n: u8, blob: &[u8]) -> Vec<u8> {
+pub(super) fn push(channel_id: [u8; 16], n: u8, blob: &[u8]) -> Vec<u8> {
     Frame::Push {
         channel_id,
         server_id: [n; 16],
@@ -69,7 +69,7 @@ fn push(channel_id: [u8; 16], n: u8, blob: &[u8]) -> Vec<u8> {
 }
 
 /// A session over `channels` that had the `hello` at `T0`.
-fn greeted(channels: &mut Channels) -> Session {
+pub(super) fn greeted(channels: &mut Channels) -> Session {
     let mut session = connected(channels, T0);
     session.on_frame(&hello(1, &[1]), channels, T0);
     session.outgoing();
@@ -77,7 +77,7 @@ fn greeted(channels: &mut Channels) -> Session {
 }
 
 /// The client refs of the `publish`es written.
-fn published(session: &mut Session) -> Vec<ClientRef> {
+pub(super) fn published(session: &mut Session) -> Vec<ClientRef> {
     session
         .outgoing()
         .iter()
@@ -88,9 +88,15 @@ fn published(session: &mut Session) -> Vec<ClientRef> {
         .collect()
 }
 
-/// Whether `events` hold exactly one message, with `server_id` `[n; 16]`.
+/// Whether `events` hold exactly one message, with `server_id` `[n; 16]`,
+/// and at most the `StatusChanged` of a sender seen for the first time
+/// (R13).
 fn is_message(events: &[Event], n: u8) -> bool {
-    matches!(events, [Event::Message { received, .. }] if received.server_id == [n; 16])
+    matches!(
+        events,
+        [Event::Message { received, .. }] | [Event::Message { received, .. }, Event::StatusChanged { .. }]
+            if received.server_id == [n; 16]
+    )
 }
 
 /// Spec 028, R10: a valid push → `Message`; a forged one and a consumed
@@ -119,7 +125,7 @@ fn s028_t10_r10_push_routing() {
     assert!(is_message(&step.events, 1), "{:?}", step.events);
     assert_eq!(
         format!("{:?}", step.events),
-        format!("[Message({})]", key_prefix(&id))
+        format!("[Message({0}), StatusChanged({0})]", key_prefix(&id))
     );
     for (n, blob) in [(2, &forged), (3, &retired)] {
         let step = session.on_frame(&push(id, n, blob), &mut channels, T0 + 3);
@@ -214,7 +220,7 @@ fn s028_t10_r10_own_key_stops_publishing() {
     let mut thief = thief_of(&handle);
     // The thief's counter overtakes the first entry alone (spec
     // 021-channel-session R14).
-    channels[0].encrypt("overtaken", None, T0).unwrap();
+    let overtaken = channels[0].encrypt("overtaken", None, T0).unwrap();
     let mine = channels[0].encrypt("mine", None, T0).unwrap();
     // The thief's device is its own: sealing writes nothing of Alice's.
     let before = handle.all_commits();
@@ -228,8 +234,17 @@ fn s028_t10_r10_own_key_stops_publishing() {
     let step = session.on_frame(&push(id, 1, &hi), &mut channels, T0 + 100);
     assert_eq!(step.events, [Event::StorageFailed { channel: id }]);
     assert!(!channels[0].status().own_key_used_elsewhere);
+    // The overtaken entry leaves, and the alert shows (R11, R13).
     let step = session.on_frame(&push(id, 2, &theirs), &mut channels, T0 + 200);
-    assert!(step.events.is_empty());
+    let overtaken = Event::NotDelivered {
+        channel: id,
+        client_ref: overtaken,
+        sent_at: T0,
+    };
+    assert_eq!(
+        step.events,
+        [overtaken, Event::StatusChanged { channel: id }]
+    );
     assert!(channels[0].status().own_key_used_elsewhere);
     session.on_frame(&ok(id), &mut channels, T0 + 300);
     let refs = published(&mut session);
@@ -252,14 +267,23 @@ fn s028_t10_r10_stall_alert_then_regeneration() {
     let (mut channels, handle, _) = alice();
     let id = ids(&channels)[0];
     let mut thief = thief_of(&handle);
-    channels[0].encrypt("first", None, T0).unwrap();
+    let first = channels[0].encrypt("first", None, T0).unwrap();
     channels[0].encrypt("second", None, T0).unwrap();
     let theirs = sealed(&mut thief, "x");
     channels[0].fill_log(FILL_EXPIRES, ROOM + 1);
     let mut session = greeted(&mut channels);
 
     let step = session.on_frame(&push(id, 1, &theirs), &mut channels, T0 + 100);
-    assert_eq!(step.events, [Event::StorageFailed { channel: id }]);
+    let overtaken = Event::NotDelivered {
+        channel: id,
+        client_ref: first,
+        sent_at: T0,
+    };
+    let alert = Event::StatusChanged { channel: id };
+    assert_eq!(
+        step.events,
+        [Event::StorageFailed { channel: id }, overtaken, alert]
+    );
     assert!(channels[0].status().own_key_used_elsewhere);
     session.on_frame(&ok(id), &mut channels, T0 + 200);
     assert_eq!(published(&mut session), []);
@@ -340,17 +364,26 @@ fn s028_t10_r10_stall_with_flag_already_set() {
     let (mut channels, handle, _) = alice();
     let id = ids(&channels)[0];
     let mut thief = thief_of(&handle);
-    for text in ["one", "two", "three"] {
-        channels[0].encrypt(text, None, T0).unwrap();
-    }
+    channels[0].encrypt("one", None, T0).unwrap();
+    let second = channels[0].encrypt("two", None, T0).unwrap();
+    channels[0].encrypt("three", None, T0).unwrap();
     let theirs = [sealed(&mut thief, "x"), sealed(&mut thief, "y")];
     let mut session = greeted(&mut channels);
     session.on_frame(&push(id, 1, &theirs[0]), &mut channels, T0 + 100);
     assert!(channels[0].status().own_key_used_elsewhere);
     channels[0].fill_log(FILL_EXPIRES, ROOM + 1);
 
+    // The thief's second counter overtakes Alice's second entry.
     let step = session.on_frame(&push(id, 2, &theirs[1]), &mut channels, T0 + 200);
-    assert_eq!(step.events, [Event::StorageFailed { channel: id }]);
+    let overtaken = Event::NotDelivered {
+        channel: id,
+        client_ref: second,
+        sent_at: T0,
+    };
+    assert_eq!(
+        step.events,
+        [Event::StorageFailed { channel: id }, overtaken]
+    );
     let waiting = channels[0].outbox_ref(2).unwrap();
     session.on_frame(&ok(id), &mut channels, T0 + 300);
     assert!(!published(&mut session).contains(&waiting));

@@ -88,7 +88,8 @@ crates/core/src/session/connection.rs        Session, Step, Event, Channels (R5�
 crates/core/src/session/connection/event.rs  Event and its redacted Debug
 crates/core/src/session/connection/sync.rs   the truncation, the ok and the limits of R9 (R8, R9)
 crates/core/src/session/connection/traffic.rs the push routed to decrypt and the stalls of R10
-crates/core/src/session/connection/tests.rs  s028_* tests, with those of R8, R9 and R10 in tests/truncation.rs, tests/ok.rs and tests/traffic.rs
+crates/core/src/session/connection/outcomes.rs the acks, clock samples, outcomes and status events (R11–R13)
+crates/core/src/session/connection/tests.rs  s028_* tests, with those of R8, R9 and R10 in tests/truncation.rs, tests/ok.rs and tests/traffic.rs, of R11–R13 and R17 in tests/acks.rs, and of R14 on a tick in tests/tick.rs
 crates/core/src/testing/server.rs            MemoryServer, which implements R4 over Frame, re-exported by testing.rs beside spec 020's doubles
 crates/core/fuzz/fuzz_targets/frame_decode.rs
 crates/core/fuzz/fuzz_targets/session_on_frame.rs
@@ -256,3 +257,4 @@ Decided on 2026-09-25: the frame keys belong to this spec (`docs/spec.md` §6).
 - 2026-10-09 amended after audit AM round 1 (`docs/audit-log.md`, decisions taken without the human): a `LogFull` stall begun with the own-key flag set stops, whether or not that `decrypt` set it; a frozen channel's `ok` still records its truncation (R10, T10)
 - 2026-10-10 slice (c1b) (decisions taken without the human): `set_write_failed` takes the channel, so that a mark cleared with `storage_full` begins a `LogFull` stall whose stop reads the own-key flag then (R10, Interface); the freeze after a failed `acked` or `expire_outbox` moves to slice (c2), which first calls them
 - 2026-10-10 slice (c1b) implemented: the `write_failed` mark and the freeze after a failed `outbox` (R10); amended after audit AN rounds 1–2 (`docs/audit-log.md`): T10 names a clearing with `storage_full` while the own-key flag is set, and T16 holds the abandoned entry on this connection but for the `LogFull` stall a clearing with `storage_full` begins
+- 2026-10-12 slice (c2) implemented: the `ack` routed to its channel, the clock samples, the outcomes drained after each step and the hold on a late `key_retired` copy (R11, R12), `Event::StatusChanged` (R13), the `outbox` and `expire_outbox` on every tick (R14), and the freeze after a failed `acked` or `expire_outbox` (R10); `outcomes.rs` added to the Interface

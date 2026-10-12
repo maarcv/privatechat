@@ -34,6 +34,19 @@ pub enum Event {
         /// `now − ttl_ms` when the session found it.
         before: u64,
     },
+    /// The server stored an entry in time (R12).
+    Delivered {
+        /// The channel.
+        channel: [u8; 16],
+        /// The entry.
+        client_ref: ClientRef,
+        /// The server's identifier of the message.
+        server_id: [u8; 16],
+        /// When it is listed, clamped (spec 021-channel-session R17).
+        received_at: u64,
+        /// When the server drops it: `received_at + ttl_ms`.
+        expires_at: u64,
+    },
     /// An entry left the `outbox` unsent: stale, overtaken or refused
     /// (R9, R14).
     NotDelivered {
@@ -44,6 +57,11 @@ pub enum Event {
         /// When it was sealed, so that the client can report a row it no
         /// longer lists.
         sent_at: u64,
+    },
+    /// The client should re-read the channel's status and peers (R13).
+    StatusChanged {
+        /// The channel.
+        channel: [u8; 16],
     },
     /// The server speaks no version of this app (R2).
     UnsupportedServer {
@@ -68,9 +86,17 @@ impl fmt::Debug for Event {
             Event::HistoryTruncated { channel, before } => {
                 write!(f, "HistoryTruncated({}, {before})", key_prefix(channel))
             }
+            Event::Delivered {
+                channel,
+                received_at,
+                ..
+            } => write!(f, "Delivered({}, {received_at})", key_prefix(channel)),
             Event::NotDelivered {
                 channel, sent_at, ..
             } => write!(f, "NotDelivered({}, {sent_at})", key_prefix(channel)),
+            Event::StatusChanged { channel } => {
+                write!(f, "StatusChanged({})", key_prefix(channel))
+            }
             Event::UnsupportedServer { connection } => {
                 write!(f, "UnsupportedServer({connection})")
             }

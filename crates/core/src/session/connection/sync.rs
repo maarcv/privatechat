@@ -1,12 +1,13 @@
 //! The truncation and the `ok` of spec 028-session-sans-io (R8, R9): the
 //! history before a `subscribe` judged by the local clock alone, what an
-//! `ok` and the ticks after it call, and the two limits that catch a
-//! silent server and a suspended process.
+//! `ok` and the ticks after it call, the `outbox` it publishes (R14), and
+//! the two limits that catch a silent server and a suspended process.
 
+use super::outcomes::Flight;
 use super::{Channels, Event, Session, Step, Subscription, expired, find_mut, last_complete};
 use crate::Error;
 use crate::proto::envelope::ttl_ms;
-use crate::session::channel::{Channel, ClientRef, OutboxStep};
+use crate::session::channel::{Channel, OutboxStep};
 use crate::session::frames::Frame;
 
 /// How long a channel may await its `ok` with no frame at all on the
@@ -133,12 +134,8 @@ impl Session {
     /// (R9, R14); a store error freezes the channel (R10).
     pub(super) fn publish_outbox(&mut self, channel: &mut Channel, now: u64, step: &mut Step) {
         let channel_id = channel.config().channel_id();
-        let in_flight: Vec<ClientRef> = self
-            .in_flight
-            .iter()
-            .filter(|(_, of)| **of == channel_id)
-            .map(|(client_ref, _)| *client_ref)
-            .collect();
+        let in_flight = self.unanswered(&channel_id, now);
+        self.watch(channel);
         let OutboxStep {
             publish,
             not_delivered,
@@ -164,11 +161,56 @@ impl Session {
             match frame.encode() {
                 Ok(frame) => {
                     self.outgoing.push(frame);
-                    self.in_flight.insert(client_ref, channel_id);
+                    let flight = Flight {
+                        channel: channel_id,
+                        published_at: now,
+                    };
+                    self.in_flight.insert(client_ref, flight);
                 }
                 // A blob the channel sealed always fits a frame.
                 Err(_) => return self.reconnect(step),
             }
+        }
+    }
+
+    /// R14 on a tick: every subscribed channel publishes its `outbox`, and
+    /// every other channel of the session drops its stale entries; a
+    /// frozen channel is not called (R10).
+    pub(super) fn tick_outboxes(&mut self, channels: &mut Channels, now: u64, step: &mut Step) {
+        for channel_id in self.channel_ids.clone() {
+            if self.is_frozen(&channel_id) {
+                continue;
+            }
+            let Some(channel) = find_mut(channels, &channel_id) else {
+                continue;
+            };
+            if let Some(Subscription::Subscribed) = self.subscriptions.get(&channel_id) {
+                self.publish_outbox(channel, now, step);
+            } else {
+                self.expire_outbox(channel, now, step);
+            }
+        }
+    }
+
+    /// The stale entries of a channel not subscribed leave its `outbox`
+    /// unsent (R14); a store error freezes it (R10).
+    fn expire_outbox(&mut self, channel: &mut Channel, now: u64, step: &mut Step) {
+        let channel_id = channel.config().channel_id();
+        let in_flight = self.unanswered(&channel_id, now);
+        self.watch(channel);
+        match channel.expire_outbox(now, &in_flight) {
+            Ok(OutboxStep { not_delivered, .. }) => {
+                for (client_ref, sent_at) in not_delivered {
+                    step.events.push(Event::NotDelivered {
+                        channel: channel_id,
+                        client_ref,
+                        sent_at,
+                    });
+                }
+            }
+            Err(Error::Store(error)) => self.freeze(channel_id, error, step),
+            // `expire_outbox` fails only by its commit.
+            Err(_) => {}
         }
     }
 
