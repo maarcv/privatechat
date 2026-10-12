@@ -20,6 +20,17 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AP10 | `on_error` took its names as a tuple; the test helper `refusal` built every `error` (C) | Low | Two parameters; the helper renamed `error_frame` |
 | AP11 | A `bad_blob` that frees room watching the status for R13, and a stale `subscribe` blocking a fresh one, are untested (C) | Far-fetched | None: the first needs a log at its headroom limit, the second a `hello` not caused by the stale `subscribe` |
 
+**Round 2.** Fresh passes on the whole change. AP1–AP11 hold; pass B found nothing. Pass C ran 28 new mutants: 23 killed, 1 equivalent, 1 not compiling, 3 survived, one of them AP11's far-fetched case and two killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AP12 | A `bad_blob` of the `key_retired` copy held it for the minute of `now`, where R12's hold since AO1 lasts the minute the copy was sealed in: a copy sealed at :59.5 and refused at :00.5 blocked its re-seal for a minute (A) | Low | The hold takes the minute of the copy's publish, which `outbox`'s re-seal makes its sealing minute; R12 and R16 say "the minute it was sealed in"; a T16 case |
+| AP13 | A stale re-queued `subscribe` waiting for a fresh one's `ok`, which R7 does not allow, was untested (C) | Medium | The delayed-endings test checks the first one leaves at once |
+| AP14 | A re-queued `subscribe` with the latest expiry going to the back of the queue was untested (C) | Low | A case with three channels expiring together |
+| AP15 | `on_error` handled `channel_quota` inline, where every other code has a helper (C) | Low | `channel_full` |
+| AP16 | A re-queued `subscribe` at the front, waiting for a stale one's answer, holds back R7's `Reconnect` for a `subscribe` queued behind it at the `hello` (A) | Far-fetched | None: it needs about ten re-queues within the window, and that `subscribe` then leaves under the fresh `hello` |
+| AP17 | R16 does not say what a `rate_limited` naming a channel neither awaiting `ok` nor subscribed, and no entry, does; the code does nothing (A) | Far-fetched | None: a server of spec 030 R8 names only a channel awaiting `ok` |
+
 Decisions taken without the human, by the advisor (three passes, unanimous): a paused channel calls `expire_outbox` on a tick (AP4), since §2's malicious server must not hold back the client's own TTL; R14 and spec 021 R23 amended. Taken by the author against the spec, which pass A found consistent: `channel_quota` pauses the named entry's channel, else the named channel when it is the session's, else every channel; a `bad_auth`, `bad_ttl` or `channel_quota` naming a channel not of the session does nothing; `bad_blob` acts only on an entry in flight on this connection, and an `abandon` that finds no ordinary entry holds the copy for the minute of `now`; under R15, `outbox` is still called and the blobs past the limit come back later.
 
 ## Audit AO

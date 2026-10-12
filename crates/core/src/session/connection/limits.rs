@@ -3,7 +3,7 @@
 //! or a full server asks for, a `subscribe` refused or ended, and a blob
 //! refused.
 
-use super::outcomes::Hold;
+use super::outcomes::{Flight, Hold};
 use super::{
     Channels, Event, Link, MINUTE_MS, Queued, Session, Step, Subscription, find, find_mut,
     release_order,
@@ -37,21 +37,7 @@ impl Session {
         match code {
             CODE_NONCE_EXPIRED => self.nonce_expired(channel_id, now, step),
             CODE_BAD_AUTH | CODE_BAD_TTL => self.refuse(channel_id, step),
-            CODE_CHANNEL_QUOTA => {
-                let paused = match (flight, channel_id) {
-                    (Some(flight), _) => vec![flight.channel],
-                    (None, Some(channel_id)) => vec![channel_id],
-                    (None, None) => self.channel_ids.clone(),
-                };
-                for channel_id in paused {
-                    if self.channel_ids.contains(&channel_id) {
-                        self.paused.insert(channel_id, now);
-                        step.events.push(Event::ChannelFull {
-                            channel: channel_id,
-                        });
-                    }
-                }
-            }
+            CODE_CHANNEL_QUOTA => self.channel_full(flight, channel_id, now, step),
             CODE_RATE_LIMITED => match (channel_id, client_ref) {
                 (Some(channel_id), None) => {
                     self.subscribe_again(channel_id, channels, now, step);
@@ -66,7 +52,7 @@ impl Session {
             }
             CODE_BAD_BLOB => match (client_ref, flight) {
                 (Some(client_ref), Some(flight)) => {
-                    self.bad_blob(client_ref, flight.channel, channels, now, step);
+                    self.bad_blob(client_ref, flight, channels, step);
                 }
                 (Some(_), None) => {}
                 (None, _) => self.reconnect(step),
@@ -97,6 +83,32 @@ impl Session {
                 self.subscriptions.remove(&channel_id);
             }
             None => self.reconnect(step),
+        }
+    }
+
+    /// `channel_quota`: the channel of the named entry, or the named
+    /// channel, or else every channel of the session publishes nothing for
+    /// a minute, each with `Event::ChannelFull`; a channel not of the
+    /// session is ignored.
+    fn channel_full(
+        &mut self,
+        flight: Option<Flight>,
+        channel_id: Option<[u8; 16]>,
+        now: u64,
+        step: &mut Step,
+    ) {
+        let paused = match (flight, channel_id) {
+            (Some(flight), _) => vec![flight.channel],
+            (None, Some(channel_id)) => vec![channel_id],
+            (None, None) => self.channel_ids.clone(),
+        };
+        for channel_id in paused {
+            if self.channel_ids.contains(&channel_id) {
+                self.paused.insert(channel_id, now);
+                step.events.push(Event::ChannelFull {
+                    channel: channel_id,
+                });
+            }
         }
     }
 
@@ -153,17 +165,19 @@ impl Session {
     }
 
     /// A `bad_blob` of an entry published on this connection: an ordinary
-    /// entry leaves the `outbox` unsent; the pending `key_retired` is held
-    /// within the minute of `now`, as a late `ack` holds it (R12); a store
+    /// entry leaves the `outbox` unsent; the pending `key_retired` copy is
+    /// held within the minute it was sealed in, as a late `ack` holds it
+    /// (R12): `outbox` re-seals a copy of an earlier minute before handing
+    /// it out, so that minute is the one it was published in. A store
     /// error freezes the channel, as a failed `acked` does (R10).
     fn bad_blob(
         &mut self,
         client_ref: ClientRef,
-        channel_id: [u8; 16],
+        flight: Flight,
         channels: &mut Channels,
-        now: u64,
         step: &mut Step,
     ) {
+        let channel_id = flight.channel;
         if self.is_frozen(&channel_id) {
             return;
         }
@@ -180,7 +194,7 @@ impl Session {
             Ok(None) => {
                 let hold = Hold {
                     channel: channel_id,
-                    minute: now / MINUTE_MS,
+                    minute: flight.published_at / MINUTE_MS,
                 };
                 self.held.insert(client_ref, hold);
             }

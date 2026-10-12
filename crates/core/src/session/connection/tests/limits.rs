@@ -374,7 +374,8 @@ fn s028_t16_r16_error_codes() {
 
 /// Spec 028, R16: a `bad_blob` of an ordinary entry → `NotDelivered`, the
 /// entry gone; of the current `key_retired` copy → that copy held within
-/// its minute, the next minute's copy published; naming nothing →
+/// the minute it was sealed in, the next minute's copy published, also
+/// when the `bad_blob` comes in that next minute; naming nothing →
 /// `Reconnect`; naming an entry not in flight → nothing.
 #[test]
 fn s028_t16_r16_bad_blob() {
@@ -422,6 +423,20 @@ fn s028_t16_r16_bad_blob() {
     let (held, _) = tick_until(&mut session, &mut channels, T0 + 100, T0 + MINUTE - 1);
     assert_eq!(held, []);
     session.on_tick(&mut channels, T0 + MINUTE);
+    let next = published(&mut session);
+    assert_eq!(next.len(), 1);
+    assert_ne!(next[0], copy);
+
+    // A copy sealed in one minute and refused in the next: the hold ends
+    // with the minute it was sealed in, and the next tick re-seals it.
+    let mut channels = vec![channel(3, 60, T0)];
+    let id = ids(&channels)[0];
+    channels[0].regenerate_identity(T0).unwrap();
+    let mut session = subscribed(&mut channels, T0 + 59_500);
+    let [copy] = published(&mut session).try_into().unwrap();
+    let refused = error_frame("bad_blob", Some(id), Some(copy));
+    session.on_frame(&refused, &mut channels, T0 + MINUTE + 500);
+    session.on_tick(&mut channels, T0 + MINUTE + 1_000);
     let next = published(&mut session);
     assert_eq!(next.len(), 1);
     assert_ne!(next[0], copy);
@@ -521,7 +536,8 @@ fn s028_t16_r16_rate_limited_subscribe() {
 /// Spec 028, R16 and R7: two subscriptions ended 12 s apart past the
 /// `hello`'s window, with 20 s of delay from client to server → both
 /// subscribed again, neither refused: the second `subscribe` under the old
-/// nonce waits for the fresh `hello` the first one brings.
+/// nonce waits for the fresh `hello` the first one brings, while the first
+/// left at once, the other still awaiting its `ok`.
 #[test]
 fn s028_t16_r16_two_endings_delayed() {
     const DELAY: u64 = 20_000;
@@ -534,8 +550,10 @@ fn s028_t16_r16_two_endings_delayed() {
     let [kept, a, b]: [[u8; 16]; 3] = ids(&channels).try_into().unwrap();
     let mut session = connected(&channels, T0);
     server.connect(CONNECTION, T0);
+    let pk_a = channels[1].config().channel_keypair().unwrap().0.0;
     let mut link: Vec<(u64, Vec<u8>)> = Vec::new();
     let mut events = Vec::new();
+    let mut a_again = None;
     for second in 0..=140 {
         let now = T0 + second * 1_000;
         let (due, later): (Vec<_>, Vec<_>) =
@@ -565,8 +583,18 @@ fn s028_t16_r16_two_endings_delayed() {
             assert_eq!(published(&mut session), [sent]);
         }
         events.extend(session.on_tick(&mut channels, now).events);
-        link.extend(session.outgoing().into_iter().map(|frame| (now, frame)));
+        let written = session.outgoing();
+        for frame in &written {
+            if let Frame::Subscribe { pk_ch, .. } = Frame::decode(frame).unwrap()
+                && pk_ch == pk_a
+                && second >= 55
+            {
+                a_again.get_or_insert(second);
+            }
+        }
+        link.extend(written.into_iter().map(|frame| (now, frame)));
     }
+    assert_eq!(a_again, Some(55));
     let subscribed = [kept, a, b].map(|channel| Event::Subscribed { channel });
     assert_eq!(events, subscribed);
 }
@@ -588,6 +616,25 @@ fn s028_t16_r16_subscribe_again_in_order() {
     session.on_frame(&ended, &mut channels, T0 + 1_200);
     session.on_tick(&mut channels, T0 + 2_200);
     assert_eq!(super::subscribed_ids(&mut session, &channels), [minute]);
+
+    // Three channels expiring together: the one released first, ended,
+    // goes behind those still queued.
+    let mut channels: Channels = (1..=3).map(|byte| channel(byte, DAY, T0)).collect();
+    let [one, two, three]: [[u8; 16]; 3] = ids(&channels).try_into().unwrap();
+    let mut session = connected(&channels, T0);
+    session.on_frame(&hello(1, &[1]), &mut channels, T0);
+    assert_eq!(super::subscribed_ids(&mut session, &channels), [one]);
+    session.on_frame(
+        &error_frame("rate_limited", Some(one), None),
+        &mut channels,
+        T0 + 200,
+    );
+    let mut released = Vec::new();
+    for at in (1..=7).map(|second| T0 + second * 1_000) {
+        session.on_tick(&mut channels, at);
+        released.extend(super::subscribed_ids(&mut session, &channels));
+    }
+    assert_eq!(released, [two, three, one]);
 }
 
 /// Spec 028, R14 and R16: a subscribed channel paused by a `rate_limited`
