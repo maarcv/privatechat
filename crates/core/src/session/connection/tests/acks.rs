@@ -18,7 +18,7 @@ const DAY_MS: u64 = 86_400_000;
 
 /// The `ack` of `client_ref` as server message `n`, stored at
 /// `received_at`.
-fn ack(client_ref: ClientRef, n: u8, received_at: u64) -> Vec<u8> {
+pub(super) fn ack(client_ref: ClientRef, n: u8, received_at: u64) -> Vec<u8> {
     Frame::Ack {
         client_ref: client_ref.bytes,
         server_id: [n; 16],
@@ -30,7 +30,7 @@ fn ack(client_ref: ClientRef, n: u8, received_at: u64) -> Vec<u8> {
 
 /// A session over `channels` whose first channel had its `ok` at `now`,
 /// its `outbox` published.
-fn subscribed(channels: &mut Channels, now: u64) -> Session {
+pub(super) fn subscribed(channels: &mut Channels, now: u64) -> Session {
     let mut session = connected(channels, now);
     session.on_frame(&hello(1, &[1]), channels, now);
     session.on_frame(&ok(ids(channels)[0]), channels, now);

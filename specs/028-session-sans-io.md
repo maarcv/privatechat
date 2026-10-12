@@ -89,7 +89,8 @@ crates/core/src/session/connection/event.rs  Event and its redacted Debug
 crates/core/src/session/connection/sync.rs   the truncation, the ok and the limits of R9 (R8, R9)
 crates/core/src/session/connection/traffic.rs the push routed to decrypt and the stalls of R10
 crates/core/src/session/connection/outcomes.rs the acks, clock samples, outcomes and status events (R11–R13)
-crates/core/src/session/connection/tests.rs  s028_* tests, with those of R8, R9 and R10 in tests/truncation.rs, tests/ok.rs and tests/traffic.rs, of R11–R13 and R17, and R10's freeze after a failed `acked`, in tests/acks.rs, and of R14 on a tick, with R10's freeze after a failed `expire_outbox` and R13's banner lapsing on a tick or at an `ok`, in tests/tick.rs
+crates/core/src/session/connection/limits.rs the publish rate, the pauses and the error codes (R15, R16)
+crates/core/src/session/connection/tests.rs  s028_* tests, with those of R8, R9 and R10 in tests/truncation.rs, tests/ok.rs and tests/traffic.rs, of R11–R13 and R17, and R10's freeze after a failed `acked`, in tests/acks.rs, and of R14 on a tick, with R10's freeze after a failed `expire_outbox` and R13's banner lapsing on a tick or at an `ok`, in tests/tick.rs, and of R15 and R16 in tests/limits.rs
 crates/core/src/testing/server.rs            MemoryServer, which implements R4 over Frame, re-exported by testing.rs beside spec 020's doubles
 crates/core/fuzz/fuzz_targets/frame_decode.rs
 crates/core/fuzz/fuzz_targets/session_on_frame.rs
@@ -258,3 +259,4 @@ Decided on 2026-09-25: the frame keys belong to this spec (`docs/spec.md` §6).
 - 2026-10-10 slice (c1b) (decisions taken without the human): `set_write_failed` takes the channel, so that a mark cleared with `storage_full` begins a `LogFull` stall whose stop reads the own-key flag then (R10, Interface); the freeze after a failed `acked` or `expire_outbox` moves to slice (c2), which first calls them
 - 2026-10-10 slice (c1b) implemented: the `write_failed` mark and the freeze after a failed `outbox` (R10); amended after audit AN rounds 1–2 (`docs/audit-log.md`): T10 names a clearing with `storage_full` while the own-key flag is set, and T16 holds the abandoned entry on this connection but for the `LogFull` stall a clearing with `storage_full` begins
 - 2026-10-12 slice (c2) implemented: the `ack` routed to its channel, the clock samples, the outcomes drained after each step and the hold on a late `key_retired` copy (R11, R12), `Event::StatusChanged` (R13), the `outbox` and `expire_outbox` on every tick (R14), and the freeze after a failed `acked` or `expire_outbox` (R10); `outcomes.rs` added to the Interface
+- 2026-10-12 slice (d) implemented: the publish rate (R15), the error codes with their pauses, refusals and holds, and the `subscribe` queued again after a `rate_limited`, one under a stale nonce at a time (R7, R16); `limits.rs` added to the Interface
