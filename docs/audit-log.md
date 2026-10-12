@@ -2,6 +2,26 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AO
+
+**2026-10-12 — Audit AO, the code audit of slice (c2) of spec 028-session-sans-io (branch `028-acks`): the `ack` routed to its channel, the clock samples, the outcomes and the hold on a late `key_retired` copy (R11, R12), `Event::StatusChanged` (R13), the `outbox` and `expire_outbox` on every tick (R14), and the freeze after a failed `acked` or `expire_outbox` (R10); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** One production defect (AO1), no High finding. Pass C ran 38 mutants: 26 killed, 6 equivalent, 6 survived, each killed below, as is pass A's.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AO1 | The hold of a late `key_retired` copy lasted the minute of the `ack`, and, passed to `outbox` as in flight, blocked the re-seal R12 says ends it: in a one-minute channel an `ack` crossing a minute delayed the retirement up to a minute (A) | Low | The hold lasts the minute of the copy's `sent_at`, when a re-seal is not yet due; a T12 case |
+| AO2 | No test told a push's sample from a live one: the only one was an hour ahead, which both raise (A, C) | Medium | A push stored an hour before raises no warning |
+| AO3 | T12's "`Ignored` → nothing" never reached `acked`: both `ack`s were unknown to the session (A) | Medium | An entry dropped as stale while in flight, then its `ack` |
+| AO4 | T11 said "no clock sample" after a suspension, where R11 takes one, not live (A) | Low | T11 says "no live sample" |
+| AO5 | The Interface did not say where the tests of the freeze after a failed `acked` or `expire_outbox` live (A) | Far-fetched | The Interface names them all the same |
+| AO6 | A channel cleared with `storage_full` after a dropped `ack` publishes the entry again on the same connection (B) | Far-fetched | None: receivers drop the copy as `Replay`, and T16 accepts the return to the `LogFull` stall |
+| AO7 | The step that freezes a channel after a local write error may still report its `StatusChanged` (B) | Far-fetched | None: no adversary of `docs/spec.md` §2 causes the error, and the event only asks the client to read the status |
+| AO8 | The tick's status snapshot, taken before `synced` moves the time the truncation banner is judged by, was untested, as was its restriction to the session's channels (C) | Medium | A test: the banner lapsing on a tick gives one `StatusChanged`, and another connection's channel nothing; a comment says why |
+| AO9 | A push to a frozen channel taking a clock sample was untested (C) | Medium | A push an hour ahead after the freeze raises nothing |
+| AO10 | Removing a drained outcome's `client_ref` from the in-flight set was untested (C) | Low | Its later `ack`, an hour off, takes no live sample |
+| AO11 | `on_connect` forgetting the holds was untested (C) | Low | A new connection publishes the held copy at its `ok` |
+| AO12 | An `ack` read on a clock set back since its publish counting as live was untested (C) | Low | A T11 case |
+| AO13 | `expire_outbox` watched a status the tick had watched already (C) | Low | The call removed |
+
 ## Audit AN
 
 **2026-10-10 — Audit AN, the code audit of slice (c1b) of spec 028-session-sans-io (branch `028-write-failed`): the `write_failed` mark and the freeze after a failed `outbox` (R10's second half); round 1 of three passes (A: conformance; B: the adversary, a key thief on a failing disk; C: quality, tests and hand mutants).** No High finding and no production defect. Pass C ran 13 mutants: 11 killed, 2 survived, each killed below.

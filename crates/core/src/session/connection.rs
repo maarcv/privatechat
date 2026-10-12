@@ -203,7 +203,7 @@ impl Session {
             }) => self.on_error(&code, channel_id, now, &mut step),
             Ok(_) => {}
         }
-        self.finish(channels, now, &mut step);
+        self.finish(channels, &mut step);
         step
     }
 
@@ -213,6 +213,10 @@ impl Session {
     /// the next `subscribe` (R6).
     pub(crate) fn on_tick(&mut self, channels: &mut Channels, now: u64) -> Step {
         let mut step = Step::default();
+        // Before `synced`, which moves the time the truncation banner is
+        // judged by: a banner that lapses on a tick changes the status
+        // (R13). Only this session's channels: the others belong to other
+        // connections' steps.
         for channel in channels.iter() {
             let channel_id = channel.config().channel_id();
             if self.channel_ids.contains(&channel_id) && !self.is_frozen(&channel_id) {
@@ -230,7 +234,7 @@ impl Session {
             Link::Ready(hello) => self.release(hello, channels, now, &mut step),
             _ => {}
         }
-        self.finish(channels, now, &mut step);
+        self.finish(channels, &mut step);
         step
     }
 
@@ -257,7 +261,7 @@ impl Session {
         {
             self.publish_outbox(channel, now, &mut step);
         }
-        self.finish(channels, now, &mut step);
+        self.finish(channels, &mut step);
         step
     }
 

@@ -196,8 +196,8 @@ impl Session {
     /// unsent (R14); a store error freezes it (R10).
     fn expire_outbox(&mut self, channel: &mut Channel, now: u64, step: &mut Step) {
         let channel_id = channel.config().channel_id();
+        // `on_tick`, its one caller, watched the channel already (R13).
         let in_flight = self.unanswered(&channel_id, now);
-        self.watch(channel);
         match channel.expire_outbox(now, &in_flight) {
             Ok(OutboxStep { not_delivered, .. }) => {
                 for (client_ref, sent_at) in not_delivered {

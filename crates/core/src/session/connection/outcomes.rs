@@ -18,9 +18,9 @@ pub(super) struct Flight {
     pub(super) published_at: u64,
 }
 
-/// A `key_retired` copy not published again on this connection until the
-/// minute it was held in ends (R12), or until its re-seal, which names
-/// another copy.
+/// A `key_retired` copy not published again on this connection while the
+/// minute it was sealed in lasts (R12): the minute after, `outbox`
+/// re-seals it as another copy (spec 025-identity-regen R4).
 #[derive(Clone, Copy)]
 pub(super) struct Hold {
     pub(super) channel: [u8; 16],
@@ -58,7 +58,7 @@ impl Session {
             && now.saturating_sub(flight.published_at) <= LIVE_ACK_MS;
         self.sample(channel, received_at, now, live);
         match channel.acked(client_ref, server_id, received_at, now) {
-            Ok(outcome) => self.report(channel, outcome, now, step),
+            Ok(outcome) => self.report(channel, outcome, step),
             Err(Error::Store(error)) => self.freeze(flight.channel, error, step),
             // `acked` fails only by its commit.
             Err(_) => {}
@@ -84,14 +84,14 @@ impl Session {
     /// At the end of a step, for every channel it called: the outcomes the
     /// channel queued meanwhile (R11), then `Event::StatusChanged` when its
     /// status differs from before or its peers changed (R13).
-    pub(super) fn finish(&mut self, channels: &mut Channels, now: u64, step: &mut Step) {
+    pub(super) fn finish(&mut self, channels: &mut Channels, step: &mut Step) {
         for (channel_id, before) in core::mem::take(&mut self.watched) {
             let Some(channel) = find_mut(channels, &channel_id) else {
                 continue;
             };
             for outcome in channel.take_outcomes() {
                 self.in_flight.remove(&outcome.client_ref);
-                self.report(channel, outcome, now, step);
+                self.report(channel, outcome, step);
             }
             let peers_changed = channel.take_peers_changed();
             if peers_changed || channel.status() != before {
@@ -106,7 +106,7 @@ impl Session {
     /// in the status alone, and a late `ack` of the current `key_retired`
     /// copy holds it, so that an `ack` always late cannot turn into a
     /// publish every tick.
-    fn report(&mut self, channel: &Channel, outcome: Outcome, now: u64, step: &mut Step) {
+    fn report(&mut self, channel: &Channel, outcome: Outcome, step: &mut Step) {
         let channel_id = channel.config().channel_id();
         let client_ref = outcome.client_ref;
         match (outcome.outcome, outcome.server_id, outcome.received_at) {
@@ -130,13 +130,16 @@ impl Session {
                 }
             }
             // Only the current `key_retired` copy carries its `sent_at`
-            // when ignored (spec 025-identity-regen R5).
-            (AckOutcome::Ignored, ..) if outcome.sent_at.is_some() => {
-                let hold = Hold {
-                    channel: channel_id,
-                    minute: now / MINUTE_MS,
-                };
-                self.held.insert(client_ref, hold);
+            // when ignored (spec 025-identity-regen R5). Held past its
+            // minute, it would block the re-seal that replaces it.
+            (AckOutcome::Ignored, ..) => {
+                if let Some(sent_at) = outcome.sent_at {
+                    let hold = Hold {
+                        channel: channel_id,
+                        minute: sent_at / MINUTE_MS,
+                    };
+                    self.held.insert(client_ref, hold);
+                }
             }
             _ => {}
         }

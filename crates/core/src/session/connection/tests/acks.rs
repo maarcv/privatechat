@@ -84,6 +84,23 @@ fn s028_t12_r12_ack_routing() {
     // The live sample, two days off, raises the clock warning (R11, R13).
     let status = Event::StatusChanged { channel: id };
     assert_eq!(step.events, [not_delivered, status]);
+    // An entry dropped as stale while in flight: its very late `ack`
+    // reaches `acked`, which ignores it.
+    let mut minute = vec![channel(2, 60, T0)];
+    let stale = minute[0].encrypt("stale", None, T0).unwrap();
+    let mut other = subscribed(&mut minute, T0);
+    assert_eq!(published(&mut other), [stale]);
+    let past_grace = T0 + 60_000 + 360_000 + 60_000 + 1;
+    let step = other.on_tick(&mut minute, past_grace);
+    assert!(
+        step.events
+            .iter()
+            .any(|event| matches!(event, Event::NotDelivered { .. }))
+    );
+    let step = other.on_frame(&ack(stale, 9, T0), &mut minute, past_grace + 100);
+    assert!(step.events.is_empty(), "{:?}", step.events);
+    assert!(step.failed.is_empty());
+
     for frame in [
         ack(on_time, 3, T0 + 500),
         ack(ClientRef { bytes: [9; 16] }, 4, T0),
@@ -113,6 +130,20 @@ fn s028_t12_r12_late_retirement_held() {
     assert_eq!(step.events, [Event::StatusChanged { channel: id }]);
     assert!(channels[0].status().retirement_pending);
     let mut now = T0 + 1_000;
+    while now < T0 + 30_000 {
+        now += 1_000;
+        session.on_tick(&mut channels, now);
+        assert_eq!(published(&mut session), [], "{now}");
+    }
+    // A new connection forgets the hold (R5): the copy leaves at its `ok`,
+    // and is held again by its late `ack`.
+    session.on_disconnect();
+    session.on_connect(now, &[]);
+    session.on_frame(&hello(2, &[1]), &mut channels, now);
+    session.outgoing();
+    session.on_frame(&ok(id), &mut channels, now);
+    assert_eq!(published(&mut session), copy);
+    session.on_frame(&ack(copy[0], 2, T0 + 2 * DAY_MS), &mut channels, now);
     while now < T0 + 59_000 {
         now += 1_000;
         session.on_tick(&mut channels, now);
@@ -122,6 +153,22 @@ fn s028_t12_r12_late_retirement_held() {
     let next = published(&mut session);
     assert_eq!(next.len(), 1);
     assert_ne!(next[0], copy[0]);
+
+    // A one-minute channel whose copy, sealed in one minute, is answered
+    // late in the next: the hold ends with its minute, and the next tick
+    // re-seals and publishes it.
+    let mut channels = vec![channel(3, 60, T0)];
+    channels[0].regenerate_identity(T0).unwrap();
+    let mut session = subscribed(&mut channels, T0 + 59_000);
+    let [copy] = published(&mut session).try_into().unwrap();
+    session.on_tick(&mut channels, T0 + 60_000);
+    assert_eq!(published(&mut session), []);
+    session.on_frame(&ack(copy, 1, T0 + 60_100), &mut channels, T0 + 60_200);
+    assert!(channels[0].status().retirement_pending);
+    session.on_tick(&mut channels, T0 + 61_000);
+    let next = published(&mut session);
+    assert_eq!(next.len(), 1);
+    assert_ne!(next[0], copy);
 }
 
 /// Spec 028, R11: after a reconnect that lost an `ack`, the echo in the
@@ -169,9 +216,11 @@ fn s028_t11_r11_outcomes() {
             Event::NotDelivered { client_ref: n, sent_at: T0, .. },
         ] if d == second && n == first
     ));
-    // The first left the in-flight set: its late `ack` is unknown.
-    let step = session.on_frame(&ack(first, 2, T0 + 100), &mut channels, T0 + 300);
+    // The first left the in-flight set: its late `ack` is unknown, and
+    // takes no live sample that an hour off would raise.
+    let step = session.on_frame(&ack(first, 2, T0 + 300 - HOUR), &mut channels, T0 + 300);
     assert!(step.events.is_empty());
+    assert!(!channels[0].status().clock_off);
 
     let mut thief = thief_of(&handle);
     let mut overtaken = Vec::new();
@@ -214,7 +263,18 @@ fn s028_t11_r11_clock_samples() {
         received_at: T0 + HOUR,
         blob: vec![0; 8],
     };
-    let step = session.on_frame(&junk.encode().unwrap(), &mut channels, T0 + 100);
+    // One stored an hour before is a legitimate backlog: no warning, as a
+    // live sample would raise.
+    let old = Frame::Push {
+        channel_id: id,
+        server_id: [2; 16],
+        received_at: T0 + 100 - HOUR,
+        blob: vec![0; 8],
+    };
+    let step = session.on_frame(&old.encode().unwrap(), &mut channels, T0 + 100);
+    assert!(!channels[0].status().clock_off);
+    assert!(step.events.is_empty(), "{:?}", step.events);
+    let step = session.on_frame(&junk.encode().unwrap(), &mut channels, T0 + 200);
     assert!(channels[0].status().clock_off);
     assert_eq!(step.events, [Event::StatusChanged { channel: id }]);
 
@@ -243,6 +303,15 @@ fn s028_t11_r11_clock_samples() {
     session.after_send(ids(&channels)[0], &mut channels, T0 + HOUR);
     assert_eq!(published(&mut session), [later]);
     session.on_frame(&ack(later, 2, T0), &mut channels, T0 + HOUR + 1_000);
+    assert!(!channels[0].status().clock_off);
+
+    // A clock set back between the publish and its `ack`: not live.
+    let (mut channels, _, _) = alice();
+    let mut session = subscribed(&mut channels, T0);
+    let back = channels[0].encrypt("back", None, T0 + 4_000).unwrap();
+    session.after_send(ids(&channels)[0], &mut channels, T0 + 4_000);
+    assert_eq!(published(&mut session), [back]);
+    session.on_frame(&ack(back, 1, T0 + 3_000 - HOUR), &mut channels, T0 + 3_000);
     assert!(!channels[0].status().clock_off);
 
     // A 60-second channel whose `ack` comes 40 s late, an off of 40 s past
@@ -358,6 +427,16 @@ fn s028_t10_r10_acked_failure_freezes() {
     assert!(step.events.is_empty() && step.failed.is_empty());
     let step = session.on_frame(&push(id, 3, &hi), &mut channels, T0 + 400);
     assert!(step.events.is_empty());
+    // No clock sample either, an hour off as it is.
+    let ahead = Frame::Push {
+        channel_id: id,
+        server_id: [4; 16],
+        received_at: T0 + 400 + HOUR,
+        blob: vec![0; 8],
+    };
+    let step = session.on_frame(&ahead.encode().unwrap(), &mut channels, T0 + 450);
+    assert!(step.events.is_empty());
+    assert!(!channels[0].status().clock_off);
     session.after_send(id, &mut channels, T0 + 500);
     session.on_tick(&mut channels, T0 + 1_000);
     assert_eq!(published(&mut session), []);
