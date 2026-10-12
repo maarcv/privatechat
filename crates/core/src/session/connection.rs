@@ -70,6 +70,15 @@ enum Subscription {
     Subscribed,
 }
 
+/// A `subscribe` not yet released.
+#[derive(Clone, Copy)]
+struct Queued {
+    channel_id: [u8; 16],
+    /// Queued again after a `rate_limited` ended its subscription:
+    /// released however old the nonce (R7, R16).
+    again: bool,
+}
+
 /// The latest `hello` of the connection.
 #[derive(Clone, Copy)]
 struct Hello {
@@ -97,10 +106,7 @@ pub(crate) struct Session {
     /// The channels the `Device` refuses to subscribe again (R5).
     skip: Vec<[u8; 16]>,
     /// The `subscribe`s not yet released, in release order (R6).
-    queue: VecDeque<[u8; 16]>,
-    /// The queued channels whose subscription a `rate_limited` ended,
-    /// released however old the nonce (R7, R16).
-    requeued: BTreeSet<[u8; 16]>,
+    queue: VecDeque<Queued>,
     /// The channels a `bad_auth` or `bad_ttl` refused (R6, R16).
     refused: BTreeSet<[u8; 16]>,
     /// When the last `subscribe` of the connection was released (R6).
@@ -146,7 +152,6 @@ impl Session {
             link: Link::Closed,
             skip: Vec::new(),
             queue: VecDeque::new(),
-            requeued: BTreeSet::new(),
             refused: BTreeSet::new(),
             last_release: None,
             subscriptions: BTreeMap::new(),
@@ -225,7 +230,7 @@ impl Session {
                 ..
             }) => {
                 let client_ref = client_ref.map(|bytes| ClientRef { bytes });
-                self.on_error(&code, (channel_id, client_ref), channels, now, &mut step);
+                self.on_error(&code, channel_id, client_ref, channels, now, &mut step);
             }
             Ok(_) => {}
         }
@@ -334,8 +339,13 @@ impl Session {
         }
         // A channel queued again after a `rate_limited` waits under this
         // fresh nonce like any other (R7).
-        self.requeued.clear();
-        self.queue = pending.into_iter().map(|(_, id)| id).collect();
+        self.queue = pending
+            .into_iter()
+            .map(|(_, channel_id)| Queued {
+                channel_id,
+                again: false,
+            })
+            .collect();
         self.release(hello, channels, now, step);
     }
 
@@ -355,13 +365,12 @@ impl Session {
     /// counts as long past, so that a clock set back cannot hold the
     /// queue.
     fn release(&mut self, hello: Hello, channels: &Channels, now: u64, step: &mut Step) {
-        let Some(channel_id) = self.queue.front().copied() else {
+        let Some(Queued { channel_id, again }) = self.queue.front().copied() else {
             return;
         };
         let stale = expired(hello.at, NONCE_WINDOW_MS, now);
-        if stale && !self.requeued.contains(&channel_id) {
+        if stale && !again {
             self.queue.clear();
-            self.requeued.clear();
             self.reconnect(step);
             return;
         }
@@ -382,7 +391,6 @@ impl Session {
             return;
         }
         self.queue.pop_front();
-        self.requeued.remove(&channel_id);
         let Some(channel) = find(channels, &channel_id) else {
             return;
         };
@@ -414,7 +422,6 @@ impl Session {
         self.link = link;
         self.skip.clear();
         self.queue.clear();
-        self.requeued.clear();
         self.refused.clear();
         self.last_release = None;
         self.subscriptions.clear();

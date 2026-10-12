@@ -14,7 +14,7 @@ use crate::testing::MemoryServer;
 const MINUTE: u64 = 60_000;
 
 /// An `error` with `code`, naming what it names.
-fn refusal(code: &str, channel_id: Option<[u8; 16]>, client_ref: Option<ClientRef>) -> Vec<u8> {
+fn error_frame(code: &str, channel_id: Option<[u8; 16]>, client_ref: Option<ClientRef>) -> Vec<u8> {
     Frame::Error {
         code: code.to_owned(),
         message: String::new(),
@@ -117,7 +117,7 @@ fn s028_t16_r16_error_codes() {
     let (mut channels, mut session, sent) = two_subscribed();
     let [first, second]: [[u8; 16]; 2] = ids(&channels).try_into().unwrap();
     let step = session.on_frame(
-        &refusal("teapot", None, Some(sent)),
+        &error_frame("teapot", None, Some(sent)),
         &mut channels,
         T0 + 1_200,
     );
@@ -125,37 +125,60 @@ fn s028_t16_r16_error_codes() {
     session.on_tick(&mut channels, T0 + 2_000);
     assert_eq!(published(&mut session), [sent]);
     let step = session.on_frame(
-        &refusal("not_subscribed", Some(first), Some(sent)),
+        &error_frame("not_subscribed", Some(first), Some(sent)),
         &mut channels,
         T0 + 2_100,
     );
     assert_eq!(step.events, [reconnect()]);
     session.on_tick(&mut channels, T0 + 3_000);
     assert_eq!(published(&mut session), [sent]);
+    let step = session.on_frame(
+        &error_frame("not_subscribed", None, None),
+        &mut channels,
+        T0 + 3_100,
+    );
+    assert_eq!(step.events, [reconnect()]);
+    // `nonce_expired` naming no channel: a `Reconnect`, the entry out of
+    // flight all the same.
+    let step = session.on_frame(
+        &error_frame("nonce_expired", None, Some(sent)),
+        &mut channels,
+        T0 + 3_200,
+    );
+    assert_eq!(step.events, [reconnect()]);
+    session.on_tick(&mut channels, T0 + 4_000);
+    assert_eq!(published(&mut session), [sent]);
 
     // `bad_auth` and `bad_ttl`: the named channel is refused, and not
     // subscribed again on this connection, even after a new `hello`; one
     // naming none is a `Reconnect`; a new connection forgets the refusal.
     for code in ["bad_auth", "bad_ttl"] {
-        let (mut channels, mut session, _) = two_subscribed();
+        let (mut channels, mut session, sent) = two_subscribed();
         let step = session.on_frame(
-            &refusal(code, Some(second), None),
+            &error_frame(code, Some(second), Some(sent)),
             &mut channels,
             T0 + 1_200,
         );
         assert_eq!(step.events, [Event::SubscribeRefused { channel: second }]);
-        let stranger = refusal(code, Some([9; 16]), None);
+        session.on_tick(&mut channels, T0 + 1_300);
+        assert_eq!(published(&mut session), [sent]);
+        let stranger = error_frame(code, Some([9; 16]), None);
         assert!(
             session
                 .on_frame(&stranger, &mut channels, T0 + 1_300)
                 .events
                 .is_empty()
         );
-        session.on_frame(&hello(2, &[1]), &mut channels, T0 + 1_400);
-        let (_, events) = tick_until(&mut session, &mut channels, T0 + 1_400, T0 + 5_000);
-        assert!(events.is_empty(), "{events:?}");
+        // Refused, it publishes nothing.
+        channels[1].encrypt("hi", None, T0 + 1_300).unwrap();
+        session.after_send(second, &mut channels, T0 + 1_300);
         assert!(session.outgoing().is_empty());
-        let step = session.on_frame(&refusal(code, None, None), &mut channels, T0 + 5_100);
+        session.on_frame(&hello(2, &[1]), &mut channels, T0 + 1_400);
+        for at in (2..=5).map(|second| T0 + second * 1_000) {
+            assert!(session.on_tick(&mut channels, at).events.is_empty());
+            assert!(super::subscribed_ids(&mut session, &channels).is_empty());
+        }
+        let step = session.on_frame(&error_frame(code, None, None), &mut channels, T0 + 5_100);
         assert_eq!(step.events, [reconnect()]);
         session.on_connect(T0 + 6_000, &[]);
         session.on_frame(&hello(3, &[1]), &mut channels, T0 + 6_000);
@@ -167,10 +190,34 @@ fn s028_t16_r16_error_codes() {
         assert_eq!(again, both);
     }
 
+    // A refusal of a channel still queued: its `subscribe` never leaves;
+    // one awaiting its `ok`: a later `ok` does not subscribe it.
+    let mut three: Channels = (1..=3).map(|byte| channel(byte, DAY, T0)).collect();
+    let [one, two, queued]: [[u8; 16]; 3] = ids(&three).try_into().unwrap();
+    let mut session = connected(&three, T0);
+    session.on_frame(&hello(1, &[1]), &mut three, T0);
+    assert_eq!(super::subscribed_ids(&mut session, &three), [one]);
+    for (named, at) in [(queued, T0 + 100), (one, T0 + 200)] {
+        let step = session.on_frame(&error_frame("bad_auth", Some(named), None), &mut three, at);
+        assert_eq!(step.events, [Event::SubscribeRefused { channel: named }]);
+    }
+    let mut released = Vec::new();
+    for at in (1..=5).map(|second| T0 + second * 1_000) {
+        session.on_tick(&mut three, at);
+        released.extend(super::subscribed_ids(&mut session, &three));
+    }
+    assert_eq!(released, [two]);
+    assert!(
+        session
+            .on_frame(&ok(one), &mut three, T0 + 5_100)
+            .events
+            .is_empty()
+    );
+
     // `channel_quota` naming the entry: its channel alone publishes
     // nothing for a minute, the other still does at once.
     let (mut channels, mut session, sent) = two_subscribed();
-    let quota = refusal("channel_quota", Some(second), Some(sent));
+    let quota = error_frame("channel_quota", Some(second), Some(sent));
     let step = session.on_frame(&quota, &mut channels, T0 + 1_200);
     assert_eq!(step.events, [Event::ChannelFull { channel: first }]);
     channels[0].encrypt("more", None, T0 + 1_200).unwrap();
@@ -192,24 +239,32 @@ fn s028_t16_r16_error_codes() {
     // Naming the channel alone, nothing, or a channel of no session.
     let (mut channels, mut session, _) = two_subscribed();
     let step = session.on_frame(
-        &refusal("channel_quota", Some(second), None),
+        &error_frame("channel_quota", Some(second), None),
         &mut channels,
         T0 + 1_200,
     );
     assert_eq!(step.events, [Event::ChannelFull { channel: second }]);
     let step = session.on_frame(
-        &refusal("channel_quota", None, None),
+        &error_frame("channel_quota", None, None),
         &mut channels,
         T0 + 1_300,
     );
     let full = [first, second].map(|channel| Event::ChannelFull { channel });
     assert_eq!(step.events, full);
     let step = session.on_frame(
-        &refusal("channel_quota", Some([9; 16]), None),
+        &error_frame("channel_quota", Some([9; 16]), None),
         &mut channels,
         T0 + 1_400,
     );
     assert!(step.events.is_empty());
+    // An entry not in flight and no channel: every channel.
+    let unknown = ClientRef { bytes: [9; 16] };
+    let step = session.on_frame(
+        &error_frame("channel_quota", None, Some(unknown)),
+        &mut channels,
+        T0 + 1_500,
+    );
+    assert_eq!(step.events, full);
     // A new connection forgets the pause: the entry leaves at the `ok`.
     session.on_connect(T0 + 2_000, &[]);
     session.on_frame(&hello(2, &[1]), &mut channels, T0 + 2_000);
@@ -223,14 +278,18 @@ fn s028_t16_r16_error_codes() {
     let full = Event::ServerFull {
         connection: CONNECTION,
     };
+    let unnamed_full = Event::ServerFull {
+        connection: CONNECTION,
+    };
     for (code, named, events) in [
+        ("server_full", false, vec![unnamed_full]),
         ("rate_limited", true, vec![]),
         ("rate_limited", false, vec![]),
-        ("server_full", false, vec![full]),
+        ("server_full", true, vec![full]),
     ] {
         let (mut channels, mut session, sent) = two_subscribed();
         let entry = named.then_some(sent);
-        let frame = refusal(code, entry.map(|_| first), entry);
+        let frame = error_frame(code, entry.map(|_| first), entry);
         let step = session.on_frame(&frame, &mut channels, T0 + 1_200);
         assert_eq!(step.events, events);
         let other = channels[1].encrypt("other", None, T0 + 1_300).unwrap();
@@ -250,10 +309,47 @@ fn s028_t16_r16_error_codes() {
         assert_eq!(again, expected, "{code} {named}");
     }
 
+    // A pause running at an `ok`: the `outbox` waits for its end. A clock
+    // set back before the pause ends it; a new connection forgets it.
+    let mut channels = vec![channel(1, DAY, T0), channel(2, DAY, T0)];
+    let mut session = connected(&channels, T0);
+    session.on_frame(&hello(1, &[1]), &mut channels, T0);
+    session.on_frame(&ok(first), &mut channels, T0);
+    session.on_tick(&mut channels, T0 + 1_100);
+    session.outgoing();
+    let waiting = channels[1].encrypt("waiting", None, T0 + 1_100).unwrap();
+    let busy = error_frame("server_full", None, None);
+    session.on_frame(&busy, &mut channels, T0 + 1_200);
+    session.on_frame(&ok(second), &mut channels, T0 + 1_300);
+    let (held, _) = tick_until(
+        &mut session,
+        &mut channels,
+        T0 + 1_300,
+        T0 + 1_200 + MINUTE - 1,
+    );
+    assert_eq!(held, []);
+    session.on_tick(&mut channels, T0 + 1_200 + MINUTE);
+    assert_eq!(published(&mut session), [waiting]);
+    let more = channels[1]
+        .encrypt("more", None, T0 + MINUTE + 2_000)
+        .unwrap();
+    session.on_frame(&busy, &mut channels, T0 + MINUTE + 2_000);
+    session.on_tick(&mut channels, T0 + 10_000);
+    assert_eq!(published(&mut session), [more]);
+    let late = channels[1].encrypt("late", None, T0 + 10_000).unwrap();
+    session.on_frame(&busy, &mut channels, T0 + 10_000);
+    session.on_connect(T0 + 11_000, &[]);
+    session.on_frame(&hello(2, &[1]), &mut channels, T0 + 11_000);
+    session.on_tick(&mut channels, T0 + 12_100);
+    session.outgoing();
+    session.on_frame(&ok(second), &mut channels, T0 + 12_200);
+    let again = published(&mut session);
+    assert!(again.contains(&late), "{again:?}");
+
     // `rate_limited` naming a subscribed channel and no entry.
     let (mut channels, mut session, _) = two_subscribed();
     let step = session.on_frame(
-        &refusal("rate_limited", Some(first), None),
+        &error_frame("rate_limited", Some(first), None),
         &mut channels,
         T0 + 1_200,
     );
@@ -262,7 +358,7 @@ fn s028_t16_r16_error_codes() {
     // `unsupported_version`: R2's event, and nothing sent after it.
     let (mut channels, mut session, _) = two_subscribed();
     let step = session.on_frame(
-        &refusal("unsupported_version", None, None),
+        &error_frame("unsupported_version", None, None),
         &mut channels,
         T0 + 1_200,
     );
@@ -285,7 +381,7 @@ fn s028_t16_r16_bad_blob() {
     let (mut channels, mut session, sent) = two_subscribed();
     let first = ids(&channels)[0];
     let step = session.on_frame(
-        &refusal("bad_blob", Some(first), Some(sent)),
+        &error_frame("bad_blob", Some(first), Some(sent)),
         &mut channels,
         T0 + 1_200,
     );
@@ -299,13 +395,13 @@ fn s028_t16_r16_bad_blob() {
     session.on_tick(&mut channels, T0 + 2_000);
     assert_eq!(published(&mut session), []);
     let step = session.on_frame(
-        &refusal("bad_blob", Some(first), Some(sent)),
+        &error_frame("bad_blob", Some(first), Some(sent)),
         &mut channels,
         T0 + 2_100,
     );
     assert!(step.events.is_empty());
     let step = session.on_frame(
-        &refusal("bad_blob", Some(first), None),
+        &error_frame("bad_blob", Some(first), None),
         &mut channels,
         T0 + 2_200,
     );
@@ -317,7 +413,7 @@ fn s028_t16_r16_bad_blob() {
     let mut session = subscribed(&mut channels, T0);
     let [copy] = published(&mut session).try_into().unwrap();
     let step = session.on_frame(
-        &refusal("bad_blob", Some(id), Some(copy)),
+        &error_frame("bad_blob", Some(id), Some(copy)),
         &mut channels,
         T0 + 100,
     );
@@ -346,7 +442,7 @@ fn s028_t16_r16_bad_blob_abandon_fails() {
         assert_eq!(published(&mut session), [sent]);
         faults.fail_commits(true);
         let step = session.on_frame(
-            &refusal("bad_blob", Some(id), Some(sent)),
+            &error_frame("bad_blob", Some(id), Some(sent)),
             &mut channels,
             T0 + 100,
         );
@@ -379,7 +475,7 @@ fn s028_t16_r16_rate_limited_subscribe() {
     session.on_frame(&ok(first), &mut channels, T0);
     session.on_tick(&mut channels, T0 + 1_100);
     session.outgoing();
-    let ended = refusal("rate_limited", Some(second), None);
+    let ended = error_frame("rate_limited", Some(second), None);
     let step = session.on_frame(&ended, &mut channels, T0 + 1_200);
     assert!(step.events.is_empty());
     let sent = channels[0].encrypt("hi", None, T0 + 1_200).unwrap();
@@ -473,4 +569,83 @@ fn s028_t16_r16_two_endings_delayed() {
     }
     let subscribed = [kept, a, b].map(|channel| Event::Subscribed { channel });
     assert_eq!(events, subscribed);
+}
+
+/// Spec 028, R16 and R6: a `subscribe` queued again after a `rate_limited`
+/// takes its place by expiry among those still queued: a one-minute
+/// channel ended while one-day channels wait leaves next.
+#[test]
+fn s028_t16_r16_subscribe_again_in_order() {
+    let mut channels: Channels = (1..=4).map(|byte| channel(byte, DAY, T0)).collect();
+    channels.insert(0, channel(9, 60, T0));
+    let minute = ids(&channels)[0];
+    let mut session = connected(&channels, T0);
+    session.on_frame(&hello(1, &[1]), &mut channels, T0);
+    assert_eq!(super::subscribed_ids(&mut session, &channels), [minute]);
+    session.on_tick(&mut channels, T0 + 1_100);
+    session.outgoing();
+    let ended = error_frame("rate_limited", Some(minute), None);
+    session.on_frame(&ended, &mut channels, T0 + 1_200);
+    session.on_tick(&mut channels, T0 + 2_200);
+    assert_eq!(super::subscribed_ids(&mut session, &channels), [minute]);
+}
+
+/// Spec 028, R14 and R16: a subscribed channel paused by a `rate_limited`
+/// the server renews still drops its stale entries on a tick →
+/// `NotDelivered`, with no `publish` queued; an `expire_outbox` whose
+/// commit fails there → `(channel, Io)` in `failed` and the channel frozen.
+#[test]
+fn s028_t14_r14_paused_channel_expires() {
+    for fails in [false, true] {
+        let (mut channels, handle, faults) = alice();
+        let id = ids(&channels)[0];
+        let sent = channels[0].encrypt("hi", None, T0).unwrap();
+        let mut session = subscribed(&mut channels, T0);
+        assert_eq!(published(&mut session), [sent]);
+        // Out of flight, and every channel paused, again and again.
+        let stale = T0 + 86_400_000 + 360_001;
+        for at in [T0 + 100, stale - 30_000] {
+            let renewed = error_frame("rate_limited", None, Some(sent));
+            session.on_frame(&renewed, &mut channels, at);
+        }
+        faults.fail_commits(fails);
+        let step = session.on_tick(&mut channels, stale);
+        faults.fail_commits(false);
+        assert_eq!(published(&mut session), []);
+        let lost = Event::NotDelivered {
+            channel: id,
+            client_ref: sent,
+            sent_at: T0,
+        };
+        if fails {
+            assert_eq!(step.failed, [(id, StoreError::Io)]);
+            assert!(!step.events.contains(&lost));
+            let commits = handle.all_commits();
+            session.on_tick(&mut channels, stale + 1_000);
+            assert_eq!(handle.all_commits(), commits);
+        } else {
+            assert!(step.events.contains(&lost), "{:?}", step.events);
+            assert!(step.failed.is_empty());
+        }
+    }
+}
+
+/// Spec 028, R16 and R10: a `bad_blob` of an entry of a frozen channel
+/// calls nothing of it: no `abandon`, no commit, no event.
+#[test]
+fn s028_t16_r16_bad_blob_frozen() {
+    let (mut channels, handle, _) = alice();
+    let id = ids(&channels)[0];
+    let sent = channels[0].encrypt("hi", None, T0).unwrap();
+    let mut session = subscribed(&mut channels, T0);
+    assert_eq!(published(&mut session), [sent]);
+    session.set_write_failed(&channels[0], true, false);
+    let commits = handle.all_commits();
+    let step = session.on_frame(
+        &error_frame("bad_blob", Some(id), Some(sent)),
+        &mut channels,
+        T0 + 100,
+    );
+    assert!(step.events.is_empty() && step.failed.is_empty());
+    assert_eq!(handle.all_commits(), commits);
 }

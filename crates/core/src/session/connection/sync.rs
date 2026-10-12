@@ -183,8 +183,9 @@ impl Session {
     }
 
     /// R14 on a tick: every subscribed channel not paused publishes its
-    /// `outbox`, and every channel not subscribed drops its stale entries;
-    /// a frozen channel is not called (R10), a paused one waits (R16).
+    /// `outbox`, and every other channel drops its stale entries, so that
+    /// a server renewing a pause cannot hold back their `NotDelivered`
+    /// (R16); a frozen channel is not called (R10).
     pub(super) fn tick_outboxes(&mut self, channels: &mut Channels, now: u64, step: &mut Step) {
         for channel_id in self.channel_ids.clone() {
             if self.is_frozen(&channel_id) {
@@ -193,18 +194,20 @@ impl Session {
             let Some(channel) = find_mut(channels, &channel_id) else {
                 continue;
             };
-            if let Some(Subscription::Subscribed) = self.subscriptions.get(&channel_id) {
-                if !self.is_paused(&channel_id, now) {
-                    self.publish_outbox(channel, now, step);
-                }
+            let subscribed = matches!(
+                self.subscriptions.get(&channel_id),
+                Some(Subscription::Subscribed)
+            );
+            if subscribed && !self.is_paused(&channel_id, now) {
+                self.publish_outbox(channel, now, step);
             } else {
                 self.expire_outbox(channel, now, step);
             }
         }
     }
 
-    /// The stale entries of a channel not subscribed leave its `outbox`
-    /// unsent (R14); a store error freezes it (R10).
+    /// The stale entries of a channel not subscribed, or paused, leave its
+    /// `outbox` unsent (R14); a store error freezes it (R10).
     fn expire_outbox(&mut self, channel: &mut Channel, now: u64, step: &mut Step) {
         let channel_id = channel.config().channel_id();
         // `on_tick`, its one caller, watched the channel already (R13).

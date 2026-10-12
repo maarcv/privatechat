@@ -4,7 +4,10 @@
 //! refused.
 
 use super::outcomes::Hold;
-use super::{Channels, Event, Link, MINUTE_MS, Session, Step, Subscription, find_mut};
+use super::{
+    Channels, Event, Link, MINUTE_MS, Queued, Session, Step, Subscription, find, find_mut,
+    release_order,
+};
 use crate::Error;
 use crate::session::channel::ClientRef;
 use crate::session::frames::{
@@ -24,12 +27,12 @@ impl Session {
     pub(super) fn on_error(
         &mut self,
         code: &str,
-        named: (Option<[u8; 16]>, Option<ClientRef>),
+        channel_id: Option<[u8; 16]>,
+        client_ref: Option<ClientRef>,
         channels: &mut Channels,
         now: u64,
         step: &mut Step,
     ) {
-        let (channel_id, client_ref) = named;
         let flight = client_ref.and_then(|client_ref| self.in_flight.remove(&client_ref));
         match code {
             CODE_NONCE_EXPIRED => self.nonce_expired(channel_id, now, step),
@@ -50,7 +53,9 @@ impl Session {
                 }
             }
             CODE_RATE_LIMITED => match (channel_id, client_ref) {
-                (Some(channel_id), None) => self.subscribe_again(channel_id, step),
+                (Some(channel_id), None) => {
+                    self.subscribe_again(channel_id, channels, now, step);
+                }
                 _ => self.paused_all = Some(now),
             },
             CODE_SERVER_FULL => {
@@ -84,7 +89,6 @@ impl Session {
             return self.reconnect(step);
         }
         self.queue.clear();
-        self.requeued.clear();
         if let Link::Ready(_) = self.link {
             self.link = Link::AwaitingHello { since: now };
         }
@@ -106,8 +110,7 @@ impl Session {
             return;
         }
         self.subscriptions.remove(&channel_id);
-        self.queue.retain(|queued| *queued != channel_id);
-        self.requeued.remove(&channel_id);
+        self.queue.retain(|queued| queued.channel_id != channel_id);
         self.refused.insert(channel_id);
         step.events.push(Event::SubscribeRefused {
             channel: channel_id,
@@ -116,17 +119,33 @@ impl Session {
 
     /// A `rate_limited` naming a channel and no entry: a `subscribe`
     /// refused, or a subscription the server ended before its `ok`, is
-    /// queued again, to be released however old its nonce (R7); the
-    /// channel's other traffic goes on. A subscribed channel, which a
-    /// server never ends, asks for a new connection.
-    fn subscribe_again(&mut self, channel_id: [u8; 16], step: &mut Step) {
+    /// queued again in R6's order, to be released however old its nonce
+    /// (R7); the channel's other traffic goes on. A subscribed channel,
+    /// which a server never ends, asks for a new connection.
+    fn subscribe_again(
+        &mut self,
+        channel_id: [u8; 16],
+        channels: &Channels,
+        now: u64,
+        step: &mut Step,
+    ) {
         match self.subscriptions.get(&channel_id) {
             Some(Subscription::AwaitingOk { .. }) => {
                 self.subscriptions.remove(&channel_id);
-                if !self.queue.contains(&channel_id) {
-                    self.queue.push_back(channel_id);
-                }
-                self.requeued.insert(channel_id);
+                let order =
+                    |id: &[u8; 16]| find(channels, id).map(|channel| release_order(channel, now));
+                let own = order(&channel_id);
+                // Awaiting its `ok`, the channel is not queued already.
+                let at = self
+                    .queue
+                    .iter()
+                    .position(|queued| order(&queued.channel_id) > own)
+                    .unwrap_or(self.queue.len());
+                let queued = Queued {
+                    channel_id,
+                    again: true,
+                };
+                self.queue.insert(at, queued);
             }
             Some(Subscription::Subscribed) => self.reconnect(step),
             None => {}

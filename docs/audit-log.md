@@ -2,6 +2,26 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AP
+
+**2026-10-12 — Audit AP, the code audit of slice (d) of spec 028-session-sans-io (branch `028-rate-errors`): the publish rate (R15), every `error` code with its pause, refusal, hold or new `subscribe` (R16), and the `subscribe` queued again after a `rate_limited`, released however old its nonce, one stale at a time (R7); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** No production defect against the spec; one spec gap (AP4). Pass C ran 44 mutants: 27 killed, 5 equivalent, 12 survived; each survivor that is not far-fetched is killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AP1 | T16 did not send `nonce_expired`, `bad_auth`, `bad_ttl` or `server_full` naming an entry, `not_subscribed` naming none, or `channel_quota` naming an unknown entry and no channel (A) | Medium | Each case added; the named entry is published again once nothing blocks it |
+| AP2 | A pause or a publish recorded later than `now` counting as past was in the code, not in R15 or R16 (A) | Low | R15 and R16 say so, as R7 does; a test of the pause with a clock set back |
+| AP3 | A `subscribe` queued again after a `rate_limited` went to the back of the queue, not in R6's expiry order (A) | Low | It takes its place by `last + ttl_ms`; a test with a one-minute channel among one-day ones |
+| AP4 | A server renewing a `rate_limited` every 59 s kept a subscribed channel paused, so neither `outbox` nor `expire_outbox` ran and a stale entry was never reported `NotDelivered` (B) | Low | A paused channel expires its stale entries on a tick (R14, spec 021 R23); a T14 test, with the freeze after a failed commit there |
+| AP5 | The refused channel left out of the next `hello`'s queue was untested: the test dropped the `subscribe`s it read (C) | Medium | The test reads them |
+| AP6 | A refusal of a channel still queued, or awaiting its `ok`, was untested (C) | Medium | Both cases, and a refused channel's send publishing nothing |
+| AP7 | A `bad_blob` of a frozen channel's entry calling `abandon` was untested (C) | Medium | A test: no event, no commit |
+| AP8 | A pause running at an `ok`, and a new connection forgetting a `server_full` pause, were untested (C) | Medium | Both cases |
+| AP9 | A set of re-queued channels was kept beside the queue by hand, and a guard in it was dead (C) | Low | Each queued item carries its flag; the guard removed |
+| AP10 | `on_error` took its names as a tuple; the test helper `refusal` built every `error` (C) | Low | Two parameters; the helper renamed `error_frame` |
+| AP11 | A `bad_blob` that frees room watching the status for R13, and a stale `subscribe` blocking a fresh one, are untested (C) | Far-fetched | None: the first needs a log at its headroom limit, the second a `hello` not caused by the stale `subscribe` |
+
+Decisions taken without the human, by the advisor (three passes, unanimous): a paused channel calls `expire_outbox` on a tick (AP4), since §2's malicious server must not hold back the client's own TTL; R14 and spec 021 R23 amended. Taken by the author against the spec, which pass A found consistent: `channel_quota` pauses the named entry's channel, else the named channel when it is the session's, else every channel; a `bad_auth`, `bad_ttl` or `channel_quota` naming a channel not of the session does nothing; `bad_blob` acts only on an entry in flight on this connection, and an `abandon` that finds no ordinary entry holds the copy for the minute of `now`; under R15, `outbox` is still called and the blobs past the limit come back later.
+
 ## Audit AO
 
 **2026-10-12 — Audit AO, the code audit of slice (c2) of spec 028-session-sans-io (branch `028-acks`): the `ack` routed to its channel, the clock samples, the outcomes and the hold on a late `key_retired` copy (R11, R12), `Event::StatusChanged` (R13), the `outbox` and `expire_outbox` on every tick (R14), and the freeze after a failed `acked` or `expire_outbox` (R10); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** One production defect (AO1), no High finding. Pass C ran 38 mutants: 26 killed, 6 equivalent, 6 survived, each killed below, as is pass A's.
