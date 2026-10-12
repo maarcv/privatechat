@@ -52,7 +52,7 @@ fn publishes(session: &mut Session) -> Vec<(ClientRef, Vec<u8>)> {
 }
 
 /// Spec 028, R12: an in-time `ack` → `Delivered` with its `server_id`,
-/// `received_at` and `expires_at`; a late one → `NotDelivered`; an entry
+/// `received_at` and `expires_at`, the time clamped to `now`; a late one → `NotDelivered`; an entry
 /// dropped as stale while in flight, its `ack` `Ignored` → nothing; a
 /// second `ack` and an unknown `client_ref` → nothing.
 #[test]
@@ -61,8 +61,9 @@ fn s028_t12_r12_ack_routing() {
     let id = ids(&channels)[0];
     let on_time = channels[0].encrypt("on time", None, T0).unwrap();
     let late = channels[0].encrypt("late", None, T0).unwrap();
+    let ahead = channels[0].encrypt("ahead", None, T0).unwrap();
     let mut session = subscribed(&mut channels, T0);
-    assert_eq!(published(&mut session), [on_time, late]);
+    assert_eq!(published(&mut session), [on_time, late, ahead]);
 
     let step = session.on_frame(&ack(on_time, 1, T0 + 200), &mut channels, T0 + 300);
     let delivered = Event::Delivered {
@@ -85,6 +86,20 @@ fn s028_t12_r12_ack_routing() {
     // The live sample, two days off, raises the clock warning (R11, R13).
     let status = Event::StatusChanged { channel: id };
     assert_eq!(step.events, [not_delivered, status]);
+    // Stored a minute ahead of the device: listed at `now`, the clamped
+    // time the `Outcome` carries (spec 021-channel-session R17).
+    let step = session.on_frame(&ack(ahead, 5, T0 + 60_450), &mut channels, T0 + 450);
+    let clamped = Event::Delivered {
+        channel: id,
+        client_ref: ahead,
+        server_id: [5; 16],
+        received_at: T0 + 450,
+        expires_at: T0 + 450 + DAY_MS,
+    };
+    // Its live sample, a minute off, clears the warning the late `ack`
+    // raised.
+    let status = Event::StatusChanged { channel: id };
+    assert_eq!(step.events, [clamped, status]);
     // An entry dropped as stale while in flight: its very late `ack`
     // reaches `acked`, which ignores it.
     let mut minute = vec![channel(2, 60, T0)];

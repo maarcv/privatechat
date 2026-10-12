@@ -46,6 +46,13 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AO26 | A push in a `LogFull` stall taking no clock sample was untested (C) | Low | A T11 case |
 | AO27 | An `ack` read in the millisecond of its publish, and a push after the gap stored an hour before, were untested bounds of the samples (C) | Low | Two T11 cases |
 
+**Round 4.** Fresh passes on the whole change. AO1–AO27 hold; pass B found nothing; pass A found one test gap and pass C another, with no production defect. Pass C ran 21 new mutants: 20 killed, 1 survived, killed below. The audit closes with this round (`CLAUDE.md`, the audit): the only findings are test gaps, now closed, a pass A test gap read like pass C's.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AO28 | No test checked that `Delivered` carries the clamped time of its `Outcome`: an event built from the frame's own `received_at` passed (A) | Low | A T12 case: an `ack` a minute ahead is listed at `now` |
+| AO29 | The redacted `Debug` of `Delivered` was not pinned: printing the whole channel id passed (C) | Low | Exact assertions for `Delivered` and `StatusChanged` |
+
 ## Audit AN
 
 **2026-10-10 — Audit AN, the code audit of slice (c1b) of spec 028-session-sans-io (branch `028-write-failed`): the `write_failed` mark and the freeze after a failed `outbox` (R10's second half); round 1 of three passes (A: conformance; B: the adversary, a key thief on a failing disk; C: quality, tests and hand mutants).** No High finding and no production defect. Pass C ran 13 mutants: 11 killed, 2 survived, each killed below.
