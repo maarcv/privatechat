@@ -45,6 +45,17 @@ Findings and applied changes of every audit of the specification, newest first; 
 
 Decisions taken without the human, by the advisor (three passes, unanimous): every entry an `error` names is held for the minute it was published in (AP18), since §2's malicious server must not turn its frames into the user's uploads.
 
+**Round 4.** Fresh passes on the whole change. AP1–AP24 hold; pass B found nothing; pass A found wording behind AP18, no code defect; pass C found test gaps only. Pass C ran 9 new mutants: 5 killed, 4 survived, each killed below. The audit closes with this round (`CLAUDE.md`, the audit): pass A's findings change no behaviour, and the rest are test gaps, now closed.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AP25 | Since AP18 a held ordinary entry reaches `outbox` and `expire_outbox` as in flight, with R22's minute of grace, where R9 and R14 said "in flight or queued" (A) | Low | R9 and R14 say "in flight, queued or held"; a `NotDelivered` comes at most a minute later, the grace an entry in flight already has |
+| AP26 | The comments of the hold still spoke of the `key_retired` copy alone (A) | Low | They name the entries an `error` names |
+| AP27 | The Interface did not say tests/limits.rs holds R14's test of a paused channel (A) | Low | It says so |
+| AP28 | A pause renewed while it runs was untested, for `rate_limited`, `server_full` and `channel_quota` (C) | Medium | A case for each |
+| AP29 | A `bad_blob` naming another channel than its entry's was untested (C) | Medium | A case: the entry's own channel abandons it |
+| AP30 | `Queued::again` did not read as a predicate (C) | Low | Renamed `requeued` |
+
 Decisions taken without the human, by the advisor (three passes, unanimous): a paused channel calls `expire_outbox` on a tick (AP4), since §2's malicious server must not hold back the client's own TTL; R14 and spec 021 R23 amended. Taken by the author against the spec, which pass A found consistent: `channel_quota` pauses the named entry's channel, else the named channel when it is the session's, else every channel; a `bad_auth`, `bad_ttl` or `channel_quota` naming a channel not of the session does nothing; `bad_blob` acts only on an entry in flight on this connection, and an `abandon` that finds no ordinary entry holds the copy for the minute it was published in (AP12); under R15, `outbox` is still called and the blobs past the limit come back later.
 
 ## Audit AO

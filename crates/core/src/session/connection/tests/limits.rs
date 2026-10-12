@@ -418,6 +418,22 @@ fn s028_t16_r16_bad_blob() {
         T0 + 2_100,
     );
     assert!(step.events.is_empty());
+    // Naming another channel: the entry's own channel abandons it.
+    let (mut channels, mut session, sent) = two_subscribed();
+    let [first, second]: [[u8; 16]; 2] = ids(&channels).try_into().unwrap();
+    let step = session.on_frame(
+        &error_frame("bad_blob", Some(second), Some(sent)),
+        &mut channels,
+        T0 + 1_200,
+    );
+    let gone = Event::NotDelivered {
+        channel: first,
+        client_ref: sent,
+        sent_at: T0,
+    };
+    assert_eq!(step.events, [gone]);
+    session.on_tick(&mut channels, T0 + MINUTE);
+    assert_eq!(published(&mut session), []);
     let step = session.on_frame(
         &error_frame("bad_blob", Some(first), None),
         &mut channels,
@@ -679,6 +695,27 @@ fn s028_t16_r16_pauses_renew() {
         assert_eq!(held, [], "{code} {named:?}");
         session.on_tick(&mut channels, end + MINUTE + 1_000);
         assert_eq!(published(&mut session), [late], "{code} {named:?}");
+    }
+
+    // Renewed while it runs: the pause runs a minute from the renewal.
+    for (code, channel_id) in [
+        ("rate_limited", None),
+        ("server_full", None),
+        ("channel_quota", Some(0)),
+    ] {
+        let (mut channels, mut session, _) = two_subscribed();
+        let first = ids(&channels)[0];
+        let frame = error_frame(code, channel_id.map(|_| first), None);
+        session.on_frame(&frame, &mut channels, T0 + 1_200);
+        tick_until(&mut session, &mut channels, T0 + 1_200, T0 + 31_200);
+        session.on_frame(&frame, &mut channels, T0 + 31_200);
+        let late = channels[0].encrypt("late", None, T0 + 31_200).unwrap();
+        session.after_send(first, &mut channels, T0 + 31_200);
+        let renewed = T0 + 31_200 + MINUTE;
+        let (held, _) = tick_until(&mut session, &mut channels, T0 + 31_200, renewed - 1);
+        assert_eq!(held, [], "{code}");
+        session.on_tick(&mut channels, renewed);
+        assert_eq!(published(&mut session), [late], "{code}");
     }
 }
 

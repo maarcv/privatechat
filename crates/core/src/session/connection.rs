@@ -76,7 +76,7 @@ struct Queued {
     channel_id: [u8; 16],
     /// Queued again after a `rate_limited` ended its subscription:
     /// released however old the nonce (R7, R16).
-    again: bool,
+    requeued: bool,
 }
 
 /// The latest `hello` of the connection.
@@ -122,7 +122,8 @@ pub(crate) struct Session {
     sync_stopped: bool,
     /// The entries published on this connection and not yet answered.
     in_flight: BTreeMap<ClientRef, Flight>,
-    /// The `key_retired` copies held after a late `ack` (R12).
+    /// The entries held after a late `ack` of a `key_retired` copy (R12)
+    /// or an `error` naming them (R16).
     held: BTreeMap<ClientRef, Hold>,
     /// The channels the current step called, with their status before
     /// (R13).
@@ -343,7 +344,7 @@ impl Session {
             .into_iter()
             .map(|(_, channel_id)| Queued {
                 channel_id,
-                again: false,
+                requeued: false,
             })
             .collect();
         self.release(hello, channels, now, step);
@@ -365,11 +366,15 @@ impl Session {
     /// counts as long past, so that a clock set back cannot hold the
     /// queue.
     fn release(&mut self, hello: Hello, channels: &Channels, now: u64, step: &mut Step) {
-        let Some(Queued { channel_id, again }) = self.queue.front().copied() else {
+        let Some(Queued {
+            channel_id,
+            requeued,
+        }) = self.queue.front().copied()
+        else {
             return;
         };
         let stale = expired(hello.at, NONCE_WINDOW_MS, now);
-        if stale && !again {
+        if stale && !requeued {
             self.queue.clear();
             self.reconnect(step);
             return;

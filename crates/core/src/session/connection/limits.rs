@@ -168,7 +168,7 @@ impl Session {
                     .unwrap_or(self.queue.len());
                 let queued = Queued {
                     channel_id,
-                    again: true,
+                    requeued: true,
                 };
                 self.queue.insert(at, queued);
             }
