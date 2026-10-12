@@ -131,8 +131,8 @@ fn s028_t14_r14_expire_failure_freezes() {
     );
 }
 
-/// Spec 028, R13: a truncation banner that lapses on a tick →
-/// `StatusChanged` once; a channel of another connection among the
+/// Spec 028, R13: a truncation banner that lapses on a tick, or at the
+/// `synced` of an `ok`, → `StatusChanged` once; a channel of another connection among the
 /// `Device`'s, its peers changed, is not reported by this session's ticks.
 #[test]
 fn s028_t13_r13_banner_lapses_on_tick() {
@@ -160,4 +160,21 @@ fn s028_t13_r13_banner_lapses_on_tick() {
         "{changes:?}"
     );
     assert!(channels[1].take_peers_changed());
+
+    // Ticks up to a second before the banner lapses, then a new connection
+    // whose `ok` comes after it: that `ok` reports it.
+    let mut channels = vec![channel(1, MINUTE, T0 - 10 * 86_400_000)];
+    let mut session = connected(&channels, T0);
+    session.on_frame(&hello(1, &[1]), &mut channels, T0);
+    session.on_frame(&ok(id), &mut channels, T0);
+    for at in (1..=418).map(|second| T0 + second * 1_000) {
+        session.on_tick(&mut channels, at);
+    }
+    session.on_disconnect();
+    session.on_connect(T0 + 419_000, &[]);
+    session.on_frame(&hello(2, &[1]), &mut channels, T0 + 419_000);
+    assert!(channels[0].status().truncated_before.is_some());
+    let step = session.on_frame(&ok(id), &mut channels, T0 + 420_500);
+    assert!(channels[0].status().truncated_before.is_none());
+    assert_eq!(step.events, [Event::Subscribed { channel: id }, status]);
 }

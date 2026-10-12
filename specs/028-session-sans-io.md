@@ -89,7 +89,7 @@ crates/core/src/session/connection/event.rs  Event and its redacted Debug
 crates/core/src/session/connection/sync.rs   the truncation, the ok and the limits of R9 (R8, R9)
 crates/core/src/session/connection/traffic.rs the push routed to decrypt and the stalls of R10
 crates/core/src/session/connection/outcomes.rs the acks, clock samples, outcomes and status events (R11–R13)
-crates/core/src/session/connection/tests.rs  s028_* tests, with those of R8, R9 and R10 in tests/truncation.rs, tests/ok.rs and tests/traffic.rs, of R11–R13 and R17, and R10's freeze after a failed `acked`, in tests/acks.rs, and of R14 on a tick, with R10's freeze after a failed `expire_outbox`, in tests/tick.rs
+crates/core/src/session/connection/tests.rs  s028_* tests, with those of R8, R9 and R10 in tests/truncation.rs, tests/ok.rs and tests/traffic.rs, of R11–R13 and R17, and R10's freeze after a failed `acked`, in tests/acks.rs, and of R14 on a tick, with R10's freeze after a failed `expire_outbox` and R13's banner lapsing on a tick or at an `ok`, in tests/tick.rs
 crates/core/src/testing/server.rs            MemoryServer, which implements R4 over Frame, re-exported by testing.rs beside spec 020's doubles
 crates/core/fuzz/fuzz_targets/frame_decode.rs
 crates/core/fuzz/fuzz_targets/session_on_frame.rs

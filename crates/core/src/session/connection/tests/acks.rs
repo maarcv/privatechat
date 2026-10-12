@@ -317,6 +317,16 @@ fn s028_t11_r11_clock_samples() {
     assert_eq!(published(&mut session), [later]);
     session.on_frame(&ack(later, 2, T0), &mut channels, T0 + HOUR + 1_000);
     assert!(!channels[0].status().clock_off);
+    // A push after the gap stored an hour before: a backlog sample, no
+    // warning.
+    let behind = Frame::Push {
+        channel_id: ids(&channels)[0],
+        server_id: [4; 16],
+        received_at: T0,
+        blob: vec![0; 8],
+    };
+    session.on_frame(&behind.encode().unwrap(), &mut channels, T0 + HOUR + 1_500);
+    assert!(!channels[0].status().clock_off);
     // A push after the gap is still sampled, by the backlog rule: stored an
     // hour ahead, it raises the warning.
     let ahead = Frame::Push {
@@ -326,6 +336,14 @@ fn s028_t11_r11_clock_samples() {
         blob: vec![0; 8],
     };
     session.on_frame(&ahead.encode().unwrap(), &mut channels, T0 + HOUR + 2_000);
+    assert!(channels[0].status().clock_off);
+
+    // An `ack` read in the very ms of its publish, an hour off: live.
+    let (mut channels, _, _) = alice();
+    let sent = channels[0].encrypt("hi", None, T0).unwrap();
+    let mut session = subscribed(&mut channels, T0);
+    assert_eq!(published(&mut session), [sent]);
+    session.on_frame(&ack(sent, 1, T0 - HOUR), &mut channels, T0);
     assert!(channels[0].status().clock_off);
 
     // A clock set back between the publish and its `ack`: not live.

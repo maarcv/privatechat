@@ -759,3 +759,67 @@ fn s028_t10_r10_write_failed_cleared_stopped() {
         [reconnect()]
     );
 }
+
+/// Spec 028, R11: a push in a `LogFull` stall is still a backlog sample.
+#[test]
+fn s028_t11_r11_stalled_push_sampled() {
+    let (mut channels, _, _) = alice();
+    let id = ids(&channels)[0];
+    let mut bob = member(&channels[0]);
+    let blob = sealed(&mut bob, "one");
+    channels[0].fill_log(FILL_EXPIRES, ROOM + 1);
+    let mut session = greeted(&mut channels);
+    let step = session.on_frame(&push(id, 1, &blob), &mut channels, T0 + 100);
+    assert_eq!(step.events, [Event::StorageFailed { channel: id }]);
+    let ahead = Frame::Push {
+        channel_id: id,
+        server_id: [2; 16],
+        received_at: T0 + 200 + 3_600_000,
+        blob: vec![0; 8],
+    };
+    let step = session.on_frame(&ahead.encode().unwrap(), &mut channels, T0 + 200);
+    assert!(channels[0].status().clock_off);
+    assert_eq!(step.events, [Event::StatusChanged { channel: id }]);
+}
+
+/// Spec 028, R10: in a `LogFull` stall acks go on.
+#[test]
+fn s028_t10_r10_stall_acks_go_on() {
+    let (mut channels, _, _) = alice();
+    let id = ids(&channels)[0];
+    let mut bob = member(&channels[0]);
+    let blob = sealed(&mut bob, "one");
+    let mine = channels[0].encrypt("mine", None, T0).unwrap();
+    channels[0].fill_log(FILL_EXPIRES, ROOM + 1);
+    let mut session = greeted(&mut channels);
+    let step = session.on_frame(&push(id, 1, &blob), &mut channels, T0 + 100);
+    assert_eq!(step.events, [Event::StorageFailed { channel: id }]);
+    session.on_frame(&ok(id), &mut channels, T0 + 200);
+    assert_eq!(published(&mut session), [mine]);
+    let ack = Frame::Ack {
+        client_ref: mine.bytes,
+        server_id: [2; 16],
+        received_at: T0 + 250,
+    };
+    let step = session.on_frame(&ack.encode().unwrap(), &mut channels, T0 + 300);
+    assert!(
+        matches!(step.events[..], [Event::Delivered { client_ref, .. }] if client_ref == mine),
+        "{:?}",
+        step.events
+    );
+    // And a tick still expires a stale entry of a channel awaiting `ok`.
+    let (mut channels, _, _) = alice();
+    let stale = channels[0].encrypt("stale", None, T0).unwrap();
+    channels[0].fill_log(FILL_EXPIRES, ROOM + 1);
+    let mut session = greeted(&mut channels);
+    session.on_frame(&push(id, 1, &blob), &mut channels, T0 + 100);
+    let step = session.on_tick(&mut channels, T0 + 86_400_000 + 361_000);
+    assert!(
+        step.events.iter().any(
+            |event| matches!(event, Event::NotDelivered { client_ref, .. } if *client_ref == stale)
+        ),
+        "{:?} {:?}",
+        step.events,
+        step.failed
+    );
+}

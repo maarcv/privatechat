@@ -35,6 +35,17 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AO20 | `unanswered` forgets expired holds without saying so (C) | Low | Its comment says so |
 | AO21 | T12's test comment left out the `Ignored` case AO3 added (C) | Low | The comment names it |
 
+**Round 3.** Fresh passes on the whole change. AO1–AO21 hold; pass B found nothing, pass C no production defect. Pass C ran 14 new mutants: 8 killed, 2 equivalent, 4 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AO22 | A truncation banner that lapses at the `synced` of an `ok` was never reported: the status was watched only at the `outbox` after it (A) | Low | The `ok` watches the status before `synced`, as the tick does (AO8); a T13 case |
+| AO23 | The Interface did not say the banner tests live in tests/tick.rs (A) | Far-fetched | The Interface says so all the same |
+| AO24 | A tick skipping a channel in a `LogFull` stall, whose stale entries R10 still expires, was untested (C) | Medium | A T10 case |
+| AO25 | An `ack` of a channel in a `LogFull` stall dropped, though acks go on (R10), was untested (C) | Medium | A T10 case |
+| AO26 | A push in a `LogFull` stall taking no clock sample was untested (C) | Low | A T11 case |
+| AO27 | An `ack` read in the millisecond of its publish, and a push after the gap stored an hour before, were untested bounds of the samples (C) | Low | Two T11 cases |
+
 ## Audit AN
 
 **2026-10-10 — Audit AN, the code audit of slice (c1b) of spec 028-session-sans-io (branch `028-write-failed`): the `write_failed` mark and the freeze after a failed `outbox` (R10's second half); round 1 of three passes (A: conformance; B: the adversary, a key thief on a failing disk; C: quality, tests and hand mutants).** No High finding and no production defect. Pass C ran 13 mutants: 11 killed, 2 survived, each killed below.

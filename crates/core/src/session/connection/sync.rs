@@ -119,6 +119,10 @@ impl Session {
         // A dropped push lies after the cursor: `synced` would mark it
         // fetched (R10).
         if syncs && !self.sync_stopped && !self.is_stalled(&channel_id) {
+            // Before `synced`, which moves the time the truncation banner
+            // is judged by: a banner that lapses here changes the status
+            // (R13), as on a tick.
+            self.watch(channel);
             sync(channel, now, step);
         }
         step.events.push(Event::Subscribed {
