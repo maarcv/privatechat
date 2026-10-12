@@ -22,6 +22,19 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AO12 | An `ack` read on a clock set back since its publish counting as live was untested (C) | Low | A T11 case |
 | AO13 | `expire_outbox` watched a status the tick had watched already (C) | Low | The call removed |
 
+**Round 2.** Fresh passes on the whole change. AO1–AO13 hold; no production defect. Pass C ran 25 new mutants: 22 killed, 3 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AO14 | T10 and T14 did not name the freeze after a failed `acked` or `expire_outbox` their tests check; T13's live `ack` a day off and T11's push after the gap had no test of their own (A) | Low | T10 and T14 clauses; both cases tested |
+| AO15 | A clock flipping across a minute boundary, with `ack`s always late, re-seals and publishes the `key_retired` once a flip rather than once a minute (B) | Far-fetched | None: the first set-back trips R9's gap, whose `Reconnect` clears the holds, and R12 ends a hold when the minute of `now` changes |
+| AO16 | A channel awaiting `ok` publishing its `outbox` on a tick, before its backlog, was untested (C) | Medium | A T14 case |
+| AO17 | The 5 000 ms bound of a live `ack` was pinned from below only (C) | Medium | An `ack` 5 001 ms after its publish is not live |
+| AO18 | A hold dropped when the clock is set back to an earlier minute was untested (C) | Low | A T12 case |
+| AO19 | `Flight` and `Hold` derived `Clone` and `Copy`, which nothing uses (C) | Low | The derives removed |
+| AO20 | `unanswered` forgets expired holds without saying so (C) | Low | Its comment says so |
+| AO21 | T12's test comment left out the `Ignored` case AO3 added (C) | Low | The comment names it |
+
 ## Audit AN
 
 **2026-10-10 — Audit AN, the code audit of slice (c1b) of spec 028-session-sans-io (branch `028-write-failed`): the `write_failed` mark and the freeze after a failed `outbox` (R10's second half); round 1 of three passes (A: conformance; B: the adversary, a key thief on a failing disk; C: quality, tests and hand mutants).** No High finding and no production defect. Pass C ran 13 mutants: 11 killed, 2 survived, each killed below.

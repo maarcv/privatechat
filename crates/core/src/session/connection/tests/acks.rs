@@ -52,8 +52,9 @@ fn publishes(session: &mut Session) -> Vec<(ClientRef, Vec<u8>)> {
 }
 
 /// Spec 028, R12: an in-time `ack` → `Delivered` with its `server_id`,
-/// `received_at` and `expires_at`; a late one → `NotDelivered`; a second
-/// `ack` of it and an unknown `client_ref` → nothing.
+/// `received_at` and `expires_at`; a late one → `NotDelivered`; an entry
+/// dropped as stale while in flight, its `ack` `Ignored` → nothing; a
+/// second `ack` and an unknown `client_ref` → nothing.
 #[test]
 fn s028_t12_r12_ack_routing() {
     let (mut channels, _, _) = alice();
@@ -166,6 +167,18 @@ fn s028_t12_r12_late_retirement_held() {
     session.on_frame(&ack(copy, 1, T0 + 60_100), &mut channels, T0 + 60_200);
     assert!(channels[0].status().retirement_pending);
     session.on_tick(&mut channels, T0 + 61_000);
+    let next = published(&mut session);
+    assert_eq!(next.len(), 1);
+    assert_ne!(next[0], copy);
+
+    // A clock set back a minute while a copy is held: the hold ends, and
+    // the copy is re-sealed and published.
+    let (mut channels, _, _) = alice();
+    channels[0].regenerate_identity(T0).unwrap();
+    let mut session = subscribed(&mut channels, T0);
+    let [copy] = published(&mut session).try_into().unwrap();
+    session.on_frame(&ack(copy, 1, T0 + 2 * DAY_MS), &mut channels, T0 + 1_000);
+    session.on_tick(&mut channels, T0 - 30_000);
     let next = published(&mut session);
     assert_eq!(next.len(), 1);
     assert_ne!(next[0], copy);
@@ -304,6 +317,16 @@ fn s028_t11_r11_clock_samples() {
     assert_eq!(published(&mut session), [later]);
     session.on_frame(&ack(later, 2, T0), &mut channels, T0 + HOUR + 1_000);
     assert!(!channels[0].status().clock_off);
+    // A push after the gap is still sampled, by the backlog rule: stored an
+    // hour ahead, it raises the warning.
+    let ahead = Frame::Push {
+        channel_id: ids(&channels)[0],
+        server_id: [3; 16],
+        received_at: T0 + 2 * HOUR,
+        blob: vec![0; 8],
+    };
+    session.on_frame(&ahead.encode().unwrap(), &mut channels, T0 + HOUR + 2_000);
+    assert!(channels[0].status().clock_off);
 
     // A clock set back between the publish and its `ack`: not live.
     let (mut channels, _, _) = alice();
@@ -312,6 +335,16 @@ fn s028_t11_r11_clock_samples() {
     session.after_send(ids(&channels)[0], &mut channels, T0 + 4_000);
     assert_eq!(published(&mut session), [back]);
     session.on_frame(&ack(back, 1, T0 + 3_000 - HOUR), &mut channels, T0 + 3_000);
+    assert!(!channels[0].status().clock_off);
+
+    // An `ack` read 5 001 ms after its publish, an hour off: not live.
+    let (mut channels, _, _) = alice();
+    let sent = channels[0].encrypt("hi", None, T0).unwrap();
+    let mut session = subscribed(&mut channels, T0);
+    assert_eq!(published(&mut session), [sent]);
+    // A tick between, so that R9's gap does not trip.
+    session.on_tick(&mut channels, T0 + 3_000);
+    session.on_frame(&ack(sent, 1, T0 + 5_001 - HOUR), &mut channels, T0 + 5_001);
     assert!(!channels[0].status().clock_off);
 
     // A 60-second channel whose `ack` comes 40 s late, an off of 40 s past
@@ -331,7 +364,8 @@ fn s028_t11_r11_clock_samples() {
 /// `StatusChanged` alone; an ordinary message of a known peer with its
 /// name unchanged → none; a stranger's `key_retired` that removes its
 /// peer → `StatusChanged`; an `ack` that delivers the retirement →
-/// `StatusChanged`; a send that changes one's own name → `StatusChanged`.
+/// `StatusChanged`; a send that changes one's own name → `StatusChanged`; a
+/// live `ack` a day off → `StatusChanged`.
 #[test]
 fn s028_t13_r13_status_event() {
     let (mut channels, handle, _) = alice();
@@ -399,6 +433,12 @@ fn s028_t13_r13_status_event() {
             .events
             .is_empty()
     );
+
+    // A live `ack` a day off: the clock warning shows.
+    let [_, sent] = published(&mut session).try_into().unwrap();
+    let step = session.on_frame(&ack(sent, 5, T0 + 800 - DAY_MS), &mut channels, T0 + 800);
+    assert!(channels[0].status().clock_off);
+    assert!(step.events.contains(&Event::StatusChanged { channel: id }));
 }
 
 /// Spec 028, R10: an `acked` whose commit fails → the channel in `failed`

@@ -12,7 +12,6 @@ use crate::session::channel::{AckOutcome, Channel, ClientRef, Outcome};
 const LIVE_ACK_MS: u64 = 5_000;
 
 /// One entry published on this connection and not yet answered.
-#[derive(Clone, Copy)]
 pub(super) struct Flight {
     pub(super) channel: [u8; 16],
     pub(super) published_at: u64,
@@ -21,7 +20,6 @@ pub(super) struct Flight {
 /// A `key_retired` copy not published again on this connection while the
 /// minute it was sealed in lasts (R12): the minute after, `outbox`
 /// re-seals it as another copy (spec 025-identity-regen R4).
-#[derive(Clone, Copy)]
 pub(super) struct Hold {
     pub(super) channel: [u8; 16],
     pub(super) minute: u64,
@@ -146,7 +144,8 @@ impl Session {
     }
 
     /// The entries of `channel_id` its `outbox` must not hand out at `now`:
-    /// in flight, or held within their minute (R12, R14).
+    /// in flight, or held within their minute (R12, R14). The holds whose
+    /// minute is not `now`'s are forgotten on the way.
     pub(super) fn unanswered(&mut self, channel_id: &[u8; 16], now: u64) -> Vec<ClientRef> {
         let minute = now / MINUTE_MS;
         self.held.retain(|_, hold| hold.minute == minute);

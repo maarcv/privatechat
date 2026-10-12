@@ -20,9 +20,10 @@ const MINUTE: u32 = 60;
 const STALE: u64 = T0 + 60_000 + 360_000 + 1;
 
 /// Spec 028, R14: a tick publishes what a subscribed channel's `outbox`
-/// holds, once; a stale entry found on a tick → `NotDelivered`, for a
-/// subscribed channel and for one of the session not subscribed, also
-/// between connections, which queue nothing.
+/// holds, once, and nothing of a channel awaiting its `ok`; a stale entry
+/// found on a tick → `NotDelivered`, for a subscribed channel and for one
+/// of the session not subscribed, also between connections, which queue
+/// nothing.
 #[test]
 fn s028_t14_r14_tick() {
     let mut channels = vec![channel(1, MINUTE, T0), channel(2, MINUTE, T0)];
@@ -67,6 +68,19 @@ fn s028_t14_r14_tick() {
     });
     assert_eq!(step.events, expected);
     assert!(session.outgoing().is_empty());
+
+    // Awaiting its `ok`, a channel publishes nothing: its backlog may hold
+    // the own-key message that stops it (R10).
+    let mut channels = vec![channel(3, MINUTE, T0)];
+    let id = ids(&channels)[0];
+    let mut session = connected(&channels, T0);
+    session.on_frame(&hello(1, &[1]), &mut channels, T0);
+    session.outgoing();
+    let early = channels[0].encrypt("early", None, T0).unwrap();
+    session.on_tick(&mut channels, T0 + 50);
+    assert_eq!(published(&mut session), []);
+    session.on_frame(&ok(id), &mut channels, T0 + 100);
+    assert_eq!(published(&mut session), [early]);
 }
 
 /// Spec 028, R14 and R10: an `expire_outbox` whose commit fails → the
