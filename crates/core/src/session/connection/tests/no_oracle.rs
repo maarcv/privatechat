@@ -57,8 +57,9 @@ enum Op {
     Push(usize, u8, [Kind; 2]),
     /// The `ok` of channel `0` or `1`.
     Ok(usize),
-    /// The `ack` of the oldest `publish` not yet acknowledged.
-    Ack,
+    /// The `ack` of the oldest `publish` not yet acknowledged, with
+    /// `server_id` `[n; 16]`, `n` drawn from the pushes' few.
+    Ack(u8),
     /// An `error` with this code, naming channel `0` or `1` or none, and
     /// the oldest `publish` not yet acknowledged or none.
     Error(&'static str, Option<usize>, bool),
@@ -94,7 +95,7 @@ fn op() -> impl Strategy<Value = Op> {
         6 => (0usize..2, 0u8..8, kind(), kind())
             .prop_map(|(channel, n, a, b)| Op::Push(channel, n, [a, b])),
         2 => (0usize..2).prop_map(Op::Ok),
-        2 => Just(Op::Ack),
+        2 => (0u8..8).prop_map(Op::Ack),
         1 => Just(Op::Reconnect),
         3 => Just(Op::Hello),
         3 => (
@@ -210,8 +211,7 @@ fn run(ops: &[(u64, Op)], side: usize) -> Vec<Seen> {
     let mut hellos = 1;
     session.on_connect(now, &[]);
     session.on_frame(&hello(hellos, &[1]), &mut channels, now);
-    for (n, (delay, op)) in ops.iter().enumerate() {
-        let n = u8::try_from(n % 250).unwrap();
+    for (delay, op) in ops {
         now += 1 + delay;
         let step = match op {
             Op::Tick => session.on_tick(&mut channels, now),
@@ -230,11 +230,11 @@ fn run(ops: &[(u64, Op)], side: usize) -> Vec<Seen> {
                 session.on_frame(&push, &mut channels, now)
             }
             Op::Ok(index) => session.on_frame(&ok(channel_ids[*index]), &mut channels, now),
-            Op::Ack if !unacked.is_empty() => {
+            Op::Ack(server_id) if !unacked.is_empty() => {
                 let client_ref = unacked.remove(0);
-                session.on_frame(&ack(client_ref, n, now), &mut channels, now)
+                session.on_frame(&ack(client_ref, *server_id, now), &mut channels, now)
             }
-            Op::Ack => Step::default(),
+            Op::Ack(_) => Step::default(),
             Op::Error(code, channel, entry) => {
                 let channel_id = channel.map(|index| channel_ids[index]);
                 let client_ref = match entry {

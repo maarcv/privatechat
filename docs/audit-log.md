@@ -30,6 +30,16 @@ Findings and applied changes of every audit of the specification, newest first; 
 
 Decisions taken without the human, by the advisor (three passes, unanimous): §4's No-oracle rule names the exceptions R18 already makes (AQ10), since the accepted spec ranks above `docs/spec.md` and no promise of §1 or §2 changes.
 
+**Round 3.** Fresh passes on the whole change. AQ1–AQ14 hold; no production defect. Pass C ran 8 new mutants: 4 killed, 1 equivalent, 1 killed by T10 and unreachable under R18's headroom, 2 survived, one killed below and one far-fetched.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AQ15 | R18 and §4 left out the key being retired: a blob signed with it removes the entries it overtook (spec 021 R9 step 5), so the `publish`es that follow depend on its verdict; and §4's "only these" left out a store that fails on commit, AQ8 (A, B) | Low | R18 leaves out the key being retired with one's own key; §4 names it with spec 025, drops "only these" and names a commit that fails; 028's Security line follows |
+| AQ16 | §4 named the time of the commit, not the later compaction that drops a consumed message (B) | Low | §4 and R18 say the store works longer for a consumed message, at its commit and at that compaction |
+| AQ17 | An `ack`'s `server_id` was the op's index, so it met a push's almost never: an `acked` that ignored an `ack` naming a `server_id` already in the log survived (C) | Medium | The `ack`'s `server_id` is drawn from the pushes' eight |
+| AQ18 | The test compares a `publish`'s length, not its sealed counter and payload, which a member could read (C) | Far-fetched | None: R18 leaves out the blob's bytes, and a member's own counter moves on no peer's message (spec 021 R14 reads one's own key alone) |
+| AQ19 | Every push comes with `received_at = now`, so a push that moved `synced_at` changes no truncation in the test (C) | Far-fetched | None: it needs an older backlog push and an absence timed within a TTL's edge |
+
 ## Audit AP
 
 **2026-10-12 — Audit AP, the code audit of slice (d) of spec 028-session-sans-io (branch `028-rate-errors`): the publish rate (R15), every `error` code with its pause, refusal, hold or new `subscribe` (R16), and the `subscribe` queued again after a `rate_limited`, released however old its nonce, one stale at a time (R7); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** No production defect against the spec; one spec gap (AP4). Pass C ran 44 mutants: 27 killed, 5 equivalent, 12 survived; each survivor that is not far-fetched is killed below.

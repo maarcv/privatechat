@@ -48,7 +48,7 @@ Since the decision of 2026-09-25 (`docs/spec.md` §6), this spec also fixes the 
 
 **No oracle**
 
-- R18 For two sequences of calls that differ only in the bytes of `push` blobs whose opened `sender_pk` is not one's own, with the log headroom of spec 021-channel-session R18 holding in both, `outgoing()` MUST return the same frames at the same calls, apart from the bytes of `sig`, `client_ref` and the blobs of `publish` (`docs/spec.md` §4 "No-oracle rule"). A blob from one's own key can change what the user may send (spec 021-channel-session R14, spec 024-key-retired R3), and the time a commit takes differs between a consumed and a rejected message; both are outside this property and documented.
+- R18 For two sequences of calls that differ only in the bytes of `push` blobs whose opened `sender_pk` is neither one's own `pk_u` nor the key being retired (spec 025-identity-regen), with the log headroom of spec 021-channel-session R18 holding in both, `outgoing()` MUST return the same frames at the same calls, apart from the bytes of `sig`, `client_ref` and the blobs of `publish` (`docs/spec.md` §4 "No-oracle rule"). A blob from one's own key or from the key being retired can change what the user may send (spec 021-channel-session R9 step 5 and R14, spec 024-key-retired R3), and the store works longer for a consumed message than for a rejected one, at its commit and at the compaction that later drops it, and a store that fails on commit fails on the consumed one alone; these are outside this property and documented in `docs/spec.md` §4 "No-oracle rule".
 
 ## Limits
 
@@ -149,7 +149,7 @@ A `Step` never fails as a whole: a store failure in one channel goes to `failed`
 - A network observer counts the channels of a connection: one `subscribe` and one `ok` per channel, at least 1 100 ms apart, show through TLS by size and timing. Documented residual (`docs/spec.md` §2); hiding the count needs the cover traffic of v2.
 - R4, R8 and R9 together close three holes of streamed history: no live push can move the cursor past an unsent part of the backlog; truncation is decided by the client's clock before the backlog, so a server can neither hide a deletion by claiming everything older expired nor repeat `ok` to reset the gap baseline; and a quiet channel is not flagged as truncated on every reconnect, because `synced_at` records when it was last complete. The cursor itself stays in server time (spec 021-channel-session R20), so a fast device clock skips nothing (spec 021-channel-session R20 leaves the cursor before a push already expired by the local clock).
 - R10 never lets the cursor move past a push the channel could not store: once one is dropped, no later push of the connection is decrypted and `synced` is not called, and the connection is renewed from the same cursor when room returns. Under `LogFull`, `check_own_key` keeps the own-key alert working and the pending `outbox`, including a `key_retired`, still leaves; after any other store error the channel is frozen and both wait for the probe of spec 027-core-api R12 (spec 021-channel-session, Security).
-- R18 is the session half of the no-oracle rule; its two documented exceptions depend on the user's own key or on local disk timing, not on anything a sender learns from a forged blob.
+- R18 is the session half of the no-oracle rule; its documented exceptions depend on the user's own key, current or being retired, or on the local store, not on anything a sender learns from a forged blob.
 - No log line (spec 021-channel-session R28).
 
 ## Public API changes
@@ -265,3 +265,4 @@ Decided on 2026-09-25: the frame keys belong to this spec (`docs/spec.md` §6).
 - 2026-10-12 amended after audit AP round 3 (`docs/audit-log.md`, decisions taken without the human): every entry an `error` names is held until the minute it was published in ends (R16, T16)
 - 2026-10-12 amended after audit AP round 4 (`docs/audit-log.md`): R9 and R14 pass `outbox` the entries held as well (R12, R16); the Interface names R14's paused-channel test in tests/limits.rs
 - 2026-10-13 slice (e) implemented: the no-oracle property (R18); the Interface names tests/no_oracle.rs, and T18 lists the kinds of push and the calls it runs through; T18 compares the events and failed lists too (audit AQ rounds 1–2, `docs/audit-log.md`)
+- 2026-10-13 amended after audit AQ round 3 (`docs/audit-log.md`): R18 leaves out the key being retired with one's own key, and names the store's later compaction and a commit that fails beside the commit's time, as `docs/spec.md` §4 now does
