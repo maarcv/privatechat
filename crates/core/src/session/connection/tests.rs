@@ -12,6 +12,7 @@ use crate::testing::{MemoryServer, MemoryVault};
 
 mod acks;
 mod limits;
+mod no_oracle;
 mod ok;
 mod tick;
 mod traffic;
