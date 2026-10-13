@@ -2,6 +2,22 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AQ
+
+**2026-10-13 — Audit AQ, the code audit of slice (e) of spec 028-session-sans-io (branch `028-no-oracle`): the no-oracle property (R18), the proptest T18; round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** No production code changed and no production defect found: a push's bytes reach the session only through the channel's verdict, which changes a frame only on a store error, outside R18's headroom condition. Pass C ran 13 mutants: 8 killed, 1 equivalent, 4 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AQ1 | The test compared only `outgoing()`: a rejected push answered with `Event::Reconnect`, which the `Device` turns into a new socket a server sees, survived (B, C) | Medium | Each call's events are compared too, but `Message` and `StatusChanged`, which tell the user what came, and with no `client_ref`; and the channels of its failed list |
+| AQ2 | Time moved only at a tick, so a pause, a hold, R15's window or R6's spacing always ended at a tick, never before a frame: a rejected push delaying the next `subscribe`, and a consumed one publishing the `outbox`, survived (C) | Medium | Every call comes after a delay, at times past a minute |
+| AQ3 | No `error` frame was sent, so no pause or hold was ever in play: a rejected push lifting them survived (C) | Low | `rate_limited`, `channel_quota`, `server_full` and `bad_blob`, naming a channel, an entry, both or neither |
+| AQ4 | "Expired", sealed at `T0` and pushed three days later, was a valid message on the seven-day channel (A, B, C) | Low | The run starts eight days after `T0` |
+| AQ5 | No push was of another channel or came under a `server_id` seen before, and garbage stopped at its length (B) | Low | A kind of the other channel's message, `server_id`s drawn from eight, garbage up to 599 bytes |
+| AQ6 | The mask hid a `publish`'s blob length, which a server sees (A) | Low | The length is compared |
+| AQ7 | The push times were worked out twice, in `run` and in `blobs_of` (C) | Low | Each run seals its blobs at the push |
+| AQ8 | A store that fails on commit freezes a channel on a consumed push and not on a rejected one whose cursor is not due, so publishes stop on one only; R18 names the headroom, not a commit that fails (B) | Far-fetched | None: it needs a local storage failure no adversary of §2 causes, which the `Device` sees through its own write failures |
+| AQ9 | A signed blob whose AEAD fails is not among the kinds: it needs a helper that signs a corrupted ciphertext (B) | Far-fetched | None: the session takes every non-store verdict the same way, which the kinds already reach |
+
 ## Audit AP
 
 **2026-10-12 — Audit AP, the code audit of slice (d) of spec 028-session-sans-io (branch `028-rate-errors`): the publish rate (R15), every `error` code with its pause, refusal, hold or new `subscribe` (R16), and the `subscribe` queued again after a `rate_limited`, released however old its nonce, one stale at a time (R7); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** No production defect against the spec; one spec gap (AP4). Pass C ran 44 mutants: 27 killed, 5 equivalent, 12 survived; each survivor that is not far-fetched is killed below.
