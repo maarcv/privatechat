@@ -22,6 +22,8 @@ const SERVER: &str = "wss://chat.example.org:9001";
 const HOST: &str = "chat.example.org";
 const CONNECTION: u64 = 7;
 const DAY: u32 = 86_400;
+/// A one-day channel's TTL in ms.
+const DAY_MS: u64 = 86_400_000;
 /// A whole minute, so that the times below read easily.
 const T0: u64 = 1_790_000_040_000;
 

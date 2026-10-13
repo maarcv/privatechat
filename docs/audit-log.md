@@ -40,6 +40,15 @@ Decisions taken without the human, by the advisor (three passes, unanimous): §4
 | AQ18 | The test compares a `publish`'s length, not its sealed counter and payload, which a member could read (C) | Far-fetched | None: R18 leaves out the blob's bytes, and a member's own counter moves on no peer's message (spec 021 R14 reads one's own key alone) |
 | AQ19 | Every push comes with `received_at = now`, so a push that moved `synced_at` changes no truncation in the test (C) | Far-fetched | None: it needs an older backlog push and an absence timed within a TTL's edge |
 
+**Round 4.** Fresh passes on the whole change. AQ1–AQ19 hold; no production defect; pass A found wording behind AQ15 in specs 013 and 021, pass B a far-fetched case, pass C test gaps. Pass C ran 5 new mutants: 3 killed, 1 equivalent, 1 survived, killed below. The audit closes with this round (`CLAUDE.md`, the audit): pass A's findings change no behaviour, as in audits AO and AP, and the rest are far-fetched or test gaps, now closed.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AQ20 | Spec 021's Security said spec 028 never lets a verdict shape a frame, and spec 013's copied §4's sentence without its exceptions (A) | Low | Both point to the exceptions §4 names after R18 |
+| AQ21 | "A store that fails on commit fails on the consumed one alone" was not exact: a rejected push whose cursor is due commits too, and a compaction a consumed message brings about can fail (A); a consumed push's commit carries a pending `synced_at`, so a later `synced` commits in the other run alone (B) | Far-fetched | None to the code: §4 and R18 say the store's work differs at that call or a later one, its commits, the compaction, their time and their failures |
+| AQ22 | No op regenerated one's own key, so a consumed peer message cancelling one's pending `key_retired` survived T18 and the whole suite (C) | Medium | A regeneration op; T18 lists it |
+| AQ23 | `DAY_MS` was defined in two test files (C) | Low | Once, beside `DAY` |
+
 ## Audit AP
 
 **2026-10-12 — Audit AP, the code audit of slice (d) of spec 028-session-sans-io (branch `028-rate-errors`): the publish rate (R15), every `error` code with its pause, refusal, hold or new `subscribe` (R16), and the `subscribe` queued again after a `rate_limited`, released however old its nonce, one stale at a time (R7); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** No production defect against the spec; one spec gap (AP4). Pass C ran 44 mutants: 27 killed, 5 equivalent, 12 survived; each survivor that is not far-fetched is killed below.

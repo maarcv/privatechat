@@ -1,6 +1,6 @@
 # 028 — Session: the client side of the protocol, sans I/O
 
-Status: accepted
+Status: implemented
 Phase: 2
 Related ADRs: 0010, 0020, 0022, 0023, 0037
 Depends on: 011-config-format, 015-test-vectors, 016-fuzz-harness, 017-record-encoding, 020-store-files, 021-channel-session, 023-ttl-purge, 024-key-retired, 025-identity-regen
@@ -48,7 +48,7 @@ Since the decision of 2026-09-25 (`docs/spec.md` §6), this spec also fixes the 
 
 **No oracle**
 
-- R18 For two sequences of calls that differ only in the bytes of `push` blobs whose opened `sender_pk` is neither one's own `pk_u` nor the key being retired (spec 025-identity-regen), with the log headroom of spec 021-channel-session R18 holding in both, `outgoing()` MUST return the same frames at the same calls, apart from the bytes of `sig`, `client_ref` and the blobs of `publish` (`docs/spec.md` §4 "No-oracle rule"). A blob from one's own key or from the key being retired can change what the user may send (spec 021-channel-session R9 step 5 and R14, spec 024-key-retired R3), and the store works longer for a consumed message than for a rejected one, at its commit and at the compaction that later drops it, and a store that fails on commit fails on the consumed one alone; these are outside this property and documented in `docs/spec.md` §4 "No-oracle rule".
+- R18 For two sequences of calls that differ only in the bytes of `push` blobs whose opened `sender_pk` is neither one's own `pk_u` nor the key being retired (spec 025-identity-regen), with the log headroom of spec 021-channel-session R18 holding in both, `outgoing()` MUST return the same frames at the same calls, apart from the bytes of `sig`, `client_ref` and the blobs of `publish` (`docs/spec.md` §4 "No-oracle rule"). A blob from one's own key or from the key being retired can change what the user may send (spec 021-channel-session R9 step 5 and R14, spec 024-key-retired R3), and the store's work differs between a consumed and a rejected message, at that call or a later one: its commits, the compaction that later drops the message, how long they take and whether a failing store fails at them; these are outside this property and documented in `docs/spec.md` §4 "No-oracle rule".
 
 ## Limits
 
@@ -176,7 +176,7 @@ A `Step` never fails as a whole: a store failure in one channel goes to `failed`
 - T15 (covers R15): `s028_t15_r15_publish_rate`: 31 sends in one minute → 30 frames at once, the 31st after the window.
 - T16 (covers R16): `s028_t16_r16_error_codes`: one case per code of R16, with and without `client_ref` and `channel_id` where they apply; each named entry leaves the in-flight set, and is not published again before the minute it was published in ends; a `bad_blob` of the `key_retired` is not published again within its minute; a `bad_blob` naming nothing → `Reconnect`; a `rate_limited` naming a channel awaiting `ok` and no `client_ref` → that channel subscribed again, also when it arrives 130 s after the `hello` (then `nonce_expired`, a fresh `hello`, and the subscribe under the new nonce, with no `Reconnect`), and two such endings 12 s apart with 20 s of delay on the link → both channels subscribed, neither refused, and a publish on another subscribed channel still queued at once; a `rate_limited` naming a `client_ref` → no publish for 60 000 ms; a `bad_blob` naming an ordinary entry whose `abandon` commit fails (`fail_commits`) → no `NotDelivered`, the channel in `failed`, and the entry not published again on this connection, after `set_write_failed(false)` too, unless a clearing with `storage_full` returns the channel to the `LogFull` stall of R10.
 - T17 (covers R17): `s028_t17_r17_outgoing_drains`: a second call returns nothing.
-- T18 (covers R18): `s028_t18_r18_no_oracle` proptest: runs that differ only in the bytes of pushes from peers (valid, forged, of another channel, expired, replayed, a `key_retired`, bytes that are no blob, under `server_id`s that come again) give the same frame sequence, and the same events but those that tell the user what came and the same failed lists, through `ok`s, `ack`s, `error`s that pause, hold, refuse or expire the nonce, fresh `hello`s on the same connection, ticks, reconnections and bursts of sends that reach R15's limit, a frame sometimes coming more than a minute after the last call, before any tick.
+- T18 (covers R18): `s028_t18_r18_no_oracle` proptest: runs that differ only in the bytes of pushes from peers (valid, forged, of another channel, expired, replayed, a `key_retired`, bytes that are no blob, under `server_id`s that come again) give the same frame sequence, and the same events but those that tell the user what came and the same failed lists, through `ok`s, `ack`s, `error`s that pause, hold, refuse or expire the nonce, fresh `hello`s on the same connection, ticks, reconnections, regenerations of one's own key and bursts of sends that reach R15's limit, a frame sometimes coming more than a minute after the last call, before any tick.
 
 ## Vectors
 
@@ -265,4 +265,6 @@ Decided on 2026-09-25: the frame keys belong to this spec (`docs/spec.md` §6).
 - 2026-10-12 amended after audit AP round 3 (`docs/audit-log.md`, decisions taken without the human): every entry an `error` names is held until the minute it was published in ends (R16, T16)
 - 2026-10-12 amended after audit AP round 4 (`docs/audit-log.md`): R9 and R14 pass `outbox` the entries held as well (R12, R16); the Interface names R14's paused-channel test in tests/limits.rs
 - 2026-10-13 slice (e) implemented: the no-oracle property (R18); the Interface names tests/no_oracle.rs, and T18 lists the kinds of push and the calls it runs through; T18 compares the events and failed lists too (audit AQ rounds 1–2, `docs/audit-log.md`)
-- 2026-10-13 amended after audit AQ round 3 (`docs/audit-log.md`): R18 leaves out the key being retired with one's own key, and names the store's later compaction and a commit that fails beside the commit's time, as `docs/spec.md` §4 now does
+- 2026-10-13 amended after audit AQ round 3 (`docs/audit-log.md`): R18 leaves out the key being retired with one's own key, and names the store's work at that call or a later one, its time and its failures, beside the commit's time, as `docs/spec.md` §4 now does
+- 2026-10-13 amended after audit AQ round 4 (`docs/audit-log.md`): T18 regenerates one's own key; R18's store exception covers a later call
+- 2026-10-13 implemented: slices (a)–(e), audits AJ–AQ (`docs/audit-log.md`)

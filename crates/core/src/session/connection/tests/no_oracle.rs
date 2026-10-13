@@ -11,15 +11,13 @@ use proptest::prelude::{
 use super::acks::ack;
 use super::limits::error_frame;
 use super::traffic::member;
-use super::{CONNECTION, DAY, T0, channel, hello, ids, ok};
+use super::{CONNECTION, DAY, DAY_MS, T0, channel, hello, ids, ok};
 use crate::session::channel::{Channel, ClientRef};
 use crate::session::connection::{Channels, Event, Session, Step};
 use crate::session::frames::{
     CODE_BAD_AUTH, CODE_BAD_BLOB, CODE_CHANNEL_QUOTA, CODE_NONCE_EXPIRED, CODE_RATE_LIMITED,
     CODE_SERVER_FULL, Frame,
 };
-
-const DAY_MS: u64 = 86_400_000;
 
 /// Past both channels' windows for what was sealed at `T0`.
 const START: u64 = T0 + 8 * DAY_MS;
@@ -63,6 +61,10 @@ enum Op {
     /// An `error` with this code, naming channel `0` or `1` or none, and
     /// the oldest `publish` not yet acknowledged or none.
     Error(&'static str, Option<usize>, bool),
+    /// The user regenerates the key of channel `0` or `1`, then
+    /// `after_send`: its `key_retired` and its old key's entries are
+    /// pending.
+    Regenerate(usize),
     /// The socket closes and a new one opens, with its `hello`.
     Reconnect,
     /// A fresh `hello` on the same socket, as after a `nonce_expired`.
@@ -96,6 +98,7 @@ fn op() -> impl Strategy<Value = Op> {
             .prop_map(|(channel, n, a, b)| Op::Push(channel, n, [a, b])),
         2 => (0usize..2).prop_map(Op::Ok),
         2 => (0u8..8).prop_map(Op::Ack),
+        1 => (0usize..2).prop_map(Op::Regenerate),
         1 => Just(Op::Reconnect),
         3 => Just(Op::Hello),
         3 => (
@@ -244,6 +247,12 @@ fn run(ops: &[(u64, Op)], side: usize) -> Vec<Seen> {
                 let error = error_frame(code, channel_id, client_ref);
                 session.on_frame(&error, &mut channels, now)
             }
+            Op::Regenerate(index) => {
+                // A second one while the first is pending fails, in both
+                // runs.
+                let _ = channels[*index].regenerate_identity(now);
+                session.after_send(channel_ids[*index], &mut channels, now)
+            }
             Op::Reconnect => {
                 session.on_disconnect();
                 unacked.clear();
@@ -297,8 +306,9 @@ proptest! {
 
     /// Spec 028, R18: runs that differ only in the bytes of pushes from
     /// other members (valid, forged, of the other channel, expired,
-    /// replayed, a `key_retired`, garbage), among ticks, sends, `ok`s,
-    /// `ack`s, `error`s and reconnections, write the same frames at the
+    /// replayed, a `key_retired`, garbage), among ticks, sends,
+    /// regenerations of one's own key, `ok`s, `ack`s, `error`s and
+    /// reconnections, write the same frames at the
     /// same calls, but for a `subscribe`'s `sig` and a `publish`'s
     /// `client_ref` and blob bytes, and leave the same events, but those
     /// that tell the user what came and the `client_ref`s, and the same
