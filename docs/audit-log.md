@@ -2,6 +2,53 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AQ
+
+**2026-10-13 — Audit AQ, the code audit of slice (e) of spec 028-session-sans-io (branch `028-no-oracle`): the no-oracle property (R18), the proptest T18; round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** No production code changed and no production defect found: a push's bytes reach the session only through the channel's verdict, which changes a frame only on a store error, outside R18's headroom condition. Pass C ran 13 mutants: 8 killed, 1 equivalent, 4 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AQ1 | The test compared only `outgoing()`: a rejected push answered with `Event::Reconnect`, which the `Device` turns into a new socket a server sees, survived (B, C) | Medium | Each call's events are compared too, but `Message` and `StatusChanged`, which tell the user what came, and with no `client_ref`; and the channels of its failed list |
+| AQ2 | Time moved only at a tick, so a pause, a hold, R15's window or R6's spacing always ended at a tick, never before a frame: a rejected push delaying the next `subscribe`, and a consumed one publishing the `outbox`, survived (C) | Medium | Every call comes after a delay, at times past a minute |
+| AQ3 | No `error` frame was sent, so no pause or hold was ever in play: a rejected push lifting them survived (C) | Low | `rate_limited`, `channel_quota`, `server_full` and `bad_blob`, naming a channel, an entry, both or neither |
+| AQ4 | "Expired", sealed at `T0` and pushed three days later, was a valid message on the seven-day channel (A, B, C) | Low | The run starts eight days after `T0` |
+| AQ5 | No push was of another channel or came under a `server_id` seen before, and garbage stopped at its length (B) | Low | A kind of the other channel's message, `server_id`s drawn from eight, garbage up to 599 bytes |
+| AQ6 | The mask hid a `publish`'s blob length, which a server sees (A) | Low | The length is compared |
+| AQ7 | The push times were worked out twice, in `run` and in `blobs_of` (C) | Low | Each run seals its blobs at the push |
+| AQ8 | A store that fails on commit freezes a channel on a consumed push and not on a rejected one whose cursor is not due, so publishes stop on one only; R18 names the headroom, not a commit that fails (B) | Far-fetched | None: it needs a local storage failure no adversary of §2 causes, which the `Device` sees through its own write failures |
+| AQ9 | A signed blob whose AEAD fails is not among the kinds: it needs a helper that signs a corrupted ciphertext (B) | Far-fetched | None: the session takes every non-store verdict the same way, which the kinds already reach |
+
+**Round 2.** Fresh passes on the whole change. AQ1–AQ9 hold; pass B found nothing but far-fetched cases. Pass C ran 17 new mutants: 12 killed, 3 equivalent, 2 survived, both killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AQ10 | `docs/spec.md` §4's No-oracle rule read as absolute, where R18 leaves out a blob from one's own key, the log headroom and the time a commit takes (A) | Low | §4 names the three, as R18 does |
+| AQ11 | No `hello` came on a connection already greeted, and no `nonce_expired` or `bad_auth`, so a push marking its channel refused or skipped, which only `on_hello` reads, survived (C) | Medium | A fresh `hello` on the same socket, and both codes among the `error`s |
+| AQ12 | The module comment of `connection.rs` still said a later slice checks R18 (C) | Low | It names tests/no_oracle.rs |
+| AQ13 | A push whose blob is over `MAX_BLOB` breaks the frame and asks for a new connection, where a shorter one does not (B) | Far-fetched | None: the server chose that length, and R1 reacts before any key is used |
+| AQ14 | Every `key_retired` and valid message comes from a new member, so a known peer's retirement or a counter gap is never reached (B) | Far-fetched | None: those change peer records and gaps alone, which only `StatusChanged` reports |
+
+Decisions taken without the human, by the advisor (three passes, unanimous): §4's No-oracle rule names the exceptions R18 already makes (AQ10), since the accepted spec ranks above `docs/spec.md` and no promise of §1 or §2 changes.
+
+**Round 3.** Fresh passes on the whole change. AQ1–AQ14 hold; no production defect. Pass C ran 8 new mutants: 4 killed, 1 equivalent, 1 killed by T10 and unreachable under R18's headroom, 2 survived, one killed below and one far-fetched.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AQ15 | R18 and §4 left out the key being retired: a blob signed with it removes the entries it overtook (spec 021 R9 step 5), so the `publish`es that follow depend on its verdict; and §4's "only these" left out a store that fails on commit, AQ8 (A, B) | Low | R18 leaves out the key being retired with one's own key; §4 names it with spec 025, drops "only these" and names a commit that fails; 028's Security line follows |
+| AQ16 | §4 named the time of the commit, not the later compaction that drops a consumed message (B) | Low | §4 and R18 say the store works longer for a consumed message, at its commit and at that compaction |
+| AQ17 | An `ack`'s `server_id` was the op's index, so it met a push's almost never: an `acked` that ignored an `ack` naming a `server_id` already in the log survived (C) | Medium | The `ack`'s `server_id` is drawn from the pushes' eight |
+| AQ18 | The test compares a `publish`'s length, not its sealed counter and payload, which a member could read (C) | Far-fetched | None: R18 leaves out the blob's bytes, and a member's own counter moves on no peer's message (spec 021 R14 reads one's own key alone) |
+| AQ19 | Every push comes with `received_at = now`, so a push that moved `synced_at` changes no truncation in the test (C) | Far-fetched | None: it needs an older backlog push and an absence timed within a TTL's edge |
+
+**Round 4.** Fresh passes on the whole change. AQ1–AQ19 hold; no production defect; pass A found wording behind AQ15 in specs 013 and 021, pass B a far-fetched case, pass C test gaps. Pass C ran 5 new mutants: 3 killed, 1 equivalent, 1 survived, killed below. The audit closes with this round (`CLAUDE.md`, the audit): pass A's findings change no behaviour, as in audits AO and AP, and the rest are far-fetched or test gaps, now closed.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AQ20 | Spec 021's Security said spec 028 never lets a verdict shape a frame, and spec 013's copied §4's sentence without its exceptions (A) | Low | Both point to the exceptions §4 names after R18 |
+| AQ21 | "A store that fails on commit fails on the consumed one alone" was not exact: a rejected push whose cursor is due commits too, and a compaction a consumed message brings about can fail (A); a consumed push's commit carries a pending `synced_at`, so a later `synced` commits in the other run alone (B) | Far-fetched | None to the code: §4 and R18 say the store's work differs at that call or a later one, its commits, the compaction, their time and their failures |
+| AQ22 | No op regenerated one's own key, so a consumed peer message cancelling one's pending `key_retired` survived T18 and the whole suite (C) | Medium | A regeneration op; T18 lists it |
+| AQ23 | `DAY_MS` was defined in two test files (C) | Low | Once, beside `DAY` |
+
 ## Audit AP
 
 **2026-10-12 — Audit AP, the code audit of slice (d) of spec 028-session-sans-io (branch `028-rate-errors`): the publish rate (R15), every `error` code with its pause, refusal, hold or new `subscribe` (R16), and the `subscribe` queued again after a `rate_limited`, released however old its nonce, one stale at a time (R7); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** No production defect against the spec; one spec gap (AP4). Pass C ran 44 mutants: 27 killed, 5 equivalent, 12 survived; each survivor that is not far-fetched is killed below.

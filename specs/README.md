@@ -28,7 +28,7 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 025 | 025-identity-regen | 2 | implemented |
 | 026 | 026-peer-limits | 2 | implemented |
 | 027 | 027-core-api | 2 | accepted |
-| 028 | 028-session-sans-io | 2 | accepted |
+| 028 | 028-session-sans-io | 2 | implemented |
 | 030 | 030-ws-protocol | 3 | accepted |
 | 031 | 031-auth-channel-signature | 3 | accepted |
 | 032 | 032-storage-ttl | 3 | accepted |

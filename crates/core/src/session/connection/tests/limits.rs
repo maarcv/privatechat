@@ -14,7 +14,11 @@ use crate::testing::MemoryServer;
 const MINUTE: u64 = 60_000;
 
 /// An `error` with `code`, naming what it names.
-fn error_frame(code: &str, channel_id: Option<[u8; 16]>, client_ref: Option<ClientRef>) -> Vec<u8> {
+pub(super) fn error_frame(
+    code: &str,
+    channel_id: Option<[u8; 16]>,
+    client_ref: Option<ClientRef>,
+) -> Vec<u8> {
     Frame::Error {
         code: code.to_owned(),
         message: String::new(),

@@ -4,7 +4,7 @@
 //! failed `acked` (R10).
 
 use super::traffic::{alice, greeted, member, published, push, sealed, thief_of};
-use super::{DAY, T0, channel, connected, hello, ids, ok, reconnect};
+use super::{DAY, DAY_MS, T0, channel, connected, hello, ids, ok, reconnect};
 use crate::session::channel::ClientRef;
 use crate::session::connection::{Channels, Event, Session};
 use crate::session::frames::Frame;
@@ -12,9 +12,6 @@ use crate::storage::StoreError;
 
 /// One hour, by which a clock sample is off.
 const HOUR: u64 = 3_600_000;
-
-/// A one-day channel's TTL in ms.
-const DAY_MS: u64 = 86_400_000;
 
 /// The `ack` of `client_ref` as server message `n`, stored at
 /// `received_at`.
