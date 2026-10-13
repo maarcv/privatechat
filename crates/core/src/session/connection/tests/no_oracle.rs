@@ -15,7 +15,8 @@ use super::{CONNECTION, DAY, T0, channel, hello, ids, ok};
 use crate::session::channel::{Channel, ClientRef};
 use crate::session::connection::{Channels, Event, Session, Step};
 use crate::session::frames::{
-    CODE_BAD_BLOB, CODE_CHANNEL_QUOTA, CODE_RATE_LIMITED, CODE_SERVER_FULL, Frame,
+    CODE_BAD_AUTH, CODE_BAD_BLOB, CODE_CHANNEL_QUOTA, CODE_NONCE_EXPIRED, CODE_RATE_LIMITED,
+    CODE_SERVER_FULL, Frame,
 };
 
 const DAY_MS: u64 = 86_400_000;
@@ -63,6 +64,8 @@ enum Op {
     Error(&'static str, Option<usize>, bool),
     /// The socket closes and a new one opens, with its `hello`.
     Reconnect,
+    /// A fresh `hello` on the same socket, as after a `nonce_expired`.
+    Hello,
 }
 
 fn kind() -> impl Strategy<Value = Kind> {
@@ -93,12 +96,15 @@ fn op() -> impl Strategy<Value = Op> {
         2 => (0usize..2).prop_map(Op::Ok),
         2 => Just(Op::Ack),
         1 => Just(Op::Reconnect),
+        3 => Just(Op::Hello),
         3 => (
             prop_oneof![
                 Just(CODE_RATE_LIMITED),
                 Just(CODE_CHANNEL_QUOTA),
                 Just(CODE_SERVER_FULL),
                 Just(CODE_BAD_BLOB),
+                Just(CODE_NONCE_EXPIRED),
+                Just(CODE_BAD_AUTH),
             ],
             option::of(0usize..2),
             any::<bool>(),
@@ -243,6 +249,10 @@ fn run(ops: &[(u64, Op)], side: usize) -> Vec<Seen> {
                 unacked.clear();
                 hellos += 1;
                 session.on_connect(now, &[]);
+                session.on_frame(&hello(hellos, &[1]), &mut channels, now)
+            }
+            Op::Hello => {
+                hellos += 1;
                 session.on_frame(&hello(hellos, &[1]), &mut channels, now)
             }
         };

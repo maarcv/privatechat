@@ -7,8 +7,8 @@
 //! R5–R7), the truncation (R8), the `ok` with what follows it (R9), the
 //! traffic with its stalls and the `write_failed` mark (R10), the acks,
 //! outcomes and status events (R11–R13), the `outbox` after a send and on
-//! every tick (R14), the publish rate (R15) and the error codes (R16). A
-//! later slice of spec 028 checks the no-oracle property (R18).
+//! every tick (R14), the publish rate (R15) and the error codes (R16);
+//! `tests/no_oracle.rs` checks the no-oracle property (R18).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 

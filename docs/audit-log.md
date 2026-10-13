@@ -18,6 +18,18 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AQ8 | A store that fails on commit freezes a channel on a consumed push and not on a rejected one whose cursor is not due, so publishes stop on one only; R18 names the headroom, not a commit that fails (B) | Far-fetched | None: it needs a local storage failure no adversary of §2 causes, which the `Device` sees through its own write failures |
 | AQ9 | A signed blob whose AEAD fails is not among the kinds: it needs a helper that signs a corrupted ciphertext (B) | Far-fetched | None: the session takes every non-store verdict the same way, which the kinds already reach |
 
+**Round 2.** Fresh passes on the whole change. AQ1–AQ9 hold; pass B found nothing but far-fetched cases. Pass C ran 17 new mutants: 12 killed, 3 equivalent, 2 survived, both killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AQ10 | `docs/spec.md` §4's No-oracle rule read as absolute, where R18 leaves out a blob from one's own key, the log headroom and the time a commit takes (A) | Low | §4 names the three, as R18 does |
+| AQ11 | No `hello` came on a connection already greeted, and no `nonce_expired` or `bad_auth`, so a push marking its channel refused or skipped, which only `on_hello` reads, survived (C) | Medium | A fresh `hello` on the same socket, and both codes among the `error`s |
+| AQ12 | The module comment of `connection.rs` still said a later slice checks R18 (C) | Low | It names tests/no_oracle.rs |
+| AQ13 | A push whose blob is over `MAX_BLOB` breaks the frame and asks for a new connection, where a shorter one does not (B) | Far-fetched | None: the server chose that length, and R1 reacts before any key is used |
+| AQ14 | Every `key_retired` and valid message comes from a new member, so a known peer's retirement or a counter gap is never reached (B) | Far-fetched | None: those change peer records and gaps alone, which only `StatusChanged` reports |
+
+Decisions taken without the human, by the advisor (three passes, unanimous): §4's No-oracle rule names the exceptions R18 already makes (AQ10), since the accepted spec ranks above `docs/spec.md` and no promise of §1 or §2 changes.
+
 ## Audit AP
 
 **2026-10-12 — Audit AP, the code audit of slice (d) of spec 028-session-sans-io (branch `028-rate-errors`): the publish rate (R15), every `error` code with its pause, refusal, hold or new `subscribe` (R16), and the `subscribe` queued again after a `rate_limited`, released however old its nonce, one stale at a time (R7); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** No production defect against the spec; one spec gap (AP4). Pass C ran 44 mutants: 27 killed, 5 equivalent, 12 survived; each survivor that is not far-fetched is killed below.

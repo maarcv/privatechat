@@ -1,6 +1,6 @@
 # Private E2E chat — Specification and plan (SDD)
 
-Version: mvp · Post-audit I revision · Updated: 2026-10-09 · Marc Vilardebó (audits in `docs/audit-log.md`)
+Version: mvp · Post-audit I revision · Updated: 2026-10-13 · Marc Vilardebó (audits in `docs/audit-log.md`)
 
 This file, on the default branch (`mvp` until the first release), is the canonical source of the specification (see §11 "Governance"). Read copy, may lag behind: https://claude.ai/code/artifact/1527bf13-79e8-485a-908d-a515cbd062a4
 
@@ -236,7 +236,7 @@ record = field*            field = key (u8) ‖ len (u32 BE) ‖ value (len byte
   - otherwise the key has been used elsewhere, whatever the counter and whether or not the message is stale: `OwnKeyUsedElsewhere` is persisted (UI in §7 "Key-used-elsewhere alert"). A stale message moves no counter (ADR 0027). A message that is not stale with `counter ≥` send counter sets the send counter to `counter + 1` (so the victim is not left mute), or exhausts it (`CounterExhausted` on the next send) if `counter = 2^64 − 1`.
 - If such a message is consumed, not stale and a `key_retired` of one's own `pk`, the channel becomes read-only until regeneration.
 
-**No-oracle rule.** The core emits no byte to the network depending on the result of `decrypt`; the `Error` codes are local only and no future feature (receipts, "is typing") may expose them to the sender or to the server. A verdict never surfaces as an error of `Session::on_frame`, never changes the connection state and never changes the timing of the next outgoing frame.
+**No-oracle rule.** The core emits no byte to the network depending on the result of `decrypt`; the `Error` codes are local only and no future feature (receipts, "is typing") may expose them to the sender or to the server. A verdict never surfaces as an error of `Session::on_frame`, never changes the connection state and never changes the timing of the next outgoing frame. Outside this rule, and only these (spec 028-session-sans-io R18): a blob from one's own key, which only a holder of `sk_u` can sign, may change what the device may send ("Messages from one's own key" above; spec 021-channel-session R14, spec 024-key-retired R3); the log headroom of spec 021-channel-session R18, which consumed messages use up, may stall the channel ("Verification on receive", step 0); and the time a commit takes differs between a consumed and a rejected message.
 
 ## 5. Channel config and invitation
 
