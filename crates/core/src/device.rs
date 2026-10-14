@@ -20,11 +20,14 @@ mod channels;
 mod dispatch;
 mod plan;
 mod recovery;
+mod routing;
 mod settings;
+mod tick;
 
 pub use self::channels::{ChannelInfo, ExportedFile, Imported};
 pub use self::dispatch::Sent;
 pub use self::plan::{ConnectionPlan, Route, probe_hello};
+use self::routing::Link;
 use self::settings::SettingsHolder;
 pub use self::settings::SettingsView;
 
@@ -72,6 +75,8 @@ pub struct Device {
     channels: Vec<Channel>,
     /// The probe time of each `write_failed` channel (R14).
     marks: BTreeMap<[u8; 16], u64>,
+    /// When each channel's mark was last cleared (R12, R14).
+    cleared: BTreeMap<[u8; 16], u64>,
     broken: Vec<Broken>,
     settings: SettingsHolder,
     /// The events produced outside a call that returns events, for the
@@ -84,8 +89,9 @@ pub struct Device {
     runs: Vec<ConnectionPlan>,
     /// The last plan `id` minted.
     next_plan_id: u64,
+    /// The session of each plan `id` (R11).
+    links: BTreeMap<u64, Link>,
 }
-
 
 impl Device {
     /// Opens every channel of `vault` and loads the settings (R1).
@@ -106,12 +112,14 @@ impl Device {
             vault,
             channels: Vec::new(),
             marks: BTreeMap::new(),
+            cleared: BTreeMap::new(),
             broken: Vec::new(),
             settings,
             queued: Vec::new(),
             latest_now: now,
             runs: Vec::new(),
             next_plan_id: 0,
+            links: BTreeMap::new(),
         };
         for store in stores {
             let dir = *store.name();
@@ -167,6 +175,8 @@ impl Device {
             .ok_or(Error::UnknownChannel)?;
         self.vault.remove(&dir)?;
         self.broken.remove(position);
+        // Space may have been freed (R3).
+        self.make_probes_due();
         Ok(())
     }
 }

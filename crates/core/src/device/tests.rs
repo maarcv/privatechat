@@ -15,6 +15,7 @@ mod plan;
 mod recovery;
 mod scripted;
 mod settings;
+mod tick;
 
 /// A whole minute.
 const NOW: u64 = 1_790_000_040_000;

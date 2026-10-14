@@ -254,10 +254,7 @@ fn s027_t15_r15_purge_failure_at_open() {
             .queued
             .contains(&Event::StorageFailed { channel: id })
     );
-    assert_eq!(
-        super::first_probe_at(&device),
-        Some(NOW + 60_000)
-    );
+    assert_eq!(super::first_probe_at(&device), Some(NOW + 60_000));
 }
 
 /// Spec 027, R15: a direct `purge_expired` that fails is handled by R14.

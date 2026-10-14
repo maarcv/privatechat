@@ -4,6 +4,7 @@
 //! moved to `broken` when the reopen fails; and the status compared around
 //! every direct writer.
 
+use super::tick::LATER_PROBE_MS;
 use super::{Broken, BrokenChannel, Device};
 use crate::error::Error;
 use crate::session::channel::Channel;
@@ -61,10 +62,6 @@ impl Device {
             if let Some(value) = outcome(open) {
                 result = Ok(value);
             }
-            // A fresh instance starts with its peers flag set (spec
-            // 021-channel-session R1); a first failure already asks the
-            // client to re-read everything with `StorageFailed`.
-            open.take_peers_changed();
             // A marked channel reopens with no `StorageFailed`: a call that
             // stood changed what the client shows (a status, a peer, one's
             // own name), which the fresh instance's flag cannot tell.
@@ -104,6 +101,10 @@ impl Device {
         match reopened {
             Ok(mut channel) => {
                 channel.carry_session(carry);
+                // A fresh instance starts with its peers flag set (spec
+                // 021-channel-session R1); a reopen tells the client by
+                // `StorageFailed` or a call's own result.
+                channel.take_peers_changed();
                 self.channels.insert(position, channel);
                 Ok(())
             }
@@ -130,11 +131,40 @@ impl Device {
     }
 
     /// Marks the channel at `position` `write_failed`, its first probe a
-    /// minute after the latest `now` (R14).
-    fn mark(&mut self, position: usize) {
-        let probe_at = self.latest_now.saturating_add(FIRST_PROBE_MS);
-        if let Some(channel) = self.channels.get(position) {
-            self.marks.insert(channel.config().channel_id(), probe_at);
+    /// minute after the latest `now`, or ten minutes when its last clearing
+    /// was less than ten minutes before (R14).
+    pub(super) fn mark(&mut self, position: usize) {
+        let Some(channel) = self.channels.get(position) else {
+            return;
+        };
+        let id = channel.config().channel_id();
+        let wait = if self.cleared_recently(id) {
+            LATER_PROBE_MS
+        } else {
+            FIRST_PROBE_MS
+        };
+        self.marks.insert(id, self.latest_now.saturating_add(wait));
+        // Its session holds it frozen (spec 028-session-sans-io R10).
+        let run = self.runs.iter().find(|run| run.channels.contains(&id));
+        if let Some(link) = run.and_then(|run| self.links.get_mut(&run.id)) {
+            link.session.set_write_failed(channel, true, false);
+        }
+    }
+
+    /// Whether `channel`'s mark was cleared less than ten minutes before
+    /// the latest `now`, a clearing recorded later counting as older (R12,
+    /// R14).
+    pub(super) fn cleared_recently(&self, channel: [u8; 16]) -> bool {
+        self.cleared.get(&channel).is_some_and(|&at| {
+            at <= self.latest_now && self.latest_now.saturating_sub(at) < LATER_PROBE_MS
+        })
+    }
+
+    /// Every probe due at the next tick, as after a `leave` or a
+    /// `remove_broken` that may have freed space (R3).
+    pub(super) fn make_probes_due(&mut self) {
+        for probe_at in self.marks.values_mut() {
+            *probe_at = 0;
         }
     }
 }

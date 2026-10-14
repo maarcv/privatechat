@@ -39,6 +39,7 @@ impl Device {
     ) -> Result<Sent, Error> {
         self.latest_now = now;
         let counter = self.channel(channel)?.send_counter();
+        let marked = self.marks.contains_key(&channel);
         let (result, events) = self.direct(
             channel,
             |open| open.encrypt(body, display_name, now),
@@ -55,6 +56,13 @@ impl Device {
             self.queued.extend(events);
             return Err(Error::Internal);
         };
+        // A message on a marked channel may mean room came back (R12); a
+        // state-only writer proves nothing.
+        if marked && self.marks.contains_key(&channel) && !self.cleared_recently(channel) {
+            self.marks.insert(channel, 0);
+        }
+        let mut events = events;
+        events.extend(self.after_send(channel, now));
         Ok(Sent {
             client_ref,
             message,
@@ -215,7 +223,11 @@ impl Device {
             |reopened| reopened.status().retirement_pending.then_some(()),
         );
         match result {
-            Ok(()) => Ok(events),
+            Ok(()) => {
+                let mut events = events;
+                events.extend(self.after_send(channel, now));
+                Ok(events)
+            }
             Err(error) => {
                 self.queued.extend(events);
                 Err(error)
