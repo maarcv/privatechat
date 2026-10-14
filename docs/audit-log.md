@@ -2,6 +2,21 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AW
+
+**2026-10-14 — Audit AW, the code audit of slice (d2b) of spec 027-core-api (branch `027-retries`): the retry of `broken` entries on the tick (R12) and the retries `leave` and `remove_broken` make due (R3); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit W's findings already took AW1–AW5, so this audit's are numbered from AW6. No production defect. Pass C ran 19 mutants: 12 killed, 2 equivalent, 5 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AW6 | The test of "a `Corrupt` stopping the retries" emptied the directory, which reads `Corrupt` again, so retrying `Corrupt` entries passed (A) | Medium | The readable state is put back: only a retry R12 forbids brings it back |
+| AW7 | An `Io` entry with no `channel_id` ahead of one with it, a retry failing as the tick's one reopen, the time R4's and R14's entries record, and an entry not retried in the tick it was recorded in were untested (C) | Medium | A T12 case of each |
+| AW8 | Only T03 fixed the order of a due retry and a due probe in one tick; R12 did not (A) | Low | R12 takes a due retry before a due probe, with a History line |
+| AW9 | `probe_one` returned an `Option` no caller read (C) | Low | Back to a list |
+| AW10 | `leave` and `remove_broken` made a retry due by recording time 0, which a clock under ten minutes past the epoch would not reach (A) | Low | They record a time later than any `now`, which R12 counts as passed |
+| AW11 | A retried channel starts with no gaps or ignored keys, which only memory held (B) | Far-fetched | None: R12 opens with `open_stored`, and the gaps are not kept by design |
+| AW12 | A channel whose `leave` and silent reopen both failed comes back by the retry (B) | Far-fetched | None: the user had the error, R3 offers `remove_broken`, and the next unlock did as much |
+| AW13 | A flapping disk can re-mint a run once every ten minutes (B) | Far-fetched | None: bounded, and the server learns nothing new |
+
 ## Audit AV
 
 **2026-10-14 — Audit AV, the code audit of slice (d2a) of spec 027-core-api (branch `027-ticks`): the routing of the connections to one session per plan (R11), `on_tick` with its one compaction and one probe (R12, without the retry of `broken` entries), the store recovery through sessions and ticks (R14, R15), `flush` (R24) and `after_send` (R9); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit V's findings already took AV1–AV5, so this audit's are numbered from AV6. One production defect (AV6). Pass C ran 38 mutants: 20 killed, 2 equivalent, 16 survived, of which 15 are killed below and one is close to equivalent (AV15).

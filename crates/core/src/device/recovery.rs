@@ -169,8 +169,9 @@ impl Device {
         for probe_at in self.marks.values_mut() {
             *probe_at = 0;
         }
+        // A time later than any `now` counts as passed (R12).
         for broken in &mut self.broken {
-            broken.recorded_at = 0;
+            broken.recorded_at = u64::MAX;
         }
     }
 }

@@ -55,11 +55,15 @@ fn s027_t12_r12_corrupt_stops_the_retries() {
     break_channel(&fixture.faults, &mut device);
     fixture.faults.fail_create(false);
     let dir = crate::storage::Vault::dir_name(&fixture.vault.clone(), &id()).unwrap();
+    let (state, log) = fixture.vault.get_raw(&dir);
     fixture.vault.put_raw(&dir, Some(b"not a state"), None);
     device.on_tick(NOW + TEN_MINUTES);
     assert_eq!(device.status().broken[0].reason, StoreError::Corrupt);
-    let (state, log) = (None::<&[u8]>, None::<&[u8]>);
-    fixture.vault.put_raw(&dir, state, log);
+    // The directory reads again: only a retry of a `Corrupt` entry, which
+    // R12 forbids, would bring it back.
+    fixture
+        .vault
+        .put_raw(&dir, state.as_deref(), log.as_deref());
     assert!(device.on_tick(NOW + 3 * TEN_MINUTES).is_empty());
     assert_eq!(device.status().broken.len(), 1);
 }
@@ -152,5 +156,97 @@ fn s027_t05_r05_failed_import_retry_is_retried_on_the_tick() {
     assert_eq!(
         device.on_tick(NOW + TEN_MINUTES),
         [Event::StatusChanged { channel: id() }]
+    );
+}
+
+/// Spec 027, R12: the entry a failed reopen of R14 records is not retried
+/// at the tick of that `now`, nor before ten minutes have passed.
+#[test]
+fn s027_t12_r12_reopen_entry_waits_from_its_recording() {
+    let (fixture, mut device) = opened();
+    fixture.faults.poison_after(1);
+    fixture.faults.fail_create(true);
+    assert!(device.label(id(), PEER, "ann", NOW).is_err());
+    fixture.faults.fail_create(false);
+    device.on_tick(NOW);
+    assert_eq!(device.status().broken.len(), 1);
+    assert!(device.on_tick(NOW + TEN_MINUTES - 1_000).is_empty());
+    assert_eq!(
+        device.on_tick(NOW + TEN_MINUTES),
+        [Event::StatusChanged { channel: id() }]
+    );
+}
+
+/// Spec 027, R12: the entry R4's failed retry records waits ten minutes.
+#[test]
+fn s027_t12_r12_create_retry_entry_waits_ten_minutes() {
+    let (fixture, mut device) = opened();
+    device.on_tick(NOW);
+    fixture.faults.poison_after(1);
+    fixture.faults.fail_create_at(2);
+    let qr = config(2).export_qr(NOW).unwrap();
+    assert!(device.import_qr(&qr, false, NOW).is_err());
+    let channel = config(2).channel_id();
+    assert_eq!(device.status().broken[0].channel_id, Some(channel));
+    assert_eq!(device.on_tick(NOW + TEN_MINUTES - 1_000), []);
+    assert_eq!(
+        device.on_tick(NOW + TEN_MINUTES),
+        [Event::StatusChanged { channel }]
+    );
+}
+
+/// Spec 027, R12: an `Io` entry without a `channel_id`, listed first,
+/// does not hold back the retry of one that carries it.
+#[test]
+fn s027_t12_r12_entry_without_id_does_not_block_retries() {
+    let (fixture, device) = opened();
+    drop(device);
+    for k in 2..=4 {
+        fixture.plant_channel(k, Vec::new());
+    }
+    fixture.faults.fail_loads(true);
+    let mut device = fixture.open().unwrap();
+    let first = device.status().broken[0].name.clone();
+    let k = (1..=4)
+        .find(|&k| {
+            let dir =
+                crate::storage::Vault::dir_name(&fixture.vault.clone(), &config(k).channel_id());
+            dir.unwrap().to_hex() != first
+        })
+        .unwrap();
+    let qr = config(k).export_qr(NOW).unwrap();
+    assert!(device.import_qr(&qr, false, NOW).is_err());
+    fixture.faults.fail_loads(false);
+    assert_eq!(
+        device.on_tick(NOW + TEN_MINUTES),
+        [Event::StatusChanged {
+            channel: config(k).channel_id()
+        }]
+    );
+}
+
+/// Spec 027, R12: a retry that fails is the tick's one reopen, the probe
+/// of a marked channel due at that tick waiting for the next.
+#[test]
+fn s027_t12_r12_failed_retry_is_the_ticks_reopen() {
+    let (fixture, _) = super::dispatch::with_peer();
+    fixture.plant_channel(2, Vec::new());
+    let mut device = fixture.open().unwrap();
+    device.on_tick(NOW);
+    break_channel(&fixture.faults, &mut device);
+    fixture.faults.fail_create(false);
+    device.on_tick(NOW + TEN_MINUTES - MINUTE);
+    fixture.faults.fail_at(1);
+    let marked = config(2).channel_id();
+    assert!(device.rename_channel(marked, "x").is_err());
+    assert_eq!(
+        device.on_tick(NOW + TEN_MINUTES - 1_000),
+        [Event::StorageFailed { channel: marked }]
+    );
+    fixture.faults.fail_create_at(1);
+    assert_eq!(device.on_tick(NOW + TEN_MINUTES), []);
+    assert_eq!(
+        device.on_tick(NOW + TEN_MINUTES + 1_000),
+        [Event::StatusChanged { channel: marked }]
     );
 }

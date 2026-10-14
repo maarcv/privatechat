@@ -39,11 +39,11 @@ impl Device {
         }
         events.extend(self.tick_unconnected(now));
         events.extend(self.compact_one(now));
-        // One reopen a tick: the retry of a `broken` entry, or else a probe
-        // (R3: the retry first, the probe at the tick after).
+        // One reopen a tick: a due retry of a `broken` entry before a due
+        // probe (R12).
         match self.retry_one(now) {
             Some(retried) => events.extend(retried),
-            None => events.extend(self.probe_one(now).unwrap_or_default()),
+            None => events.extend(self.probe_one(now)),
         }
         events
     }
@@ -166,30 +166,34 @@ impl Device {
     /// cleared with `StatusChanged` and, when its connection is connected
     /// and the log has room, `Reconnect`, so that the pushes it held come
     /// again; on failure the next probe is ten minutes ahead.
-    fn probe_one(&mut self, now: u64) -> Option<Vec<Event>> {
+    fn probe_one(&mut self, now: u64) -> Vec<Event> {
         let due = self.marks.iter().find_map(|(id, probe_at)| {
             let came = *probe_at <= now || *probe_at > now.saturating_add(LATER_PROBE_MS);
             came.then_some(*id)
         });
-        let id = due?;
+        let Some(id) = due else {
+            return Vec::new();
+        };
         let Ok(position) = self.position(id) else {
             self.marks.remove(&id);
-            return Some(Vec::new());
+            return Vec::new();
         };
         if self.reopen(position).is_err() {
-            return Some(vec![Event::StorageFailed { channel: id }]);
+            return vec![Event::StorageFailed { channel: id }];
         }
-        let channel = self.channels.get_mut(position)?;
+        let Some(channel) = self.channels.get_mut(position) else {
+            return Vec::new();
+        };
         if channel.probe(now).is_err() {
             self.marks.insert(id, now.saturating_add(LATER_PROBE_MS));
-            return Some(Vec::new());
+            return Vec::new();
         }
         let storage_full = channel.status().storage_full;
         self.marks.remove(&id);
         self.cleared.insert(id, now);
         let mut events = vec![Event::StatusChanged { channel: id }];
         let Some(channel) = self.channels.get(position) else {
-            return Some(events);
+            return events;
         };
         if let Some((connection, link)) = link_of(&self.runs, &mut self.links, id) {
             link.session.set_write_failed(channel, false, storage_full);
@@ -197,7 +201,7 @@ impl Device {
                 events.push(Event::Reconnect { connection });
             }
         }
-        Some(events)
+        events
     }
 
     /// The retry of a `broken` entry (R12): the first whose reason is `Io`
