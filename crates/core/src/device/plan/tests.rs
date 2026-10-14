@@ -34,3 +34,11 @@ fn s027_t10_r10_needs_proxy() {
         assert!(!needs_proxy("wss://example.org", Some(proxy)), "{proxy}");
     }
 }
+
+/// Spec 027, R10: a URL outside the grammar needs a proxy, and `.onion`
+/// counts only as the host's suffix.
+#[test]
+fn s027_t10_r10_needs_proxy_edges() {
+    assert!(needs_proxy("https://example.org", None));
+    assert!(!needs_proxy("wss://a.onion.example.org", None));
+}

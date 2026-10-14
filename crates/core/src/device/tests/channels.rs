@@ -176,7 +176,10 @@ fn s027_t05_r05_import() {
         device.import_file(&file, b"not the seven words", false, NOW),
         Err(Error::BadPassword)
     );
-    assert!(device.import_qr(b"not a qr", false, NOW).is_err());
+    assert_eq!(
+        device.import_qr(b"not a qr", false, NOW),
+        Err(Error::BadConfig)
+    );
     assert_eq!(fixture.vault.clone().list().unwrap().len(), 1);
 }
 
@@ -200,10 +203,14 @@ fn s027_t05_r05_import_over_broken() {
         };
         let mut device = fixture.open().unwrap();
         assert_eq!(device.status().broken.len(), 1);
+        let planted = fixture.vault.get_raw(&dir);
         let qr = qr_of(&config(1));
         assert_eq!(device.import_qr(&qr, false, NOW), Err(Error::Store(reason)));
         assert_eq!(device.status().broken.len(), 1);
         assert!(device.channels().is_empty());
+        // A rejection writes nothing and creates no store (T05).
+        assert_eq!(fixture.vault.get_raw(&dir), planted);
+        assert_eq!(fixture.vault.clone().list().unwrap().len(), 1);
 
         fixture.faults.fail_remove(true);
         assert_eq!(
@@ -211,6 +218,7 @@ fn s027_t05_r05_import_over_broken() {
             Err(Error::Store(StoreError::Io))
         );
         assert_eq!(device.status().broken.len(), 1);
+        assert_eq!(fixture.vault.get_raw(&dir), planted);
         fixture.faults.fail_remove(false);
 
         let imported = device.import_qr(&qr, true, NOW).unwrap();
@@ -231,7 +239,8 @@ fn s027_t05_r05_import_over_broken() {
 #[test]
 fn s027_t05_r05_import_retries_an_io_entry() {
     let fixture = with_settings();
-    fixture.plant_channel(1, Vec::new());
+    let dir = fixture.plant_channel(1, Vec::new());
+    let planted = fixture.vault.get_raw(&dir);
     fixture.faults.fail_loads(true);
     let mut device = fixture.open().unwrap();
     let qr = qr_of(&config(1));
@@ -239,6 +248,7 @@ fn s027_t05_r05_import_retries_an_io_entry() {
         device.import_qr(&qr, true, NOW),
         Err(Error::Store(StoreError::Io))
     );
+    assert_eq!(fixture.vault.get_raw(&dir), planted);
     let broken = device.status().broken;
     assert_eq!(broken.len(), 1);
     assert_eq!(broken[0].reason, StoreError::Io);
@@ -447,4 +457,82 @@ fn s027_t21_r21_failing_channel_writes() {
 
     let device = fixture.open().unwrap();
     assert_eq!(device.channels(), before);
+}
+
+/// Spec 027, R1: a channel created behind the gate of R2, or over a newer
+/// app's settings, saves nothing; once a fresh install has saved, the next
+/// channel does not save again.
+#[test]
+fn s027_t01_r01_channels_save_only_fresh_settings() {
+    let fixture = Fixture::new();
+    fixture.plant_channel(1, Vec::new());
+    let mut device = fixture.open().unwrap();
+    assert!(device.status().settings_reset);
+    device.create_channel(SERVER, 3_600, "room", NOW).unwrap();
+    assert!(fixture.vault.settings_raw().is_none());
+    assert!(device.status().settings_reset);
+
+    let fixture = Fixture::new();
+    fixture.plant_channel(1, Vec::new());
+    fixture.plant_newer_settings();
+    let planted = fixture.vault.settings_raw();
+    let mut device = fixture.open().unwrap();
+    device.import_qr(&qr_of(&config(2)), false, NOW).unwrap();
+    assert_eq!(fixture.vault.settings_raw(), planted);
+
+    let fixture = Fixture::new();
+    let mut device = fixture.open().unwrap();
+    device.create_channel(SERVER, 3_600, "room", NOW).unwrap();
+    fixture.faults.fail_save_settings(true);
+    device.create_channel(SERVER, 3_600, "hall", NOW).unwrap();
+}
+
+/// Spec 027, R5: an `Io`-broken entry whose import retry fails with
+/// another error takes that error as its reason.
+#[test]
+fn s027_t05_r05_failed_retry_records_its_reason() {
+    let fixture = with_settings();
+    let dir = fixture.plant_channel(1, Vec::new());
+    fixture.faults.fail_loads(true);
+    let mut device = fixture.open().unwrap();
+    fixture.faults.fail_loads(false);
+    fixture.vault.put_raw(&dir, Some(b"not a state"), None);
+    assert_eq!(
+        device.import_qr(&qr_of(&config(1)), false, NOW),
+        Err(Error::Store(StoreError::Corrupt))
+    );
+    assert_eq!(device.status().broken[0].reason, StoreError::Corrupt);
+}
+
+/// Spec 027, R7: a suggested name of white space alone reads `""`, a fresh
+/// channel shows no status flag, and `needs_proxy` follows the proxy.
+#[test]
+fn s027_t07_r07_info_fields() {
+    let fixture = with_settings();
+    let mut device = fixture.open().unwrap();
+    let blank = Config::from_parts(Secret::from_bytes([1; 32]), SERVER, 3_600, "  ", 0).unwrap();
+    let info = device.import_qr(&qr_of(&blank), false, NOW).unwrap().info;
+    assert_eq!(info.suggested_name, "");
+    assert!(!info.status.read_only);
+
+    let onion = format!(
+        "wss://{}.onion",
+        "abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwx"
+    );
+    let id = device
+        .import_qr(&qr_of(&config_on(2, &onion)), false, NOW)
+        .unwrap()
+        .info
+        .id;
+    let needs = |device: &Device| {
+        device
+            .channels()
+            .into_iter()
+            .find(|info| info.id == id)
+            .unwrap()
+            .needs_proxy
+    };
+    assert!(needs(&device));
+    device.set_socks5_proxy(Some("127.0.0.1:9050")).unwrap();
+    assert!(!needs(&device));
 }

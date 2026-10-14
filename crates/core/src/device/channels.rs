@@ -6,7 +6,7 @@ use super::{Broken, BrokenChannel, Device, plan};
 use crate::error::Error;
 use crate::proto::config::Config;
 use crate::session::channel::{Channel, ChannelStatus};
-use crate::session::names::{clean_name, name_key, shown_name};
+use crate::session::names::shown_name;
 use crate::storage::StoreError;
 
 /// What the client shows about one open channel (R7).
@@ -151,9 +151,7 @@ impl Device {
     /// `UnknownChannel`; the store's error.
     pub fn leave(&mut self, channel: [u8; 16]) -> Result<(), Error> {
         let position = self.position(channel)?;
-        if let Some(open) = self.channels.get_mut(position) {
-            open.leave()?;
-        }
+        self.channel_mut(channel)?.leave()?;
         self.channels.remove(position);
         Ok(())
     }
@@ -162,15 +160,10 @@ impl Device {
     /// 022-peers-tofu R6 says.
     fn info(&self, channel: &Channel) -> ChannelInfo {
         let config = channel.config();
-        let suggested = config.suggested_name();
         ChannelInfo {
             id: config.channel_id(),
             server_url: config.server_url().to_owned(),
-            suggested_name: if name_key(suggested).is_empty() {
-                String::new()
-            } else {
-                clean_name(suggested)
-            },
+            suggested_name: shown_name(config.suggested_name()).unwrap_or_default(),
             local_name: channel.local_name().and_then(shown_name),
             own_display_name: channel.own_display_name().and_then(shown_name),
             ttl_seconds: config.ttl_seconds(),
@@ -305,16 +298,22 @@ impl Device {
         let id = config.channel_id();
         let retried = self.vault.create(&id).and_then(|mut store| {
             let loaded = store.load()?;
-            Ok(loaded.map(|_| store))
+            Ok(loaded.map(|loaded| (store, loaded)))
         });
-        let failure = match retried {
+        let opened = match retried {
             Ok(None) => return Err(original),
-            Ok(Some(store)) => match Channel::open_stored(store) {
-                Ok(channel) => return Ok(channel),
-                Err(Error::Store(reason)) => reason,
-                Err(error) => return Err(error),
-            },
-            Err(reason) => reason,
+            Ok(Some((store, loaded))) => Channel::loaded(store, loaded),
+            Err(reason) => Err(Error::Store(reason)),
+        };
+        let failure = match opened {
+            // `docs/spec.md` §5: a state that stands for another server is
+            // not this channel's, as `Channel::create` would have said.
+            Ok(channel) if channel.config().server_url() != config.server_url() => {
+                return Err(Error::ConfigMismatch);
+            }
+            Ok(channel) => return Ok(channel),
+            Err(Error::Store(reason)) => reason,
+            Err(error) => return Err(error),
         };
         let dir = self.vault.dir_name(&id)?;
         self.broken.push(Broken {

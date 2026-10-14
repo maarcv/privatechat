@@ -385,8 +385,14 @@ impl Channel {
         Ok(Channel::new(store, config.duplicate(), state, records))
     }
 
-    /// A channel over what `store` loaded, its config decoded once (R6).
-    fn loaded(
+    /// A channel over what `store` loaded, its config decoded once (R6);
+    /// spec 027-core-api R4 opens a state it has just loaded with it.
+    ///
+    /// # Errors
+    ///
+    /// `Store(Corrupt)` or `Store(UnsupportedVersion)` for a stored config
+    /// that does not decode.
+    pub(crate) fn loaded(
         store: Box<dyn Store>,
         (state, records): (ChannelState, Vec<LogRecord>),
     ) -> Result<Channel, Error> {
