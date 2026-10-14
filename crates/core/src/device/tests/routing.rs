@@ -7,6 +7,7 @@ use crate::session::connection::Event;
 use crate::session::frames::Frame;
 use crate::testing::MemoryServer;
 
+/// Spec 027, R11: frames reach the right session; an `id` not in the plan
 /// gets no event and no frame.
 #[test]
 fn s027_t11_r11_routing() {
@@ -30,6 +31,8 @@ fn s027_t11_r11_routing() {
     assert!(subscribed(&events, config(1).channel_id()));
 }
 
+/// Spec 027, R11: a channel the server refuses with `bad_auth` is not
+/// subscribed on the next connection of the same plan, and a plan whose
 /// channels were all refused leaves the plan.
 #[test]
 fn s027_t11_r11_refused_channels() {
@@ -94,6 +97,7 @@ fn s027_t11_r11_two_plans() {
     assert!(subscribed(&events, other.channel_id()));
 }
 
+/// Spec 027, R11: a plan stays in `connections()` while one of its
 /// channels is not refused, and leaves it once all are.
 #[test]
 fn s027_t11_r11_plan_left_out_only_when_all_refused() {
@@ -107,6 +111,8 @@ fn s027_t11_r11_plan_left_out_only_when_all_refused() {
     assert!(device.connections().is_empty());
 }
 
+/// Spec 027, R11: the next connection of a plan is told the channels
+/// refused on the last one, and subscribes none of them after its
 /// `hello`.
 #[test]
 fn s027_t11_r11_refused_channel_not_resubscribed() {
@@ -125,6 +131,7 @@ fn s027_t11_r11_refused_channel_not_resubscribed() {
     assert!(device.outgoing(plan).is_empty());
 }
 
+/// Spec 027, R11: a plan `id` that left the plan routes nothing, even
 /// when its socket was open.
 #[test]
 fn s027_t11_r11_old_plan_id_ignored() {
@@ -143,6 +150,7 @@ fn s027_t11_r11_old_plan_id_ignored() {
     assert!(device.outgoing(old).is_empty());
 }
 
+/// Spec 027, R11: a `replan` keeps the session of a plan it leaves
 /// unchanged: the connected channel still publishes on it.
 #[test]
 fn s027_t11_r11_replan_keeps_unchanged_sessions() {

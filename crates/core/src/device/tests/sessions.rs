@@ -107,6 +107,61 @@ fn s027_t12_r12_stale_entry_after_a_disconnect() {
     }));
 }
 
+/// A second device holding channel 1 of `fixture` with the same identity,
+/// as a copy of the data directory restored elsewhere.
+fn twin_of(fixture: &Fixture) -> Device {
+    let dir = crate::storage::Vault::dir_name(&fixture.vault.clone(), &id()).unwrap();
+    let (state, log) = fixture.vault.get_raw(&dir);
+    let twin = Fixture::new();
+    twin.save_settings(&settings("wss://example.org", 30, None));
+    twin.vault.put_raw(&dir, state.as_deref(), log.as_deref());
+    twin.open().unwrap()
+}
+
+/// Has `twin` publish one message on `server`, on a socket numbered apart,
+/// between `from` and `from + 6 s`.
+fn twin_sends(twin: &mut Device, server: &mut MemoryServer, from: u64) {
+    let plan = twin.connections()[0].id;
+    let socket = 1_000;
+    server.connect(socket, from);
+    twin.on_connect(plan, from);
+    for now in (from..from + 6_000).step_by(1_000) {
+        twin.on_tick(now);
+        for _ in 0..5 {
+            for frame in twin.outgoing(plan) {
+                server.receive(socket, &frame, now);
+            }
+            for frame in server.read(socket, 100) {
+                twin.on_frame(plan, &frame, now);
+            }
+        }
+        if now == from + 2_000 {
+            twin.send(id(), "from the twin", None, now).unwrap();
+        }
+    }
+}
+
+/// Spec 027, R9: a `regenerate_identity` on a connected channel whose
+/// publishing the session stopped after an own-key alert, its log full,
+/// returns the `Reconnect` of its connection (spec 028-session-sans-io
+/// R10).
+#[test]
+fn s027_t09_r09_regeneration_after_an_alert_reconnects() {
+    let (fixture, _) = with_peer();
+    let mut device = fixture.open().unwrap();
+    let mut other = twin_of(&fixture);
+    let mut server = MemoryServer::new(&[HOST]);
+    connect_all(&mut device, &mut server, NOW);
+    run(&mut device, &mut server, NOW, NOW + 3_000);
+    device.channels[0].fill_log(NOW + 36_000_000, FULL_LOG);
+    twin_sends(&mut other, &mut server, NOW + 4_000);
+    run(&mut device, &mut server, NOW + 4_000, NOW + 10_000);
+    assert!(device.channel_status(id()).unwrap().own_key_used_elsewhere);
+    let plan = device.connections()[0].id;
+    let events = device.regenerate_identity(id(), NOW + 11_000).unwrap();
+    assert!(events.contains(&Event::Reconnect { connection: plan }));
+}
+
 /// Spec 027, R14: under `fail_commits`, a push of one's own key from
 /// another device raises no alert while the channel is marked; once the
 /// probe clears the mark and the client reconnects, the push comes again
@@ -114,38 +169,14 @@ fn s027_t12_r12_stale_entry_after_a_disconnect() {
 #[test]
 fn s027_t14_r14_own_key_push_on_a_marked_channel() {
     let (fixture, _) = with_peer();
-    let dir = crate::storage::Vault::dir_name(&fixture.vault.clone(), &id()).unwrap();
-    let (state, log) = fixture.vault.get_raw(&dir);
-    let twin = Fixture::new();
-    twin.save_settings(&settings("wss://example.org", 30, None));
-    twin.vault.put_raw(&dir, state.as_deref(), log.as_deref());
     let mut device = fixture.open().unwrap();
-    let mut other = twin.open().unwrap();
+    let mut other = twin_of(&fixture);
     let mut server = MemoryServer::new(&[HOST]);
     connect_all(&mut device, &mut server, NOW);
     run(&mut device, &mut server, NOW, NOW + 3_000);
     fixture.faults.fail_commits(true);
     assert!(device.mute(id(), PEER, true).is_err());
-
-    // The twin publishes on a socket of its own, numbered apart.
-    let plan = other.connections()[0].id;
-    let socket = 1_000;
-    server.connect(socket, NOW + 4_000);
-    other.on_connect(plan, NOW + 4_000);
-    for now in (NOW + 4_000..NOW + 10_000).step_by(1_000) {
-        other.on_tick(now);
-        for _ in 0..5 {
-            for frame in other.outgoing(plan) {
-                server.receive(socket, &frame, now);
-            }
-            for frame in server.read(socket, 100) {
-                other.on_frame(plan, &frame, now);
-            }
-        }
-        if now == NOW + 6_000 {
-            other.send(id(), "from the twin", None, now).unwrap();
-        }
-    }
+    twin_sends(&mut other, &mut server, NOW + 4_000);
     run(&mut device, &mut server, NOW + 4_000, NOW + 10_000);
     assert!(!device.channel_status(id()).unwrap().own_key_used_elsewhere);
 

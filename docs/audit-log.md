@@ -34,6 +34,21 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AV24 | A clock flipping between two times eleven minutes apart probes a failing channel every tick (B) | Far-fetched | None: within R12's one reopen a tick, and the clock is not an adversary of §2 |
 | AV25 | A user sending on a marked channel whose commits stand while its probes fail makes it probe every tick, ahead of another marked channel (B) | Far-fetched | None: R12 prescribes it, and the other probe runs once the sends stop |
 
+**Round 3.** Fresh passes on the whole change. AV6–AV25 hold; no production defect. Pass C ran 24 new mutants: 15 killed, 7 equivalent, 2 survived, both killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AV26 | R9's `Reconnect` from a `regenerate_identity` whose publishing the session stopped after an own-key alert had no test and no T clause (A) | Medium | T09 names it; a test with a twin device pushing one's own key on a full log |
+| AV27 | The split of the tick tests left the first lines of the routing tests' doc comments on unrelated tick tests (A) | Low | Moved back |
+| AV28 | The probe a `remove_broken` makes due was named after T14, and T03 did not name it (A) | Low | Renamed `s027_t03_r03_*`; T03 names it |
+| AV29 | The queued events coming first, and a channel broken by a reopen losing its clearing time, were untested (C) | Medium | A case of each |
+| AV30 | One `on_tick` can return two `Reconnect` for one connection, the session's and the probe's (B) | Far-fetched | None: the client closes and reopens once |
+| AV31 | One tick can reopen several channels on their first failures beyond R12's one reopen (B) | Far-fetched | None: R12's budget counts probes and retries; each channel reopens once before its mark |
+
+The audit closes with this round (`CLAUDE.md`, the audit): pass B found only far-fetched cases, and passes A and C test gaps and doc comments, now closed.
+
+Decisions taken without the human: slice (d2a) takes the store recovery through sessions and ticks, which shares its code with the tick, and the tick and session clauses of T08, T09, T14 and T15 (AV11, AV18), leaving (d2b) the retry of `broken` entries; T03 and T09 name the clauses R3 and R9 already require (AV26, AV28).
+
 ## Audit AU
 
 **2026-10-14 — Audit AU, the code audit of slice (d1) of spec 027-core-api (branch `027-plan`): the connection plan (R10), `probe_plan` and `probe_hello` (R12), and the settings gate over them (R2); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit U's findings already took AU1–AU5, so this audit's are numbered from AU6. No production defect. Pass C ran 38 mutants: 28 killed, 2 equivalent, 8 survived, each killed below or removed with the code it mutated.

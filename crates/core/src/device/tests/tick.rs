@@ -78,9 +78,6 @@ pub(super) fn with_channels(n: u8) -> (Fixture, Device) {
     (fixture, device)
 }
 
-/// Spec 027, R11: frames reach the right session; an `id` not in the plan
-/// Spec 027, R11: a channel the server refuses with `bad_auth` is not
-/// subscribed on the next connection of the same plan, and a plan whose
 /// Spec 027, R12: 16 channels ticked every second are all subscribed.
 #[test]
 fn s027_t12_r12_sixteen_channels_subscribe() {
@@ -184,6 +181,28 @@ fn s027_t14_r14_probe() {
     assert_eq!(
         device.on_tick(NOW + MINUTE + TEN_MINUTES),
         [Event::StatusChanged { channel: id }]
+    );
+    assert!(!device.channels()[0].write_failed);
+}
+
+/// Spec 027, R14: a failure queued before a tick whose probe clears it
+/// comes first, so that `StorageFailed` never follows its own clearing.
+#[test]
+fn s027_t14_r14_queued_failure_before_its_clearing() {
+    let (fixture, mut device) = opened();
+    let id = id();
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id, PEER, true).is_err());
+    let events = device.on_tick(NOW + MINUTE);
+    let failed = events
+        .iter()
+        .position(|event| *event == Event::StorageFailed { channel: id });
+    let cleared = events
+        .iter()
+        .rposition(|event| *event == Event::StatusChanged { channel: id });
+    assert!(
+        failed.is_some() && cleared.is_some() && failed < cleared,
+        "{events:?}"
     );
     assert!(!device.channels()[0].write_failed);
 }
@@ -518,10 +537,6 @@ fn s027_t15_r15_compaction_failing_on_the_tick() {
 /// A log one byte into the headroom of spec 021-channel-session R18.
 pub(super) const FULL_LOG: u64 = crate::storage::MAX_LOG_LEN - 1_114_156 + 1;
 
-/// Spec 027, R11: a plan stays in `connections()` while one of its
-/// Spec 027, R11: the next connection of a plan is told the channels
-/// refused on the last one, and subscribes none of them after its
-/// Spec 027, R11: a plan `id` that left the plan routes nothing, even
 /// Spec 027, R12, R14: a probe that clears a channel whose socket has
 /// closed asks for no `Reconnect`.
 #[test]
@@ -876,7 +891,6 @@ fn s027_t12_r12_purge_without_a_status_change_is_silent() {
     assert!(handle.log_len() < len);
 }
 
-/// Spec 027, R11: a `replan` keeps the session of a plan it leaves
 /// Spec 027, R14: a probe whose reopen fails drops the mark with the
 /// channel, so that the channel imported again is not `write_failed`.
 #[test]
@@ -893,6 +907,32 @@ fn s027_t14_r14_broken_by_a_probe_forgets_its_mark() {
         .import_qr(&config(1).export_qr(NOW).unwrap(), false, NOW + MINUTE)
         .unwrap();
     assert!(!device.channels()[0].write_failed);
+}
+
+/// Spec 027, R14: a channel broken by a failed reopen forgets its
+/// clearing: imported again from `broken`, a new failure waits one minute
+/// for its first probe, not ten.
+#[test]
+fn s027_t14_r14_broken_by_a_reopen_forgets_its_clearing() {
+    let (fixture, mut device) = opened();
+    mark(&fixture, &mut device);
+    device.on_tick(NOW + MINUTE);
+    assert!(!device.channels()[0].write_failed);
+    fixture.faults.fail_create(true);
+    fixture.faults.fail_at(1);
+    assert!(device.rename_channel(id(), "x").is_err());
+    assert!(device.channels().is_empty());
+    fixture.faults.fail_create(false);
+    device
+        .import_qr(&config(1).export_qr(NOW).unwrap(), false, NOW + MINUTE)
+        .unwrap();
+    device.on_tick(NOW + MINUTE + 1_000);
+    fixture.faults.fail_at(1);
+    assert!(device.rename_channel(id(), "y").is_err());
+    assert_eq!(
+        super::first_probe_at(&device),
+        Some(NOW + 2 * MINUTE + 1_000)
+    );
 }
 
 /// Spec 027, R14: a channel left forgets its mark and its clearing: once
@@ -928,7 +968,7 @@ fn s027_t14_r14_leave_forgets_mark_and_clearing() {
 /// Spec 027, R3, R12: a `remove_broken` makes the probe due at the next
 /// tick.
 #[test]
-fn s027_t14_r14_remove_broken_makes_the_probe_due() {
+fn s027_t03_r03_remove_broken_makes_the_probe_due() {
     let (fixture, _) = with_peer();
     let corrupt = fixture.plant_corrupt(9);
     let mut device = fixture.open().unwrap();
