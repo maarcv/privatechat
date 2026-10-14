@@ -1,6 +1,7 @@
 //! Tests of the channels of the device (spec 027-core-api R4–R8, and R1
 //! and R21 for their writes).
 
+use super::scripted::open_scripted;
 use super::{Fixture, NOW, SERVER, config};
 use crate::Error;
 use crate::crypto::Secret;
@@ -155,6 +156,8 @@ fn s027_t05_r05_import() {
     let dir = fixture.vault.dir_name(&config(1).channel_id()).unwrap();
     let handle = MemoryStore::handle(&fixture.vault, dir);
     let commits = handle.all_commits();
+    // An open channel answers with no store touched: no `Vault::create`.
+    fixture.faults.fail_create(true);
     let again = device.import_qr(&qr_of(&config(1)), false, NOW).unwrap();
     assert_eq!(
         again,
@@ -168,6 +171,7 @@ fn s027_t05_r05_import() {
         device.import_qr(&other, false, NOW),
         Err(Error::ConfigMismatch)
     );
+    fixture.faults.fail_create(false);
     assert_eq!(handle.all_commits(), commits);
     assert_eq!(listed(&device), [config(1).channel_id()]);
 
@@ -207,6 +211,8 @@ fn s027_t05_r05_import_over_broken() {
         let qr = qr_of(&config(1));
         assert_eq!(device.import_qr(&qr, false, NOW), Err(Error::Store(reason)));
         assert_eq!(device.status().broken.len(), 1);
+        // Only an `Io` entry is retried and takes the `channel_id` (R5).
+        assert_eq!(device.status().broken[0].channel_id, None);
         assert!(device.channels().is_empty());
         // A rejection writes nothing and creates no store (T05).
         assert_eq!(fixture.vault.get_raw(&dir), planted);
@@ -257,10 +263,15 @@ fn s027_t05_r05_import_retries_an_io_entry() {
     assert!(device.channels().is_empty());
 
     fixture.faults.fail_loads(false);
+    device.import_qr(&qr_of(&config(2)), false, NOW).unwrap();
     let imported = device.import_qr(&qr, false, NOW).unwrap();
     assert!(!imported.is_new);
     assert!(device.status().broken.is_empty());
-    assert_eq!(listed(&device), [config(1).channel_id()]);
+    // R7: the retried channel opened last, so it is listed last.
+    assert_eq!(
+        listed(&device),
+        [config(2).channel_id(), config(1).channel_id()]
+    );
 }
 
 /// Spec 027, R5: an `Io`-broken channel that reads again with another
@@ -338,6 +349,8 @@ fn s027_t07_r07_channels_and_rename() {
     for bad in [
         "x".repeat(65),
         "a\u{7}b".to_owned(),
+        "a\u{80}b".to_owned(),
+        "\u{e9}".repeat(33),
         "\u{200b}\u{2060}".to_owned(),
         " ".to_owned(),
     ] {
@@ -351,6 +364,11 @@ fn s027_t07_r07_channels_and_rename() {
     device.rename_channel(id, &"x".repeat(64)).unwrap();
     device.rename_channel(id, "").unwrap();
     assert_eq!(device.channels()[0].local_name, None);
+    let (state, _) = MemoryStore::handle(&fixture.vault, dir)
+        .load()
+        .unwrap()
+        .unwrap();
+    assert_eq!(state.local_name, None);
     device.rename_channel(id, "kit\u{202e}chen").unwrap();
     drop(device);
     let device = fixture.open().unwrap();
@@ -535,4 +553,82 @@ fn s027_t07_r07_info_fields() {
     assert!(needs(&device));
     device.set_socks5_proxy(Some("127.0.0.1:9050")).unwrap();
     assert!(!needs(&device));
+}
+
+/// Spec 027, R4 and `docs/spec.md` §5: a state that the retry reads for
+/// another server → `ConfigMismatch`, nothing opened, nothing broken.
+#[test]
+fn s027_t04_r04_recovered_state_checks_the_server() {
+    let fixture = with_settings();
+    let mut device = open_scripted(&fixture, vec![Some(StoreError::Io), None]);
+    fixture.plant_channel(1, Vec::new());
+    let other = qr_of(&config_on(1, OTHER_SERVER));
+    assert_eq!(
+        device.import_qr(&other, false, NOW),
+        Err(Error::ConfigMismatch)
+    );
+    assert!(device.channels().is_empty());
+    assert!(device.status().broken.is_empty());
+}
+
+/// Spec 027, R4: a retry that fails with another error → the original
+/// `Io`, the directory in `broken` with the retry's error.
+#[test]
+fn s027_t04_r04_failed_retry_returns_the_original_io() {
+    let fixture = with_settings();
+    let mut device = open_scripted(&fixture, vec![None, Some(StoreError::Corrupt)]);
+    fixture.faults.fail_at(1);
+    assert_eq!(
+        device.import_qr(&qr_of(&config(1)), false, NOW),
+        Err(Error::Store(StoreError::Io))
+    );
+    let broken = device.status().broken;
+    assert_eq!(broken.len(), 1);
+    assert_eq!(broken[0].reason, StoreError::Corrupt);
+    assert_eq!(broken[0].channel_id, Some(config(1).channel_id()));
+}
+
+/// Spec 027, R4: only `Io` is retried; a directory that appeared corrupt
+/// after the unlock → `Corrupt`, nothing put in `broken`.
+#[test]
+fn s027_t04_r04_only_io_is_retried() {
+    let fixture = with_settings();
+    let mut device = fixture.open().unwrap();
+    let dir = fixture.vault.dir_name(&config(1).channel_id()).unwrap();
+    fixture.vault.put_raw(&dir, Some(b"not a state"), None);
+    assert_eq!(
+        device.import_qr(&qr_of(&config(1)), false, NOW),
+        Err(Error::Store(StoreError::Corrupt))
+    );
+    assert!(device.status().broken.is_empty());
+}
+
+/// Spec 027, R1: on a fresh install the defaults are saved before
+/// `Vault::create`, and stay saved when it fails.
+#[test]
+fn s027_t01_r01_settings_saved_before_the_store() {
+    let fixture = Fixture::new();
+    let mut device = fixture.open().unwrap();
+    fixture.faults.fail_create(true);
+    assert_eq!(
+        device.create_channel(SERVER, 3_600, "room", NOW),
+        Err(Error::Store(StoreError::Io))
+    );
+    assert!(fixture.stored_settings().is_some());
+}
+
+/// Spec 027, R8: leaving a channel in the middle keeps the order of the
+/// others.
+#[test]
+fn s027_t08_r08_leave_keeps_the_others() {
+    let fixture = with_settings();
+    let mut device = fixture.open().unwrap();
+    for k in 1..=3 {
+        device.import_qr(&qr_of(&config(k)), false, NOW).unwrap();
+    }
+    device.leave(config(2).channel_id()).unwrap();
+    assert_eq!(
+        listed(&device),
+        [config(1).channel_id(), config(3).channel_id()]
+    );
 }

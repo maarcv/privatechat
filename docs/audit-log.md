@@ -19,7 +19,18 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AS20 | A directory name that fails in `recover` returns its own error, not the original `Io` (A) | Far-fetched | None: a keyed hash that has already worked in the call |
 | AS21 | The `needs_proxy` test lives in `device/plan/tests.rs`, not under `device/tests` (A) | Far-fetched | None: no rule asks for it |
 
-Decisions taken without the human: R10's loopback proxy is an IPv4 literal in `127.0.0.0/8` alone (AS13), since `::1` was never writable and the change only narrows what is trusted.
+**Round 2.** Fresh passes on the whole change. AS12–AS21 hold; pass B found nothing but a far-fetched case. Pass C ran 23 new mutants: 11 killed, 1 equivalent, 11 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AS22 | The server check AS16 added to `recover` was neither in R4 nor tested: no double failed one load and not the next (A, C) | Medium | R4 names it, with a History line; test doubles whose created stores fail their first load as a test scripts it (`device/tests/scripted.rs`), and a T04 case |
+| AS23 | T05's "no store opened" for an open channel did not see a `Vault::create` (A) | Low | The second import and the `ConfigMismatch` run with every `create` failing |
+| AS24 | `needs_proxy` was not tested with a proxy below `127.0.0.0/8` or at `0.0.0.0`; `leave` of a channel not the last; an `Io`-only retry and an `Io`-only recovery; the original `Io` after a retry failing otherwise; the settings saved before the store; a retried channel's place in the list; a cleared name stored as absent; a C1 control and a name of 64 characters but more bytes (C) | Medium | A case for each, in T01, T04, T05, T07, T08 and T10 |
+| AS25 | A state the retry finds checks its server and not its `channel_id`, as `Channel::create` does (B) | Far-fetched | None: the store binds a state to its directory (spec 020 R18) |
+
+The audit closes with this round (`CLAUDE.md`, the audit): pass B found only a far-fetched case, pass A's findings are a spec line for a check that only narrows what is accepted and a test gap, and pass C's are test gaps, now closed.
+
+Decisions taken without the human: R10's loopback proxy is an IPv4 literal in `127.0.0.0/8` alone (AS13), since `::1` was never writable and the change only narrows what is trusted; R4's retry checks the server of the state it finds (AS16, AS22), as `Channel::create` does, rather than open a state of another server.
 
 ## Audit AR
 

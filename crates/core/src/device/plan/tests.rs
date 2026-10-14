@@ -28,6 +28,8 @@ fn s027_t10_r10_needs_proxy() {
         "127.0.0.1.1:9050",
         "127.0.0.256:9050",
         "128.0.0.1:9050",
+        "126.255.255.255:9050",
+        "0.0.0.0:9050",
     ] {
         assert!(needs_proxy(&onion_ws, Some(proxy)), "{proxy}");
         assert!(!needs_proxy(&onion_wss, Some(proxy)), "{proxy}");
