@@ -75,7 +75,7 @@ The peers are spec 022-peers-tofu's, the message list 023-ttl-purge's, a receive
 - R30 A property test MUST run two channels over `MemoryStore` that exchange 1 000 messages through an in-memory list standing in for the server, with 1 % of the pushes delivered twice and a `FailingStore` failing one commit chosen by the case, and MUST end with every message delivered once, every duplicate `Replay`, and each reopened state equal under `state_eq` to the in-memory one; it runs 4 cases with `max_shrink_iters = 0` and prints its seed on failure. The 10 000-message run is spec 027-core-api's.
 - R31 `abandon(client_ref)` MUST remove an ordinary `outbox` entry in one commit, appending its kept signature and a not-delivered record, and return its `sent_at`; for a `key_retired` entry or an unknown `client_ref` it MUST commit nothing and return `None`. Spec 028-session-sans-io calls it when the server refuses the blob.
 - R32 Every state-changing method — `create`, `encrypt`, `decrypt`, `acked`, `outbox`, `expire_outbox`, `synced`, `flush`, `probe`, `relieve_headroom`, `check_own_key`, `abandon` and `leave` — MUST have a `FailingStore` test that fails its commit (or its `destroy`) and checks that the reopened state is the one before the call.
-- R33 `send_counter()` MUST return the current send counter and `outbox_ref(counter)` the `ClientRef` of the ordinary `outbox` entry sealed with that counter, if any, so that spec 027-core-api can tell after a reopen whether an `encrypt` stood.
+- R33 `send_counter()` MUST return the current send counter and `outbox_ref(counter)` the `ClientRef` of the ordinary `outbox` entry of the current key sealed with that counter, if any (an entry of a retired key may hold the same counter, spec 025-identity-regen R1), so that spec 027-core-api can tell after a reopen whether an `encrypt` stood.
 
 ## Limits
 
@@ -212,7 +212,7 @@ None directly: `Channel` is crate-internal, and spec 027-core-api exposes its ca
 - T30 (covers R30): `s021_t30_r30_thousand_messages`: the exchange property.
 - T31 (covers R31): `s021_t31_r31_abandon`: an ordinary entry → its `sent_at`, removed, a kept signature and a not-delivered record; a `key_retired` entry (planted with the `testing` builders) and an unknown `client_ref` → `None`, `commits = 0`.
 - T32 (covers R32): `s021_t32_r32_failing_store_per_method`: each method of R32 under a `FailingStore` failing its commit or `destroy` → the reopened state is the one before.
-- T33 (covers R33): `s021_t33_r33_send_counter_and_outbox_ref`: after `encrypt`, `outbox_ref(send_counter() − 1)` is its `ClientRef`; after its `ack`, `None`.
+- T33 (covers R33): `s021_t33_r33_send_counter_and_outbox_ref`: after `encrypt`, `outbox_ref(send_counter() − 1)` is its `ClientRef`; after its `ack`, `None`; after a regeneration, an entry still waiting under the retired key is not the `outbox_ref` of its counter.
 
 ## Vectors
 
@@ -284,3 +284,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-10-09 the note that the hooks of specs 024 and 026 change nothing until they are implemented removed (`docs/audit-log.md`, audit AI)
 - 2026-10-12 R23 names the paused channel of spec 028-session-sans-io R14 among the callers of `expire_outbox` (`docs/audit-log.md`, audit AP)
 - 2026-10-13 Security names the exceptions to the no-oracle rule that `docs/spec.md` §4 names after spec 028-session-sans-io R18 (audit AQ round 4, `docs/audit-log.md`)
+- 2026-10-14 amended after audit AT of spec 027-core-api (`docs/audit-log.md`): `outbox_ref` names an entry of the current key only (R33, T33), so that a `send` whose commit did not stand after a regeneration is not taken for one that did

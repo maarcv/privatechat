@@ -113,11 +113,13 @@ impl Channel {
         self.state.send_counter
     }
 
-    /// The `ClientRef` of the ordinary `outbox` entry sealed with
-    /// `counter`, if it is still waiting (R33).
+    /// The `ClientRef` of the ordinary `outbox` entry of the current key
+    /// sealed with `counter`, if it is still waiting (R33): an entry of a
+    /// retired key may hold the same counter, since a regeneration starts
+    /// the counter again (spec 025-identity-regen R1).
     pub(crate) fn outbox_ref(&self, counter: u64) -> Option<ClientRef> {
         self.ordinary_outbox()
-            .find(|entry| entry.counter == counter)
+            .find(|entry| entry.counter == counter && !entry.under_retired_key)
             .map(ClientRef::of)
     }
 }

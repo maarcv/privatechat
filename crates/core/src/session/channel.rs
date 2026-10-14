@@ -232,6 +232,25 @@ pub(crate) struct SessionCarry {
     clock_off: ClockOff,
 }
 
+#[cfg(test)]
+impl SessionCarry {
+    /// A carry with one gap of `gap_peer` and one ignored key, for the
+    /// tests of spec 027-core-api R14.
+    pub(crate) fn for_tests(gap_peer: PeerId, ignored: PeerId) -> SessionCarry {
+        let gap = Gap {
+            peer: gap_peer,
+            missing: 3,
+            anomalous: false,
+            spans_truncation: false,
+        };
+        SessionCarry {
+            gaps: BTreeMap::from([(gap_peer, gap)]),
+            ignored_keys: BTreeSet::from([ignored]),
+            clock_off: ClockOff::No,
+        }
+    }
+}
+
 /// Whether the device clock looks off, and which kind of sample said so
 /// (R25): a backlog sample clears only a flag a backlog sample set.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

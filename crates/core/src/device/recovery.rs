@@ -61,9 +61,14 @@ impl Device {
                 result = Ok(value);
             }
             // A fresh instance starts with its peers flag set (spec
-            // 021-channel-session R1); the failure already asks the client
-            // to re-read everything.
+            // 021-channel-session R1); a first failure already asks the
+            // client to re-read everything with `StorageFailed`.
             open.channel.take_peers_changed();
+            // A marked channel reopens with no `StorageFailed`: a call that
+            // stood still reports the status it changed.
+            if marked && result.is_ok() && open.channel.status() != before {
+                events.push(Event::StatusChanged { channel });
+            }
         } else if open.channel.take_peers_changed() || open.channel.status() != before {
             events.push(Event::StatusChanged { channel });
         }

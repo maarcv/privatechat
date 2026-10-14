@@ -4,6 +4,9 @@
 use super::dispatch::{PEER, id, opened, with_peer};
 use super::{DAY_MS, Fixture, NOW, config};
 use crate::Error;
+use crate::crypto::PublicKey;
+use crate::device::Device;
+use crate::proto::fingerprint::verify_qr;
 use crate::session::connection::Event;
 use crate::storage::{Store, StoreError};
 use crate::testing::{MemoryStore, batch, record, settings};
@@ -65,10 +68,10 @@ fn s027_t14_r14_failing_commits() {
     );
     assert!(device.messages(id, NOW).unwrap().is_empty());
     assert!(device.peers(id).is_ok());
-    fixture.faults.fail_commits(false);
-    device.rename_channel(other, "hall").unwrap();
     device.leave(id).unwrap();
     assert_eq!(device.channels().len(), 1);
+    fixture.faults.fail_commits(false);
+    device.rename_channel(other, "hall").unwrap();
 }
 
 /// Spec 027, R14: the probe time of a call that takes no `now` counts
@@ -254,4 +257,244 @@ fn s027_t15_r15_direct_purge_failure() {
     );
     assert!(device.channels()[0].write_failed);
     assert_eq!(device.queued, [Event::StorageFailed { channel: id }]);
+}
+
+/// Spec 027, R14: every direct writer goes through the recovery: a store
+/// failing during the call → the channel `write_failed` and
+/// `StorageFailed` queued.
+#[test]
+fn s027_t14_r14_every_direct_writer_recovers() {
+    let qr = verify_qr(config(1).id(), &PublicKey(PEER)).unwrap();
+    type Call = Box<dyn Fn(&mut Device, [u8; 16]) -> bool>;
+    let calls: Vec<(&str, Call)> = vec![
+        (
+            "verify",
+            Box::new(|d, id| d.verify(id, PEER, Some("ann"), NOW).is_err()),
+        ),
+        (
+            "verify_scanned",
+            Box::new(move |d, id| d.verify_scanned(id, &qr, "ann", NOW).is_err()),
+        ),
+        ("retire", Box::new(|d, id| d.retire(id, PEER, NOW).is_err())),
+        ("forget", Box::new(|d, id| d.forget(id, PEER).is_err())),
+        (
+            "rename_channel",
+            Box::new(|d, id| d.rename_channel(id, "hall").is_err()),
+        ),
+    ];
+    for (name, call) in calls {
+        let (fixture, mut device) = opened();
+        let id = id();
+        fixture.faults.fail_at(1);
+        assert!(call(&mut device, id), "{name}");
+        assert_eq!(
+            device.queued,
+            [Event::StorageFailed { channel: id }],
+            "{name}"
+        );
+        assert!(device.channels()[0].write_failed, "{name}");
+    }
+}
+
+/// Spec 027, R14: a `regenerate_identity` that fails before its commit
+/// returns the error and queues `StorageFailed`.
+#[test]
+fn s027_t14_r14_regeneration_failing_queues_its_event() {
+    let (fixture, mut device) = opened();
+    let id = id();
+    fixture.faults.fail_at(1);
+    assert_eq!(
+        device.regenerate_identity(id, NOW),
+        Err(Error::Store(StoreError::Io))
+    );
+    assert_eq!(device.queued, [Event::StorageFailed { channel: id }]);
+}
+
+/// Spec 027, R14: every writer that carries a `now` sets the time from
+/// which a later call without one counts the probe.
+#[test]
+fn s027_t14_r14_every_now_times_the_probe() {
+    type Call = Box<dyn Fn(&mut Device, [u8; 16], u64)>;
+    let calls: Vec<(&str, Call)> = vec![
+        (
+            "send",
+            Box::new(|d, id, now| drop(d.send(id, "hi", None, now).unwrap())),
+        ),
+        (
+            "purge_expired",
+            Box::new(|d, id, now| assert_eq!(d.purge_expired(id, now), Ok(0))),
+        ),
+        (
+            "verify",
+            Box::new(|d, id, now| d.verify(id, PEER, Some("ann"), now).unwrap()),
+        ),
+        (
+            "retire",
+            Box::new(|d, id, now| d.retire(id, PEER, now).unwrap()),
+        ),
+        (
+            "regenerate_identity",
+            Box::new(|d, id, now| drop(d.regenerate_identity(id, now).unwrap())),
+        ),
+    ];
+    for (name, call) in calls {
+        let (fixture, mut device) = opened();
+        let id = id();
+        call(&mut device, id, NOW + 5_000);
+        fixture.faults.fail_commits(true);
+        assert!(device.rename_channel(id, "hall").is_err(), "{name}");
+        let probe_at = device.channels.first().and_then(|open| open.probe_at);
+        assert_eq!(probe_at, Some(NOW + 65_000), "{name}");
+    }
+}
+
+/// Spec 027, R14: a reopen takes the fresh instance's peers flag, so a
+/// later writer that changes nothing raises no `StatusChanged`.
+#[test]
+fn s027_t14_r14_reopen_takes_the_peers_flag() {
+    let (fixture, mut device) = opened();
+    let id = id();
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id, PEER, true).is_err());
+    device.queued.clear();
+    assert_eq!(device.purge_expired(id, NOW), Ok(0));
+    assert!(device.queued.is_empty());
+}
+
+/// Spec 027, R7 and R14: a reopened channel keeps its place in
+/// `channels()`.
+#[test]
+fn s027_t14_r14_reopen_keeps_the_order() {
+    let (fixture, _) = with_peer();
+    fixture.plant_channel(2, Vec::new());
+    let mut device = fixture.open().unwrap();
+    let before: Vec<[u8; 16]> = device.channels().iter().map(|info| info.id).collect();
+    fixture.faults.fail_at(1);
+    assert!(device.rename_channel(before[0], "hall").is_err());
+    let after: Vec<[u8; 16]> = device.channels().iter().map(|info| info.id).collect();
+    assert_eq!(after, before);
+}
+
+/// Spec 027, R8 and R14: a marked channel whose silent reopen in `leave`
+/// fails moves to `broken` with `StorageFailed` queued.
+#[test]
+fn s027_t08_r08_leave_reopen_fails() {
+    let (fixture, mut device) = opened();
+    let id = id();
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id, PEER, true).is_err());
+    device.queued.clear();
+    fixture.faults.fail_at(1);
+    fixture.faults.fail_create(true);
+    assert_eq!(device.leave(id), Err(Error::Store(StoreError::Io)));
+    assert!(device.channels().is_empty());
+    assert_eq!(device.status().broken[0].channel_id, Some(id));
+    assert_eq!(device.queued, [Event::StorageFailed { channel: id }]);
+}
+
+/// Spec 027, R14: a direct writer that meets `Corrupt` reopens too, and
+/// a state that no longer opens moves the channel to `broken`.
+#[test]
+fn s027_t14_r14_corrupt_state_breaks_the_channel() {
+    let (fixture, dir) = with_peer();
+    let mut device = fixture.open().unwrap();
+    let id = id();
+    let (_, log) = fixture.vault.get_raw(&dir);
+    fixture
+        .vault
+        .put_raw(&dir, Some(b"not a state"), log.as_deref());
+    assert_eq!(
+        device.mute(id, PEER, true),
+        Err(Error::Store(StoreError::Corrupt))
+    );
+    assert!(device.channels().is_empty());
+    assert_eq!(device.status().broken[0].reason, StoreError::Corrupt);
+    assert_eq!(device.queued, [Event::StorageFailed { channel: id }]);
+}
+
+/// Spec 027, R14: `regenerate_identity` on a marked channel poisoned
+/// after its rename → `Ok`, and the status change it made is reported.
+#[test]
+fn s027_t14_r14_marked_regeneration_reports_its_status() {
+    let (fixture, mut device) = opened();
+    let id = id();
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id, PEER, true).is_err());
+    device.queued.clear();
+    fixture.faults.poison_after(1);
+    let events = device.regenerate_identity(id, NOW).unwrap();
+    assert!(device.channel_status(id).unwrap().retirement_pending);
+    assert_eq!(events, [Event::StatusChanged { channel: id }]);
+}
+
+/// Spec 027, R9 and spec 021 R33: after a regeneration, a `send` whose
+/// commit fails before its rename is not taken for the entry still waiting
+/// under the retired key with the same counter.
+#[test]
+fn s027_t09_r09_send_after_a_regeneration_failing() {
+    let (fixture, mut device) = opened();
+    let id = id();
+    let waiting = device.send(id, "before", None, NOW).unwrap();
+    device.regenerate_identity(id, NOW).unwrap();
+    fixture.faults.fail_at(1);
+    assert_eq!(
+        device.send(id, "after", None, NOW).err(),
+        Some(Error::Store(StoreError::Io))
+    );
+    let messages = device.messages(id, NOW).unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].client_ref, Some(waiting.client_ref));
+}
+
+/// Plants the own-key alert in channel 1 of `fixture`, before it opens.
+fn plant_alert(fixture: &Fixture) {
+    let dir = crate::storage::Vault::dir_name(&fixture.vault.clone(), &id()).unwrap();
+    let mut store = MemoryStore::handle(&fixture.vault, dir);
+    let (mut state, _) = store.load().unwrap().unwrap();
+    state.own_key_used_elsewhere = true;
+    store.commit(&batch(state, Vec::new())).unwrap();
+}
+
+/// Spec 027, R14 and R9: `regenerate_identity` after an own-key alert →
+/// `StatusChanged` in its events and the alert cleared; poisoned after
+/// its rename → `Ok` and no alert in `status()`.
+#[test]
+fn s027_t14_r14_regeneration_after_an_alert() {
+    for poisoned in [false, true] {
+        let (fixture, _) = with_peer();
+        plant_alert(&fixture);
+        let mut device = fixture.open().unwrap();
+        let id = id();
+        assert!(device.channel_status(id).unwrap().own_key_used_elsewhere);
+        if poisoned {
+            fixture.faults.poison_after(1);
+        }
+        let events = device.regenerate_identity(id, NOW).unwrap();
+        let expected = if poisoned {
+            Event::StorageFailed { channel: id }
+        } else {
+            Event::StatusChanged { channel: id }
+        };
+        assert_eq!(events, [expected]);
+        let status = device.channel_status(id).unwrap();
+        assert!(!status.own_key_used_elsewhere);
+        assert!(status.retirement_pending);
+    }
+}
+
+/// Spec 027, R14: a reopen keeps the gaps and the ignored keys of the
+/// session, not only `clock_off`.
+#[test]
+fn s027_t14_r14_reopen_carries_gaps_and_ignored_keys() {
+    let (fixture, mut device) = opened();
+    let id = id();
+    let carry = crate::session::channel::SessionCarry::for_tests(PEER, [0x77; 32]);
+    device.channel_mut(id).unwrap().carry_session(carry.clone());
+    assert_eq!(device.gaps(id).unwrap().len(), 1);
+    assert_eq!(device.channel_status(id).unwrap().ignored_keys, 1);
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id, PEER, true).is_err());
+    assert_eq!(device.channel(id).unwrap().session_carry(), carry);
+    assert_eq!(device.gaps(id).unwrap().len(), 1);
+    assert_eq!(device.channel_status(id).unwrap().ignored_keys, 1);
 }

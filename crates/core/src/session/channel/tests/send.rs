@@ -129,6 +129,13 @@ fn s021_t33_r33_send_counter_and_outbox_ref() {
         Some(client_ref)
     );
     assert_eq!(channel.outbox_ref(channel.send_counter()), None);
+    // A regeneration starts the counter again: the entry still waiting
+    // under the retired key is not the current key's counter 0.
+    channel.regenerate_identity(NOW).unwrap();
+    assert_eq!(channel.send_counter(), 0);
+    assert_eq!(channel.outbox_ref(0), None);
+    let current = channel.encrypt("again", None, NOW).unwrap();
+    assert_eq!(channel.outbox_ref(0), Some(current));
 }
 
 /// Spec 021, R2 and R32: after a successful `encrypt`, memory and a

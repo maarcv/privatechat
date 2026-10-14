@@ -72,6 +72,7 @@ impl Device {
         name: &str,
         now: u64,
     ) -> Result<ChannelInfo, Error> {
+        self.latest_now = now;
         let config = Config::create(server_url, ttl_seconds, name, now)?;
         let (info, _) = self.add(&config)?;
         Ok(info)
@@ -90,6 +91,7 @@ impl Device {
         replace_broken: bool,
         now: u64,
     ) -> Result<Imported, Error> {
+        self.latest_now = now;
         let config = Config::parse_qr(text, now)?;
         self.import(&config, replace_broken)
     }
@@ -107,6 +109,7 @@ impl Device {
         replace_broken: bool,
         now: u64,
     ) -> Result<Imported, Error> {
+        self.latest_now = now;
         let config = Config::open_encrypted(bytes, password, now)?;
         self.import(&config, replace_broken)
     }

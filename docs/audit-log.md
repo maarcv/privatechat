@@ -2,6 +2,19 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AT
+
+**2026-10-14 — Audit AT, the code audit of slice (c) of spec 027-core-api (branch `027-dispatch`): the per-channel dispatch (R9) and the recovery of a failed store through the direct calls (R14, R15), with R8's retry of `leave` on a marked channel; round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit T's findings already took AT1–AT7, so this audit's are numbered from AT8. Two production defects (AT8, AT9). Pass C ran 53 mutants: 37 killed, 2 equivalent, 14 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AT8 | After a regeneration starts the counter again, a `send` whose commit failed before its rename found, in the reopened state, the entry still waiting under the retired key with the same counter, and reported it as sent: the new message lost and the old one painted again (B) | High | `outbox_ref` names an entry of the current key only; spec 021 R33 and T33 amended; a T09 case |
+| AT9 | A writer on a marked channel whose call stood after the silent reopen (R9) returned `Ok` with no event, so a `regenerate_identity` left the retirement unshown (A, C) | Medium | It reports `StatusChanged` when the status changed; R14 says the silent reopen gives no `StorageFailed` |
+| AT10 | `create_channel` and the imports did not set the `now` that times the calls without one; `messages` and the exports take `&self` and cannot (A, B, C) | Low | The three set it; R14 says "the last call taking `&mut self` that carried one" |
+| AT11 | `rename_channel` goes through R14's status comparison, which R14's list of writers did not name (A) | Low | R14 names it |
+| AT12 | The regeneration clauses ran with no own-key alert; the carry over a reopen was checked on `clock_off` alone; `leave` of a channel whose commits fail ran with the fault cleared (A) | Low | The alert planted and cleared; a carry with a gap and an ignored key; `leave` under the fault |
+| AT13 | `verify`, `verify_scanned`, `retire`, `forget` and `rename_channel` failing, a `Corrupt` state, every call's `now` timing the probe, a reopen among two channels keeping their order, the fresh instance's peers flag, the error path of `regenerate_identity` and a failed reopen inside `leave` were untested (C) | Medium | A case for each, in T08 and T14 |
+
 ## Audit AS
 
 **2026-10-14 — Audit AS, the code audit of slice (b) of spec 027-core-api (branch `027-channels`): creating, importing, exporting, listing, renaming and leaving channels (R4–R8), the `needs_proxy` predicate `ChannelInfo` shows (R10's), and the settings of a fresh install saved by the first channel (R1); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit S's findings already took AS1–AS11, so this audit's are numbered from AS12. No production defect against the spec. Pass C ran 51 mutants: 38 killed, 4 equivalent, 9 survived; eight are killed below, and the ninth (a store error from the reopened state's config) left with the double load AS16 removes.
