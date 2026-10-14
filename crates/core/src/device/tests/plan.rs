@@ -143,7 +143,7 @@ fn s027_t10_r10_plan_ids_are_new() {
 
 /// Spec 027, R10: 16 channels found at `open` make one run, minted once.
 #[test]
-fn s027_t01_r01_open_mints_each_run_once() {
+fn s027_t10_r10_open_mints_each_run_once() {
     let fixture = saved(None);
     let mut device = fixture.open().unwrap();
     for k in 1..=16 {
@@ -202,13 +202,18 @@ fn s027_t10_r10_plan_with_a_proxy() {
             .iter()
             .all(|plan| plan.route.socks5_proxy.as_deref() == Some(PROXY))
     );
-    // Unchanged plans keep their `id` and username.
-    device.rename_channel(b, "hall").unwrap();
-    assert_eq!(device.connections(), plans);
+    // Unchanged plans keep their `id` and username across a replan.
+    let fifth = import(&mut device, 5, "wss://example.org");
+    let after = device.connections();
+    assert_eq!(after.len(), 5);
+    for plan in &plans {
+        assert!(after.contains(plan));
+    }
+    assert!(plan_of(&device, fifth).id > before);
 
     device.set_socks5_proxy(None).unwrap();
     assert!(unplanned(&device, onion));
-    assert_eq!(plan_of(&device, a).channels, [a, b]);
+    assert_eq!(plan_of(&device, a).channels, [a, b, fifth]);
 }
 
 /// Spec 027, R10: a `ws://` onion channel is planned, with `tls` false,

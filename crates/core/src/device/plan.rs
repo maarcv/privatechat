@@ -3,6 +3,8 @@
 //! 16 by the route they take, one per channel behind a proxy; and the
 //! route of the create-time probe.
 
+use std::collections::BTreeSet;
+
 use super::Device;
 use crate::crypto;
 use crate::error::Error;
@@ -107,13 +109,6 @@ fn fresh_username(runs: &[ConnectionPlan]) -> Result<String, Error> {
     }
 }
 
-/// Adds `position` to the runs to mint, once.
-fn mark(changed: &mut Vec<usize>, position: usize) {
-    if !changed.contains(&position) {
-        changed.push(position);
-    }
-}
-
 /// Whether `frame` is a `hello` whose versions this build speaks, by the
 /// rule of spec 028-session-sans-io R2, for the create-time probe (R12).
 ///
@@ -176,7 +171,8 @@ impl Device {
             })
             .collect();
         let mut runs = core::mem::take(&mut self.runs);
-        let mut changed = Vec::new();
+        // Each run that changed is minted once, in plan order.
+        let mut changed = BTreeSet::new();
         for (position, run) in runs.iter_mut().enumerate() {
             let before = run.channels.len();
             run.channels.retain(|id| {
@@ -185,7 +181,7 @@ impl Device {
                     .any(|(wanted_id, route)| wanted_id == id && route.same_way(&run.route))
             });
             if run.channels.len() != before {
-                mark(&mut changed, position);
+                changed.insert(position);
             }
         }
         for (id, route) in wanted {
@@ -198,10 +194,10 @@ impl Device {
             match room.and_then(|position| runs.get_mut(position).map(|run| (position, run))) {
                 Some((position, run)) => {
                     run.channels.push(id);
-                    mark(&mut changed, position);
+                    changed.insert(position);
                 }
                 None => {
-                    mark(&mut changed, runs.len());
+                    changed.insert(runs.len());
                     runs.push(ConnectionPlan {
                         id: 0,
                         route,

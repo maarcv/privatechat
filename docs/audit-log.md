@@ -28,6 +28,20 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AU18 | `.onion` was a constant in `url.rs` and again in `plan.rs` (C) | Low | One constant |
 | AU19 | A test comment said a freed run is refilled first, the opposite of what it checks (A) | Low | Reworded |
 
+**Round 3.** Fresh passes on the whole change. AU6–AU19 hold; no production defect. Pass C ran 32 new mutants: 26 killed, 3 equivalent, 3 survived: two that only a username collision reaches, and AU14's unreachable failure.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AU20 | T10's "kept while the plan is unchanged" behind a proxy ran no `replan`, so a `replan` that re-minted every proxied run passed (A) | Medium | A fifth channel is imported behind the proxy and the four earlier plans are found unchanged |
+| AU21 | The set of runs to mint was a `Vec` with a hand-written insert-once helper (C) | Low | A `BTreeSet` |
+| AU22 | A test of R10's minting was named after T01 (C) | Low | Renamed `s027_t10_r10_*` |
+| AU23 | The probe's username is not kept, so a run minted within the probe's 30 seconds may draw it again (B) | Far-fetched | None: a 32-bit collision in that window, and R12's probe is no plan |
+| AU24 | The redraw of a held username cannot be killed without scripting the random draw (C) | Far-fetched | None: AU12's code is right on reading |
+
+The audit closes with this round (`CLAUDE.md`, the audit): passes A and C found test gaps and a smaller helper, now closed, and pass B a far-fetched case.
+
+Decisions taken without the human: R10 and R12 say a SOCKS username is drawn again while another plan holds it (AU12, AU17), since a proxy that isolates by username, as Tor does, would otherwise put two channels on one circuit; it only narrows what is accepted.
+
 ## Audit AT
 
 **2026-10-14 — Audit AT, the code audit of slice (c) of spec 027-core-api (branch `027-dispatch`): the per-channel dispatch (R9) and the recovery of a failed store through the direct calls (R14, R15), with R8's retry of `leave` on a marked channel; round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit T's findings already took AT1–AT7, so this audit's are numbered from AT8. Two production defects (AT8, AT9). Pass C ran 53 mutants: 37 killed, 2 equivalent, 14 survived, each killed below.
