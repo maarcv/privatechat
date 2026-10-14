@@ -21,6 +21,7 @@ use crate::storage::{ChannelState, DirName, LogRecord, Store, StoreError, WriteB
 mod gaps;
 mod headroom;
 mod limits;
+mod local;
 mod outbox;
 mod own_key;
 mod peers;
