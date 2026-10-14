@@ -2,6 +2,22 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AY
+
+**2026-10-14 — Audit AY, the code audit of slice (f) of spec 027-core-api (branch `027-exit`): the phase 2 exit test (R23); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit Y's findings already took AY1–AY18, so this audit's are numbered from AY19. No production defect; the test was weaker than R23's wording. Pass C ran 20 mutants, of the production code the test guards and of the test: 11 killed, 5 equivalent here, 4 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AY19 | "0 errors other than the injected ones" was not enforced: `StorageFailed` had no bound, and refusals, truncations, `NotDelivered`, full servers and reconnects went uncounted; any send error passed as the injected one (A, B) | Medium | Each side sees exactly one `StorageFailed`, the send error is `Store(Io)`, no unexpected event, at most two `Reconnect`s, and no channel left `write_failed` |
+| AY20 | The failed commit landed where the draw put it, so the session's recovery of R14 went untested in some runs, and nothing showed the fault fired (A, C) | Medium | One side fails the commit of a `send`, the other of a received frame, each from a drawn step; both counted |
+| AY21 | A side receiving its own messages back, and a duplicate delivered a second time, were never checked (C) | Medium | Nothing but the other side's bodies; every second delivery produces no message |
+| AY22 | The crash run's log length was read after `load` had cut it, so it held whatever the crash left; a side whose store vanished, and a resume on a fresh channel, passed (B, C) | Medium | The length read before and after, one side's log longer than committed; one store a side, the same channel resumed, nothing broken |
+| AY23 | The crash came before any compaction, and "one compaction run and checked" checked only that one ran (A, B) | Low | The crash past the first compaction, which the reopen checks; no record kept that expired in the first two hours |
+| AY24 | A failing run printed 25 000 drawn booleans; the crash append was a constant written as a seed; the child test was named apart from its precedent (A, C) | Low | A drawn seed marks the duplicates; named constants; `s027_t23_r23_crash_child` |
+| AY25 | The resume comes past the TTL, so a pre-crash `outbox` entry lost by the reopen is invisible to the crash run (C) | Far-fetched | None: the first run catches it, and R23 asks the crash run to resume, not to recount |
+| AY26 | The crash point models a killed process, not a power cut: fast mode keeps every write in the page cache (B) | Far-fetched | None: what R23 asks; durability order is spec 020's recovery tests |
+| AY27 | Duplicates are replayed at once, never after a reconnect or a compaction (B) | Far-fetched | None: the server re-pushes the backlog from the cursor at every reconnect, which the run does |
+
 ## Audit AX
 
 **2026-10-14 — Audit AX, the code audit of slice (e) of spec 027-core-api (branch `027-boundary`): the boundary checks (`unreachable_pub`, `api_surface.rs`), the amendments of specs 011 and 016, the `dead_code` allows removed, `init` and `generate_storage_key`, and the doc updates (R16–R22); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit X's findings already took AX1–AX18, so this audit's are numbered from AX19. No production defect: no secret crosses, no gate changes production, no parser of external bytes is left unfuzzed and unexcluded. Pass C ran 24 mutants: 20 killed, 1 equivalent, 3 survived, each killed below.

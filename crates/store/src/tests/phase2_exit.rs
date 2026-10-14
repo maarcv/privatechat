@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use privatechat_core::testing::{FailingVault, Faults, MemoryServer, state_eq};
-use privatechat_core::{Device, Event, MessageContent, StoreError, Vault};
+use privatechat_core::{Device, Error, Event, LogRecord, MessageContent, StoreError, Vault};
 use proptest::test_runner::{Config, TestRunner};
 
 use super::{TestDir, open_with, run_helper};
@@ -32,8 +32,14 @@ const TTL_SECONDS: u32 = 3_600;
 const DRAIN: u64 = 600_000;
 /// The socket number of the second device, apart from the first's plan ids.
 const SECOND_SOCKETS: u64 = 1_000;
-/// The pushes the run draws a duplicate for, a bound on what it delivers.
-const PUSHES: usize = 25_000;
+/// One push in this many is delivered twice.
+const DUPLICATE_ONE_IN: u64 = 100;
+/// The append the crash run stops at, counted over both sides: past the
+/// first compaction, so that the reopen reads a compacted log.
+const CRASH_APPEND: u64 = 26_000;
+/// The most `Reconnect`s a side may see: none but the probe's after the
+/// injected failure, and a session's after its socket was refused.
+const MAX_RECONNECTS: u32 = 2;
 /// The environment variables of the crash run's child.
 const DIR_VAR: &str = "PRIVATECHAT_PHASE2_DIR";
 
@@ -51,9 +57,40 @@ struct Side {
     errors: u32,
     /// The `StorageFailed` events, each a store reopened (R14).
     storage_failed: u32,
+    /// The `Reconnect`s asked for.
+    reconnects: u32,
+    /// The events no run of R23 should see, by kind.
+    unexpected: Vec<&'static str>,
+    /// The side's one failed commit, not yet armed.
+    fault: Option<Fault>,
+}
+
+/// Where a side's one failed commit lands: the first of its kind from a
+/// time on, so that each recovery path of R14 runs in every run.
+#[derive(Clone, Copy)]
+enum Fault {
+    /// The commit of a `send`, recovered by the call (R9).
+    Send(u64),
+    /// The commit of a received frame, recovered through the session's
+    /// step.
+    Receive(u64),
 }
 
 impl Side {
+    /// Fails the next commit when the side's fault is of this kind, a
+    /// received frame or a `send`, and its time came.
+    fn arm(&mut self, now: u64, receive: bool) {
+        let due = match self.fault {
+            Some(Fault::Send(at)) => !receive && at <= now,
+            Some(Fault::Receive(at)) => receive && at <= now,
+            None => false,
+        };
+        if due {
+            self.faults.fail_at(1);
+            self.fault = None;
+        }
+    }
+
     /// A device over a fast data directory at `path`, behind `faults`.
     fn open(path: &Path, faults: &Faults, sockets: u64, now: u64) -> Side {
         let data = open_with(path, Io::fast).expect("fast data directory");
@@ -66,6 +103,9 @@ impl Side {
             received: BTreeMap::new(),
             errors: 0,
             storage_failed: 0,
+            reconnects: 0,
+            unexpected: Vec::new(),
+            fault: None,
         }
     }
 
@@ -104,12 +144,21 @@ impl Side {
                     }
                 }
                 Event::StorageFailed { .. } => self.storage_failed += 1,
-                Event::Reconnect { connection } | Event::UnsupportedServer { connection } => {
+                Event::Reconnect { connection } => {
+                    self.reconnects += 1;
                     self.device.on_disconnect(connection);
                     server.disconnect(connection + self.sockets);
                     self.connected.retain(|open| *open != connection);
                 }
-                _ => {}
+                Event::NotDelivered { .. } => self.unexpected.push("NotDelivered"),
+                Event::HistoryTruncated { .. } => self.unexpected.push("HistoryTruncated"),
+                Event::SubscribeRefused { .. } => self.unexpected.push("SubscribeRefused"),
+                Event::ChannelFull { .. } => self.unexpected.push("ChannelFull"),
+                Event::ServerFull { .. } => self.unexpected.push("ServerFull"),
+                Event::UnsupportedServer { .. } => self.unexpected.push("UnsupportedServer"),
+                Event::Subscribed { .. }
+                | Event::Delivered { .. }
+                | Event::StatusChanged { .. } => {}
             }
         }
     }
@@ -117,6 +166,7 @@ impl Side {
     /// Moves frames both ways until quiet; a push whose index `duplicate`
     /// names is delivered twice.
     fn pump(&mut self, server: &mut MemoryServer, now: u64, duplicate: &mut Duplicates) {
+        self.arm(now, true);
         for _ in 0..20 {
             let mut moved = false;
             for id in self.connected.clone() {
@@ -130,6 +180,8 @@ impl Side {
                     self.take(events, server);
                     if twice {
                         let events = self.device.on_frame(id, &frame, now);
+                        let message = |event: &Event| matches!(event, Event::Message { .. });
+                        duplicate.rejected += u32::from(!events.iter().any(message));
                         self.take(events, server);
                     }
                     moved = true;
@@ -144,9 +196,12 @@ impl Side {
     /// Sends `body`; an error, which only the injected commit may cause, is
     /// counted and the send tried again on the reopened store.
     fn send(&mut self, channel: [u8; 16], body: &str, now: u64, server: &mut MemoryServer) {
+        self.arm(now, false);
         match self.device.send(channel, body, None, now) {
             Ok(sent) => self.take(sent.events, server),
-            Err(_) => {
+            Err(error) => {
+                // The injected fault fails a commit with `Io`, and only so.
+                assert_eq!(error, Error::Store(StoreError::Io));
                 self.errors += 1;
                 let sent = self
                     .device
@@ -158,15 +213,27 @@ impl Side {
     }
 }
 
-/// Which pushes are delivered twice, drawn by the proptest.
+/// Which pushes are delivered twice, from a seed the proptest draws.
 struct Duplicates {
-    marks: Vec<bool>,
-    next: usize,
+    seed: u64,
+    next: u64,
     /// Pushes delivered twice.
     count: u32,
+    /// Second deliveries that produced no message.
+    rejected: u32,
 }
 
 impl Duplicates {
+    /// The pushes `seed` marks, none delivered yet; `None` marks none.
+    fn new(seed: Option<u64>) -> Duplicates {
+        Duplicates {
+            seed: seed.unwrap_or(0),
+            next: if seed.is_some() { 0 } else { u64::MAX },
+            count: 0,
+            rejected: 0,
+        }
+    }
+
     /// Whether this frame, a push, is the next one marked.
     fn next(&mut self, frame: &[u8]) -> bool {
         let push = matches!(
@@ -176,7 +243,16 @@ impl Duplicates {
         if !push {
             return false;
         }
-        let marked = self.marks.get(self.next).copied().unwrap_or(false);
+        if self.next == u64::MAX {
+            return false;
+        }
+        // SplitMix64 of the seed and the push's index: one in a hundred.
+        let mut z = self
+            .seed
+            .wrapping_add(self.next.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        let marked = (z ^ (z >> 31)).is_multiple_of(DUPLICATE_ONE_IN);
         self.next += 1;
         self.count += u32::from(marked);
         marked
@@ -234,13 +310,15 @@ fn exchange(
     end
 }
 
-/// Checks that each side received every message of the other once.
+/// Checks that each side received every message of the other once, and
+/// nothing else: none of its own, whose echo is not a message.
 fn check_delivered(sides: &[Side; 2], range: std::ops::Range<usize>) {
     for (from, to) in [("a", &sides[1]), ("b", &sides[0])] {
         for n in range.clone() {
             let body = format!("{from}-{n}");
             assert_eq!(to.received.get(&body), Some(&1), "{body}");
         }
+        assert_eq!(to.received.len(), range.len(), "a message not sent");
     }
 }
 
@@ -257,33 +335,26 @@ fn s027_t23_r23_phase2_exit() {
         failure_persistence: None,
         ..Config::default()
     });
-    let draws = (
-        1u32..2_000,
-        1u32..2_000,
-        proptest::collection::vec(proptest::bool::weighted(0.01), PUSHES),
-    );
+    // The step from which each side's failed commit is armed.
+    let draws = (0u64..1_000, 0u64..1_000, proptest::num::u64::ANY);
     runner
-        .run(&draws, |(fail_a, fail_b, marks)| {
-            exit_run(fail_a, fail_b, marks);
+        .run(&draws, |(fail_a, fail_b, seed)| {
+            exit_run(fail_a, fail_b, seed);
             Ok(())
         })
         .expect("the run");
 }
 
 /// One run of R23's first half.
-fn exit_run(fail_a: u32, fail_b: u32, marks: Vec<bool>) {
+fn exit_run(fail_a: u64, fail_b: u64, seed: u64) {
     let dir = TestDir::new("phase2-exit");
     let faults = [Faults::new(), Faults::new()];
-    let (first, second, channel) = start(dir.path(), [&faults[0], &faults[1]], T0);
-    faults[0].fail_at(fail_a);
-    faults[1].fail_at(fail_b);
+    let (mut first, mut second, channel) = start(dir.path(), [&faults[0], &faults[1]], T0);
+    first.fault = Some(Fault::Send(T0 + TICK + fail_a * SEND_EVERY));
+    second.fault = Some(Fault::Receive(T0 + TICK + fail_b * SEND_EVERY));
     let mut sides = [first, second];
     let mut server = MemoryServer::new(&[HOST]);
-    let mut duplicate = Duplicates {
-        marks,
-        next: 0,
-        count: 0,
-    };
+    let mut duplicate = Duplicates::new(Some(seed));
     let end = exchange(
         &mut sides,
         &mut server,
@@ -293,15 +364,25 @@ fn exit_run(fail_a: u32, fail_b: u32, marks: Vec<bool>) {
     );
     check_delivered(&sides, 0..PER_SIDE);
     assert!(duplicate.count > 0, "no push was duplicated");
-    for side in &sides {
-        // Only the injected commit may have failed a call, and it did fail
-        // one: a direct call or a session's step reopened the store.
-        assert!(side.errors <= 1, "{} errors", side.errors);
+    assert_eq!(
+        duplicate.rejected, duplicate.count,
+        "a duplicate was not rejected"
+    );
+    // Each injected commit reopened its store once: the first side's
+    // failed its `send`, the second's a session's step, and no other call
+    // failed.
+    for (side, errors) in sides.iter().zip([1, 0]) {
+        assert!(side.fault.is_none(), "the fault was never armed");
+        assert_eq!(side.errors, errors);
+        assert_eq!(side.storage_failed, 1);
+        assert!(side.unexpected.is_empty(), "{:?}", side.unexpected);
         assert!(
-            side.errors + side.storage_failed >= 1,
-            "the fault never fired"
+            side.reconnects <= MAX_RECONNECTS,
+            "{} reconnects",
+            side.reconnects
         );
         assert!(side.device.status().broken.is_empty());
+        assert!(side.device.channels().iter().all(|info| !info.write_failed));
     }
     let [first, second] = sides;
     for (side, path) in [(first, "a"), (second, "b")] {
@@ -314,64 +395,80 @@ fn exit_run(fail_a: u32, fail_b: u32, marks: Vec<bool>) {
 }
 
 /// Each store of the data directory at `path` reloads the state its last
-/// commit wrote, and its log was compacted at least once.
+/// commit wrote, and its log was compacted: no record is left that expired
+/// in the first two hours of the run.
 fn check_reopened(path: &Path, faults: &Faults) {
     let mut data = open_with(path, Io::fast).expect("reopen");
     let stores = data.list().expect("list");
     assert_eq!(stores.len(), 1);
     for mut store in stores {
-        let (state, _) = store.load().expect("load").expect("a state");
+        let (state, records) = store.load().expect("load").expect("a state");
         let last = faults.last_committed(store.name()).expect("a commit");
         assert!(state_eq(&state, &last));
         let (_, generation) = state.log_position();
         assert!(generation > 0, "no compaction ran");
+        let oldest = records.iter().map(LogRecord::purge_at).min();
+        assert!(
+            oldest.is_some_and(|at| at > T0 + 2 * 3_600_000),
+            "{oldest:?}"
+        );
     }
 }
 
 /// Spec 027, R23: a run killed by a crash point after an append to the log
-/// reopens both directories without `Corrupt`, each log at its committed
-/// length, and the exchange resumes with a fresh server.
+/// reopens both directories without `Corrupt`, the log cut back to its
+/// committed length, and the exchange resumes on the same channel with a
+/// fresh server.
 #[test]
 fn s027_t23_r23_phase2_exit_after_a_crash() {
     let dir = TestDir::new("phase2-crash");
     let path = dir.path().to_str().expect("a UTF-8 path");
-    // A seeded k: the crash lands mid-run, on whichever side appends then.
-    let k = 1_000 + (T0 % 997);
-    let crash = format!("after_append:{k}");
+    let crash = format!("after_append:{CRASH_APPEND}");
     let status = run_helper(
-        "tests::phase2_exit::phase2_crash_child",
+        "tests::phase2_exit::s027_t23_r23_crash_child",
         &[(DIR_VAR, path), (CRASH_VAR, &crash)],
     );
     assert_eq!(status, Some(CRASH_STATUS));
+    let mut cut = false;
+    let mut compacted = false;
+    let mut ids = Vec::new();
     for side in ["a", "b"] {
+        let channels = dir.path().join(side).join("channels");
         let mut data = open_with(&dir.path().join(side), Io::fast).expect("reopen");
-        for mut store in data.list().expect("list") {
+        let stores = data.list().expect("list");
+        assert_eq!(stores.len(), 1);
+        for mut store in stores {
+            let log = channels.join(store.name().to_hex()).join("messages.log");
+            let before = std::fs::metadata(&log).expect("the log").len();
             let (state, _) = store
                 .load()
                 .map_err(|error| assert_ne!(error, StoreError::Corrupt))
                 .expect("load")
                 .expect("a state");
-            let log = std::fs::metadata(
-                dir.path()
-                    .join(side)
-                    .join("channels")
-                    .join(store.name().to_hex())
-                    .join("messages.log"),
-            )
-            .expect("the log");
-            assert_eq!(log.len(), state.log_position().0);
+            let (committed, generation) = state.log_position();
+            let after = std::fs::metadata(&log).expect("the log").len();
+            assert_eq!(after, committed);
+            cut |= before > committed;
+            compacted |= generation > 0;
+            ids.push(state.channel_id());
         }
     }
+    assert!(cut, "no append was left past the committed length");
+    assert!(compacted, "the crash came before any compaction");
+    assert_eq!(ids.first(), ids.get(1));
+
     let now = T0 + 7_200_000;
     let faults = [Faults::new(), Faults::new()];
     let (first, second, channel) = start(dir.path(), [&faults[0], &faults[1]], now);
+    for side in [&first, &second] {
+        let listed: Vec<[u8; 16]> = side.device.channels().iter().map(|info| info.id).collect();
+        assert_eq!(listed, [channel]);
+        assert_eq!(Some(&channel), ids.first());
+        assert!(side.device.status().broken.is_empty());
+    }
     let mut sides = [first, second];
     let mut server = MemoryServer::new(&[HOST]);
-    let mut duplicate = Duplicates {
-        marks: Vec::new(),
-        next: 0,
-        count: 0,
-    };
+    let mut duplicate = Duplicates::new(None);
     exchange(
         &mut sides,
         &mut server,
@@ -386,7 +483,7 @@ fn s027_t23_r23_phase2_exit_after_a_crash() {
 /// `DIR_VAR`, until the crash point stops the process; returns at once in a
 /// normal run.
 #[test]
-fn phase2_crash_child() {
+fn s027_t23_r23_crash_child() {
     let Ok(path) = std::env::var(DIR_VAR) else {
         return;
     };
@@ -395,11 +492,7 @@ fn phase2_crash_child() {
     let (first, second, channel) = start(path, [&faults[0], &faults[1]], T0);
     let mut sides = [first, second];
     let mut server = MemoryServer::new(&[HOST]);
-    let mut duplicate = Duplicates {
-        marks: Vec::new(),
-        next: 0,
-        count: 0,
-    };
+    let mut duplicate = Duplicates::new(None);
     exchange(
         &mut sides,
         &mut server,
