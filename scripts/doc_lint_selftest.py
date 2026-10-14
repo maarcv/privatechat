@@ -230,6 +230,12 @@ def spec_device_in_9(root: Path) -> None:
     text = path.read_text(encoding="utf-8")
     state = next(line for line in text.splitlines() if line.startswith("Status: "))
     replace(path, state, "Status: implemented")
+    # §9 without the handle it names, as before spec 027.
+    spec = root / "docs" / "spec.md"
+    doc = spec.read_text(encoding="utf-8")
+    start, end = doc.find("## 9."), doc.find("## 10.")
+    spec.write_text(doc[:start] + doc[start:end].replace("Device", "Handle") + doc[end:],
+                    encoding="utf-8")
 
 
 # Each rule, the edit that breaks it, and a part of the message the rule prints.

@@ -1,6 +1,6 @@
 # Private E2E chat — Specification and plan (SDD)
 
-Version: mvp · Post-audit I revision · Updated: 2026-10-13 · Marc Vilardebó (audits in `docs/audit-log.md`)
+Version: mvp · Post-audit I revision · Updated: 2026-10-14 · Marc Vilardebó (audits in `docs/audit-log.md`)
 
 This file, on the default branch (`mvp` until the first release), is the canonical source of the specification (see §11 "Governance"). Read copy, may lag behind: https://claude.ai/code/artifact/1527bf13-79e8-485a-908d-a515cbd062a4
 
@@ -300,7 +300,7 @@ sequenceDiagram
 
 **Transport.** TLS 1.3 without session resumption (no ticket, no PSK; every connection is a full handshake). The one exception is a `ws://` onion URL, which is opened with no TLS, through Tor only, whose onion service already encrypts and authenticates the connection (ADR 0038). The WebSocket handshake carries only `Host`, `Upgrade`, `Connection`, `Sec-WebSocket-Key`, `Sec-WebSocket-Version` and `User-Agent: privatechat/1`, identical on all platforms; no WS extensions (`permessage-deflate` disabled). Maximum frame 70 000 B on client and server. The TLS fingerprint of each platform's stack still reveals the platform; documented.
 
-**Connections.** One connection per **server**, with up to 16 channels subscribed per connection; a device with channels on N servers has N connections, each with its own `Session` (§9). Connections live only while the app is unlocked (§8 "Background"). With a SOCKS5 proxy configured (Tor included), one connection and one circuit per channel, isolated by SOCKS credential (user = 4-byte hex prefix of the `channel_id`, empty password). The server can link channels of the same device by IP and time; only Tor prevents it.
+**Connections.** The `Device` plans the connections (spec 027-core-api R10): the channels of one server (scheme, host and port) share connections of up to 16 channels each, each with its own `Session` (§9). Connections live only while the app is unlocked (§8 "Background"). With a SOCKS5 proxy configured (Tor included), one connection and one circuit per channel, isolated by SOCKS credential (user = 8 random lowercase hex characters drawn for each plan, never derived from the `channel_id`, empty password). The server can link channels of the same device by IP and time; only Tor prevents it.
 
 **Protocol messages** (one record of §4 "Record encoding" per binary WebSocket frame, key 0 = message type, unknown keys ignored; the core serialises and parses them; the numeric keys of each message are fixed by spec 028-session-sans-io, which the client needs first, and spec 030-ws-protocol reuses them on the server)
 
@@ -450,7 +450,7 @@ flowchart TD
 | --- | --- | --- |
 | `core` | Stable Rust pinned in `rust-toolchain.toml` (exact version in spec 000), `libsodium-sys-stable` and `zeroize`; the name comparison of §7 uses the standard library only (ADR 0043); nothing else (own record encoding, ADR 0023) | One implementation, controlled memory, no GC leaving keys on the heap |
 | `store` | Separate Rust crate: `std::fs` and the seal and open functions of `core` (spec 020-store-files), never libsodium on its own. Implements the `Store` trait of `core` with two files per channel and atomic commit via `rename` (ADR 0021). No SQLite, no C outside libsodium | Outside `core` because it does I/O (AGENTS 10); a single implementation for the three platforms, fuzzable from Rust |
-| Mobile bindings | `uniffi` (proc macros; no UDL). `Config`, `Channel`, `Session` and `Settings` are opaque handles (uniffi `Object`); only `Received`, `Peer`, `Fingerprint`, `Gap` and `Event` are `Record`s. | Generates Kotlin and Swift; secrets do not cross the boundary by value |
+| Mobile bindings | `uniffi` (proc macros; no UDL). `Device` is the one opaque handle (uniffi `Object`, ADR 0037); every other type of spec 027 is a `Record` or an enum. | Generates Kotlin and Swift; secrets do not cross the boundary by value |
 | Desktop | Tauri 2 + Svelte 5 + TypeScript; the core is linked in as a Rust crate, no wasm | Pinned and signed code, OS keychain, one more reproducible build |
 | Android | Kotlin, Jetpack Compose, minSdk 26. No Room or SQLite: storage belongs to the core | Current standard |
 | iOS | Swift 5.10, SwiftUI, iOS 16+. No GRDB or SQLite: storage belongs to the core | Current standard |
@@ -458,89 +458,60 @@ flowchart TD
 | Protocol tests | JSON test vectors in `specs/vectors/`; the reference script of spec 015-test-vectors produces them, the Rust tests reproduce them, and Kotlin and Swift reproduce them through the bindings | Guarantees interoperability |
 | CI | GitHub Actions (§10 "CI per phase") | |
 
-**Core boundary** (public API, exposed via uniffi and Tauri commands; the normative signature is in spec 027). Every function that receives external data returns `Result<_, Error>`.
+**Core boundary** (public API, exposed via uniffi and Tauri commands; the normative signature is in spec 027-core-api). One opaque handle, `Device` (ADR 0037), owns the vault, every channel, the settings and one `Session` per connection, and every call names a channel by its `channel_id` and a connection by its plan `id`; everything else that crosses is a record or an enum. Every function that receives external data returns `Result<_, Error>`.
 
 ```rust
 pub enum Error {
     BadLength, UnsupportedVersion, WrongChannel, Expired, RetiredKey, PeerLimit,
     Replay, BadSignature, BadPayload, CounterExhausted,
     BadConfig, BadPassword, InviteExpired, ConfigMismatch,
-    UnknownPeer, LabelInUse, OwnKey, // arrive with spec 022-peers-tofu
-    Internal,          // libsodium failed (to initialise, or to allocate the 64 MiB of Argon2id), or an export's expiry overflowed
-    Store(StoreError), // arrives with spec 020-store-files
-}
+    UnknownPeer, UnknownChannel, LabelInUse, OwnKey, RetirementPending,
+    Internal,          // libsodium failed (to initialise, or to allocate the 64 MiB of Argon2id), an export's expiry overflowed, or a bug
+    Store(StoreError), // spec 020-store-files
+}                      // no Display: the core writes no text a user reads (§12)
 
 pub type PeerId = [u8; 32]; // a peer's pk_u, as `Peer` carries it; one's own pk_u is never a PeerId (ADR 0029)
 
-pub trait Store: Send {                                                  // spec 020-store-files, which is normative
-    fn name(&self) -> &DirName;
-    fn load(&mut self) -> Result<Option<(ChannelState, Vec<LogRecord>)>, StoreError>; // on open; truncates the log to the committed length
-    fn commit(&mut self, batch: &WriteBatch) -> Result<(), StoreError>;  // single write; atomic (ADR 0021)
-    fn compact(&mut self, state: &ChannelState, now: u64) -> Result<u32, StoreError>; // TTL purge
-    fn log_len(&self) -> u64;
-    fn destroy(&mut self) -> Result<(), StoreError>;
-}
+pub trait Store: Send { /* the files of one channel, spec 020-store-files */ }
+pub trait Vault: Send { /* the data directory: every channel's store and settings.bin */ }
 
-pub trait Vault: Send {                                                  // the data directory: every channel's store and settings.bin
-    fn list(&mut self) -> Result<Vec<Box<dyn Store>>, StoreError>;
-    fn create(&mut self, channel_id: &[u8; 16]) -> Result<Box<dyn Store>, StoreError>;
-    fn remove(&mut self, name: &DirName) -> Result<(), StoreError>;
-    fn dir_name(&self, channel_id: &[u8; 16]) -> Result<DirName, StoreError>;
-    fn load_settings(&mut self) -> Result<Option<Settings>, StoreError>;
-    fn save_settings(&mut self, settings: &Settings) -> Result<(), StoreError>;
-}
+pub fn init() -> Result<(), Error>;
+pub fn generate_storage_key(out: &mut [u8; 32]) -> Result<(), Error>;  // K_db, drawn by the core (spec 040-uniffi R8)
+pub fn probe_hello(frame: &[u8]) -> Result<bool, Error>;              // the create-time check of §5
+pub const DEFAULT_SERVER_URL: &str;
 
-impl Config {
-    pub fn create(server_url: &str, ttl_seconds: u32, suggested_name: &str, now: u64) -> Result<Config, Error>;
-    pub fn parse(bytes: &[u8], now: u64) -> Result<Config, Error>;              // the record itself
-    pub fn parse_qr(text: &[u8], now: u64) -> Result<Config, Error>;           // ASCII base64url of the record
-    pub fn open_encrypted(bytes: &[u8], password: &[u8], now: u64) -> Result<Config, Error>;
-    pub fn export_qr(&self, now: u64) -> Result<Vec<u8>, Error>;                // ASCII base64url; expiry now + 10 min
-    pub fn export_encrypted(&self, now: u64) -> Result<(Vec<u8>, Vec<u8>), Error>; // (file, password); now + 24 h
-    pub fn channel_id(&self) -> [u8; 16];
-    pub fn server_url(&self) -> &str;
-    pub fn suggested_name(&self) -> &str;
-    pub fn ttl_seconds(&self) -> u32;
-}
-
-impl Channel {
-    pub fn open(config: Config, store: Box<dyn Store>) -> Result<Channel, Error>;
-    pub fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> Result<ClientRef, Error>; // builds the payload; stores the last display_name given (state.bin); reserves counter + outbox; the blob leaves only through outbox()
-    pub fn decrypt(&mut self, blob: &[u8], received_at: u64, now: u64) -> Result<Received, Error>;
-    pub fn acked(&mut self, client_ref: ClientRef, server_id: [u8; 16], received_at: u64) -> Result<(), Error>;
-    pub fn outbox(&mut self, now: u64) -> Result<(Vec<(ClientRef, Vec<u8>)>, Vec<ClientRef>), Error>; // (to send, not delivered); re-seals a pending key_retired (ADR 0034)
-    pub fn cursor(&self) -> Result<Option<u64>, Error>;
-    pub fn peers(&self) -> Result<Vec<Peer>, Error>;
-    pub fn label(&mut self, peer: PeerId, name: &str) -> Result<(), Error>;
-    pub fn verify(&mut self, peer: PeerId, label: Option<&str>, now: u64) -> Result<(), Error>;
-    pub fn mute(&mut self, peer: PeerId, muted: bool) -> Result<(), Error>;
-    pub fn retire(&mut self, peer: PeerId, now: u64) -> Result<(), Error>;
-    pub fn regenerate_identity(&mut self, now: u64) -> Result<(), Error>;      // key_retired to outbox if sk_u was held
-    pub fn fingerprint(&self, peer: PeerId) -> Result<Fingerprint, Error>;      // { words: Vec<String> (12), short: Vec<String> (4), qr: Vec<u8> }
-    pub fn own_fingerprint(&self) -> Result<Fingerprint, Error>;                // the same for one's own pk_u, which is never a peer
-    pub fn purge_expired(&mut self, now: u64) -> Result<u32, Error>;
-    pub fn auth_subscribe(&self, server_nonce: &[u8; 32], host: &str) -> Result<AuthProof, Error>;
-    pub fn gaps(&self) -> Vec<Gap>;
-    pub fn leave(self) -> Result<(), Error>;
-}
-
-// Settings (settings.bin, ADR 0021) is loaded and saved through `Vault` (spec 020-store-files R22);
-// what the app reads and sets, and DEFAULT_SERVER_URL on first open, is spec 027-core-api's.
-
-impl Session {                                                                  // sans-I/O, ADR 0020; one per server
-    pub fn new(server_url: &str, channels: Vec<Channel>) -> Session;             // all channels of one server (host and port)
-    pub fn on_connect(&mut self, now: u64);
-    pub fn on_frame(&mut self, frame: &[u8], now: u64) -> Result<Vec<Event>, Error>; // hello/ok/push/ack/error
-    pub fn outgoing(&mut self) -> Vec<Vec<u8>>;                                 // subscribe, publish
+impl Device {
+    pub fn open(vault: Box<dyn Vault>, now: u64) -> Result<Device, Error>;
+    pub fn status(&self) -> DeviceStatus;                                // lost settings, broken channels
+    // channels: create, import (QR or .chatcfg, as bytes), export, list, rename, leave
+    pub fn create_channel(&mut self, server_url: &str, ttl_seconds: u32, name: &str, now: u64) -> Result<ChannelInfo, Error>;
+    pub fn import_qr(&mut self, text: &[u8], replace_broken: bool, now: u64) -> Result<Imported, Error>;
+    pub fn import_file(&mut self, bytes: &[u8], password: &[u8], replace_broken: bool, now: u64) -> Result<Imported, Error>;
+    pub fn export_qr(&self, channel: [u8; 16], now: u64) -> Result<Vec<u8>, Error>;
+    pub fn export_file(&self, channel: [u8; 16], now: u64) -> Result<ExportedFile, Error>;
+    pub fn channels(&self) -> Vec<ChannelInfo>;
+    pub fn leave(&mut self, channel: [u8; 16]) -> Result<(), Error>;
+    // per channel: send, messages, peers, label, verify, mute, fingerprint, retire, regenerate_identity, forget, ...
+    pub fn send(&mut self, channel: [u8; 16], body: &str, display_name: Option<&str>, now: u64) -> Result<Sent, Error>;
+    pub fn messages(&self, channel: [u8; 16], now: u64) -> Result<Vec<Message>, Error>;
+    // connections (spec 028-session-sans-io)
+    pub fn connections(&self) -> Vec<ConnectionPlan>;                    // runs of up to 16 channels; one per channel behind a proxy
+    pub fn on_connect(&mut self, connection: u64, now: u64);
+    pub fn on_frame(&mut self, connection: u64, frame: &[u8], now: u64) -> Vec<Event>;
+    pub fn outgoing(&mut self, connection: u64) -> Vec<Vec<u8>>;
+    pub fn on_disconnect(&mut self, connection: u64);
+    pub fn on_tick(&mut self, now: u64) -> Vec<Event>;                   // at least once a second while unlocked
+    pub fn flush(&mut self, now: u64) -> Result<(), Error>;              // at lock, before the Device is dropped
+    // settings: default server, lock timeout, SOCKS5 proxy
 }
 ```
 
-- The UI never touches a key. The core never touches the network or the UI: it receives bytes and returns bytes. The UI groups the `Channel`s by the host and port of `server_url`, opens one TLS socket per group, passes frames in both directions and reconnects with backoff when it receives `Event::Reconnect`.
+- The UI never touches a key. The core never touches the network or the UI: it receives bytes and returns bytes. The client opens one socket per `ConnectionPlan` along its route, passes frames in both directions, calls `on_tick` every second and reconnects with backoff when it receives `Event::Reconnect`.
 - No server URL in the code outside the `DEFAULT_SERVER_URL` constant (spec 000).
-- The record encoding and `core::crypto` are crate-internal. `store` and `server` reach them only through `pub` functions of `core` that a spec defines (020-store-files; 028-session-sans-io for the frames; 030-ws-protocol); each such function that takes external bytes has a fuzz target (AGENTS 21).
+- `Config`, `Channel`, `Session`, the record encoding and `core::crypto` are crate-internal. `store` and `server` reach `core` only through `pub` functions a spec defines (020-store-files; 028-session-sans-io for the frames; 030-ws-protocol); each such function that takes external bytes has a fuzz target (AGENTS 21); `unreachable_pub` is denied and an `api_surface.rs` test fixes every signature (spec 027 R16).
 - The core does no I/O and does not read the clock: no `std::net`, `std::fs`, `tokio`, `SystemTime::now`. Time enters as a parameter (`now`). Checked by the dependency test of spec 010 R16 and clippy `disallowed_methods` (AGENTS 10).
 - One data directory per device with a `LOCK` file (advisory), one process: no widget or share extension in v1.
-- `Channel` has no state that has not gone through `commit`: in memory there is the copy loaded at `open`, and every change is written before returning the result.
+- A channel has no state that has not gone through `commit`: in memory there is the copy loaded at `open`, and every change is written before returning the result; a store that fails is reopened and its channel marked `write_failed` until a probe commit succeeds (spec 027 R14).
 
 ## 10. SDD execution plan
 

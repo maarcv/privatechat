@@ -1,6 +1,6 @@
 ---
 name: rust
-description: Rust coding standard for this repository's `core`, `store` and `server` crates — the official Rust Style Guide as the baseline, crate layout, types, writing code under the workspace lints, the inside of `ffi.rs`, server concurrency, documentation, testing and tooling. Use it whenever you create or edit any `.rs` file, a `Cargo.toml`, a fuzz target, a test vector loader or a clippy/rustfmt config, and when reviewing Rust code. It assumes you have read the `architecture` skill first. `references/patterns.md` has the reference shapes, written to pass the workspace lints; read only the section you need — §1 `Secret<N>`, §2 fixed-offset parser, §3 `Store`/`WriteBatch`, §4 sans-I/O `Session`, §5 encrypt ordering, §6 vector loader.
+description: Rust coding standard for this repository's `core`, `store` and `server` crates — the official Rust Style Guide as the baseline, crate layout, types, writing code under the workspace lints, the inside of `ffi.rs`, server concurrency, documentation, testing and tooling. Use it whenever you create or edit any `.rs` file, a `Cargo.toml`, a fuzz target, a test vector loader or a clippy/rustfmt config, and when reviewing Rust code. It assumes you have read the `architecture` skill first. `references/patterns.md` has the reference shapes, written to pass the workspace lints; read only the section you need — §1 `Secret<N>`, §2 fixed-offset parser, §3 `Store`/`WriteBatch`, §4 sans-I/O `Session` behind `Device`, §5 encrypt ordering, §6 vector loader.
 ---
 
 # Rust standard
@@ -29,8 +29,10 @@ tightening, never a relaxation.
   `session`, `peers`), one concept each. Use `foo.rs` + `foo/` directories,
   never `mod.rs`.
 - Default visibility is private. Reach for `pub(crate)` before `pub`. The
-  public API of `core` is the list in `docs/spec.md` §9; anything else that is
-  `pub` needs a reason.
+  public API of `core` is the Interface of spec 027-core-api: one handle,
+  `Device`, and the records and enums it names (`docs/spec.md` §9);
+  `unreachable_pub` is denied and `tests/api_surface.rs` fixes every `pub`
+  signature, so a new `pub` item is a spec change.
 - One `Error` enum per crate at the crate root (`core::Error`), written by
   hand (`core` carries no dependency beyond libsodium and `zeroize`, spec 010
   R16). Variants mirror the spec's conditions one-to-one. No `anyhow`, no
