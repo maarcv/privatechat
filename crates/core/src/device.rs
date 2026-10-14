@@ -12,6 +12,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::crypto;
 use crate::error::Error;
 use crate::session::channel::Channel;
 use crate::session::connection::Event;
@@ -75,6 +76,26 @@ struct Broken {
 /// This device: the vault, the open channels in the order they were opened
 /// or created, the broken ones and the settings. It implements neither
 /// `Clone`, `Debug` nor `Display` (R20): its channels hold their keys.
+///
+/// Neither copied nor printed (R20):
+///
+/// ```compile_fail
+/// fn copy(device: &privatechat_core::Device) -> privatechat_core::Device {
+///     device.clone()
+/// }
+/// ```
+///
+/// ```compile_fail
+/// fn show(device: &privatechat_core::Device) -> String {
+///     format!("{device:?}")
+/// }
+/// ```
+///
+/// and the config it holds is not reachable from outside `core` (R17):
+///
+/// ```compile_fail
+/// use privatechat_core::Config;
+/// ```
 pub struct Device {
     vault: Box<dyn Vault>,
     channels: Vec<Channel>,
@@ -184,6 +205,26 @@ impl Device {
         self.make_reopens_due();
         Ok(())
     }
+}
+
+/// Initialises libsodium once (R20); every other function works whether or
+/// not it was called (spec 010-primitives-wrapper R2).
+///
+/// # Errors
+///
+/// `Internal` when libsodium cannot initialise.
+pub fn init() -> Result<(), Error> {
+    Ok(crypto::init()?)
+}
+
+/// Fills `out` with 32 bytes of libsodium's `randombytes_buf`, the storage
+/// key `K_db` a client draws (spec 040-uniffi R8).
+///
+/// # Errors
+///
+/// `Internal` when libsodium cannot initialise.
+pub fn generate_storage_key(out: &mut [u8; 32]) -> Result<(), Error> {
+    Ok(crypto::fill_random(out)?)
 }
 
 impl Broken {
