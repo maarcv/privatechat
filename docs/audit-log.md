@@ -32,6 +32,18 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AY35 | "No record expired in the first two hours" let a compaction keep 50 extra minutes of expired plaintext (mutant M10) (C) | Low | No record left that expired a TTL before the end, the most spec 023 R5's quarter rule keeps |
 | AY36 | `arm` took a boolean beside the `Fault` enum; `Duplicates` had a field and a method both named `next`; the file is over 400 lines (C) | Low | A `Step` enum; `is_marked` and `index`; the PR says why one end-to-end test stays in one file |
 
+**Round 3**, on the whole change with the findings above. Pass B ran the crash run instrumented at other crash points; pass C ran 11 production mutants: 5 killed, 1 survived (AY42), 3 equivalent here and 2 out of R23, each killed by other tests. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AY37 | R23 says "a seeded *k*"; the crash append is a fixed constant (A) | Far-fetched | None: a fixed *k* keeps the run deterministic and its assertions meaningful; the wording can follow at the next touch of the spec |
+| AY38 | 1 % of the messages are duplicated, not 1 % of the pushes, echoes included (A) | Far-fetched | None: what `docs/spec.md` §10 asks |
+| AY39 | The crash run passed while a message one side's server had acked was missing at the other: with the crash on a receive (`CRASH_APPEND` 25 996), `a-4332` was lost and nothing noticed; a reload of an older state passed too (B) | Medium | Exactly one side's log runs past its committed length; every own message the server acked is shown by the other side, but the last one when the stopped append was that side's receive of it, which only the fresh server lost; checked to fail at 25 996 without that allowance |
+| AY40 | The list a device shows was never checked for order or repeats, only compared with itself across a reopen (B) | Low | `check_shown`: not empty, each body once, each sender's numbers increasing; in the first run, after the crash and after the resume |
+| AY41 | Other crash points fail on "no message was pending" with nothing wrong (B) | Low | The constant's comment says it stops a send while the other side's is pending; the acked check of AY39 holds at any point |
+| AY42 | The crash run kept the records of the load that cut the log unread: a load that cut the file but returned the uncommitted record passed (mutant M4) (C) | Low | A second load must return the same records; `Corrupt` refused by the `expect` |
+| AY43 | `Duplicates` meant "none" by `index == u64::MAX` (C) | Low | `seed: Option<u64>` |
+
 ## Audit AX
 
 **2026-10-14 — Audit AX, the code audit of slice (e) of spec 027-core-api (branch `027-boundary`): the boundary checks (`unreachable_pub`, `api_surface.rs`), the amendments of specs 011 and 016, the `dead_code` allows removed, `init` and `generate_storage_key`, and the doc updates (R16–R22); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit X's findings already took AX1–AX18, so this audit's are numbered from AX19. No production defect: no secret crosses, no gate changes production, no parser of external bytes is left unfuzzed and unexcluded. Pass C ran 24 mutants: 20 killed, 1 equivalent, 3 survived, each killed below.

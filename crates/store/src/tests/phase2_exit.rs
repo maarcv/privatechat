@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use privatechat_core::testing::{FailingVault, Faults, MemoryServer, state_eq};
+use privatechat_core::testing::{FailingVault, Faults, MemoryServer, records_eq, state_eq};
 use privatechat_core::{
     Device, Error, Event, LogRecord, MessageContent, Sender, StoreError, Vault,
 };
@@ -37,7 +37,9 @@ const SECOND_SOCKETS: u64 = 1_000;
 /// One push in this many is delivered twice.
 const DUPLICATE_ONE_IN: u64 = 100;
 /// The append the crash run stops at, counted over both sides: past the
-/// first compaction, so that the reopen reads a compacted log.
+/// first compaction, so that the reopen reads a compacted log, and the
+/// append of a `send` while the other side's last send is still pending, so
+/// that the resume delivers it.
 const CRASH_APPEND: u64 = 26_000;
 /// The most `Reconnect`s a side may see: none but the probe's after the
 /// injected failure, and a session's after its socket was refused.
@@ -244,8 +246,9 @@ impl Side {
 
 /// Which pushes are delivered twice, from a seed the proptest draws.
 struct Duplicates {
-    seed: u64,
-    /// The index of the next push; `u64::MAX` when none is marked.
+    /// The seed; `None` marks no push.
+    seed: Option<u64>,
+    /// The index of the next push.
     index: u64,
     /// Pushes of a message delivered twice.
     count: u32,
@@ -254,11 +257,11 @@ struct Duplicates {
 }
 
 impl Duplicates {
-    /// The pushes `seed` marks, none delivered yet; `None` marks none.
+    /// The pushes `seed` marks, none delivered yet.
     fn new(seed: Option<u64>) -> Duplicates {
         Duplicates {
-            seed: seed.unwrap_or(0),
-            index: if seed.is_some() { 0 } else { u64::MAX },
+            seed,
+            index: 0,
             count: 0,
             rejected: 0,
         }
@@ -270,16 +273,11 @@ impl Duplicates {
             privatechat_core::Frame::decode(frame),
             Ok(privatechat_core::Frame::Push { .. })
         );
-        if !push {
+        let Some(seed) = self.seed.filter(|_| push) else {
             return false;
-        }
-        if self.index == u64::MAX {
-            return false;
-        }
+        };
         // SplitMix64 of the seed and the push's index: one in a hundred.
-        let mut z = self
-            .seed
-            .wrapping_add(self.index.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+        let mut z = seed.wrapping_add(self.index.wrapping_mul(0x9e37_79b9_7f4a_7c15));
         z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
         z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
         let marked = (z ^ (z >> 31)).is_multiple_of(DUPLICATE_ONE_IN);
@@ -379,6 +377,35 @@ fn check_counters(side: &Side, errors: u32, storage_failed: u32) {
     assert!(side.device.channels().iter().all(|info| !info.write_failed));
 }
 
+/// Checks a list a device shows: not empty, each body once, and each
+/// sender's in the order it sent them.
+fn check_shown(shown: &[String]) {
+    assert!(!shown.is_empty(), "nothing shown");
+    for from in ["a", "b"] {
+        let numbers: Vec<usize> = shown
+            .iter()
+            .filter_map(|body| body.strip_prefix(from)?.strip_prefix('-')?.parse().ok())
+            .collect();
+        assert!(numbers.is_sorted_by(|a, b| a < b), "{from}: {numbers:?}");
+    }
+}
+
+/// The bodies of one's own messages `device` shows in `channel` at `now`,
+/// those the server acked when `acked`, the others when not.
+fn own(device: &Device, channel: [u8; 16], now: u64, acked: bool) -> Vec<String> {
+    let shown = device.messages(channel, now).expect("messages");
+    shown
+        .into_iter()
+        .filter(|message| {
+            matches!(message.sender, Sender::Own) && message.server_id.is_some() == acked
+        })
+        .filter_map(|message| match message.content {
+            MessageContent::Text { body, .. } => Some(body),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The bodies `device` shows in `channel` at `now`, in its order.
 fn bodies(device: &Device, channel: [u8; 16], now: u64) -> Vec<String> {
     let shown = device.messages(channel, now).expect("messages");
@@ -450,7 +477,7 @@ fn exit_run(fail_a: u64, fail_b: u64, seed: u64) {
         let mut device = side.device;
         device.flush(end).expect("flush");
         let shown = bodies(&device, channel, end);
-        assert!(!shown.is_empty());
+        check_shown(&shown);
         drop(device);
         let path = dir.path().join(path);
         check_reopened(&path, &faults, end);
@@ -497,7 +524,7 @@ fn s027_t23_r23_phase2_exit_after_a_crash() {
         &[(DIR_VAR, path), (CRASH_VAR, &crash)],
     );
     assert_eq!(status, Some(CRASH_STATUS));
-    let mut cut = false;
+    let mut cut = Vec::new();
     let mut compacted = false;
     let mut ids = Vec::new();
     for side in ["a", "b"] {
@@ -508,20 +535,28 @@ fn s027_t23_r23_phase2_exit_after_a_crash() {
         for mut store in stores {
             let log = channels.join(store.name().to_hex()).join("messages.log");
             let before = std::fs::metadata(&log).expect("the log").len();
-            let (state, _) = store
+            let (state, records) = store
                 .load()
-                .map_err(|error| assert_ne!(error, StoreError::Corrupt))
-                .expect("load")
+                .expect("load without Corrupt")
                 .expect("a state");
             let (committed, generation) = state.log_position();
             let after = std::fs::metadata(&log).expect("the log").len();
             assert_eq!(after, committed);
-            cut |= before > committed;
+            // The load that cut the log returned only the committed records.
+            let (_, again) = store.load().expect("load again").expect("a state");
+            assert!(records_eq(&records, &again), "an uncommitted record");
+            cut.push(before > committed);
             compacted |= generation > 0;
             ids.push(state.channel_id());
         }
     }
-    assert!(cut, "no append was left past the committed length");
+    // The process stopped in one append: one side's log runs past its
+    // committed length, the other's does not.
+    assert_eq!(
+        cut.iter().filter(|cut| **cut).count(),
+        1,
+        "no append, or two, past the committed length: {cut:?}"
+    );
     assert!(compacted, "the crash came before any compaction");
     assert_eq!(ids.first(), ids.get(1));
 
@@ -530,28 +565,30 @@ fn s027_t23_r23_phase2_exit_after_a_crash() {
     let now = T0 + TICK + PER_SIDE as u64 * SEND_EVERY + DRAIN;
     let faults = [Faults::new(), Faults::new()];
     let (first, second, channel) = start(dir.path(), [&faults[0], &faults[1]], now);
-    let mut pending = [Vec::new(), Vec::new()];
-    let mut shown = [Vec::new(), Vec::new()];
-    for (side, (pending, shown)) in [&first, &second]
-        .into_iter()
-        .zip(pending.iter_mut().zip(shown.iter_mut()))
-    {
+    for side in [&first, &second] {
         let listed: Vec<[u8; 16]> = side.device.channels().iter().map(|info| info.id).collect();
         assert_eq!(listed, [channel]);
         assert_eq!(Some(&channel), ids.first());
         assert!(side.device.status().broken.is_empty());
-        // One's own messages the server never acked, still in the outbox.
-        let messages = side.device.messages(channel, now).expect("messages");
-        *pending = messages
+    }
+    let shown = [&first, &second].map(|side| bodies(&side.device, channel, now));
+    shown.iter().for_each(|shown| check_shown(shown));
+    // One's own messages the server never acked, still in the outbox.
+    let pending = [&first, &second].map(|side| own(&side.device, channel, now, false));
+    // Every message one side's server acked is held by the other, but the
+    // last one when the stopped append was the other's receive of it: the
+    // fresh server has lost it, which the old one would have pushed again.
+    let acked = [&first, &second].map(|side| own(&side.device, channel, now, true));
+    for (from, to) in [(0, 1), (1, 0)] {
+        let missing: Vec<&String> = acked[from]
             .iter()
-            .filter(|message| matches!(message.sender, Sender::Own) && message.server_id.is_none())
-            .filter_map(|message| match &message.content {
-                MessageContent::Text { body, .. } => Some(body.clone()),
-                _ => None,
-            })
+            .filter(|body| !shown[to].contains(body))
             .collect();
-        *shown = bodies(&side.device, channel, now);
-        assert!(!shown.is_empty(), "the reopened log shows nothing");
+        let allowed = if cut[to] { acked[from].last() } else { None };
+        assert!(
+            missing.is_empty() || (missing.len() == 1 && missing.first().copied() == allowed),
+            "{missing:?} lost"
+        );
     }
     // A pending message the other side already holds is not shown twice.
     let extra = [
@@ -566,6 +603,7 @@ fn s027_t23_r23_phase2_exit_after_a_crash() {
             .cloned()
             .collect(),
     ];
+    // `CRASH_APPEND` stops a send, so that the resume has one to deliver.
     assert!(
         extra.iter().any(|bodies: &Vec<String>| !bodies.is_empty()),
         "no message was pending at the crash"
@@ -573,7 +611,7 @@ fn s027_t23_r23_phase2_exit_after_a_crash() {
     let mut sides = [first, second];
     let mut server = MemoryServer::new(&[HOST]);
     let mut duplicate = Duplicates::new(None);
-    exchange(
+    let end = exchange(
         &mut sides,
         &mut server,
         channel,
@@ -583,6 +621,7 @@ fn s027_t23_r23_phase2_exit_after_a_crash() {
     check_delivered(&sides, 100_000..100_020, &extra);
     for side in &sides {
         check_counters(side, 0, 0);
+        check_shown(&bodies(&side.device, channel, end));
     }
 }
 
