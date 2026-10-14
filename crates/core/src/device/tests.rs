@@ -13,6 +13,7 @@ mod channels;
 mod dispatch;
 mod plan;
 mod recovery;
+mod retries;
 mod routing;
 mod scripted;
 mod sessions;

@@ -1,13 +1,15 @@
 //! The device's clock (spec 027-core-api R12, R14, R24): every connected
 //! session ticks, the channels with no connected session expire their
-//! `outbox` and report what changed, one compaction and one probe run per
-//! tick, and `flush` saves what a quiet channel holds in memory at lock.
+//! `outbox` and report what changed, one compaction and one reopen (a
+//! probe or the retry of a `broken` entry) run per tick, and `flush`
+//! saves what a quiet channel holds in memory at lock.
 
 use super::Device;
 use super::routing::link_of;
 use crate::error::Error;
 use crate::session::channel::{Channel, ChannelStatus};
 use crate::session::connection::Event;
+use crate::storage::StoreError;
 
 /// The wait between two probes of a channel that stays `write_failed`, and
 /// the time after a clearing within which a new failure waits that long
@@ -37,7 +39,12 @@ impl Device {
         }
         events.extend(self.tick_unconnected(now));
         events.extend(self.compact_one(now));
-        events.extend(self.probe_one(now));
+        // One reopen a tick: a due retry of a `broken` entry before a due
+        // probe (R12).
+        match self.retry_one(now) {
+            Some(retried) => events.extend(retried),
+            None => events.extend(self.probe_one(now)),
+        }
         events
     }
 
@@ -195,6 +202,50 @@ impl Device {
             }
         }
         events
+    }
+
+    /// The retry of a `broken` entry (R12): the first whose reason is `Io`
+    /// and which carries its `channel_id`, once ten minutes have passed
+    /// since its reason was recorded, a time later than `now` counting as
+    /// passed, is opened again; on success it leaves `broken` and joins a
+    /// run with `StatusChanged`, so that a channel a full disk broke comes
+    /// back once space is freed; on failure its reason and time are
+    /// updated, with no event.
+    fn retry_one(&mut self, now: u64) -> Option<Vec<Event>> {
+        let due = self.broken.iter().position(|broken| {
+            broken.info.reason == StoreError::Io
+                && broken.info.channel_id.is_some()
+                && (broken.recorded_at > now
+                    || now.saturating_sub(broken.recorded_at) >= LATER_PROBE_MS)
+        });
+        let position = due?;
+        let id = self.broken.get(position)?.info.channel_id?;
+        let opened = self
+            .vault
+            .create(&id)
+            .map_err(Error::Store)
+            .and_then(Channel::open_stored);
+        match opened {
+            Ok(mut channel) => {
+                // Its fresh peers flag is told by the `StatusChanged` below.
+                channel.take_peers_changed();
+                self.broken.remove(position);
+                self.channels.push(channel);
+                self.replan();
+                Some(vec![Event::StatusChanged { channel: id }])
+            }
+            Err(error) => {
+                if let Some(broken) = self.broken.get_mut(position) {
+                    // As `reopen` reads a failure that is not the store's.
+                    broken.info.reason = match error {
+                        Error::Store(reason) => reason,
+                        _ => StoreError::Corrupt,
+                    };
+                    broken.recorded_at = now;
+                }
+                Some(Vec::new())
+            }
+        }
     }
 
     /// `StatusChanged` for `channel` when its status differs from `before`

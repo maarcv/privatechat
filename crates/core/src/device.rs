@@ -66,6 +66,10 @@ pub struct BrokenChannel {
 struct Broken {
     dir: DirName,
     info: BrokenChannel,
+    /// When its reason was last recorded, or `u64::MAX` once a `leave` or
+    /// a `remove_broken` made its retry due (R3); it times the retry of an
+    /// `Io` entry that carries its `channel_id` (R12).
+    recorded_at: u64,
 }
 
 /// This device: the vault, the open channels in the order they were opened
@@ -126,7 +130,7 @@ impl Device {
             let dir = *store.name();
             match Channel::open_stored(store) {
                 Ok(channel) => device.channels.push(channel),
-                Err(Error::Store(reason)) => device.broken.push(Broken::at_open(dir, reason)),
+                Err(Error::Store(reason)) => device.broken.push(Broken::at_open(dir, reason, now)),
                 // R1: any other error fails `open`; `open_stored` returns
                 // none today.
                 Err(error) => return Err(error),
@@ -177,14 +181,14 @@ impl Device {
         self.vault.remove(&dir)?;
         self.broken.remove(position);
         // Space may have been freed (R3).
-        self.make_probes_due();
+        self.make_reopens_due();
         Ok(())
     }
 }
 
 impl Broken {
     /// A directory `open` could not open: nothing is known of its channel.
-    fn at_open(dir: DirName, reason: StoreError) -> Broken {
+    fn at_open(dir: DirName, reason: StoreError, now: u64) -> Broken {
         Broken {
             dir,
             info: BrokenChannel {
@@ -193,6 +197,7 @@ impl Broken {
                 channel_id: None,
                 channel_name: None,
             },
+            recorded_at: now,
         }
     }
 }
