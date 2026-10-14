@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::Device;
+use super::{ConnectionPlan, Device};
 use crate::session::channel::Channel;
 use crate::session::connection::{Event, Session, Step};
 use crate::storage::StoreError;
@@ -80,15 +80,7 @@ impl Device {
     /// `Session::after_send` of `channel`'s connection, when it has one
     /// (R9): its frames and events, a store failure through R14.
     pub(super) fn after_send(&mut self, channel: [u8; 16], now: u64) -> Vec<Event> {
-        let Some(connection) = self
-            .runs
-            .iter()
-            .find(|run| run.channels.contains(&channel))
-            .map(|run| run.id)
-        else {
-            return Vec::new();
-        };
-        let Some(link) = self.links.get_mut(&connection) else {
+        let Some((connection, link)) = link_of(&self.runs, &mut self.links, channel) else {
             return Vec::new();
         };
         let step = link.session.after_send(channel, &mut self.channels, now);
@@ -99,8 +91,9 @@ impl Device {
     pub(super) fn is_connected(&self, channel: [u8; 16]) -> bool {
         self.runs
             .iter()
-            .filter(|run| run.channels.contains(&channel))
-            .any(|run| self.links.get(&run.id).is_some_and(|link| link.connected))
+            .find(|run| run.channels.contains(&channel))
+            .and_then(|run| self.links.get(&run.id))
+            .is_some_and(|link| link.connected)
     }
 
     /// Brings the sessions in line with the plan (R11): a plan `id` that
@@ -157,4 +150,14 @@ impl Device {
         }
         vec![Event::StorageFailed { channel }]
     }
+}
+
+/// The plan `id` and the link of the run that carries `channel`.
+pub(super) fn link_of<'a>(
+    runs: &[ConnectionPlan],
+    links: &'a mut BTreeMap<u64, Link>,
+    channel: [u8; 16],
+) -> Option<(u64, &'a mut Link)> {
+    let id = runs.iter().find(|run| run.channels.contains(&channel))?.id;
+    links.get_mut(&id).map(|link| (id, link))
 }

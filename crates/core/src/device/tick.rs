@@ -4,8 +4,9 @@
 //! tick, and `flush` saves what a quiet channel holds in memory at lock.
 
 use super::Device;
+use super::routing::link_of;
 use crate::error::Error;
-use crate::session::channel::{AckOutcome, Channel};
+use crate::session::channel::{AckOutcome, Channel, ChannelStatus};
 use crate::session::connection::Event;
 
 /// The wait between two probes of a channel that stays `write_failed`, and
@@ -101,36 +102,56 @@ impl Device {
     }
 
     /// One compaction a tick (R12): the first channel not marked whose
-    /// purge is due (spec 023-ttl-purge R5), or else whose log lacks its
-    /// headroom (spec 021-channel-session R18). A failure goes through R14
+    /// purge is due (spec 023-ttl-purge R5), or else the first whose log
+    /// lacks its headroom and whose relief acts (spec 021-channel-session
+    /// R18): a relief that compacts nothing touches no store, so one full
+    /// channel never holds back another's. A failure goes through R14
     /// (R15).
     fn compact_one(&mut self, now: u64) -> Vec<Event> {
         let due = self.channels.iter().find_map(|channel| {
             let id = channel.config().channel_id();
-            (!self.marks.contains_key(&id) && channel.purge_due(now)).then_some((id, true))
+            (!self.marks.contains_key(&id) && channel.purge_due(now)).then_some(id)
         });
-        let full = || {
-            self.channels.iter().find_map(|channel| {
-                let id = channel.config().channel_id();
-                (!self.marks.contains_key(&id) && channel.status().storage_full)
-                    .then_some((id, false))
-            })
-        };
-        let Some((id, purge)) = due.or_else(full) else {
-            return Vec::new();
-        };
+        if let Some(id) = due {
+            let (_, events) = self.compact(id, |channel| channel.purge_expired(now).map(|_| true));
+            return events;
+        }
+        let full: Vec<[u8; 16]> = self
+            .channels
+            .iter()
+            .map(|channel| channel.config().channel_id())
+            .filter(|id| !self.marks.contains_key(id))
+            .collect();
+        for id in full {
+            if !self
+                .channel(id)
+                .is_ok_and(|channel| channel.status().storage_full)
+            {
+                continue;
+            }
+            let (acted, events) = self.compact(id, |channel| channel.relieve_headroom(now));
+            if acted {
+                return events;
+            }
+        }
+        Vec::new()
+    }
+
+    /// Runs one compaction on `id`: whether it compacted or failed, and
+    /// its events, `StatusChanged` on a change or R14's.
+    fn compact(
+        &mut self,
+        id: [u8; 16],
+        run: impl FnOnce(&mut Channel) -> Result<bool, Error>,
+    ) -> (bool, Vec<Event>) {
         let Ok(channel) = self.channel_mut(id) else {
-            return Vec::new();
+            return (false, Vec::new());
         };
         let before = channel.status();
-        let result = if purge {
-            channel.purge_expired(now).map(|_| ())
-        } else {
-            channel.relieve_headroom(now).map(|_| ())
-        };
-        match result {
-            Err(Error::Store(error)) => self.session_failure(id, error),
-            _ => self.status_change(id, before),
+        match run(channel) {
+            Err(Error::Store(error)) => (true, self.session_failure(id, error)),
+            Err(_) => (false, Vec::new()),
+            Ok(acted) => (acted, self.status_change(id, before)),
         }
     }
 
@@ -155,7 +176,7 @@ impl Device {
         if self.reopen(position).is_err() {
             return vec![Event::StorageFailed { channel: id }];
         }
-        let Ok(channel) = self.channel_mut(id) else {
+        let Some(channel) = self.channels.get_mut(position) else {
             return Vec::new();
         };
         if channel.probe(now).is_err() {
@@ -166,19 +187,13 @@ impl Device {
         self.marks.remove(&id);
         self.cleared.insert(id, now);
         let mut events = vec![Event::StatusChanged { channel: id }];
-        let channels = &self.channels;
-        if let Some(channel) = channels
-            .iter()
-            .find(|channel| channel.config().channel_id() == id)
-        {
-            let run = self.runs.iter().find(|run| run.channels.contains(&id));
-            if let Some(link) = run.and_then(|run| self.links.get_mut(&run.id)) {
-                link.session.set_write_failed(channel, false, storage_full);
-                if link.connected && !storage_full {
-                    events.push(Event::Reconnect {
-                        connection: run.map_or(0, |run| run.id),
-                    });
-                }
+        let Some(channel) = self.channels.get(position) else {
+            return events;
+        };
+        if let Some((connection, link)) = link_of(&self.runs, &mut self.links, id) {
+            link.session.set_write_failed(channel, false, storage_full);
+            if link.connected && !storage_full {
+                events.push(Event::Reconnect { connection });
             }
         }
         events
@@ -186,11 +201,11 @@ impl Device {
 
     /// `StatusChanged` for `channel` when its status differs from `before`
     /// or its peers changed (R12, R14).
-    fn status_change(&mut self, channel: [u8; 16], before: crate::ChannelStatus) -> Vec<Event> {
+    fn status_change(&mut self, channel: [u8; 16], before: ChannelStatus) -> Vec<Event> {
         let Ok(open) = self.channel_mut(channel) else {
             return Vec::new();
         };
-        if open.take_peers_changed() || open.status() != before {
+        if changed(open, before) {
             vec![Event::StatusChanged { channel }]
         } else {
             Vec::new()
@@ -198,9 +213,15 @@ impl Device {
     }
 }
 
+/// Whether `channel`'s status differs from `before` or its peers changed,
+/// the flag taken either way (R13 of spec 028, R14).
+pub(super) fn changed(channel: &mut Channel, before: ChannelStatus) -> bool {
+    channel.take_peers_changed() | (channel.status() != before)
+}
+
 /// A channel's queued outcomes as `NotDelivered`, then `StatusChanged`
 /// when its status differs from `before` or its peers changed (R14).
-fn drain(channel: &mut Channel, before: crate::ChannelStatus) -> Vec<Event> {
+fn drain(channel: &mut Channel, before: ChannelStatus) -> Vec<Event> {
     let id = channel.config().channel_id();
     let mut events: Vec<Event> = channel
         .take_outcomes()
@@ -214,7 +235,7 @@ fn drain(channel: &mut Channel, before: crate::ChannelStatus) -> Vec<Event> {
             })
         })
         .collect();
-    if channel.take_peers_changed() || channel.status() != before {
+    if changed(channel, before) {
         events.push(Event::StatusChanged { channel: id });
     }
     events

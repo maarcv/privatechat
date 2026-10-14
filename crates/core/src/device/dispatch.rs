@@ -58,7 +58,7 @@ impl Device {
         };
         // A message on a marked channel may mean room came back (R12); a
         // state-only writer proves nothing.
-        if marked && self.marks.contains_key(&channel) && !self.cleared_recently(channel) {
+        if marked && !self.cleared_recently(channel) {
             self.marks.insert(channel, 0);
         }
         let mut events = events;

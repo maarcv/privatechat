@@ -162,7 +162,7 @@ fn s027_t12_r12_stale_entry_without_a_connection() {
 /// `StatusChanged` from the first tick, its peers flag starting set, and
 /// none from the second; a successful `mute` reports it from the next.
 #[test]
-fn s027_t12_r12_status_without_a_connection() {
+fn s027_t14_r14_status_without_a_connection() {
     let (_fixture, mut device) = opened();
     let id = id();
     assert!(
@@ -226,23 +226,6 @@ fn s027_t14_r14_probe() {
         [Event::StatusChanged { channel: id }]
     );
     assert!(!device.channels()[0].write_failed);
-}
-
-/// Spec 027, R12, R14: a probe that clears a channel whose connection is
-/// connected asks for a new connection, so that the pushes it held come
-/// again.
-#[test]
-fn s027_t14_r14_probe_reconnects() {
-    let (fixture, mut device) = opened();
-    let mut server = MemoryServer::new(&[HOST]);
-    connect_all(&mut device, &mut server, NOW);
-    run(&mut device, &mut server, NOW, NOW + 3_000);
-    let plan = device.connections()[0].id;
-    fixture.faults.fail_at(1);
-    assert!(device.mute(id(), PEER, true).is_err());
-    let events = device.on_tick(NOW + 4_000 + MINUTE);
-    assert!(events.contains(&Event::StatusChanged { channel: id() }));
-    assert!(events.contains(&Event::Reconnect { connection: plan }));
 }
 
 /// Spec 027, R12: a probe time more than ten minutes ahead, after a clock
@@ -328,7 +311,7 @@ fn s027_t14_r14_after_a_recent_clearing() {
 /// Spec 027, R12, R14: one probe a tick, and a probe whose reopen fails
 /// moves the channel to `broken` with `StorageFailed`.
 #[test]
-fn s027_t14_r14_one_probe_a_tick() {
+fn s027_t12_r12_one_probe_a_tick() {
     let (fixture, _) = with_peer();
     fixture.plant_channel(2, Vec::new());
     let mut device = fixture.open().unwrap();
@@ -440,32 +423,516 @@ fn s027_t14_r14_new_session_holds_the_mark() {
     assert!(device.outgoing(plan.id).is_empty());
 }
 
-/// Spec 027, R24: a quiet channel synced at `now` and flushed keeps its
-/// `synced_at`; one channel failing its `flush` → that error, the others
-/// flushed.
+/// Spec 027, R24: a quiet channel synced at `now` and flushed, reopened a
+/// TTL later minus a minute, shows no `HistoryTruncated`; without the
+/// `flush` it would.
 #[test]
 fn s027_t24_r24_flush() {
+    let lock = NOW + 20 * MINUTE;
+    let back = lock + 3_600_000 - MINUTE;
+    for flushed in [true, false] {
+        let (fixture, mut device) = with_channels(1);
+        let mut server = MemoryServer::new(&[HOST]);
+        connect_all(&mut device, &mut server, NOW);
+        run(&mut device, &mut server, NOW, lock);
+        if flushed {
+            device.flush(lock).unwrap();
+        }
+        drop(device);
+        let mut device = fixture.open().unwrap();
+        let mut server = MemoryServer::new(&[HOST]);
+        connect_all(&mut device, &mut server, back);
+        let events = run(&mut device, &mut server, back, back + 5_000);
+        let truncated = events
+            .iter()
+            .any(|event| matches!(event, Event::HistoryTruncated { .. }));
+        assert_eq!(truncated, !flushed);
+    }
+}
+
+/// Spec 027, R24: one channel failing its `flush` → that error, and the
+/// other channel flushed.
+#[test]
+fn s027_t24_r24_flush_with_a_failure() {
     let (fixture, mut device) = with_channels(2);
     let mut server = MemoryServer::new(&[HOST]);
     connect_all(&mut device, &mut server, NOW);
-    run(&mut device, &mut server, NOW, NOW + 5_000);
-    let later = NOW + 30 * MINUTE;
-    run(&mut device, &mut server, later, later);
-    device.flush(later).unwrap();
+    let lock = NOW + 20 * MINUTE;
+    run(&mut device, &mut server, NOW, lock);
+    fixture.faults.fail_at(1);
+    assert_eq!(device.flush(lock), Err(Error::Store(StoreError::Io)));
     drop(device);
     let device = fixture.open().unwrap();
-    for channel in &device.channels {
-        assert!(channel.synced_at().is_some_and(|at| at >= NOW));
-    }
+    let synced: Vec<Option<u64>> = device
+        .channels
+        .iter()
+        .map(crate::session::channel::Channel::synced_at)
+        .collect();
+    assert!(synced.contains(&Some(lock)), "{synced:?}");
+    assert!(synced.iter().any(|at| *at != Some(lock)), "{synced:?}");
+}
 
-    let (fixture, mut device) = with_channels(2);
+/// Spec 027, R11: two plans on two servers each get their own frames.
+#[test]
+fn s027_t11_r11_two_plans() {
+    let (_fixture, mut device) = with_channels(1);
+    let other = crate::proto::config::Config::from_parts(
+        crate::crypto::Secret::from_bytes([9; 32]),
+        "wss://other.example.org",
+        3_600,
+        "room",
+        0,
+    )
+    .unwrap();
+    device
+        .import_qr(&other.export_qr(NOW).unwrap(), false, NOW)
+        .unwrap();
+    let plans = device.connections();
+    assert_eq!(plans.len(), 2);
+    let mut servers = [
+        MemoryServer::new(&[HOST]),
+        MemoryServer::new(&["other.example.org"]),
+    ];
+    for (plan, server) in plans.iter().zip(servers.iter_mut()) {
+        server.connect(plan.id, NOW);
+        device.on_connect(plan.id, NOW);
+    }
+    let mut events = Vec::new();
+    for now in (NOW..NOW + 5_000).step_by(1_000) {
+        events.extend(device.on_tick(now));
+        for _ in 0..5 {
+            for (plan, server) in plans.iter().zip(servers.iter_mut()) {
+                for frame in device.outgoing(plan.id) {
+                    server.receive(plan.id, &frame, now);
+                }
+                for frame in server.read(plan.id, 100) {
+                    events.extend(device.on_frame(plan.id, &frame, now));
+                }
+            }
+        }
+    }
+    assert!(subscribed(&events, config(1).channel_id()));
+    assert!(subscribed(&events, other.channel_id()));
+}
+
+/// Spec 027, R12: the periodic purge runs at a quarter of the log, and not
+/// below it before a day after the oldest expiry.
+#[test]
+fn s027_t12_r12_periodic_purge() {
+    let fixture = Fixture::new();
+    fixture.save_settings(&settings("wss://example.org", 30, None));
+    let quarter = fixture.plant_channel(
+        1,
+        vec![
+            record(NOW + 1_000, 1_000),
+            record(NOW + 10 * 86_400_000, 100),
+        ],
+    );
+    let below = fixture.plant_channel(
+        2,
+        vec![
+            record(NOW + 1_000, 10),
+            record(NOW + 10 * 86_400_000, 10_000),
+        ],
+    );
+    let mut device = fixture.open().unwrap();
+    let len = |dir| crate::testing::MemoryStore::handle(&fixture.vault, dir).log_len();
+    let (quarter_len, below_len) = (len(quarter), len(below));
+    device.on_tick(NOW + 2_000);
+    device.on_tick(NOW + 3_000);
+    assert!(len(quarter) < quarter_len);
+    assert_eq!(len(below), below_len);
+    device.on_tick(NOW + 1_000 + 86_400_000);
+    assert_eq!(len(below), below_len);
+    device.on_tick(NOW + 2_000 + 86_400_000);
+    assert!(len(below) < below_len);
+}
+
+/// Spec 027, R12: a stale entry of a channel refused on its connection
+/// leaves as `NotDelivered` from `on_tick`.
+#[test]
+fn s027_t12_r12_stale_entry_of_a_refused_channel() {
+    let (_fixture, mut device) = opened();
+    let mut server = MemoryServer::new(&["other.example.org"]);
+    let id = id();
+    connect_all(&mut device, &mut server, NOW);
+    run(&mut device, &mut server, NOW, NOW + 3_000);
+    let sent = device.send(id, "hello", None, NOW + 4_000).unwrap();
+    let late = NOW + 4_000 + 3_600_000 + 7 * MINUTE;
+    let events = device.on_tick(late);
+    assert!(events.contains(&Event::NotDelivered {
+        channel: id,
+        client_ref: sent.client_ref,
+        sent_at: sent.message.sent_at.unwrap(),
+    }));
+}
+
+/// Spec 027, R15: a compaction failing on the tick, with commits working,
+/// marks the channel until the probe a minute later clears it, with no
+/// second attempt before; the probe then asks for no `Reconnect` without a
+/// connection.
+#[test]
+fn s027_t15_r15_compaction_failing_on_the_tick() {
+    let fixture = Fixture::new();
+    fixture.save_settings(&settings("wss://example.org", 30, None));
+    let dir = fixture.plant_channel(1, vec![record(NOW + 1_000, 1_000)]);
+    let mut device = fixture.open().unwrap();
     device.on_tick(NOW);
+    fixture.faults.fail_compactions(true);
+    let id = config(1).channel_id();
+    let events = device.on_tick(NOW + 2_000);
+    assert!(events.contains(&Event::StorageFailed { channel: id }));
+    assert!(device.channels()[0].write_failed);
+    fixture.faults.fail_compactions(false);
+    let handle = crate::testing::MemoryStore::handle(&fixture.vault, dir);
+    let len = handle.log_len();
+    device.on_tick(NOW + 3_000);
+    assert_eq!(handle.log_len(), len);
+    let events = device.on_tick(NOW + 2_000 + MINUTE);
+    assert!(events.contains(&Event::StatusChanged { channel: id }));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, Event::Reconnect { .. }))
+    );
+    assert!(!device.channels()[0].write_failed);
+}
+
+/// A log one byte into the headroom of spec 021-channel-session R18.
+const FULL_LOG: u64 = crate::storage::MAX_LOG_LEN - 1_114_156 + 1;
+
+/// Spec 027, R11: a plan stays in `connections()` while one of its
+/// channels is not refused, and leaves it once all are.
+#[test]
+fn s027_t11_r11_plan_left_out_only_when_all_refused() {
+    let (_fixture, mut device) = with_channels(2);
+    let plan = device.connections()[0].id;
+    let link = device.links.get_mut(&plan).unwrap();
+    link.refused.insert(config(1).channel_id());
+    assert_eq!(device.connections().len(), 1);
+    let link = device.links.get_mut(&plan).unwrap();
+    link.refused.insert(config(2).channel_id());
+    assert!(device.connections().is_empty());
+}
+
+/// Spec 027, R11: the next connection of a plan is told the channels
+/// refused on the last one, and subscribes none of them after its
+/// `hello`.
+#[test]
+fn s027_t11_r11_refused_channel_not_resubscribed() {
+    let (_fixture, mut device) = with_channels(1);
+    let mut server = MemoryServer::new(&["other.example.org"]);
+    let plan = device.connections()[0].id;
+    connect_all(&mut device, &mut server, NOW);
+    run(&mut device, &mut server, NOW, NOW + 3_000);
+    device.on_disconnect(plan);
+    server.disconnect(plan);
+    server.connect(plan, NOW + 4_000);
+    device.on_connect(plan, NOW + 4_000);
+    for frame in server.read(plan, 100) {
+        device.on_frame(plan, &frame, NOW + 4_000);
+    }
+    assert!(device.outgoing(plan).is_empty());
+}
+
+/// Spec 027, R11: a plan `id` that left the plan routes nothing, even
+/// when its socket was open.
+#[test]
+fn s027_t11_r11_old_plan_id_ignored() {
+    let (_fixture, mut device) = opened();
+    let old = device.connections()[0].id;
+    device.on_connect(old, NOW);
+    device
+        .import_qr(&config(2).export_qr(NOW).unwrap(), false, NOW)
+        .unwrap();
+    assert_ne!(device.connections()[0].id, old);
+    let mut server = MemoryServer::new(&[HOST]);
+    server.connect(old, NOW);
+    for frame in server.read(old, 100) {
+        assert!(device.on_frame(old, &frame, NOW).is_empty());
+    }
+    assert!(device.outgoing(old).is_empty());
+}
+
+/// Spec 027, R12, R14: a probe that clears a channel whose socket has
+/// closed asks for no `Reconnect`.
+#[test]
+fn s027_t14_r14_probe_after_disconnect_no_reconnect() {
+    let (fixture, mut device) = opened();
+    let mut server = MemoryServer::new(&[HOST]);
+    connect_all(&mut device, &mut server, NOW);
+    run(&mut device, &mut server, NOW, NOW + 3_000);
+    let plan = device.connections()[0].id;
+    device.on_disconnect(plan);
+    server.disconnect(plan);
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id(), PEER, true).is_err());
+    let events = device.on_tick(NOW + 4_000 + MINUTE);
+    assert!(events.contains(&Event::StatusChanged { channel: id() }));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, Event::Reconnect { .. }))
+    );
+}
+
+/// Spec 027, R9: `regenerate_identity` on a connected channel calls
+/// `after_send`, so that the `key_retired` is published at once.
+#[test]
+fn s027_t09_r09_regenerate_identity_after_send() {
+    let (_fixture, mut device) = opened();
+    let mut server = MemoryServer::new(&[HOST]);
+    connect_all(&mut device, &mut server, NOW);
+    run(&mut device, &mut server, NOW, NOW + 3_000);
+    let plan = device.connections()[0].id;
+    device.regenerate_identity(id(), NOW + 4_000).unwrap();
+    assert!(!device.outgoing(plan).is_empty());
+}
+
+/// Spec 027, R12: a `send` that a reopen saved on a channel not marked
+/// before it does not make the new mark's probe due.
+#[test]
+fn s027_t14_r14_send_marking_keeps_its_first_probe() {
+    let (fixture, mut device) = opened();
+    fixture.faults.poison_after(1);
+    device.send(id(), "hello", None, NOW + 1_000).unwrap();
+    assert_eq!(super::first_probe_at(&device), Some(NOW + 1_000 + MINUTE));
+}
+
+/// Spec 027, R12, R14: a clearing exactly ten minutes old is no longer
+/// recent; a probe exactly ten minutes ahead is not due yet.
+#[test]
+fn s027_t14_r14_ten_minute_boundaries() {
+    let (fixture, mut device) = opened();
+    mark(&fixture, &mut device);
+    device.on_tick(NOW + MINUTE);
+    assert!(!device.channels()[0].write_failed);
+    device.on_tick(NOW + MINUTE + TEN_MINUTES);
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id(), PEER, true).is_err());
+    assert_eq!(
+        super::first_probe_at(&device),
+        Some(NOW + MINUTE + TEN_MINUTES + MINUTE)
+    );
+
+    let (fixture, mut device) = opened();
+    mark(&fixture, &mut device);
+    device.on_tick(NOW + MINUTE);
+    device.on_tick(NOW + MINUTE + 1_000);
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id(), PEER, true).is_err());
+    let events = device.on_tick(NOW + MINUTE + 1_000);
+    assert!(!events.contains(&Event::StatusChanged { channel: id() }));
+    assert!(device.channels()[0].write_failed);
+}
+
+/// Spec 027, R14: a channel marked on a session that already exists is
+/// frozen there: nothing it sends is published.
+#[test]
+fn s027_t14_r14_mark_freezes_the_current_session() {
+    let (fixture, mut device) = opened();
+    let mut server = MemoryServer::new(&[HOST]);
+    connect_all(&mut device, &mut server, NOW);
+    run(&mut device, &mut server, NOW, NOW + 3_000);
+    let plan = device.connections()[0].id;
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id(), PEER, true).is_err());
+    device.send(id(), "held", None, NOW + 4_000).unwrap();
+    assert!(device.outgoing(plan).is_empty());
+}
+
+/// Spec 027, R14: a tick failure whose reopen fails breaks that channel
+/// and marks no other.
+#[test]
+fn s027_t14_r14_failed_reopen_marks_no_other_channel() {
+    let fixture = Fixture::new();
+    fixture.save_settings(&settings("wss://example.org", 30, None));
+    // Both due, so that the channel the tick purges first is the one at
+    // the first position, whichever the listing put there.
+    fixture.plant_channel(1, vec![record(NOW + 1_000, 1_000)]);
+    fixture.plant_channel(2, vec![record(NOW + 1_000, 1_000)]);
+    let mut device = fixture.open().unwrap();
+    let first = device.channels()[0].id;
+    fixture.faults.fail_at(1);
+    fixture.faults.fail_create(true);
+    let events = device.on_tick(NOW + 2_000);
+    assert!(events.contains(&Event::StorageFailed { channel: first }));
+    assert_eq!(device.status().broken.len(), 1);
+    assert_eq!(device.channels().len(), 1);
+    assert!(!device.channels()[0].write_failed);
+}
+
+/// Spec 027, R14, R15: the tick purges no marked channel until its probe
+/// clears the mark.
+#[test]
+fn s027_t15_r15_no_purge_while_marked() {
+    let fixture = Fixture::new();
+    fixture.save_settings(&settings("wss://example.org", 30, None));
+    let dir = fixture.plant_channel(1, vec![record(NOW + 1_000, 1_000)]);
+    let mut device = fixture.open().unwrap();
+    let handle = crate::testing::MemoryStore::handle(&fixture.vault, dir);
+    fixture.faults.fail_at(1);
+    assert!(device.rename_channel(id(), "x").is_err());
+    let len = handle.log_len();
+    device.on_tick(NOW + 2_000);
+    assert_eq!(handle.log_len(), len);
+}
+
+/// Spec 027, R12: the tick relieves a log within its headroom.
+#[test]
+fn s027_t12_r12_tick_relieves_headroom() {
+    let (fixture, mut device) = opened();
+    let dir = *device.channels[0].dir_name();
+    device.channels[0].fill_log(NOW + 1_000, 2 * 1_048_576);
+    device.channels[0].fill_log(NOW + 36_000_000, FULL_LOG);
+    assert!(device.channels()[0].status.storage_full);
+    let handle = crate::testing::MemoryStore::handle(&fixture.vault, dir);
+    device.on_tick(NOW + 2_000);
+    assert!(handle.log_len() < FULL_LOG);
+}
+
+/// Spec 027, R14, R15: the tick relieves no marked channel.
+#[test]
+fn s027_t15_r15_no_relief_while_marked() {
+    let (fixture, mut device) = opened();
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id(), PEER, true).is_err());
+    let dir = *device.channels[0].dir_name();
+    device.channels[0].fill_log(NOW + 1_000, 2 * 1_048_576);
+    device.channels[0].fill_log(NOW + 36_000_000, FULL_LOG);
+    let handle = crate::testing::MemoryStore::handle(&fixture.vault, dir);
+    device.on_tick(NOW + 2_000);
+    assert_eq!(handle.log_len(), FULL_LOG);
+}
+
+/// Spec 027, R12: a probe that clears a connected channel whose log is
+/// full asks for no `Reconnect`.
+#[test]
+fn s027_t14_r14_probe_storage_full_no_reconnect() {
+    let (fixture, mut device) = opened();
+    let mut server = MemoryServer::new(&[HOST]);
+    connect_all(&mut device, &mut server, NOW);
+    run(&mut device, &mut server, NOW, NOW + 3_000);
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id(), PEER, true).is_err());
+    device.channels[0].fill_log(NOW + 36_000_000, FULL_LOG);
+    // Ticks every second, so that no call gap (spec 028 R9) asks for one.
+    let events = run(&mut device, &mut server, NOW + 4_000, NOW + 4_000 + MINUTE);
+    assert!(events.contains(&Event::StatusChanged { channel: id() }));
+    assert!(!device.channels()[0].write_failed);
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, Event::Reconnect { .. }))
+    );
+}
+
+/// Spec 027, R12: the probe itself asks for the `Reconnect`, with the
+/// client ticking every second, so that no call gap asks for it.
+#[test]
+fn s027_t14_r14_probe_reconnects_without_a_gap() {
+    let (fixture, mut device) = opened();
+    let mut server = MemoryServer::new(&[HOST]);
+    connect_all(&mut device, &mut server, NOW);
+    run(&mut device, &mut server, NOW, NOW + 3_000);
+    let plan = device.connections()[0].id;
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id(), PEER, true).is_err());
+    let events = run(&mut device, &mut server, NOW + 4_000, NOW + 4_000 + MINUTE);
+    assert!(events.contains(&Event::StatusChanged { channel: id() }));
+    assert!(events.contains(&Event::Reconnect { connection: plan }));
+}
+
+/// Spec 027, R12: after a probe clears the mark and the socket is
+/// reopened, the channel publishes again on the same plan.
+#[test]
+fn s027_t14_r14_cleared_channel_publishes_again() {
+    let (fixture, mut device) = opened();
+    let mut server = MemoryServer::new(&[HOST]);
+    connect_all(&mut device, &mut server, NOW);
+    run(&mut device, &mut server, NOW, NOW + 3_000);
+    let plan = device.connections()[0].id;
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id(), PEER, true).is_err());
+    let events = device.on_tick(NOW + 4_000 + MINUTE);
+    assert!(events.contains(&Event::Reconnect { connection: plan }));
+    device.on_disconnect(plan);
+    server.disconnect(plan);
+    let later = NOW + 5_000 + MINUTE;
+    connect_all(&mut device, &mut server, later);
+    run(&mut device, &mut server, later, later + 3_000);
+    device.send(id(), "back", None, later + 4_000).unwrap();
+    pump(&mut device, &mut server, later + 4_000);
+    assert!(!server.stored(&id()).is_empty());
+}
+
+/// Spec 027, R24: a channel whose `flush` fails does not stop the next
+/// one from being flushed.
+#[test]
+fn s027_t24_r24_flush_attempts_every_channel() {
+    let fixture = Fixture::new();
+    fixture.save_settings(&settings("wss://example.org", 30, None));
+    let dirs = [
+        fixture.plant_channel(1, Vec::new()),
+        fixture.plant_channel(2, Vec::new()),
+    ];
+    let mut device = fixture.open().unwrap();
     let mut server = MemoryServer::new(&[HOST]);
     connect_all(&mut device, &mut server, NOW);
     run(&mut device, &mut server, NOW, NOW + 5_000);
+    let commits =
+        || dirs.map(|dir| crate::testing::MemoryStore::handle(&fixture.vault, dir).all_commits());
+    let before = commits();
     fixture.faults.fail_at(1);
-    assert_eq!(
-        device.flush(NOW + 30 * MINUTE),
-        Err(Error::Store(StoreError::Io))
+    assert!(device.flush(NOW + 30 * MINUTE).is_err());
+    let after = commits();
+    let flushed = (0..2).filter(|&k| after[k] > before[k]).count();
+    assert_eq!(flushed, 1);
+}
+
+/// Spec 027, R12: the tick leaves the `outbox` of a connected channel to
+/// its session: an entry in flight, published and not yet acked, is not
+/// expired by the `Device`.
+#[test]
+fn s027_t12_r12_connected_outbox_left_to_its_session() {
+    let (_fixture, mut device) = opened();
+    let mut server = MemoryServer::new(&[HOST]);
+    connect_all(&mut device, &mut server, NOW);
+    run(&mut device, &mut server, NOW, NOW + 3_000);
+    device.send(id(), "hello", None, NOW + 4_000).unwrap();
+    let late = NOW + 3_600_000 + 7 * MINUTE;
+    let mut events = Vec::new();
+    let mut now = NOW + 5_000;
+    while now <= late {
+        events.extend(device.on_tick(now));
+        now += 1_000;
+    }
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, Event::NotDelivered { .. })),
+        "{events:?}"
     );
+}
+
+/// Spec 027, R12: a full channel whose relief cannot act holds back no
+/// other full channel's relief.
+#[test]
+fn s027_t12_r12_relief_skips_a_channel_it_cannot_relieve() {
+    let (fixture, _) = with_peer();
+    fixture.plant_channel(2, Vec::new());
+    let mut device = fixture.open().unwrap();
+    device.channels[0].fill_log(NOW + 36_000_000, FULL_LOG);
+    device.channels[1].fill_log(NOW + 1_000, 2 * 1_048_576);
+    device.channels[1].fill_log(NOW + 36_000_000, FULL_LOG);
+    assert!(
+        device
+            .channels()
+            .iter()
+            .all(|info| info.status.storage_full)
+    );
+    let second = *device.channels[1].dir_name();
+    let handle = crate::testing::MemoryStore::handle(&fixture.vault, second);
+    device.on_tick(NOW + 2_000);
+    assert!(handle.log_len() < FULL_LOG);
 }

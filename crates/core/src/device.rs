@@ -6,8 +6,9 @@
 //! This module opens the device and keeps the broken channels (R1, R3);
 //! `settings.rs` keeps the settings and their gate (R1, R2, R13),
 //! `channels.rs` the channels (R4–R8), `dispatch.rs` the per-channel
-//! calls (R9), `recovery.rs` the reopening of a failed store (R14, R15)
-//! and `plan.rs` the routes (R10).
+//! calls (R9), `recovery.rs` the reopening of a failed store (R14, R15),
+//! `plan.rs` the routes (R10), `routing.rs` the connections (R11) and
+//! `tick.rs` the tick, the probes and `flush` (R12, R24).
 
 use std::collections::BTreeMap;
 

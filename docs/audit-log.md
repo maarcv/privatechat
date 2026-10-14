@@ -2,6 +2,25 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AV
+
+**2026-10-14 — Audit AV, the code audit of slice (d2a) of spec 027-core-api (branch `027-ticks`): the routing of the connections to one session per plan (R11), `on_tick` with its one compaction and one probe (R12, without the retry of `broken` entries), the store recovery through sessions and ticks (R14, R15), `flush` (R24) and `after_send` (R9); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit V's findings already took AV1–AV5, so this audit's are numbered from AV6. One production defect (AV6). Pass C ran 38 mutants: 20 killed, 2 equivalent, 16 survived, of which 15 are killed below and one is close to equivalent (AV15).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AV6 | The tick's one compaction went to the first full channel even when its relief compacted nothing, so a channel full of live messages held back every later full channel's relief, and its pushes, until a purge was due (A, B) | Medium | The relief tries the full channels in order until one compacts or fails; a relief that acts on nothing touches no store; a T12 case |
+| AV7 | The probe's `Reconnect` was seen only through the session's own call gap: the test ticked once after a minute (A, C) | Medium | The test ticks every second up to the probe |
+| AV8 | T11's refused channel was never offered a `hello` on the next connection, and a plan of two was never half refused (A, C) | Medium | The `hello` delivered by hand; a plan of two channels with one refused |
+| AV9 | T24 checked a `synced_at` the first sync had committed, and a `flush` stopping at the first error passed (A, C) | Medium | A channel flushed at lock and reopened a TTL less a minute later shows no `HistoryTruncated`, and does without the `flush`; with one failing, the other is flushed |
+| AV10 | The mark freezing the session it is in, a cleared channel publishing again, a probe on a full log asking no `Reconnect`, an old plan `id` ignored, a failed reopen on the tick marking no other channel, the tick's compaction guards and relief, `on_disconnect`, `regenerate_identity`'s `after_send`, a `send` that marks keeping its first probe, the ten-minute boundaries, a connected channel's `outbox` left to its session, a stale entry of a refused channel, the periodic purge's thresholds, two plans, and a compaction failing on the tick were untested (A, C) | Medium | A case for each, in T09, T11, T12, T14, T15 and T24 |
+| AV11 | The slice list gave the session halves of T14 to (c) and (d2b) at once, and T15's tick clauses, which (d2a) implements, to (d2b) (A) | Low | (d2a) names T14's tick and session clauses and T15's tick clauses; (d2b) names what is left |
+| AV12 | A channel's run and link were looked up in four places, the status test in three, and `probe_one` searched its channel twice behind a fallback that never ran; `send` tested a mark it had just read (C) | Low | `link_of` and `changed`, one lookup each; the dead check removed |
+| AV13 | A channel left kept its clearing time, which a re-import inherited (B) | Low | `leave` drops it |
+| AV14 | Two tests were named after the wrong T; `device.rs` did not list `routing.rs` and `tick.rs` (A) | Low | Renamed; listed |
+| AV15 | A session not connected ticked with the others changes nothing a test sees (C) | Far-fetched | None: a session with no socket has no subscription |
+| AV16 | A plan `id` that `connections()` hides, behind the gate or all refused, is still routed (A) | Far-fetched | None: only a client using an `id` it was never given reaches it |
+| AV17 | `session_failure`'s guard of a marked channel and its `Io` or `Corrupt` filter, and `flush` returning the last error rather than the first, reach no test (C) | Far-fetched | None: a frozen session commits nothing, no step reports another error, and the doubles fail with `Io` alone |
+
 ## Audit AU
 
 **2026-10-14 — Audit AU, the code audit of slice (d1) of spec 027-core-api (branch `027-plan`): the connection plan (R10), `probe_plan` and `probe_hello` (R12), and the settings gate over them (R2); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit U's findings already took AU1–AU5, so this audit's are numbered from AU6. No production defect. Pass C ran 38 mutants: 28 killed, 2 equivalent, 8 survived, each killed below or removed with the code it mutated.

@@ -4,7 +4,8 @@
 //! moved to `broken` when the reopen fails; and the status compared around
 //! every direct writer.
 
-use super::tick::LATER_PROBE_MS;
+use super::routing::link_of;
+use super::tick::{LATER_PROBE_MS, changed};
 use super::{Broken, BrokenChannel, Device};
 use crate::error::Error;
 use crate::session::channel::Channel;
@@ -68,7 +69,7 @@ impl Device {
             if marked && result.is_ok() {
                 events.push(Event::StatusChanged { channel });
             }
-        } else if open.take_peers_changed() || open.status() != before {
+        } else if changed(open, before) {
             events.push(Event::StatusChanged { channel });
         }
         (result, events)
@@ -145,8 +146,7 @@ impl Device {
         };
         self.marks.insert(id, self.latest_now.saturating_add(wait));
         // Its session holds it frozen (spec 028-session-sans-io R10).
-        let run = self.runs.iter().find(|run| run.channels.contains(&id));
-        if let Some(link) = run.and_then(|run| self.links.get_mut(&run.id)) {
+        if let Some((_, link)) = link_of(&self.runs, &mut self.links, id) {
             link.session.set_write_failed(channel, true, false);
         }
     }
