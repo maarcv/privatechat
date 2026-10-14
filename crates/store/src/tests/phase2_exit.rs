@@ -8,7 +8,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use privatechat_core::testing::{FailingVault, Faults, MemoryServer, state_eq};
-use privatechat_core::{Device, Error, Event, LogRecord, MessageContent, StoreError, Vault};
+use privatechat_core::{
+    Device, Error, Event, LogRecord, MessageContent, Sender, StoreError, Vault,
+};
 use proptest::test_runner::{Config, TestRunner};
 
 use super::{TestDir, open_with, run_helper};
@@ -40,6 +42,8 @@ const CRASH_APPEND: u64 = 26_000;
 /// The most `Reconnect`s a side may see: none but the probe's after the
 /// injected failure, and a session's after its socket was refused.
 const MAX_RECONNECTS: u32 = 2;
+/// The rounds of frames a `pump` may take before it must be quiet.
+const PUMP_ROUNDS: usize = 20;
 /// The environment variables of the crash run's child.
 const DIR_VAR: &str = "PRIVATECHAT_PHASE2_DIR";
 
@@ -53,12 +57,16 @@ struct Side {
     connected: Vec<u64>,
     /// The bodies received, with how many times each came.
     received: BTreeMap<String, u32>,
+    /// The numbers of the bodies received, in the order they came.
+    order: Vec<usize>,
     /// The errors the calls returned.
     errors: u32,
     /// The `StorageFailed` events, each a store reopened (R14).
     storage_failed: u32,
     /// The `Reconnect`s asked for.
     reconnects: u32,
+    /// The `Subscribed` events.
+    subscribed: u32,
     /// The events no run of R23 should see, by kind.
     unexpected: Vec<&'static str>,
     /// The side's one failed commit, not yet armed.
@@ -76,14 +84,24 @@ enum Fault {
     Receive(u64),
 }
 
+/// The call whose commit is about to run.
+#[derive(Clone, Copy)]
+enum Step {
+    /// A `send`.
+    Send,
+    /// The frames of a `pump`.
+    Receive,
+}
+
 impl Side {
-    /// Fails the next commit when the side's fault is of this kind, a
-    /// received frame or a `send`, and its time came.
-    fn arm(&mut self, now: u64, receive: bool) {
-        let due = match self.fault {
-            Some(Fault::Send(at)) => !receive && at <= now,
-            Some(Fault::Receive(at)) => receive && at <= now,
-            None => false,
+    /// Fails the next commit when the side's fault is of this step's kind
+    /// and its time came.
+    fn arm(&mut self, now: u64, step: Step) {
+        let due = match (self.fault, step) {
+            (Some(Fault::Send(at)), Step::Send) | (Some(Fault::Receive(at)), Step::Receive) => {
+                at <= now
+            }
+            _ => false,
         };
         if due {
             self.faults.fail_at(1);
@@ -101,9 +119,11 @@ impl Side {
             sockets,
             connected: Vec::new(),
             received: BTreeMap::new(),
+            order: Vec::new(),
             errors: 0,
             storage_failed: 0,
             reconnects: 0,
+            subscribed: 0,
             unexpected: Vec::new(),
             fault: None,
         }
@@ -140,6 +160,9 @@ impl Side {
             match event {
                 Event::Message { received, .. } => {
                     if let MessageContent::Text { body, .. } = received.content {
+                        if let Some(n) = body.split_once('-').and_then(|(_, n)| n.parse().ok()) {
+                            self.order.push(n);
+                        }
                         *self.received.entry(body).or_default() += 1;
                     }
                 }
@@ -156,18 +179,18 @@ impl Side {
                 Event::ChannelFull { .. } => self.unexpected.push("ChannelFull"),
                 Event::ServerFull { .. } => self.unexpected.push("ServerFull"),
                 Event::UnsupportedServer { .. } => self.unexpected.push("UnsupportedServer"),
-                Event::Subscribed { .. }
-                | Event::Delivered { .. }
-                | Event::StatusChanged { .. } => {}
+                Event::Subscribed { .. } => self.subscribed += 1,
+                Event::Delivered { .. } | Event::StatusChanged { .. } => {}
             }
         }
     }
 
-    /// Moves frames both ways until quiet; a push whose index `duplicate`
-    /// names is delivered twice.
+    /// Moves frames both ways until quiet, in at most `PUMP_ROUNDS`; a push
+    /// whose index `duplicate` marks, and that brought a message, is
+    /// delivered twice.
     fn pump(&mut self, server: &mut MemoryServer, now: u64, duplicate: &mut Duplicates) {
-        self.arm(now, true);
-        for _ in 0..20 {
+        self.arm(now, Step::Receive);
+        for round in 0..=PUMP_ROUNDS {
             let mut moved = false;
             for id in self.connected.clone() {
                 for frame in self.device.outgoing(id) {
@@ -175,13 +198,18 @@ impl Side {
                     moved = true;
                 }
                 for frame in server.read(id + self.sockets, 200) {
-                    let twice = duplicate.next(&frame);
+                    let twice = duplicate.is_marked(&frame);
                     let events = self.device.on_frame(id, &frame, now);
+                    let message = events
+                        .iter()
+                        .any(|event| matches!(event, Event::Message { .. }));
                     self.take(events, server);
-                    if twice {
+                    // An echo of one's own message brings none: its second
+                    // delivery would prove nothing.
+                    if twice && message {
                         let events = self.device.on_frame(id, &frame, now);
-                        let message = |event: &Event| matches!(event, Event::Message { .. });
-                        duplicate.rejected += u32::from(!events.iter().any(message));
+                        duplicate.count += 1;
+                        duplicate.rejected += u32::from(events.is_empty());
                         self.take(events, server);
                     }
                     moved = true;
@@ -190,13 +218,14 @@ impl Side {
             if !moved {
                 break;
             }
+            assert!(round < PUMP_ROUNDS, "frames still moving at {now}");
         }
     }
 
     /// Sends `body`; an error, which only the injected commit may cause, is
     /// counted and the send tried again on the reopened store.
     fn send(&mut self, channel: [u8; 16], body: &str, now: u64, server: &mut MemoryServer) {
-        self.arm(now, false);
+        self.arm(now, Step::Send);
         match self.device.send(channel, body, None, now) {
             Ok(sent) => self.take(sent.events, server),
             Err(error) => {
@@ -216,10 +245,11 @@ impl Side {
 /// Which pushes are delivered twice, from a seed the proptest draws.
 struct Duplicates {
     seed: u64,
-    next: u64,
-    /// Pushes delivered twice.
+    /// The index of the next push; `u64::MAX` when none is marked.
+    index: u64,
+    /// Pushes of a message delivered twice.
     count: u32,
-    /// Second deliveries that produced no message.
+    /// Second deliveries that produced no event.
     rejected: u32,
 }
 
@@ -228,14 +258,14 @@ impl Duplicates {
     fn new(seed: Option<u64>) -> Duplicates {
         Duplicates {
             seed: seed.unwrap_or(0),
-            next: if seed.is_some() { 0 } else { u64::MAX },
+            index: if seed.is_some() { 0 } else { u64::MAX },
             count: 0,
             rejected: 0,
         }
     }
 
     /// Whether this frame, a push, is the next one marked.
-    fn next(&mut self, frame: &[u8]) -> bool {
+    fn is_marked(&mut self, frame: &[u8]) -> bool {
         let push = matches!(
             privatechat_core::Frame::decode(frame),
             Ok(privatechat_core::Frame::Push { .. })
@@ -243,18 +273,17 @@ impl Duplicates {
         if !push {
             return false;
         }
-        if self.next == u64::MAX {
+        if self.index == u64::MAX {
             return false;
         }
         // SplitMix64 of the seed and the push's index: one in a hundred.
         let mut z = self
             .seed
-            .wrapping_add(self.next.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+            .wrapping_add(self.index.wrapping_mul(0x9e37_79b9_7f4a_7c15));
         z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
         z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
         let marked = (z ^ (z >> 31)).is_multiple_of(DUPLICATE_ONE_IN);
-        self.next += 1;
-        self.count += u32::from(marked);
+        self.index += 1;
         marked
     }
 }
@@ -310,16 +339,56 @@ fn exchange(
     end
 }
 
-/// Checks that each side received every message of the other once, and
-/// nothing else: none of its own, whose echo is not a message.
-fn check_delivered(sides: &[Side; 2], range: std::ops::Range<usize>) {
-    for (from, to) in [("a", &sides[1]), ("b", &sides[0])] {
-        for n in range.clone() {
-            let body = format!("{from}-{n}");
+/// Checks that each side received every message of the other once, those
+/// of `range` and the bodies of `extra` it sent, in the order they were
+/// sent, and nothing else: none of its own, whose echo is not a message.
+fn check_delivered(sides: &[Side; 2], range: std::ops::Range<usize>, extra: &[Vec<String>; 2]) {
+    for (from, extra, to) in [("a", &extra[0], &sides[1]), ("b", &extra[1], &sides[0])] {
+        let bodies = range.clone().map(|n| format!("{from}-{n}"));
+        for body in bodies.chain(extra.iter().cloned()) {
             assert_eq!(to.received.get(&body), Some(&1), "{body}");
         }
-        assert_eq!(to.received.len(), range.len(), "a message not sent");
+        assert_eq!(
+            to.received.len(),
+            range.len() + extra.len(),
+            "a message not sent"
+        );
+        assert!(to.order.is_sorted_by(|a, b| a < b), "out of order");
     }
+}
+
+/// Checks a side's counters: `errors` failed calls and `storage_failed`
+/// stores reopened, nothing else; a bounded number of reconnects and of
+/// subscriptions, one per session; no channel broken or failing to write.
+fn check_counters(side: &Side, errors: u32, storage_failed: u32) {
+    assert!(side.fault.is_none(), "the fault was never armed");
+    assert_eq!(side.errors, errors);
+    assert_eq!(side.storage_failed, storage_failed);
+    assert!(side.unexpected.is_empty(), "{:?}", side.unexpected);
+    assert!(
+        side.reconnects <= MAX_RECONNECTS,
+        "{} reconnects",
+        side.reconnects
+    );
+    assert!(
+        side.subscribed <= side.reconnects + storage_failed + 1,
+        "{} subscriptions",
+        side.subscribed
+    );
+    assert!(side.device.status().broken.is_empty());
+    assert!(side.device.channels().iter().all(|info| !info.write_failed));
+}
+
+/// The bodies `device` shows in `channel` at `now`, in its order.
+fn bodies(device: &Device, channel: [u8; 16], now: u64) -> Vec<String> {
+    let shown = device.messages(channel, now).expect("messages");
+    shown
+        .into_iter()
+        .filter_map(|message| match message.content {
+            MessageContent::Text { body, .. } => Some(body),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Spec 027, R23: two devices exchange 10 000 messages, 5 000 each, one
@@ -336,7 +405,8 @@ fn s027_t23_r23_phase2_exit() {
         ..Config::default()
     });
     // The step from which each side's failed commit is armed.
-    let draws = (0u64..1_000, 0u64..1_000, proptest::num::u64::ANY);
+    let steps = 0..PER_SIDE as u64;
+    let draws = (steps.clone(), steps, proptest::num::u64::ANY);
     runner
         .run(&draws, |(fail_a, fail_b, seed)| {
             exit_run(fail_a, fail_b, seed);
@@ -362,7 +432,7 @@ fn exit_run(fail_a: u64, fail_b: u64, seed: u64) {
         (T0 + TICK, 0, PER_SIDE),
         &mut duplicate,
     );
-    check_delivered(&sides, 0..PER_SIDE);
+    check_delivered(&sides, 0..PER_SIDE, &[Vec::new(), Vec::new()]);
     assert!(duplicate.count > 0, "no push was duplicated");
     assert_eq!(
         duplicate.rejected, duplicate.count,
@@ -372,32 +442,30 @@ fn exit_run(fail_a: u64, fail_b: u64, seed: u64) {
     // failed its `send`, the second's a session's step, and no other call
     // failed.
     for (side, errors) in sides.iter().zip([1, 0]) {
-        assert!(side.fault.is_none(), "the fault was never armed");
-        assert_eq!(side.errors, errors);
-        assert_eq!(side.storage_failed, 1);
-        assert!(side.unexpected.is_empty(), "{:?}", side.unexpected);
-        assert!(
-            side.reconnects <= MAX_RECONNECTS,
-            "{} reconnects",
-            side.reconnects
-        );
-        assert!(side.device.status().broken.is_empty());
-        assert!(side.device.channels().iter().all(|info| !info.write_failed));
+        check_counters(side, errors, 1);
     }
     let [first, second] = sides;
     for (side, path) in [(first, "a"), (second, "b")] {
         let faults = side.faults.clone();
         let mut device = side.device;
         device.flush(end).expect("flush");
+        let shown = bodies(&device, channel, end);
+        assert!(!shown.is_empty());
         drop(device);
-        check_reopened(&dir.path().join(path), &faults);
+        let path = dir.path().join(path);
+        check_reopened(&path, &faults, end);
+        // The reopened device shows what the closed one showed.
+        let data = open_with(&path, Io::fast).expect("reopen");
+        let device = Device::open(Box::new(data), end).expect("open");
+        assert_eq!(bodies(&device, channel, end), shown);
     }
 }
 
 /// Each store of the data directory at `path` reloads the state its last
 /// commit wrote, and its log was compacted: no record is left that expired
-/// in the first two hours of the run.
-fn check_reopened(path: &Path, faults: &Faults) {
+/// a TTL before `end`, the most a compaction run when a quarter of the log
+/// has expired keeps (spec 023-ttl-purge R5).
+fn check_reopened(path: &Path, faults: &Faults, end: u64) {
     let mut data = open_with(path, Io::fast).expect("reopen");
     let stores = data.list().expect("list");
     assert_eq!(stores.len(), 1);
@@ -409,7 +477,7 @@ fn check_reopened(path: &Path, faults: &Faults) {
         assert!(generation > 0, "no compaction ran");
         let oldest = records.iter().map(LogRecord::purge_at).min();
         assert!(
-            oldest.is_some_and(|at| at > T0 + 2 * 3_600_000),
+            oldest.is_some_and(|at| at > end - u64::from(TTL_SECONDS) * 1_000),
             "{oldest:?}"
         );
     }
@@ -457,15 +525,51 @@ fn s027_t23_r23_phase2_exit_after_a_crash() {
     assert!(compacted, "the crash came before any compaction");
     assert_eq!(ids.first(), ids.get(1));
 
-    let now = T0 + 7_200_000;
+    // The resume comes after the end the full run would have had, so after
+    // the crash whatever append it stops at, and the clock never goes back.
+    let now = T0 + TICK + PER_SIDE as u64 * SEND_EVERY + DRAIN;
     let faults = [Faults::new(), Faults::new()];
     let (first, second, channel) = start(dir.path(), [&faults[0], &faults[1]], now);
-    for side in [&first, &second] {
+    let mut pending = [Vec::new(), Vec::new()];
+    let mut shown = [Vec::new(), Vec::new()];
+    for (side, (pending, shown)) in [&first, &second]
+        .into_iter()
+        .zip(pending.iter_mut().zip(shown.iter_mut()))
+    {
         let listed: Vec<[u8; 16]> = side.device.channels().iter().map(|info| info.id).collect();
         assert_eq!(listed, [channel]);
         assert_eq!(Some(&channel), ids.first());
         assert!(side.device.status().broken.is_empty());
+        // One's own messages the server never acked, still in the outbox.
+        let messages = side.device.messages(channel, now).expect("messages");
+        *pending = messages
+            .iter()
+            .filter(|message| matches!(message.sender, Sender::Own) && message.server_id.is_none())
+            .filter_map(|message| match &message.content {
+                MessageContent::Text { body, .. } => Some(body.clone()),
+                _ => None,
+            })
+            .collect();
+        *shown = bodies(&side.device, channel, now);
+        assert!(!shown.is_empty(), "the reopened log shows nothing");
     }
+    // A pending message the other side already holds is not shown twice.
+    let extra = [
+        pending[0]
+            .iter()
+            .filter(|body| !shown[1].contains(body))
+            .cloned()
+            .collect(),
+        pending[1]
+            .iter()
+            .filter(|body| !shown[0].contains(body))
+            .cloned()
+            .collect(),
+    ];
+    assert!(
+        extra.iter().any(|bodies: &Vec<String>| !bodies.is_empty()),
+        "no message was pending at the crash"
+    );
     let mut sides = [first, second];
     let mut server = MemoryServer::new(&[HOST]);
     let mut duplicate = Duplicates::new(None);
@@ -476,7 +580,10 @@ fn s027_t23_r23_phase2_exit_after_a_crash() {
         (now, 100_000, 20),
         &mut duplicate,
     );
-    check_delivered(&sides, 100_000..100_020);
+    check_delivered(&sides, 100_000..100_020, &extra);
+    for side in &sides {
+        check_counters(side, 0, 0);
+    }
 }
 
 /// The child of the crash run: the exchange in the directory of

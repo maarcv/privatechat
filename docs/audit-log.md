@@ -18,6 +18,20 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AY26 | The crash point models a killed process, not a power cut: fast mode keeps every write in the page cache (B) | Far-fetched | None: what R23 asks; durability order is spec 020's recovery tests |
 | AY27 | Duplicates are replayed at once, never after a reconnect or a compaction (B) | Far-fetched | None: the server re-pushes the backlog from the cursor at every reconnect, which the run does |
 
+**Round 2**, on the whole change with the findings above. Pass B ran the crash run instrumented and showed AY25 rested on a false premise; pass C ran 20 production mutants and 2 of the test: 11 killed, 4 equivalent here, 4 out of R23 and killed by other tests, 1 survived (AY35). No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AY28 | The crash run resumed at T0 + 2 h, 1.6 h before the crash: the message pending in the `outbox` at the crash (`a-4333`) was republished, refused as from the future and reported `NotDelivered`, and the run passed; a correct delivery failed it. Reopens AY25 (A, B) | Medium | The resume comes after the end the full run would have had; each side's own unacked messages are read after the reopen and must reach the other side once, on top of the 20 new ones; at least one is pending |
+| AY29 | The resumed exchange checked none of the counters of the first run (A, B) | Medium | One `check_counters` for both runs: after the resume 0 errors, 0 `StorageFailed`, no unexpected event, bounded reconnects, nothing broken or `write_failed` |
+| AY30 | The failed commits were drawn among the first 1 000 of 5 000 steps (A) | Low | Drawn over all 5 000; runs with both at step 0 and at step 4 999 checked by hand |
+| AY31 | Order was never checked: `received` is keyed by body (B) | Low | Each side keeps the numbers it received in order; they must be strictly increasing |
+| AY32 | `pump` stopped after 20 rounds whether quiet or not, and `Subscribed` went uncounted, so a frame loop without `Reconnect` passed (B) | Low | A `pump` still moving frames after `PUMP_ROUNDS` fails; subscriptions bounded by one per session |
+| AY33 | Half the marked duplicates were echoes of one's own messages, rejected whatever happened, and "rejected" meant only "no message" (B, C) | Low | Only a push that brought a message is delivered twice, and its second delivery must produce no event at all |
+| AY34 | Neither run checked the content of the reopened log: a commit that overwrote the previous record kept the state and passed the main run (mutant M1) (B, C) | Medium | Before closing, each side's shown bodies are kept; a `Device` reopened over the directory must show the same, non-empty list; the crash run requires a non-empty list after the reopen |
+| AY35 | "No record expired in the first two hours" let a compaction keep 50 extra minutes of expired plaintext (mutant M10) (C) | Low | No record left that expired a TTL before the end, the most spec 023 R5's quarter rule keeps |
+| AY36 | `arm` took a boolean beside the `Fault` enum; `Duplicates` had a field and a method both named `next`; the file is over 400 lines (C) | Low | A `Step` enum; `is_marked` and `index`; the PR says why one end-to-end test stays in one file |
+
 ## Audit AX
 
 **2026-10-14 — Audit AX, the code audit of slice (e) of spec 027-core-api (branch `027-boundary`): the boundary checks (`unreachable_pub`, `api_surface.rs`), the amendments of specs 011 and 016, the `dead_code` allows removed, `init` and `generate_storage_key`, and the doc updates (R16–R22); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit X's findings already took AX1–AX18, so this audit's are numbered from AX19. No production defect: no secret crosses, no gate changes production, no parser of external bytes is left unfuzzed and unexcluded. Pass C ran 24 mutants: 20 killed, 1 equivalent, 3 survived, each killed below.
