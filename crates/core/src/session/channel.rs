@@ -33,6 +33,9 @@ mod send;
 mod status;
 mod sync;
 
+pub use self::peers::Peer;
+pub use self::purge::{Delivery, Message, Stranger};
+
 #[cfg(test)]
 mod tests;
 
@@ -227,6 +230,25 @@ pub(crate) struct SessionCarry {
     ignored_keys: BTreeSet<PeerId>,
     /// The device-clock warning of R25.
     clock_off: ClockOff,
+}
+
+#[cfg(test)]
+impl SessionCarry {
+    /// A carry with one gap of `gap_peer` and one ignored key, for the
+    /// tests of spec 027-core-api R14.
+    pub(crate) fn for_tests(gap_peer: PeerId, ignored: PeerId) -> SessionCarry {
+        let gap = Gap {
+            peer: gap_peer,
+            missing: 3,
+            anomalous: false,
+            spans_truncation: false,
+        };
+        SessionCarry {
+            gaps: BTreeMap::from([(gap_peer, gap)]),
+            ignored_keys: BTreeSet::from([ignored]),
+            clock_off: ClockOff::No,
+        }
+    }
 }
 
 /// Whether the device clock looks off, and which kind of sample said so

@@ -469,9 +469,10 @@ fn s027_t21_r21_failing_channel_writes() {
     fixture.faults.fail_create(true);
     assert!(device.create_channel(SERVER, 3_600, "room", NOW).is_err());
     fixture.faults.fail_create(false);
-    fixture.faults.fail_at(1);
+    fixture.faults.fail_destroys(true);
     assert!(device.leave(id).is_err());
     drop(device);
+    fixture.faults.fail_destroys(false);
 
     let device = fixture.open().unwrap();
     assert_eq!(device.channels(), before);

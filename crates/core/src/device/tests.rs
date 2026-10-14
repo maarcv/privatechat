@@ -10,6 +10,8 @@ use crate::storage::{DirName, LogRecord, Settings, Store, StoreError, Vault};
 use crate::testing::{FailingVault, Faults, MemoryStore, MemoryVault, batch, record, state_for};
 
 mod channels;
+mod dispatch;
+mod recovery;
 mod scripted;
 mod settings;
 
@@ -108,7 +110,7 @@ fn open_ids(device: &Device) -> Vec<[u8; 16]> {
     device
         .channels
         .iter()
-        .map(|channel| channel.config().channel_id())
+        .map(|open| open.channel.config().channel_id())
         .collect()
 }
 
