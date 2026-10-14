@@ -9,6 +9,8 @@ use crate::session::channel::Channel;
 use crate::storage::{DirName, LogRecord, Settings, Store, StoreError, Vault};
 use crate::testing::{FailingVault, Faults, MemoryStore, MemoryVault, batch, record, state_for};
 
+mod channels;
+mod scripted;
 mod settings;
 
 /// A whole minute.

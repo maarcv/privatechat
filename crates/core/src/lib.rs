@@ -42,10 +42,13 @@ pub mod testing;
 #[cfg(test)]
 mod vectors;
 
-pub use device::{BrokenChannel, Device, DeviceStatus, SettingsView};
+pub use device::{
+    BrokenChannel, ChannelInfo, Device, DeviceStatus, ExportedFile, Imported, SettingsView,
+};
 pub use error::Error;
 pub use proto::config::Config;
 pub use proto::fingerprint::Fingerprint;
+pub use session::channel::ChannelStatus;
 pub use session::connection::Event;
 pub use session::frames::Frame;
 pub use storage::{

@@ -2,6 +2,36 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AS
+
+**2026-10-14 — Audit AS, the code audit of slice (b) of spec 027-core-api (branch `027-channels`): creating, importing, exporting, listing, renaming and leaving channels (R4–R8), the `needs_proxy` predicate `ChannelInfo` shows (R10's), and the settings of a fresh install saved by the first channel (R1); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit S's findings already took AS1–AS11, so this audit's are numbered from AS12. No production defect against the spec. Pass C ran 51 mutants: 38 killed, 4 equivalent, 9 survived; eight are killed below, and the ninth (a store error from the reopened state's config) left with the double load AS16 removes.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AS12 | No test saw `create_channel` or an import save the defaults behind the settings gate, over a newer app's file, or save them again after the first (C) | Medium | A T01 case of each |
+| AS13 | R10 named `::1` as a loopback proxy, which the proxy grammar of spec 020 cannot write (A, B) | Low | R10 names `127.0.0.0/8` alone, with a History line; the code already failed closed |
+| AS14 | `ChannelInfo::needs_proxy` following the proxy setting, its `status`, a suggested name of spaces shown as `""`, an unparsable URL needing a proxy and `.onion` inside a host were untested (A, C) | Low | T07 and T10 cases |
+| AS15 | A failed retry's reason, and T05's "no store created, nothing written" after a broken entry's rejection, were untested; a malformed QR was checked as any error (A, C) | Low | A T05 case; each rejection compares the directory's bytes and the stores listed; `BadConfig` |
+| AS16 | `recover` loaded the standing state twice, once itself and once in `open_stored`, so a failure between them reached no test; and it opened a standing state without `create`'s server check (B, C) | Low | One load, opened with `Channel::loaded`; a state of another server is `ConfigMismatch`, as `docs/spec.md` §5 says |
+| AS17 | `ChannelStatus`, a field of `ChannelInfo`, was not re-exported (A) | Low | `pub use` in `lib.rs` |
+| AS18 | The suggested name wrote `shown_name` out again; the loopback check parsed IPv4 by hand where `core::net::Ipv4Addr` does it, leading zeros refused; `leave` looked its channel up twice (C) | Low | `shown_name(..).unwrap_or_default()`; `Ipv4Addr::is_loopback`; `channel_mut` |
+| AS19 | The change is over AGENTS 14's 400 lines (A) | Low | Justified in the pull request |
+| AS20 | A directory name that fails in `recover` returns its own error, not the original `Io` (A) | Far-fetched | None: a keyed hash that has already worked in the call |
+| AS21 | The `needs_proxy` test lives in `device/plan/tests.rs`, not under `device/tests` (A) | Far-fetched | None: no rule asks for it |
+
+**Round 2.** Fresh passes on the whole change. AS12–AS21 hold; pass B found nothing but a far-fetched case. Pass C ran 23 new mutants: 11 killed, 1 equivalent, 11 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AS22 | The server check AS16 added to `recover` was neither in R4 nor tested: no double failed one load and not the next (A, C) | Medium | R4 names it, with a History line; test doubles whose created stores fail their first load as a test scripts it (`device/tests/scripted.rs`), and a T04 case |
+| AS23 | T05's "no store opened" for an open channel did not see a `Vault::create` (A) | Low | The second import and the `ConfigMismatch` run with every `create` failing |
+| AS24 | `needs_proxy` was not tested with a proxy below `127.0.0.0/8` or at `0.0.0.0`; `leave` of a channel not the last; an `Io`-only retry and an `Io`-only recovery; the original `Io` after a retry failing otherwise; the settings saved before the store; a retried channel's place in the list; a cleared name stored as absent; a C1 control and a name of 64 characters but more bytes (C) | Medium | A case for each, in T01, T04, T05, T07, T08 and T10 |
+| AS25 | A state the retry finds checks its server and not its `channel_id`, as `Channel::create` does (B) | Far-fetched | None: the store binds a state to its directory (spec 020 R18) |
+
+The audit closes with this round (`CLAUDE.md`, the audit): pass B found only a far-fetched case, pass A's findings are a spec line for a check that only narrows what is accepted and a test gap, and pass C's are test gaps, now closed.
+
+Decisions taken without the human: R10's loopback proxy is an IPv4 literal in `127.0.0.0/8` alone (AS13), since `::1` was never writable and the change only narrows what is trusted; R4's retry checks the server of the state it finds (AS16, AS22), as `Channel::create` does, rather than open a state of another server.
+
 ## Audit AR
 
 **2026-10-14 — Audit AR, the code audit of slice (a) of spec 027-core-api (branch `027-open`): `Device::open`, the settings and their gate, `acknowledge_settings`, the setters and `remove_broken` (R1–R3, R13), and `Error::UnknownChannel` (R18); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit R's findings already took AR1–AR11, so this audit's are numbered from AR12. One production defect (AR12). Pass C ran 35 mutants: 23 killed, 3 equivalent, 9 survived, each killed below.

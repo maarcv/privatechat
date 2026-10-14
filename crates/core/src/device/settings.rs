@@ -137,6 +137,16 @@ impl SettingsHolder {
         Ok(())
     }
 
+    /// Saves the defaults of a fresh install, before the first channel is
+    /// created or imported (R1); does nothing otherwise.
+    pub(super) fn save_if_fresh(&mut self, vault: &mut dyn Vault) -> Result<(), Error> {
+        if matches!(self.mode, Mode::Fresh) {
+            vault.save_settings(&self.current)?;
+            self.mode = Mode::Saved;
+        }
+        Ok(())
+    }
+
     /// Lowers the gate of R2 for `acknowledge_settings` (`proxy` `None`)
     /// or `set_socks5_proxy` (`proxy` the value it sets), or, outside the
     /// gate, saves what R1 and R2 say; on a failed save nothing changes.
