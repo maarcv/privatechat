@@ -162,7 +162,6 @@ impl Device {
         if marked && result == Err(Error::Store(StoreError::Io)) {
             if self.reopen(position).is_err() {
                 self.queued.push(Event::StorageFailed { channel });
-                self.replan();
                 return result;
             }
             result = self.channel_mut(channel)?.leave();

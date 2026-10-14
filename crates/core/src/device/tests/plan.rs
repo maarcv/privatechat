@@ -7,6 +7,7 @@ use crate::crypto::Secret;
 use crate::device::{ConnectionPlan, Device, probe_hello};
 use crate::proto::config::Config;
 use crate::session::frames::Frame;
+use crate::storage::StoreError;
 use crate::testing::settings;
 
 const ONION: &str = "abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwx.onion";
@@ -77,9 +78,12 @@ fn s027_t10_r10_plan() {
     assert_eq!(route.socks_username, None);
 
     let first = plans[0].id;
+    let joined = plans[1].id;
     let eighteenth = import(&mut device, 18, "wss://example.org");
     let plans = device.connections();
     assert_eq!(plans[0].id, first);
+    // The run the 18th joined changed, so it gets a new `id`.
+    assert_ne!(plans[1].id, joined);
     assert_eq!(plans[1].channels, [ids[16], eighteenth]);
     let second = plans[1].id;
 
@@ -309,5 +313,127 @@ fn s027_t12_r12_probe() {
     .encode()
     .unwrap();
     assert_eq!(probe_hello(&push), Err(Error::BadPayload));
-    assert!(probe_hello(b"not a frame").is_err());
+    assert_eq!(probe_hello(b"not a frame"), Err(Error::BadPayload));
+}
+
+/// Spec 027, R10: the group is the scheme, the host and the port: two
+/// hosts on one port, or one host on two ports, are two runs.
+#[test]
+fn s027_t10_r10_plan_groups_by_host_and_port() {
+    let fixture = saved(None);
+    let mut device = fixture.open().unwrap();
+    let a = import(&mut device, 1, "wss://example.org");
+    let b = import(&mut device, 2, "wss://other.example.org");
+    let c = import(&mut device, 3, "wss://example.org:9001");
+    assert_eq!(device.connections().len(), 3);
+    assert_eq!(plan_of(&device, a).channels, [a]);
+    assert_eq!(plan_of(&device, b).channels, [b]);
+    assert_eq!(plan_of(&device, c).channels, [c]);
+}
+
+/// Spec 027, R1: `open` builds the plan of the channels it opened.
+#[test]
+fn s027_t01_r01_open_builds_the_plan() {
+    let fixture = saved(None);
+    fixture.plant_channel(1, Vec::new());
+    let device = fixture.open().unwrap();
+    assert_eq!(
+        device.connections()[0].channels,
+        [super::config(1).channel_id()]
+    );
+}
+
+/// Spec 027, R2: a proxy set, or adopted from the stored file after a
+/// passing `Io`, while the gate is up is in the route the gate releases.
+#[test]
+fn s027_t02_r02_released_plan_takes_the_proxy() {
+    let fixture = Fixture::new();
+    fixture.plant_channel(1, Vec::new());
+    let mut device = fixture.open().unwrap();
+    assert!(device.status().settings_reset);
+    device.set_socks5_proxy(Some(PROXY)).unwrap();
+    assert_eq!(
+        device.connections()[0].route.socks5_proxy.as_deref(),
+        Some(PROXY)
+    );
+
+    let fixture = saved(Some(PROXY));
+    fixture.plant_channel(1, Vec::new());
+    fixture.faults.fail_load_settings(true);
+    let mut device = fixture.open().unwrap();
+    fixture.faults.fail_load_settings(false);
+    device.acknowledge_settings(false).unwrap();
+    let route = &device.connections()[0].route;
+    assert_eq!(route.socks5_proxy.as_deref(), Some(PROXY));
+    assert!(route.socks_username.is_some());
+}
+
+/// Spec 027, R14: a channel whose reopen fails leaves its run, from a
+/// direct writer and from `leave`; R5: an `Io` entry an import reopens
+/// joins one.
+#[test]
+fn s027_t14_r14_broken_channel_leaves_its_run() {
+    let id = super::config(1).channel_id();
+    let fixture = saved(None);
+    fixture.plant_channel(1, Vec::new());
+    let mut device = fixture.open().unwrap();
+    fixture.faults.poison_after(1);
+    fixture.faults.fail_create(true);
+    assert!(device.rename_channel(id, "hall").is_err());
+    assert_eq!(device.status().broken.len(), 1);
+    assert!(device.connections().is_empty());
+
+    let fixture = saved(None);
+    fixture.plant_channel(1, Vec::new());
+    let mut device = fixture.open().unwrap();
+    fixture.faults.fail_at(1);
+    assert!(device.rename_channel(id, "hall").is_err());
+    assert!(device.channels()[0].write_failed);
+    fixture.faults.fail_at(1);
+    fixture.faults.fail_create(true);
+    assert_eq!(device.leave(id), Err(Error::Store(StoreError::Io)));
+    assert_eq!(device.status().broken.len(), 1);
+    assert!(device.connections().is_empty());
+
+    let fixture = saved(None);
+    fixture.plant_channel(1, Vec::new());
+    fixture.faults.fail_loads(true);
+    let mut device = fixture.open().unwrap();
+    assert!(device.connections().is_empty());
+    fixture.faults.fail_loads(false);
+    import(&mut device, 1, "wss://example.org");
+    assert_eq!(device.connections()[0].channels, [id]);
+}
+
+/// Spec 027, R10, R12: every username is 8 lowercase hex characters, a
+/// byte below 16 included.
+#[test]
+fn s027_t12_r12_probe_username_is_eight_hex() {
+    let fixture = saved(Some(PROXY));
+    let device = fixture.open().unwrap();
+    for _ in 0..64 {
+        let route = device.probe_plan("wss://example.org").unwrap().unwrap();
+        let username = route.socks_username.unwrap();
+        assert_eq!(username.len(), 8, "{username}");
+        assert!(
+            username
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        );
+    }
+}
+
+/// Spec 027, R2: a newer app's `settings.bin`, acknowledged, releases the
+/// plan with nothing saved.
+#[test]
+fn s027_t02_r02_newer_settings_release_the_plan() {
+    let fixture = Fixture::new();
+    fixture.plant_channel(1, Vec::new());
+    fixture.plant_newer_settings();
+    let mut device = fixture.open().unwrap();
+    assert!(device.connections().is_empty());
+    device.acknowledge_settings(false).unwrap();
+    let plans = device.connections();
+    assert_eq!(plans.len(), 1);
+    assert_eq!(plans[0].channels, [super::config(1).channel_id()]);
 }
