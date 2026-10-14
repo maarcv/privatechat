@@ -164,8 +164,8 @@ impl Device {
         let wanted: Vec<([u8; 16], Route)> = self
             .channels
             .iter()
-            .filter_map(|open| {
-                let config = open.channel.config();
+            .filter_map(|channel| {
+                let config = channel.config();
                 let route = reach(config.server_url(), proxy.as_deref())?;
                 Some((config.channel_id(), route))
             })

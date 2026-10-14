@@ -9,6 +9,8 @@
 //! calls (R9), `recovery.rs` the reopening of a failed store (R14, R15)
 //! and `plan.rs` the routes (R10).
 
+use std::collections::BTreeMap;
+
 use crate::error::Error;
 use crate::session::channel::Channel;
 use crate::session::connection::Event;
@@ -67,7 +69,9 @@ struct Broken {
 /// `Clone`, `Debug` nor `Display` (R20): its channels hold their keys.
 pub struct Device {
     vault: Box<dyn Vault>,
-    channels: Vec<Open>,
+    channels: Vec<Channel>,
+    /// The probe time of each `write_failed` channel (R14).
+    marks: BTreeMap<[u8; 16], u64>,
     broken: Vec<Broken>,
     settings: SettingsHolder,
     /// The events produced outside a call that returns events, for the
@@ -82,13 +86,6 @@ pub struct Device {
     next_plan_id: u64,
 }
 
-/// An open channel and what the device keeps beside it.
-struct Open {
-    channel: Channel,
-    /// While the channel is `write_failed`, the time of its next probe
-    /// (R14).
-    probe_at: Option<u64>,
-}
 
 impl Device {
     /// Opens every channel of `vault` and loads the settings (R1).
@@ -108,6 +105,7 @@ impl Device {
         let mut device = Device {
             vault,
             channels: Vec::new(),
+            marks: BTreeMap::new(),
             broken: Vec::new(),
             settings,
             queued: Vec::new(),
@@ -118,10 +116,7 @@ impl Device {
         for store in stores {
             let dir = *store.name();
             match Channel::open_stored(store) {
-                Ok(channel) => device.channels.push(Open {
-                    channel,
-                    probe_at: None,
-                }),
+                Ok(channel) => device.channels.push(channel),
                 Err(Error::Store(reason)) => device.broken.push(Broken::at_open(dir, reason)),
                 // R1: any other error fails `open`; `open_stored` returns
                 // none today.
@@ -131,8 +126,8 @@ impl Device {
         let due: Vec<[u8; 16]> = device
             .channels
             .iter()
-            .filter(|open| open.channel.purge_due(now))
-            .map(|open| open.channel.config().channel_id())
+            .filter(|channel| channel.purge_due(now))
+            .map(|channel| channel.config().channel_id())
             .collect();
         for id in due {
             // R15: a failed purge never fails `open`; R14 handles it.

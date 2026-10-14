@@ -4,7 +4,7 @@
 //! moved to `broken` when the reopen fails; and the status compared around
 //! every direct writer.
 
-use super::{Broken, BrokenChannel, Device, Open};
+use super::{Broken, BrokenChannel, Device};
 use crate::error::Error;
 use crate::session::channel::Channel;
 use crate::session::connection::Event;
@@ -36,9 +36,9 @@ impl Device {
         let Some(open) = self.channels.get_mut(position) else {
             return (Err(Error::UnknownChannel), Vec::new());
         };
-        let before = open.channel.status();
-        let marked = open.probe_at.is_some();
-        let mut result = call(&mut open.channel);
+        let before = open.status();
+        let marked = self.marks.contains_key(&channel);
+        let mut result = call(open);
         let mut events = Vec::new();
         let failed = matches!(
             result,
@@ -58,20 +58,20 @@ impl Device {
             return (result, events);
         };
         if failed {
-            if let Some(value) = outcome(&open.channel) {
+            if let Some(value) = outcome(open) {
                 result = Ok(value);
             }
             // A fresh instance starts with its peers flag set (spec
             // 021-channel-session R1); a first failure already asks the
             // client to re-read everything with `StorageFailed`.
-            open.channel.take_peers_changed();
+            open.take_peers_changed();
             // A marked channel reopens with no `StorageFailed`: a call that
             // stood changed what the client shows (a status, a peer, one's
             // own name), which the fresh instance's flag cannot tell.
             if marked && result.is_ok() {
                 events.push(Event::StatusChanged { channel });
             }
-        } else if open.channel.take_peers_changed() || open.channel.status() != before {
+        } else if open.take_peers_changed() || open.status() != before {
             events.push(Event::StatusChanged { channel });
         }
         (result, events)
@@ -87,15 +87,13 @@ impl Device {
             return Err(StoreError::Io);
         }
         let open = self.channels.remove(position);
-        let id = open.channel.config().channel_id();
-        let dir = *open.channel.dir_name();
-        let carry = open.channel.session_carry();
+        let id = open.config().channel_id();
+        let dir = *open.dir_name();
+        let carry = open.session_carry();
         let name = open
-            .channel
             .local_name()
-            .unwrap_or_else(|| open.channel.config().suggested_name());
+            .unwrap_or_else(|| open.config().suggested_name());
         let channel_name = shown_name(name);
-        let probe_at = open.probe_at;
         // The store holds its directory until it is dropped.
         drop(open);
         let reopened = self
@@ -106,7 +104,7 @@ impl Device {
         match reopened {
             Ok(mut channel) => {
                 channel.carry_session(carry);
-                self.channels.insert(position, Open { channel, probe_at });
+                self.channels.insert(position, channel);
                 Ok(())
             }
             Err(error) => {
@@ -114,6 +112,7 @@ impl Device {
                     Error::Store(reason) => reason,
                     _ => StoreError::Corrupt,
                 };
+                self.marks.remove(&id);
                 self.broken.push(Broken {
                     dir,
                     info: BrokenChannel {
@@ -134,8 +133,8 @@ impl Device {
     /// minute after the latest `now` (R14).
     fn mark(&mut self, position: usize) {
         let probe_at = self.latest_now.saturating_add(FIRST_PROBE_MS);
-        if let Some(open) = self.channels.get_mut(position) {
-            open.probe_at = Some(probe_at);
+        if let Some(channel) = self.channels.get(position) {
+            self.marks.insert(channel.config().channel_id(), probe_at);
         }
     }
 }

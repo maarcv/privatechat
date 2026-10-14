@@ -29,7 +29,7 @@ fn s027_t14_r14_direct_writer_poisoned() {
     // The poisoned commit stood: the reopened state shows it.
     assert_eq!(device.peers(id).unwrap()[0].label.as_deref(), Some("ann"));
     assert!(device.messages(id, NOW).unwrap().is_empty());
-    let probe_at = device.channels.first().and_then(|open| open.probe_at);
+    let probe_at = super::first_probe_at(&device);
     assert_eq!(probe_at, Some(NOW + 60_000));
 }
 
@@ -83,7 +83,7 @@ fn s027_t14_r14_probe_time_from_the_latest_now() {
     device.label(id, PEER, "ann", NOW + 5_000).unwrap();
     fixture.faults.fail_commits(true);
     assert!(device.mute(id, PEER, true).is_err());
-    let probe_at = device.channels.first().and_then(|open| open.probe_at);
+    let probe_at = super::first_probe_at(&device);
     assert_eq!(probe_at, Some(NOW + 65_000));
 }
 
@@ -255,7 +255,7 @@ fn s027_t15_r15_purge_failure_at_open() {
             .contains(&Event::StorageFailed { channel: id })
     );
     assert_eq!(
-        device.channels.first().and_then(|open| open.probe_at),
+        super::first_probe_at(&device),
         Some(NOW + 60_000)
     );
 }
@@ -393,7 +393,7 @@ fn s027_t14_r14_every_now_times_the_probe() {
         call(&mut device, id, NOW + 5_000);
         fixture.faults.fail_commits(true);
         assert!(device.rename_channel(id, "hall").is_err(), "{name}");
-        let probe_at = device.channels.first().and_then(|open| open.probe_at);
+        let probe_at = super::first_probe_at(&device);
         assert_eq!(probe_at, Some(NOW + 65_000), "{name}");
     }
 }
@@ -646,7 +646,7 @@ fn s027_t14_r14_marked_failure_keeps_the_mark() {
     assert!(device.mute(id, PEER, true).is_err());
     fixture.faults.fail_at(1);
     assert!(device.label(id, PEER, "ann", NOW + 30_000).is_err());
-    let probe_at = device.channels.first().and_then(|open| open.probe_at);
+    let probe_at = super::first_probe_at(&device);
     assert_eq!(probe_at, Some(NOW + 60_000));
     device.queued.clear();
     assert_eq!(device.purge_expired(id, NOW + 30_000), Ok(0));

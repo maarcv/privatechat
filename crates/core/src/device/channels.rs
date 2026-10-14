@@ -2,7 +2,7 @@
 //! importing, exporting, listing, renaming and leaving them, and the
 //! recovery of a first commit that poisoned its store.
 
-use super::{Broken, BrokenChannel, Device, Open, plan};
+use super::{Broken, BrokenChannel, Device, plan};
 use crate::error::Error;
 use crate::proto::config::Config;
 use crate::session::channel::{Channel, ChannelStatus};
@@ -55,7 +55,10 @@ impl Device {
     /// The open channels, in the order the device opened or created them
     /// (R7).
     pub fn channels(&self) -> Vec<ChannelInfo> {
-        self.channels.iter().map(|open| self.info(open)).collect()
+        self.channels
+            .iter()
+            .map(|channel| self.info(channel))
+            .collect()
     }
 
     /// Creates a channel on `server_url` (R4).
@@ -154,10 +157,7 @@ impl Device {
     /// `UnknownChannel`; the store's error.
     pub fn leave(&mut self, channel: [u8; 16]) -> Result<(), Error> {
         let position = self.position(channel)?;
-        let marked = self
-            .channels
-            .get(position)
-            .is_some_and(|open| open.probe_at.is_some());
+        let marked = self.marks.contains_key(&channel);
         let mut result = self.channel_mut(channel)?.leave();
         if marked && result == Err(Error::Store(StoreError::Io)) {
             if self.reopen(position).is_err() {
@@ -168,14 +168,14 @@ impl Device {
         }
         result?;
         self.channels.remove(position);
+        self.marks.remove(&channel);
         self.replan();
         Ok(())
     }
 
     /// The `ChannelInfo` of an open channel (R7), its names cleaned as spec
     /// 022-peers-tofu R6 says.
-    fn info(&self, open: &Open) -> ChannelInfo {
-        let channel = &open.channel;
+    fn info(&self, channel: &Channel) -> ChannelInfo {
         let config = channel.config();
         ChannelInfo {
             id: config.channel_id(),
@@ -185,7 +185,7 @@ impl Device {
             own_display_name: channel.own_display_name().and_then(shown_name),
             ttl_seconds: config.ttl_seconds(),
             status: channel.status(),
-            write_failed: open.probe_at.is_some(),
+            write_failed: self.marks.contains_key(&config.channel_id()),
             needs_proxy: plan::needs_proxy(
                 config.server_url(),
                 self.settings.current().socks5_proxy.as_deref(),
@@ -197,26 +197,20 @@ impl Device {
     pub(super) fn position(&self, channel: [u8; 16]) -> Result<usize, Error> {
         self.channels
             .iter()
-            .position(|open| open.channel.config().channel_id() == channel)
+            .position(|open| open.config().channel_id() == channel)
             .ok_or(Error::UnknownChannel)
     }
 
     /// The open channel `channel`.
     pub(super) fn channel(&self, channel: [u8; 16]) -> Result<&Channel, Error> {
         let position = self.position(channel)?;
-        self.channels
-            .get(position)
-            .map(|open| &open.channel)
-            .ok_or(Error::UnknownChannel)
+        self.channels.get(position).ok_or(Error::UnknownChannel)
     }
 
     /// The open channel `channel`, to change.
     pub(super) fn channel_mut(&mut self, channel: [u8; 16]) -> Result<&mut Channel, Error> {
         let position = self.position(channel)?;
-        self.channels
-            .get_mut(position)
-            .map(|open| &mut open.channel)
-            .ok_or(Error::UnknownChannel)
+        self.channels.get_mut(position).ok_or(Error::UnknownChannel)
     }
 
     /// R5 for a parsed `config`: an open channel answers at once, a broken
@@ -252,7 +246,7 @@ impl Device {
     fn existing(&self, config: &Config) -> Result<Imported, Error> {
         let position = self.position(config.channel_id())?;
         let open = self.channels.get(position).ok_or(Error::UnknownChannel)?;
-        if open.channel.config().server_url() != config.server_url() {
+        if open.config().server_url() != config.server_url() {
             return Err(Error::ConfigMismatch);
         }
         Ok(Imported {
@@ -279,10 +273,7 @@ impl Device {
         match opened {
             Ok(channel) => {
                 self.broken.remove(position);
-                self.channels.push(Open {
-                    channel,
-                    probe_at: None,
-                });
+                self.channels.push(channel);
                 self.replan();
                 Ok(true)
             }
@@ -309,12 +300,8 @@ impl Device {
             Err(Error::Store(StoreError::Io)) => (self.recover(config)?, true),
             Err(error) => return Err(error),
         };
-        let open = Open {
-            channel,
-            probe_at: None,
-        };
-        let info = self.info(&open);
-        self.channels.push(open);
+        let info = self.info(&channel);
+        self.channels.push(channel);
         self.replan();
         Ok((info, is_new))
     }

@@ -111,7 +111,7 @@ fn open_ids(device: &Device) -> Vec<[u8; 16]> {
     device
         .channels
         .iter()
-        .map(|open| open.channel.config().channel_id())
+        .map(|channel| channel.config().channel_id())
         .collect()
 }
 
@@ -349,4 +349,10 @@ fn s027_t03_r03_remove_io_broken() {
     let device = fixture.open().unwrap();
     assert!(device.channels.is_empty());
     assert!(device.status().broken.is_empty());
+}
+
+/// The probe time of the first open channel, when it is `write_failed`.
+fn first_probe_at(device: &Device) -> Option<u64> {
+    let id = device.channels.first()?.config().channel_id();
+    device.marks.get(&id).copied()
 }
