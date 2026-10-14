@@ -17,6 +17,20 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AW12 | A channel whose `leave` and silent reopen both failed comes back by the retry (B) | Far-fetched | None: the user had the error, R3 offers `remove_broken`, and the next unlock did as much |
 | AW13 | A flapping disk can re-mint a run once every ten minutes (B) | Far-fetched | None: bounded, and the server learns nothing new |
 
+**Round 2.** Fresh passes on the whole change. AW6–AW13 hold; no production defect. Pass C ran 14 new mutants: 9 killed, 2 equivalent, 3 survived plus 3 more of the order of retries, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AW14 | `leave` near the epoch, the time a failed import retry records, one retry a tick between two due entries, `remove_broken` making every retry due, which entry a retry removes or updates, and the retried channel's place in `channels()` were untested (C) | Medium | A T03 or T12 case of each |
+| AW15 | A T03 assertion after removing the only entry could not fail (A) | Low | It checks the entry and the channel are gone |
+| AW16 | `Broken::recorded_at`'s comment did not name `u64::MAX`; `make_probes_due` made the retries due too (A, C) | Low | The comment names it; renamed `make_reopens_due` |
+| AW17 | A retry failing with an error not the store's kept the reason `Io`, where `reopen` reads it `Corrupt` (A) | Low | `Corrupt`, as `reopen` |
+| AW18 | A clock that goes back at every tick retries a failing entry every tick, ahead of the probes (B) | Far-fetched | None: no platform clock does, and a single set-back costs one retry |
+
+The audit closes with this round (`CLAUDE.md`, the audit): pass B found only a far-fetched case, pass A test and comment gaps, and pass C test gaps, now closed.
+
+Decisions taken without the human: R12 takes a due retry of a `broken` entry before a due probe (AW8), the order T03 already asked for.
+
 ## Audit AV
 
 **2026-10-14 — Audit AV, the code audit of slice (d2a) of spec 027-core-api (branch `027-ticks`): the routing of the connections to one session per plan (R11), `on_tick` with its one compaction and one probe (R12, without the retry of `broken` entries), the store recovery through sessions and ticks (R14, R15), `flush` (R24) and `after_send` (R9); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit V's findings already took AV1–AV5, so this audit's are numbered from AV6. One production defect (AV6). Pass C ran 38 mutants: 20 killed, 2 equivalent, 16 survived, of which 15 are killed below and one is close to equivalent (AV15).

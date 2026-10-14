@@ -236,9 +236,11 @@ impl Device {
             }
             Err(error) => {
                 if let Some(broken) = self.broken.get_mut(position) {
-                    if let Error::Store(reason) = error {
-                        broken.info.reason = reason;
-                    }
+                    // As `reopen` reads a failure that is not the store's.
+                    broken.info.reason = match error {
+                        Error::Store(reason) => reason,
+                        _ => StoreError::Corrupt,
+                    };
                     broken.recorded_at = now;
                 }
                 Some(Vec::new())

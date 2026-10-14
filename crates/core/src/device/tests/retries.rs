@@ -7,7 +7,7 @@ use super::{NOW, config};
 use crate::device::Device;
 use crate::session::connection::Event;
 use crate::storage::StoreError;
-use crate::testing::Faults;
+use crate::testing::{FailingVault, Faults};
 
 /// Breaks channel 1 through a failing direct writer whose reopen fails,
 /// at `NOW`, with every later `Vault::create` failing too.
@@ -103,6 +103,8 @@ fn s027_t03_r03_leave_makes_the_retries_due() {
         device.on_tick(NOW + 2_000),
         [Event::StatusChanged { channel: id() }]
     );
+    // R7: the retry opened it last.
+    assert_eq!(device.channels().last().unwrap().id, id());
     assert!(
         device
             .channels()
@@ -115,8 +117,8 @@ fn s027_t03_r03_leave_makes_the_retries_due() {
     );
 }
 
-/// Spec 027, R3: an `Io` entry with a `channel_id` is removed by
-/// `remove_broken`, and another entry's retry is due at the next tick.
+/// Spec 027, R3: a `remove_broken` makes another entry's retry due at the
+/// next tick, and an `Io` entry with a `channel_id` is removed by it.
 #[test]
 fn s027_t03_r03_remove_broken_makes_the_retries_due() {
     let (fixture, mut device) = opened();
@@ -137,7 +139,7 @@ fn s027_t03_r03_remove_broken_makes_the_retries_due() {
     fixture.faults.fail_create(false);
     device.remove_broken(&name).unwrap();
     assert!(device.status().broken.is_empty());
-    assert!(device.on_tick(NOW + TEN_MINUTES).is_empty());
+    assert!(device.channels().is_empty());
 }
 
 /// Spec 027, R5: an `Io` entry from `open`, whose import retry fails with
@@ -157,6 +159,75 @@ fn s027_t05_r05_failed_import_retry_is_retried_on_the_tick() {
         device.on_tick(NOW + TEN_MINUTES),
         [Event::StatusChanged { channel: id() }]
     );
+}
+
+/// Spec 027, R12: an import retry that fails later than `open` records
+/// its own time, from which the tick's retry waits ten minutes.
+#[test]
+fn s027_t12_r12_failed_import_retry_records_its_time() {
+    let (fixture, device) = opened();
+    drop(device);
+    fixture.faults.fail_loads(true);
+    let mut device = fixture.open().unwrap();
+    let qr = config(1).export_qr(NOW).unwrap();
+    let later = NOW + 5 * MINUTE;
+    assert!(device.import_qr(&qr, false, later).is_err());
+    fixture.faults.fail_loads(false);
+    assert!(device.on_tick(NOW + TEN_MINUTES).is_empty());
+    assert_eq!(
+        device.on_tick(later + TEN_MINUTES),
+        [Event::StatusChanged { channel: id() }]
+    );
+}
+
+/// Spec 027, R12: of two due retries, one runs a tick and the other
+/// waits for the next.
+#[test]
+fn s027_t12_r12_one_retry_a_tick() {
+    let (fixture, device) = opened();
+    drop(device);
+    fixture.plant_channel(2, Vec::new());
+    fixture.faults.fail_loads(true);
+    let mut device = fixture.open().unwrap();
+    for k in [1, 2] {
+        let qr = config(k).export_qr(NOW).unwrap();
+        assert!(device.import_qr(&qr, false, NOW).is_err());
+    }
+    fixture.faults.fail_loads(false);
+    let first = device.on_tick(NOW + TEN_MINUTES);
+    assert_eq!(first.len(), 1);
+    assert_eq!(device.status().broken.len(), 1);
+    let second = device.on_tick(NOW + TEN_MINUTES + 1_000);
+    assert_eq!(second.len(), 1);
+    assert_ne!(first, second);
+    assert!(device.status().broken.is_empty());
+}
+
+/// Spec 027, R3: a `remove_broken` makes every other entry's retry due,
+/// one a tick.
+#[test]
+fn s027_t03_r03_remove_broken_makes_every_retry_due() {
+    let (fixture, device) = opened();
+    drop(device);
+    fixture.plant_channel(2, Vec::new());
+    fixture.plant_channel(3, Vec::new());
+    fixture.faults.fail_loads(true);
+    let mut device = fixture.open().unwrap();
+    for k in [1, 2] {
+        let qr = config(k).export_qr(NOW).unwrap();
+        assert!(device.import_qr(&qr, false, NOW).is_err());
+    }
+    fixture.faults.fail_loads(false);
+    let unknown = device
+        .status()
+        .broken
+        .into_iter()
+        .find(|entry| entry.channel_id.is_none())
+        .unwrap();
+    device.remove_broken(&unknown.name).unwrap();
+    assert_eq!(device.on_tick(NOW + 1_000).len(), 1);
+    assert_eq!(device.on_tick(NOW + 2_000).len(), 1);
+    assert!(device.status().broken.is_empty());
 }
 
 /// Spec 027, R12: the entry a failed reopen of R14 records is not retried
@@ -196,7 +267,8 @@ fn s027_t12_r12_create_retry_entry_waits_ten_minutes() {
 }
 
 /// Spec 027, R12: an `Io` entry without a `channel_id`, listed first,
-/// does not hold back the retry of one that carries it.
+/// does not hold back the retry of one that carries it, and a failed
+/// retry updates the retried entry, not the first.
 #[test]
 fn s027_t12_r12_entry_without_id_does_not_block_retries() {
     let (fixture, device) = opened();
@@ -216,13 +288,19 @@ fn s027_t12_r12_entry_without_id_does_not_block_retries() {
         .unwrap();
     let qr = config(k).export_qr(NOW).unwrap();
     assert!(device.import_qr(&qr, false, NOW).is_err());
+    assert!(device.on_tick(NOW + TEN_MINUTES).is_empty());
     fixture.faults.fail_loads(false);
+    assert!(device.on_tick(NOW + TEN_MINUTES + 1_000).is_empty());
     assert_eq!(
-        device.on_tick(NOW + TEN_MINUTES),
+        device.on_tick(NOW + 2 * TEN_MINUTES),
         [Event::StatusChanged {
             channel: config(k).channel_id()
         }]
     );
+    // The retried entry left `broken`, the others stayed.
+    let broken = device.status().broken;
+    assert_eq!(broken.len(), 3);
+    assert!(broken.iter().all(|entry| entry.channel_id.is_none()));
 }
 
 /// Spec 027, R12: a retry that fails is the tick's one reopen, the probe
@@ -248,5 +326,26 @@ fn s027_t12_r12_failed_retry_is_the_ticks_reopen() {
     assert_eq!(
         device.on_tick(NOW + TEN_MINUTES + 1_000),
         [Event::StatusChanged { channel: marked }]
+    );
+}
+
+/// Spec 027, R3: under ten minutes past the epoch, a `leave` still makes
+/// the retry due at the next tick.
+#[test]
+fn s027_t03_r03_leave_makes_the_retry_due_near_the_epoch() {
+    let (fixture, _) = super::dispatch::with_peer();
+    fixture.plant_channel(2, Vec::new());
+    let vault = FailingVault::new(Box::new(fixture.vault.clone()), fixture.faults.clone());
+    let mut device = Device::open(Box::new(vault), MINUTE).unwrap();
+    fixture.faults.poison_after(1);
+    fixture.faults.fail_create(true);
+    assert!(device.label(id(), PEER, "ann", MINUTE).is_err());
+    device.on_tick(MINUTE);
+    assert_eq!(device.status().broken[0].channel_id, Some(id()));
+    fixture.faults.fail_create(false);
+    device.leave(config(2).channel_id()).unwrap();
+    assert_eq!(
+        device.on_tick(MINUTE + 1_000),
+        [Event::StatusChanged { channel: id() }]
     );
 }

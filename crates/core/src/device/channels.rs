@@ -172,7 +172,7 @@ impl Device {
         self.cleared.remove(&channel);
         self.replan();
         // Space may have been freed (R3).
-        self.make_probes_due();
+        self.make_reopens_due();
         Ok(())
     }
 

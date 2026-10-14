@@ -66,7 +66,8 @@ pub struct BrokenChannel {
 struct Broken {
     dir: DirName,
     info: BrokenChannel,
-    /// When its reason was last recorded, which times the retry of an
+    /// When its reason was last recorded, or `u64::MAX` once a `leave` or
+    /// a `remove_broken` made its retry due (R3); it times the retry of an
     /// `Io` entry that carries its `channel_id` (R12).
     recorded_at: u64,
 }
@@ -180,7 +181,7 @@ impl Device {
         self.vault.remove(&dir)?;
         self.broken.remove(position);
         // Space may have been freed (R3).
-        self.make_probes_due();
+        self.make_reopens_due();
         Ok(())
     }
 }
