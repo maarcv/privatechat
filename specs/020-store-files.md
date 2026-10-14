@@ -175,6 +175,7 @@ pub struct StorageKey { /* Secret<32> */ }
 impl StorageKey { pub fn from_bytes(bytes: &mut [u8; 32]) -> StorageKey; }
 
 pub struct DirName(pub [u8; 16]);                  // the directory hash of R18
+impl DirName { pub fn to_hex(&self) -> String; }   // its 32 lowercase hex characters (R18), added by spec 027-core-api
 pub struct Settings { /* default_server_url, lock_timeout_seconds, socks5_proxy; pub(crate) */ }
 pub struct ChannelState { /* the fields of the state record, pub(crate) */ }
 pub struct LogRecord { /* the fields of the log record except generation and offset, which open checks and seal writes from their parameters; pub(crate) */ }
@@ -378,4 +379,4 @@ Decided on 2026-09-25: 020-R5, R9 and R18 (log header, generation and offset, ke
 - 2026-10-01 revised after audit AA round 3 (`docs/audit-log.md`), decision of the human reviewer: R23 lists the modules of `std` the store may name outside `fs.rs` instead of the names it may not (AA-Q3)
 - 2026-10-03 the second reading of R10–R15 the acceptance criterion asks for, by the human reviewer and two independent agent readings (`docs/audit-log.md`): a directory is synced after the first commit's log (R13) and after a compaction's new log (R15) is created, and after R14's rename, so that no state rename becomes durable before the name it depends on; a destroy whose `channels/` sync fails deletes nothing (R21); a compaction at generation `u32::MAX` is `Corrupt`; a store with no load reads its position from its files (R10); the Security section names `F_FULLFSYNC` and what a failed `fsync` leads to
 - 2026-10-03 implemented: slices (a)–(g) with audits X and AA, the reading of R10–R15 done (Marc Vilardebó)
-- 2026-10-14 amended by spec 027-core-api slice (a), audit AR: the doubles gain `get_raw`, `put_settings_record`, `settings_raw` and `fail_loads`, which the tests of `Device` need
+- 2026-10-14 amended by spec 027-core-api slice (a), audit AR: the doubles gain `get_raw`, `put_settings_record`, `settings_raw` and `fail_loads`, which the tests of `Device` need; `DirName::to_hex` in the Interface

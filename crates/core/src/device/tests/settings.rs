@@ -492,3 +492,49 @@ fn s027_t13_r13_bad_proxy_at_the_gate() {
     assert!(device.status().settings_reset);
     assert!(fixture.vault.settings_raw().is_none());
 }
+
+/// Spec 027, R2: two changes of one field at the gate are applied onto the
+/// adopted file in order.
+#[test]
+fn s027_t02_r02_passing_io_applies_changes_in_order() {
+    let fixture = with_stored_proxy();
+    fixture.faults.fail_load_settings(true);
+    let mut device = fixture.open().unwrap();
+    fixture.faults.fail_load_settings(false);
+    device.set_lock_timeout_seconds(10).unwrap();
+    device.set_lock_timeout_seconds(20).unwrap();
+    device.acknowledge_settings(false).unwrap();
+    assert_eq!(fixture.stored_settings().unwrap().lock_timeout_seconds, 20);
+}
+
+/// Spec 027, R2: a re-read after `Io` that finds no file saves the settings.
+#[test]
+fn s027_t02_r02_passing_io_over_an_absent_file() {
+    let fixture = Fixture::new();
+    fixture.plant_channel(1, Vec::new());
+    fixture.faults.fail_load_settings(true);
+    let mut device = fixture.open().unwrap();
+    fixture.faults.fail_load_settings(false);
+    device.acknowledge_settings(false).unwrap();
+    let stored = fixture.stored_settings().unwrap();
+    assert!(settings_eq(
+        &stored,
+        &settings(crate::DEFAULT_SERVER_URL, 60, None)
+    ));
+}
+
+/// Spec 027, R2: only an `Io` is re-read; a corrupt file is replaced.
+#[test]
+fn s027_t02_r02_corrupt_is_not_reread() {
+    let fixture = Fixture::new();
+    fixture.plant_channel(1, Vec::new());
+    fixture.vault.put_settings_raw(b"corrupt");
+    let mut device = fixture.open().unwrap();
+    fixture.save_settings(&settings(OTHER_SERVER, 30, Some(PROXY)));
+    device.acknowledge_settings(false).unwrap();
+    let stored = fixture.stored_settings().unwrap();
+    assert!(settings_eq(
+        &stored,
+        &settings(crate::DEFAULT_SERVER_URL, 60, None)
+    ));
+}

@@ -138,14 +138,15 @@ impl SettingsHolder {
     }
 
     /// Lowers the gate of R2 for `acknowledge_settings` (`proxy` `None`)
-    /// or `set_socks5_proxy` (`proxy` its change), or, outside the gate,
-    /// saves what R1 and R2 say; on a failed save nothing changes.
+    /// or `set_socks5_proxy` (`proxy` the value it sets), or, outside the
+    /// gate, saves what R1 and R2 say; on a failed save nothing changes.
     fn release(
         &mut self,
         vault: &mut dyn Vault,
-        proxy: Option<Change>,
+        proxy: Option<Option<String>>,
         replace_newer: bool,
     ) -> Result<(), Error> {
+        let proxy = proxy.map(Change::Socks5Proxy);
         let Mode::Reset { reason, changes } = &self.mode else {
             return self.acknowledge_outside_gate(vault, replace_newer);
         };
@@ -269,13 +270,14 @@ impl Device {
         if proxy.is_some_and(|proxy| !url::is_proxy(proxy)) {
             return Err(Error::BadConfig);
         }
-        let change = Change::Socks5Proxy(proxy.map(str::to_owned));
+        let proxy = proxy.map(str::to_owned);
         if self.settings.is_reset() {
             return self
                 .settings
-                .release(self.vault.as_mut(), Some(change), false);
+                .release(self.vault.as_mut(), Some(proxy), false);
         }
-        self.settings.set(self.vault.as_mut(), change)
+        self.settings
+            .set(self.vault.as_mut(), Change::Socks5Proxy(proxy))
     }
 
     /// The user has seen that the settings were lost or written by a newer

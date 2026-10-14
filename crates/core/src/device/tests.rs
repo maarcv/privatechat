@@ -334,6 +334,10 @@ fn s027_t03_r03_remove_io_broken() {
     assert_eq!(broken[0].reason, StoreError::Io);
     assert_eq!(broken[0].channel_id, None);
     assert_eq!(broken[0].channel_name, None);
+    // The fault cleared, the next `open` opens it again (R12).
+    let reopened = fixture.open().unwrap();
+    assert_eq!(open_ids(&reopened), [config(1).channel_id()]);
+    drop(reopened);
     device.remove_broken(&name.to_hex()).unwrap();
     assert!(device.status().broken.is_empty());
     drop(device);

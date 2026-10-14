@@ -20,6 +20,17 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AR21 | `remove_broken` looked its entry up twice; `has_settings` repeated `settings_raw`; a bad proxy at the gate was untested (C) | Low | One lookup; `has_settings` removed; a T13 case |
 | AR22 | A local writer that hides the channel directories for one unlock, while the user changes a setting, gets the defaults saved without the proxy (B) | Far-fetched | None: R1 promises only that the device writes nothing on its own, and a rollback of `settings.bin` does as much, documented in the Security section |
 
+**Round 2.** Fresh passes on the whole change. AR12–AR22 hold; pass B found nothing. Pass C ran 32 new mutants: 28 killed, 4 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AR23 | `DirName::to_hex`, `pub` for `store`, was in neither Interface (A) | Low | Spec 027 lists it among the items `pub` for `store`, spec 020's Interface beside `DirName`, each with a History line |
+| AR24 | A re-read after `Io` that finds no file, a `Corrupt` gate not re-read, and two changes of one field applied in order were untested (C) | Medium | A T02 case for each |
+| AR25 | `fail_loads(false)` was never seen to clear the fault (C) | Low | T03 reopens once it is cleared and the channel opens |
+| AR26 | `release` took any `Change` where only the proxy's is legal (C) | Low | It takes the proxy value and builds the change |
+
+The audit closes with this round (`CLAUDE.md`, the audit): pass A's finding changes no behaviour, as in audits AO and AP, pass B found nothing, and pass C's are test gaps, now closed, and a narrower type.
+
 ## Audit AQ
 
 **2026-10-13 — Audit AQ, the code audit of slice (e) of spec 028-session-sans-io (branch `028-no-oracle`): the no-oracle property (R18), the proptest T18; round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** No production code changed and no production defect found: a push's bytes reach the session only through the channel's verdict, which changes a frame only on a store error, outside R18's headroom condition. Pass C ran 13 mutants: 8 killed, 1 equivalent, 4 survived, each killed below.
