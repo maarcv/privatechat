@@ -113,6 +113,24 @@ impl MemoryVault {
         lock(&self.shared).settings = Some(bytes.to_vec());
     }
 
+    /// Plants `record`, sealed under the vault's key, as the settings: the
+    /// file of another version of the app.
+    pub fn put_settings_record(&self, record: &[u8]) -> Result<(), StoreError> {
+        let sealed = Settings::seal_record(&fixed_key(), record)?;
+        lock(&self.shared).settings = Some(sealed);
+        Ok(())
+    }
+
+    /// Whether the vault holds a settings file.
+    pub fn has_settings(&self) -> bool {
+        lock(&self.shared).settings.is_some()
+    }
+
+    /// The `nonce ‖ box` of the settings, `None` when absent.
+    pub fn settings_raw(&self) -> Option<Vec<u8>> {
+        lock(&self.shared).settings.clone()
+    }
+
     /// The store of `name` over these bytes.
     fn store(&self, name: DirName) -> MemoryStore {
         MemoryStore {

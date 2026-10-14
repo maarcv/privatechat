@@ -61,6 +61,13 @@ impl Settings {
         seal_box(&settings_key(key)?, &record)
     }
 
+    /// Seals an arbitrary record as `nonce ‖ box`, for the doubles that
+    /// plant the file of another version.
+    #[cfg(any(test, fuzzing, feature = "test-support"))]
+    pub(crate) fn seal_record(key: &StorageKey, record: &[u8]) -> Result<Vec<u8>, StoreError> {
+        seal_box(&settings_key(key)?, record)
+    }
+
     /// Decodes a settings record under `Reject`, key 0 first (R8).
     pub(crate) fn decode(buf: &[u8]) -> Result<Settings, StoreError> {
         let mut reader = Reader::new(buf, MAX_SETTINGS_RECORD, UnknownKeys::Reject)?;

@@ -20,6 +20,7 @@ pub(crate) mod state;
 
 pub use self::log::LogRecord;
 pub(crate) use self::log::{Content, LogEntry, Message};
+pub(crate) use self::settings::MAX_LOCK_TIMEOUT_SECONDS;
 pub use self::settings::Settings;
 pub use self::state::ChannelState;
 
