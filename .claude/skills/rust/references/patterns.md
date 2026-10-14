@@ -9,7 +9,7 @@ Contents:
 1. `Secret<N>` — key material
 2. Fixed-offset parsing — the wire envelope (§4)
 3. `Store` trait and `WriteBatch` — one commit per operation
-4. Sans-I/O `Session`
+4. Sans-I/O `Session` behind one `Device`
 5. Encrypt: reserve before you emit
 6. Test vector loader
 
@@ -210,7 +210,7 @@ server binary.
 A sketch; spec 021-channel-session is normative.
 
 ```rust
-pub fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> Result<ClientRef, Error> {
+pub(crate) fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> Result<ClientRef, Error> {
     let payload = Payload::text(body, display_name, now)?; // the core builds and validates it
     let counter = self.state.send_counter;
     let next = counter.checked_add(1).ok_or(Error::CounterExhausted)?;

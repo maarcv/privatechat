@@ -64,12 +64,12 @@ pub use storage::{
 pub const DEFAULT_SERVER_URL: &str = "wss://server.invalid";
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::DEFAULT_SERVER_URL;
 
     /// The code lines of one `[section]` of a TOML file, comments and blank
     /// lines dropped, so that a commented-out copy of a line never counts.
-    fn section<'a>(toml: &'a str, header: &str) -> Vec<&'a str> {
+    pub(crate) fn section<'a>(toml: &'a str, header: &str) -> Vec<&'a str> {
         let mut lines = Vec::new();
         let mut inside = false;
         for line in toml.lines() {

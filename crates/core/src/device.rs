@@ -74,10 +74,8 @@ struct Broken {
 }
 
 /// This device: the vault, the open channels in the order they were opened
-/// or created, the broken ones and the settings. It implements neither
-/// `Clone`, `Debug` nor `Display` (R20): its channels hold their keys.
-///
-/// Neither copied nor printed (R20):
+/// or created, the broken ones and the settings. Its channels hold their
+/// keys, so it is neither copied nor printed (R20):
 ///
 /// ```compile_fail
 /// fn copy(device: &privatechat_core::Device) -> privatechat_core::Device {
@@ -88,6 +86,12 @@ struct Broken {
 /// ```compile_fail
 /// fn show(device: &privatechat_core::Device) -> String {
 ///     format!("{device:?}")
+/// }
+/// ```
+///
+/// ```compile_fail
+/// fn show(device: &privatechat_core::Device) -> String {
+///     device.to_string()
 /// }
 /// ```
 ///

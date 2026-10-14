@@ -192,9 +192,8 @@ pub(crate) fn ct_eq<const N: usize>(a: &[u8; N], b: &[u8; N]) -> bool {
 ///
 /// `CryptoError::InitFailed` when libsodium cannot initialise.
 pub(crate) fn random_bytes<const N: usize>() -> Result<[u8; N], CryptoError> {
-    init()?;
     let mut bytes = [0u8; N];
-    ffi::random_bytes(&mut bytes);
+    fill_random(&mut bytes)?;
     Ok(bytes)
 }
 

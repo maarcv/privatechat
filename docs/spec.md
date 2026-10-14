@@ -450,7 +450,7 @@ flowchart TD
 | --- | --- | --- |
 | `core` | Stable Rust pinned in `rust-toolchain.toml` (exact version in spec 000), `libsodium-sys-stable` and `zeroize`; the name comparison of §7 uses the standard library only (ADR 0043); nothing else (own record encoding, ADR 0023) | One implementation, controlled memory, no GC leaving keys on the heap |
 | `store` | Separate Rust crate: `std::fs` and the seal and open functions of `core` (spec 020-store-files), never libsodium on its own. Implements the `Store` trait of `core` with two files per channel and atomic commit via `rename` (ADR 0021). No SQLite, no C outside libsodium | Outside `core` because it does I/O (AGENTS 10); a single implementation for the three platforms, fuzzable from Rust |
-| Mobile bindings | `uniffi` (proc macros; no UDL). `Device` is the one opaque handle (uniffi `Object`, ADR 0037); every other type of spec 027 is a `Record` or an enum. | Generates Kotlin and Swift; secrets do not cross the boundary by value |
+| Mobile bindings | `uniffi` (proc macros; no UDL). `Device` is the one opaque handle (uniffi `Object`, ADR 0037); the records and enums its calls take and return are `Record`s and enums, and nothing else of `core` crosses. | Generates Kotlin and Swift; secrets do not cross the boundary by value |
 | Desktop | Tauri 2 + Svelte 5 + TypeScript; the core is linked in as a Rust crate, no wasm | Pinned and signed code, OS keychain, one more reproducible build |
 | Android | Kotlin, Jetpack Compose, minSdk 26. No Room or SQLite: storage belongs to the core | Current standard |
 | iOS | Swift 5.10, SwiftUI, iOS 16+. No GRDB or SQLite: storage belongs to the core | Current standard |
@@ -458,7 +458,7 @@ flowchart TD
 | Protocol tests | JSON test vectors in `specs/vectors/`; the reference script of spec 015-test-vectors produces them, the Rust tests reproduce them, and Kotlin and Swift reproduce them through the bindings | Guarantees interoperability |
 | CI | GitHub Actions (§10 "CI per phase") | |
 
-**Core boundary** (public API, exposed via uniffi and Tauri commands; the normative signature is in spec 027-core-api). One opaque handle, `Device` (ADR 0037), owns the vault, every channel, the settings and one `Session` per connection, and every call names a channel by its `channel_id` and a connection by its plan `id`; everything else that crosses is a record or an enum. Every function that receives external data returns `Result<_, Error>`.
+**Core boundary** (public API, exposed via uniffi and Tauri commands; the normative signature is in spec 027-core-api). One opaque handle, `Device` (ADR 0037), owns the vault, every channel, the settings and one `Session` per connection, and every call names a channel by its `channel_id` and a connection by its plan `id`; the records and enums its calls take and return are the only other types that cross, and the items `pub` for `store` and `server` (`StorageKey`, `Store`, `Vault`, `ChannelState`, `LogRecord`, `Settings`, `WriteBatch`) never do. Every function that receives external data returns `Result<_, Error>`, but `on_frame` and `on_tick`, which return events only: a store failure inside them is `Event::StorageFailed` (spec 027 R14).
 
 ```rust
 pub enum Error {
@@ -508,7 +508,7 @@ impl Device {
 
 - The UI never touches a key. The core never touches the network or the UI: it receives bytes and returns bytes. The client opens one socket per `ConnectionPlan` along its route, passes frames in both directions, calls `on_tick` every second and reconnects with backoff when it receives `Event::Reconnect`.
 - No server URL in the code outside the `DEFAULT_SERVER_URL` constant (spec 000).
-- `Config`, `Channel`, `Session`, the record encoding and `core::crypto` are crate-internal. `store` and `server` reach `core` only through `pub` functions a spec defines (020-store-files; 028-session-sans-io for the frames; 030-ws-protocol); each such function that takes external bytes has a fuzz target (AGENTS 21); `unreachable_pub` is denied and an `api_surface.rs` test fixes every signature (spec 027 R16).
+- `Config`, `Channel`, `Session`, the record encoding and `core::crypto` are crate-internal. `store` and `server` reach `core` only through `pub` functions a spec defines (020-store-files; 028-session-sans-io for the frames; 030-ws-protocol); each such function that takes external bytes has a fuzz target or a named exclusion (AGENTS 21, spec 016 R6); `unreachable_pub` is denied and an `api_surface.rs` test fixes every signature (spec 027 R16).
 - The core does no I/O and does not read the clock: no `std::net`, `std::fs`, `tokio`, `SystemTime::now`. Time enters as a parameter (`now`). Checked by the dependency test of spec 010 R16 and clippy `disallowed_methods` (AGENTS 10).
 - One data directory per device with a `LOCK` file (advisory), one process: no widget or share extension in v1.
 - A channel has no state that has not gone through `commit`: in memory there is the copy loaded at `open`, and every change is written before returning the result; a store that fails is reopened and its channel marked `write_failed` until a probe commit succeeds (spec 027 R14).

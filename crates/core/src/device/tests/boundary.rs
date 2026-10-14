@@ -7,24 +7,11 @@ use crate::device::Device;
 use crate::error::Error;
 use crate::storage::StoreError;
 use crate::testing::settings;
-
-/// The code lines of `[section]` of a TOML file.
-fn section<'a>(toml: &'a str, header: &str) -> Vec<&'a str> {
-    let mut inside = false;
-    let mut lines = Vec::new();
-    for line in toml.lines().map(str::trim) {
-        if line.starts_with('[') {
-            inside = line == header;
-        } else if inside && !line.is_empty() && !line.starts_with('#') {
-            lines.push(line.split(" #").next().unwrap_or(line).trim());
-        }
-    }
-    lines
-}
+use crate::tests::section;
 
 /// Spec 027, R16: `unreachable_pub` is denied in the workspace.
 #[test]
-fn s027_t16_r16_unreachable_pub_denied() {
+fn s027_t16_r16_public_items() {
     let manifest = include_str!("../../../../../Cargo.toml");
     assert!(section(manifest, "[workspace.lints.rust]").contains(&"unreachable_pub = \"deny\""));
 }
@@ -34,7 +21,16 @@ fn s027_t16_r16_unreachable_pub_denied() {
 /// that reaches them.
 #[test]
 fn s027_t17_r17_amendments() {
-    assert!(!include_str!("../../lib.rs").contains("dead_code"));
+    // On the module's declaration or as an inner attribute of its file.
+    for source in [
+        include_str!("../../lib.rs"),
+        include_str!("../../crypto.rs"),
+        include_str!("../../proto.rs"),
+        include_str!("../../session.rs"),
+        include_str!("../../storage.rs"),
+    ] {
+        assert!(!source.contains("dead_code"));
+    }
     let exclusions = include_str!("../../../../../scripts/fuzz_exclusions.txt");
     for decoder in [
         "PeerRecord::decode",
@@ -148,6 +144,9 @@ fn s040_t08_r08_generate_storage_key_core() {
     let mut second = [0u8; 32];
     crate::device::generate_storage_key(&mut first).unwrap();
     crate::device::generate_storage_key(&mut second).unwrap();
-    assert_ne!(first, [0u8; 32]);
-    assert_ne!(first, second);
+    // Every 8 bytes are drawn: two draws agree on a quarter with
+    // probability 2^-64, and a quarter left as it was agrees always.
+    for (first, second) in first.chunks(8).zip(second.chunks(8)) {
+        assert_ne!(first, second);
+    }
 }

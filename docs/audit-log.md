@@ -2,6 +2,19 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AX
+
+**2026-10-14 — Audit AX, the code audit of slice (e) of spec 027-core-api (branch `027-boundary`): the boundary checks (`unreachable_pub`, `api_surface.rs`), the amendments of specs 011 and 016, the `dead_code` allows removed, `init` and `generate_storage_key`, and the doc updates (R16–R22); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit X's findings already took AX1–AX18, so this audit's are numbered from AX19. No production defect: no secret crosses, no gate changes production, no parser of external bytes is left unfuzzed and unexcluded. Pass C ran 24 mutants: 20 killed, 1 equivalent, 3 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AX19 | `generate_storage_key` filling half the key passed its test; `Display` on `Device` and a `dead_code` allow inside a module file were caught by no test (C) | Medium | The two draws compared by 8-byte quarters; a `compile_fail` doctest for `Display`; the four module files read for `dead_code` |
+| AX20 | T20's "without `init()`" ran in a process where another test had initialised libsodium (A) | Low | A test binary of its own in `store`, which creates a channel before anything else touches libsodium |
+| AX21 | §9 said every function receiving external data returns `Result`, every byte-reading `pub` function has a fuzz target, and every other type of spec 027 crosses the bindings (B) | Low | §9 names `on_frame` and `on_tick`, the named exclusions, and the items `pub` for `store` and `server` that never cross |
+| AX22 | R17 put `parse_verify_qr` on the exclusion list, where spec 016 R6 counts it reached by its module path; R22 tied the doc updates to the marking pull request, where the slice list gives them to (e) (A) | Low | R17 and R22 amended, with a History line |
+| AX23 | T16's test name was missing; the rust skill's contents and its §5 sketch still showed a `pub` session and `encrypt` (A) | Low | `s027_t16_r16_public_items`; the skill brought up to date |
+| AX24 | A second copy of the TOML section reader; the R20 rule written twice on `Device`; two random draws doing the same; the by-path `Channel::decrypt` call unexplained (C) | Low | One reader; one sentence; `random_bytes` through `fill_random`; a comment on the call |
+
 ## Audit AW
 
 **2026-10-14 — Audit AW, the code audit of slice (d2b) of spec 027-core-api (branch `027-retries`): the retry of `broken` entries on the tick (R12) and the retries `leave` and `remove_broken` make due (R3); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit W's findings already took AW1–AW5, so this audit's are numbered from AW6. No production defect. Pass C ran 19 mutants: 12 killed, 2 equivalent, 5 survived, each killed below.

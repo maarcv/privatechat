@@ -204,6 +204,7 @@ pub(crate) fn channel_decrypt_verdict(data: &[u8]) -> Option<Result<Option<Recei
     Some(text_k1_config().and_then(|config| {
         let own = Secret::from_bytes(text_k1::SENDER_SEED);
         let mut channel = Channel::for_fuzzing(&config, &own)?;
+        // By path, so that the reach check of spec 016 R6 sees it.
         Channel::decrypt(&mut channel, blob, *server_id, received_at, now)
     }))
 }
