@@ -44,6 +44,15 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AY42 | The crash run kept the records of the load that cut the log unread: a load that cut the file but returned the uncommitted record passed (mutant M4) (C) | Low | A second load must return the same records; `Corrupt` refused by the `expect` |
 | AY43 | `Duplicates` meant "none" by `index == u64::MAX` (C) | Low | `seed: Option<u64>` |
 
+**Round 4**, on the whole change with the findings above. Pass B rolled a side's `state.bin` back in an instrumented copy; pass C ran 13 production mutants: 6 killed, 3 survived (AY47), 3 out of R23 and 1 equivalent here, each killed by other tests. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AY44 | AY39's allowance applied whenever the receiving side's log was cut, but at the run's crash point the cut append is a send: a state reloaded two commits back, missing the other side's last acked message, passed (A, B) | Medium | No allowance: the crash stops a send, so every acked message of one side must be shown by the other |
+| AY45 | T23 names one test, `s027_t23_r23_phase2_exit`; the crash run is `…_after_a_crash` with its child (A) | Low | T23 names both, with the change that marks spec 027 implemented |
+| AY46 | The sender of a shown or delivered message was never checked: one's own shown as a peer's, or a peer's as a stranger, passed (B) | Low | A `Message` event must come from a peer; every listed body must come from its side, its own as `Own`, the other's from a known peer |
+| AY47 | Nothing read the status, the gaps or the delivery of one's own rows: a `clock_off` on every ack, a gap on every message, every delivered message shown as failed all passed (mutants M3, M4, M8) (C) | Low | `check_clean`: a clean `ChannelStatus`, no gap, every own message shown `Delivered`, in both runs |
+
 ## Audit AX
 
 **2026-10-14 — Audit AX, the code audit of slice (e) of spec 027-core-api (branch `027-boundary`): the boundary checks (`unreachable_pub`, `api_surface.rs`), the amendments of specs 011 and 016, the `dead_code` allows removed, `init` and `generate_storage_key`, and the doc updates (R16–R22); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit X's findings already took AX1–AX18, so this audit's are numbered from AX19. No production defect: no secret crosses, no gate changes production, no parser of external bytes is left unfuzzed and unexcluded. Pass C ran 24 mutants: 20 killed, 1 equivalent, 3 survived, each killed below.

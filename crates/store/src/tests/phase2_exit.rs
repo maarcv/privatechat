@@ -9,7 +9,8 @@ use std::path::Path;
 
 use privatechat_core::testing::{FailingVault, Faults, MemoryServer, records_eq, state_eq};
 use privatechat_core::{
-    Device, Error, Event, LogRecord, MessageContent, Sender, StoreError, Vault,
+    ChannelStatus, Delivery, Device, Error, Event, LogRecord, MessageContent, Sender, StoreError,
+    Vault,
 };
 use proptest::test_runner::{Config, TestRunner};
 
@@ -161,6 +162,8 @@ impl Side {
         for event in events {
             match event {
                 Event::Message { received, .. } => {
+                    // Only the other side's messages arrive.
+                    assert!(matches!(received.sender, Sender::Peer { .. }));
                     if let MessageContent::Text { body, .. } = received.content {
                         if let Some(n) = body.split_once('-').and_then(|(_, n)| n.parse().ok()) {
                             self.order.push(n);
@@ -377,6 +380,33 @@ fn check_counters(side: &Side, errors: u32, storage_failed: u32) {
     assert!(side.device.channels().iter().all(|info| !info.write_failed));
 }
 
+/// Checks that `device` raises no alarm in `channel` at `now`: a clean
+/// status, no gap, and every own message it shows delivered.
+fn check_clean(device: &Device, channel: [u8; 16], now: u64) {
+    let clean = ChannelStatus {
+        own_key_used_elsewhere: false,
+        read_only: false,
+        retirement_pending: false,
+        storage_full: false,
+        ignored_keys: 0,
+        unknown_limit_reached: false,
+        labelled_limit_reached: false,
+        clock_off: false,
+        truncated_before: None,
+    };
+    assert_eq!(device.channel_status(channel), Ok(clean));
+    assert_eq!(device.gaps(channel), Ok(Vec::new()));
+    let shown = device.messages(channel, now).expect("messages");
+    let own: Vec<_> = shown
+        .iter()
+        .filter(|message| matches!(message.sender, Sender::Own))
+        .collect();
+    assert!(!own.is_empty(), "no own message shown");
+    for message in own {
+        assert_eq!(message.delivery, Some(Delivery::Delivered));
+    }
+}
+
 /// Checks a list a device shows: not empty, each body once, and each
 /// sender's in the order it sent them.
 fn check_shown(shown: &[String]) {
@@ -406,13 +436,24 @@ fn own(device: &Device, channel: [u8; 16], now: u64, acked: bool) -> Vec<String>
         .collect()
 }
 
-/// The bodies `device` shows in `channel` at `now`, in its order.
-fn bodies(device: &Device, channel: [u8; 16], now: u64) -> Vec<String> {
+/// The bodies the device of side `me` shows in `channel` at `now`, in its
+/// order, each checked to come from its sender: its own as `Own`, the other
+/// side's from a known peer.
+fn bodies(device: &Device, me: &str, channel: [u8; 16], now: u64) -> Vec<String> {
     let shown = device.messages(channel, now).expect("messages");
     shown
         .into_iter()
         .filter_map(|message| match message.content {
-            MessageContent::Text { body, .. } => Some(body),
+            MessageContent::Text { body, .. } => {
+                let own = body.strip_prefix(me).is_some_and(|n| n.starts_with('-'));
+                let sender = match message.sender {
+                    Sender::Own => own,
+                    Sender::Peer { .. } => !own && message.stranger.is_none(),
+                    Sender::OwnKeyElsewhere { .. } => false,
+                };
+                assert!(sender, "{body} shown from the wrong sender");
+                Some(body)
+            }
             _ => None,
         })
         .collect()
@@ -472,19 +513,20 @@ fn exit_run(fail_a: u64, fail_b: u64, seed: u64) {
         check_counters(side, errors, 1);
     }
     let [first, second] = sides;
-    for (side, path) in [(first, "a"), (second, "b")] {
+    for (side, name) in [(first, "a"), (second, "b")] {
         let faults = side.faults.clone();
         let mut device = side.device;
         device.flush(end).expect("flush");
-        let shown = bodies(&device, channel, end);
+        check_clean(&device, channel, end);
+        let shown = bodies(&device, name, channel, end);
         check_shown(&shown);
         drop(device);
-        let path = dir.path().join(path);
+        let path = dir.path().join(name);
         check_reopened(&path, &faults, end);
         // The reopened device shows what the closed one showed.
         let data = open_with(&path, Io::fast).expect("reopen");
         let device = Device::open(Box::new(data), end).expect("open");
-        assert_eq!(bodies(&device, channel, end), shown);
+        assert_eq!(bodies(&device, name, channel, end), shown);
     }
 }
 
@@ -571,24 +613,21 @@ fn s027_t23_r23_phase2_exit_after_a_crash() {
         assert_eq!(Some(&channel), ids.first());
         assert!(side.device.status().broken.is_empty());
     }
-    let shown = [&first, &second].map(|side| bodies(&side.device, channel, now));
+    let shown =
+        [(&first, "a"), (&second, "b")].map(|(side, me)| bodies(&side.device, me, channel, now));
     shown.iter().for_each(|shown| check_shown(shown));
     // One's own messages the server never acked, still in the outbox.
     let pending = [&first, &second].map(|side| own(&side.device, channel, now, false));
-    // Every message one side's server acked is held by the other, but the
-    // last one when the stopped append was the other's receive of it: the
-    // fresh server has lost it, which the old one would have pushed again.
+    // Every message one side's server acked is held by the other: the
+    // stopped append is a send (`CRASH_APPEND`), so no committed receive may
+    // be missing, and an older state reloaded would miss one.
     let acked = [&first, &second].map(|side| own(&side.device, channel, now, true));
     for (from, to) in [(0, 1), (1, 0)] {
         let missing: Vec<&String> = acked[from]
             .iter()
             .filter(|body| !shown[to].contains(body))
             .collect();
-        let allowed = if cut[to] { acked[from].last() } else { None };
-        assert!(
-            missing.is_empty() || (missing.len() == 1 && missing.first().copied() == allowed),
-            "{missing:?} lost"
-        );
+        assert!(missing.is_empty(), "{missing:?} lost");
     }
     // A pending message the other side already holds is not shown twice.
     let extra = [
@@ -619,9 +658,10 @@ fn s027_t23_r23_phase2_exit_after_a_crash() {
         &mut duplicate,
     );
     check_delivered(&sides, 100_000..100_020, &extra);
-    for side in &sides {
+    for (side, me) in sides.iter().zip(["a", "b"]) {
         check_counters(side, 0, 0);
-        check_shown(&bodies(&side.device, channel, end));
+        check_clean(&side.device, channel, end);
+        check_shown(&bodies(&side.device, me, channel, end));
     }
 }
 
