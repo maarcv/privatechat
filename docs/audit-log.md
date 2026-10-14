@@ -18,7 +18,7 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AY26 | The crash point models a killed process, not a power cut: fast mode keeps every write in the page cache (B) | Far-fetched | None: what R23 asks; durability order is spec 020's recovery tests |
 | AY27 | Duplicates are replayed at once, never after a reconnect or a compaction (B) | Far-fetched | None: the server re-pushes the backlog from the cursor at every reconnect, which the run does |
 
-**Round 2**, on the whole change with the findings above. Pass B ran the crash run instrumented and showed AY25 rested on a false premise; pass C ran 20 production mutants and 2 of the test: 11 killed, 4 equivalent here, 4 out of R23 and killed by other tests, 1 survived (AY35). No production defect.
+**Round 2**, on the whole change with the findings above. Pass B ran the crash run instrumented and showed AY25 rested on a false premise; pass C ran 20 production mutants and 2 of the test: 13 killed (both of the test), 4 equivalent here, 4 out of R23 and killed by other tests, 1 survived (AY35). No production defect.
 
 | # | Finding | Severity | Change |
 | --- | --- | --- | --- |
@@ -52,6 +52,21 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AY45 | T23 names one test, `s027_t23_r23_phase2_exit`; the crash run is `…_after_a_crash` with its child (A) | Low | T23 names both, with the change that marks spec 027 implemented |
 | AY46 | The sender of a shown or delivered message was never checked: one's own shown as a peer's, or a peer's as a stranger, passed (B) | Low | A `Message` event must come from a peer; every listed body must come from its side, its own as `Own`, the other's from a known peer |
 | AY47 | Nothing read the status, the gaps or the delivery of one's own rows: a `clock_off` on every ack, a gap on every message, every delivered message shown as failed all passed (mutants M3, M4, M8) (C) | Low | `check_clean`: a clean `ChannelStatus`, no gap, every own message shown `Delivered`, in both runs |
+
+**Round 5**, on the whole change with the findings above. Pass B ran mutants in a scratch copy; pass C ran 12 production mutants: 5 killed, 1 survived (AY54), 6 out of R23 or equivalent here, each killed by other tests. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AY48 | Round 2's mutant counts left out the 2 mutants of the test (A) | Low | The count corrected above |
+| AY49 | Nothing requires the acked list of AY44 to be non-empty (A) | Far-fetched | None: the crash run is deterministic and its acked lists are not empty |
+| AY50 | No run checked that the list holds every unexpired message and no expired one: a compaction dropping 20 minutes of live history, or a peer's message shown past its TTL, passed the first run (B) | Low | `check_shown` takes the time and the numbers required: nothing shown that expired more than `MARGIN` (15 min, the most the injected failure delays a display) before it, and every message expiring more than `MARGIN` after it shown, in both runs; both mutants checked to fail |
+| AY51 | The order across senders was never checked: all peer messages listed before all own ones passed (B) | Low | `bodies` requires the list sorted by display time; the mutant checked to fail |
+| AY52 | Rows and events that are not text were skipped: a spurious key-retired or unreadable row passed (B) | Low | Every listed row and every `Message` event must be text |
+| AY53 | `state_eq` ignores the log position (B) | Far-fetched | None: R23 names `state_eq`; a position cutting a shown record fails the reopened list |
+| AY54 | `reconnects <= 2` allowed 0, so a failed `send` reopened without a mark, so without its probe, passed (mutant M9) (C) | Low | One `Reconnect` per store reopened, exactly |
+| AY55 | The body format `name-n` was parsed three ways (C) | Low | One `number` |
+| AY56 | Bare numbers, and the resume's messages written as a tuple and as a range (C) | Low | `READ_BATCH`, the URL from `HOST`, `exchange` takes the numbers as a range, `RESUMED` |
+| AY57 | Repeated code in the crash run (C) | Low | The channel check out of the loop; `extra` built in one loop |
 
 ## Audit AX
 

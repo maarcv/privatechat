@@ -42,9 +42,13 @@ const DUPLICATE_ONE_IN: u64 = 100;
 /// append of a `send` while the other side's last send is still pending, so
 /// that the resume delivers it.
 const CRASH_APPEND: u64 = 26_000;
-/// The most `Reconnect`s a side may see: none but the probe's after the
-/// injected failure, and a session's after its socket was refused.
-const MAX_RECONNECTS: u32 = 2;
+/// The numbers of the messages of the crash run's resumed exchange.
+const RESUMED: std::ops::Range<usize> = 100_000..100_020;
+/// The most frames read from the server at once.
+const READ_BATCH: usize = 200;
+/// The slack of the expiry checks: the most a message's display time may
+/// lag its send, through the injected failure's probe and reconnect.
+const MARGIN: u64 = 900_000;
 /// The rounds of frames a `pump` may take before it must be quiet.
 const PUMP_ROUNDS: usize = 20;
 /// The environment variables of the crash run's child.
@@ -164,12 +168,11 @@ impl Side {
                 Event::Message { received, .. } => {
                     // Only the other side's messages arrive.
                     assert!(matches!(received.sender, Sender::Peer { .. }));
-                    if let MessageContent::Text { body, .. } = received.content {
-                        if let Some(n) = body.split_once('-').and_then(|(_, n)| n.parse().ok()) {
-                            self.order.push(n);
-                        }
-                        *self.received.entry(body).or_default() += 1;
+                    let body = text(received.content);
+                    if let Some(n) = ["a", "b"].iter().find_map(|from| number(&body, from)) {
+                        self.order.push(n);
                     }
+                    *self.received.entry(body).or_default() += 1;
                 }
                 Event::StorageFailed { .. } => self.storage_failed += 1,
                 Event::Reconnect { connection } => {
@@ -202,7 +205,7 @@ impl Side {
                     server.receive(id + self.sockets, &frame, now);
                     moved = true;
                 }
-                for frame in server.read(id + self.sockets, 200) {
+                for frame in server.read(id + self.sockets, READ_BATCH) {
                     let twice = duplicate.is_marked(&frame);
                     let events = self.device.on_frame(id, &frame, now);
                     let message = events
@@ -298,7 +301,7 @@ fn start(dir: &Path, faults: [&Faults; 2], now: u64) -> (Side, Side, [u8; 16]) {
         None => {
             let info = first
                 .device
-                .create_channel("wss://example.org", TTL_SECONDS, "exit", now)
+                .create_channel(&format!("wss://{HOST}"), TTL_SECONDS, "exit", now)
                 .expect("create");
             let qr = first.device.export_qr(info.id, now).expect("export");
             second.device.import_qr(&qr, false, now).expect("import");
@@ -308,15 +311,16 @@ fn start(dir: &Path, faults: [&Faults; 2], now: u64) -> (Side, Side, [u8; 16]) {
     (first, second, channel)
 }
 
-/// Runs the exchange from `from`, each side sending `count` messages
-/// numbered from `offset`, then `DRAIN` of quiet; returns the time it ended.
+/// Runs the exchange from `from`, each side sending the messages of
+/// `numbers`, then `DRAIN` of quiet; returns the time it ended.
 fn exchange(
     sides: &mut [Side; 2],
     server: &mut MemoryServer,
     channel: [u8; 16],
-    (from, offset, count): (u64, usize, usize),
+    (from, numbers): (u64, std::ops::Range<usize>),
     duplicate: &mut Duplicates,
 ) -> u64 {
+    let count = numbers.len();
     let end = from + count as u64 * SEND_EVERY + DRAIN;
     let mut now = from;
     while now <= end {
@@ -328,7 +332,7 @@ fn exchange(
         let step = (now - from) / SEND_EVERY;
         if (now - from) % SEND_EVERY == 0 && (step as usize) < count {
             for (name, side) in ["a", "b"].iter().zip(sides.iter_mut()) {
-                let body = format!("{name}-{}", offset + step as usize);
+                let body = format!("{name}-{}", numbers.start + step as usize);
                 side.send(channel, &body, now, server);
             }
         }
@@ -359,18 +363,15 @@ fn check_delivered(sides: &[Side; 2], range: std::ops::Range<usize>, extra: &[Ve
 }
 
 /// Checks a side's counters: `errors` failed calls and `storage_failed`
-/// stores reopened, nothing else; a bounded number of reconnects and of
-/// subscriptions, one per session; no channel broken or failing to write.
+/// stores reopened, nothing else; one reconnect per store reopened, from
+/// the probe that cleared its mark (R12); subscriptions bounded, one per
+/// session; no channel broken or failing to write.
 fn check_counters(side: &Side, errors: u32, storage_failed: u32) {
     assert!(side.fault.is_none(), "the fault was never armed");
     assert_eq!(side.errors, errors);
     assert_eq!(side.storage_failed, storage_failed);
     assert!(side.unexpected.is_empty(), "{:?}", side.unexpected);
-    assert!(
-        side.reconnects <= MAX_RECONNECTS,
-        "{} reconnects",
-        side.reconnects
-    );
+    assert_eq!(side.reconnects, storage_failed, "reconnects");
     assert!(
         side.subscribed <= side.reconnects + storage_failed + 1,
         "{} subscriptions",
@@ -407,17 +408,48 @@ fn check_clean(device: &Device, channel: [u8; 16], now: u64) {
     }
 }
 
-/// Checks a list a device shows: not empty, each body once, and each
-/// sender's in the order it sent them.
-fn check_shown(shown: &[String]) {
-    assert!(!shown.is_empty(), "nothing shown");
-    for from in ["a", "b"] {
-        let numbers: Vec<usize> = shown
-            .iter()
-            .filter_map(|body| body.strip_prefix(from)?.strip_prefix('-')?.parse().ok())
-            .collect();
-        assert!(numbers.is_sorted_by(|a, b| a < b), "{from}: {numbers:?}");
+/// The number of `body` when side `from` sent it.
+fn number(body: &str, from: &str) -> Option<usize> {
+    body.strip_prefix(from)?.strip_prefix('-')?.parse().ok()
+}
+
+/// When message `n` of either side was sent: from `T0 + TICK` in the first
+/// run, from `resume` for the numbers of the resumed exchange.
+fn sent_time(n: usize, resume: u64) -> u64 {
+    match n.checked_sub(RESUMED.start) {
+        Some(k) => resume + k as u64 * SEND_EVERY,
+        None => T0 + TICK + n as u64 * SEND_EVERY,
     }
+}
+
+/// Checks a list a device shows at `now`: not empty, each body once, each
+/// sender's in the order it sent them, nothing that expired more than
+/// `MARGIN` before `now`, and both sides' messages of `required`, which
+/// expire more than `MARGIN` after it.
+fn check_shown(shown: &[String], now: u64, resume: u64, required: std::ops::Range<usize>) {
+    assert!(!shown.is_empty(), "nothing shown");
+    let ttl = u64::from(TTL_SECONDS) * 1_000;
+    for from in ["a", "b"] {
+        let numbers: Vec<usize> = shown.iter().filter_map(|body| number(body, from)).collect();
+        assert!(numbers.is_sorted_by(|a, b| a < b), "{from}: {numbers:?}");
+        for n in &numbers {
+            assert!(
+                sent_time(*n, resume) + ttl + MARGIN >= now,
+                "{from}-{n} expired"
+            );
+        }
+        for n in required.clone() {
+            assert!(numbers.contains(&n), "{from}-{n} not shown");
+        }
+    }
+}
+
+/// The messages of the first run still shown at `now`, all but those
+/// within `MARGIN` of their expiry.
+fn unexpired(now: u64) -> std::ops::Range<usize> {
+    let ttl = u64::from(TTL_SECONDS) * 1_000;
+    let first = (0..PER_SIDE).find(|n| sent_time(*n, 0) + ttl >= now + MARGIN);
+    first.unwrap_or(PER_SIDE)..PER_SIDE
 }
 
 /// The bodies of one's own messages `device` shows in `channel` at `now`,
@@ -429,32 +461,37 @@ fn own(device: &Device, channel: [u8; 16], now: u64, acked: bool) -> Vec<String>
         .filter(|message| {
             matches!(message.sender, Sender::Own) && message.server_id.is_some() == acked
         })
-        .filter_map(|message| match message.content {
-            MessageContent::Text { body, .. } => Some(body),
-            _ => None,
-        })
+        .map(|message| text(message.content))
         .collect()
 }
 
+/// The body of a text message; any other content fails the run.
+fn text(content: MessageContent) -> String {
+    let body = match content {
+        MessageContent::Text { body, .. } => Some(body),
+        _ => None,
+    };
+    body.expect("a message that is not text")
+}
+
 /// The bodies the device of side `me` shows in `channel` at `now`, in its
-/// order, each checked to come from its sender: its own as `Own`, the other
-/// side's from a known peer.
+/// order, each checked to be text from its sender, its own as `Own`, the
+/// other side's from a known peer, and listed by display time.
 fn bodies(device: &Device, me: &str, channel: [u8; 16], now: u64) -> Vec<String> {
     let shown = device.messages(channel, now).expect("messages");
+    assert!(shown.is_sorted_by_key(|message| message.received_at));
     shown
         .into_iter()
-        .filter_map(|message| match message.content {
-            MessageContent::Text { body, .. } => {
-                let own = body.strip_prefix(me).is_some_and(|n| n.starts_with('-'));
-                let sender = match message.sender {
-                    Sender::Own => own,
-                    Sender::Peer { .. } => !own && message.stranger.is_none(),
-                    Sender::OwnKeyElsewhere { .. } => false,
-                };
-                assert!(sender, "{body} shown from the wrong sender");
-                Some(body)
-            }
-            _ => None,
+        .map(|message| {
+            let body = text(message.content);
+            let own = number(&body, me).is_some();
+            let sender = match message.sender {
+                Sender::Own => own,
+                Sender::Peer { .. } => !own && message.stranger.is_none(),
+                Sender::OwnKeyElsewhere { .. } => false,
+            };
+            assert!(sender, "{body} shown from the wrong sender");
+            body
         })
         .collect()
 }
@@ -497,7 +534,7 @@ fn exit_run(fail_a: u64, fail_b: u64, seed: u64) {
         &mut sides,
         &mut server,
         channel,
-        (T0 + TICK, 0, PER_SIDE),
+        (T0 + TICK, 0..PER_SIDE),
         &mut duplicate,
     );
     check_delivered(&sides, 0..PER_SIDE, &[Vec::new(), Vec::new()]);
@@ -519,7 +556,7 @@ fn exit_run(fail_a: u64, fail_b: u64, seed: u64) {
         device.flush(end).expect("flush");
         check_clean(&device, channel, end);
         let shown = bodies(&device, name, channel, end);
-        check_shown(&shown);
+        check_shown(&shown, end, 0, unexpired(end));
         drop(device);
         let path = dir.path().join(name);
         check_reopened(&path, &faults, end);
@@ -607,15 +644,17 @@ fn s027_t23_r23_phase2_exit_after_a_crash() {
     let now = T0 + TICK + PER_SIDE as u64 * SEND_EVERY + DRAIN;
     let faults = [Faults::new(), Faults::new()];
     let (first, second, channel) = start(dir.path(), [&faults[0], &faults[1]], now);
+    assert_eq!(Some(&channel), ids.first());
     for side in [&first, &second] {
         let listed: Vec<[u8; 16]> = side.device.channels().iter().map(|info| info.id).collect();
         assert_eq!(listed, [channel]);
-        assert_eq!(Some(&channel), ids.first());
         assert!(side.device.status().broken.is_empty());
     }
     let shown =
         [(&first, "a"), (&second, "b")].map(|(side, me)| bodies(&side.device, me, channel, now));
-    shown.iter().for_each(|shown| check_shown(shown));
+    shown
+        .iter()
+        .for_each(|shown| check_shown(shown, now, now, 0..0));
     // One's own messages the server never acked, still in the outbox.
     let pending = [&first, &second].map(|side| own(&side.device, channel, now, false));
     // Every message one side's server acked is held by the other: the
@@ -630,18 +669,13 @@ fn s027_t23_r23_phase2_exit_after_a_crash() {
         assert!(missing.is_empty(), "{missing:?} lost");
     }
     // A pending message the other side already holds is not shown twice.
-    let extra = [
-        pending[0]
+    let extra = [(0, 1), (1, 0)].map(|(from, to): (usize, usize)| {
+        pending[from]
             .iter()
-            .filter(|body| !shown[1].contains(body))
+            .filter(|body| !shown[to].contains(body))
             .cloned()
-            .collect(),
-        pending[1]
-            .iter()
-            .filter(|body| !shown[0].contains(body))
-            .cloned()
-            .collect(),
-    ];
+            .collect::<Vec<String>>()
+    });
     // `CRASH_APPEND` stops a send, so that the resume has one to deliver.
     assert!(
         extra.iter().any(|bodies: &Vec<String>| !bodies.is_empty()),
@@ -654,14 +688,15 @@ fn s027_t23_r23_phase2_exit_after_a_crash() {
         &mut sides,
         &mut server,
         channel,
-        (now, 100_000, 20),
+        (now, RESUMED),
         &mut duplicate,
     );
-    check_delivered(&sides, 100_000..100_020, &extra);
+    check_delivered(&sides, RESUMED, &extra);
     for (side, me) in sides.iter().zip(["a", "b"]) {
         check_counters(side, 0, 0);
         check_clean(&side.device, channel, end);
-        check_shown(&bodies(&side.device, me, channel, end));
+        let shown = bodies(&side.device, me, channel, end);
+        check_shown(&shown, end, now, RESUMED);
     }
 }
 
@@ -683,7 +718,7 @@ fn s027_t23_r23_crash_child() {
         &mut sides,
         &mut server,
         channel,
-        (T0 + TICK, 0, PER_SIDE),
+        (T0 + TICK, 0..PER_SIDE),
         &mut duplicate,
     );
 }
