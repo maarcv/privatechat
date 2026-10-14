@@ -128,6 +128,30 @@ fn s027_t14_r14_failed_reopen() {
     assert_eq!(broken[0].name, name.to_hex());
 }
 
+/// Spec 027, R14: a channel moved to `broken` by a failed reopen carries
+/// its `suggested_name` when it has no `local_name`, and a `local_name`
+/// cleaned as spec 022 R6 says.
+#[test]
+fn s027_t14_r14_failed_reopen_names() {
+    let (fixture, mut device) = opened();
+    let id = id();
+    fixture.faults.poison_after(1);
+    fixture.faults.fail_create(true);
+    assert!(device.label(id, PEER, "ann", NOW).is_err());
+    let broken = device.status().broken;
+    assert_eq!(broken[0].channel_name.as_deref(), Some("room"));
+
+    let (fixture, mut device) = opened();
+    // A format character passes `set_local_name` (spec 022 R4) and is
+    // removed from what a client is handed (R6).
+    device.rename_channel(id, "kit\u{202e}chen").unwrap();
+    fixture.faults.poison_after(1);
+    fixture.faults.fail_create(true);
+    assert!(device.label(id, PEER, "ann", NOW).is_err());
+    let broken = device.status().broken;
+    assert_eq!(broken[0].channel_name.as_deref(), Some("kitchen"));
+}
+
 /// Spec 027, R14: `OutboxFull` from `send` is returned as it is and
 /// reopens nothing.
 #[test]
@@ -383,6 +407,19 @@ fn s027_t14_r14_reopen_takes_the_peers_flag() {
     fixture.faults.fail_at(1);
     assert!(device.mute(id, PEER, true).is_err());
     device.queued.clear();
+    assert_eq!(device.purge_expired(id, NOW), Ok(0));
+    assert!(device.queued.is_empty());
+}
+
+/// Spec 027, R14: a writer that changes the status takes the peers flag
+/// too, so a later writer that changes nothing raises no `StatusChanged`.
+#[test]
+fn s027_t14_r14_status_change_takes_the_peers_flag() {
+    let (_fixture, mut device) = opened();
+    let id = id();
+    // The flag a loaded channel starts with (spec 021 R1) is still set.
+    let events = device.regenerate_identity(id, NOW).unwrap();
+    assert_eq!(events, [Event::StatusChanged { channel: id }]);
     assert_eq!(device.purge_expired(id, NOW), Ok(0));
     assert!(device.queued.is_empty());
 }

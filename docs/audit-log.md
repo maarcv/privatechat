@@ -27,6 +27,20 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AT19 | A `send` whose commit stood and whose reopen then failed returns an error, and the message is published once the channel comes back (B) | Far-fetched | None: R14's last sentence tells the client a reopened state may hold a commit whose call failed |
 | AT20 | A writer inside the unlocked device restoring a copy from before a regeneration makes `outbox_ref` read the copy (B) | Far-fetched | None: outside `docs/spec.md` §2, and the rollback of the identity is the larger effect |
 
+**Round 3.** Fresh passes on the whole change. AT8–AT20 hold; no production defect. Pass C ran 17 new mutants: 13 killed, 1 equivalent, 3 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AT21 | R14 said a marked channel's call that stood "returns or queues" `StatusChanged`; only `send` and `regenerate_identity` can stand with `Ok`, and every other writer returns its error (A) | Low | R14 names the two |
+| AT22 | R15's mark held off "the next attempt", where R14 lets a direct `purge_expired` run on a marked channel (A) | Low | R15 says the tick's next attempt |
+| AT23 | T08's clause of a marked channel poisoned by a session commit needs a session, and the slice list did not defer it (A) | Low | Slice (d2b) names T08's session half |
+| AT24 | A writer changing the status as the first after `open` left the peers flag set; a failed reopen's name was untested with no local name and with a U+202E in it (C) | Medium | A case for each |
+| AT25 | A `send` reported committed after a failed directory sync can be lost to a power cut before the probe's commit (B) | Far-fetched | None: nothing is published while marked, and R9 reads what stands, as spec 020 R11 says |
+
+The audit closes with this round (`CLAUDE.md`, the audit): pass A's findings change no behaviour, pass B found only a far-fetched case, and pass C's are test gaps, now closed.
+
+Decisions taken without the human: `outbox_ref` names an entry of the current key only (AT8), amending accepted spec 021 R33, since a regeneration starts the counter again and the other reading reports a lost message as sent; R14 and R15 reworded to what specs 021 and 023, which the code follows, already say (AT10, AT11, AT14, AT15, AT21, AT22).
+
 ## Audit AS
 
 **2026-10-14 — Audit AS, the code audit of slice (b) of spec 027-core-api (branch `027-channels`): creating, importing, exporting, listing, renaming and leaving channels (R4–R8), the `needs_proxy` predicate `ChannelInfo` shows (R10's), and the settings of a fresh install saved by the first channel (R1); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit S's findings already took AS1–AS11, so this audit's are numbered from AS12. No production defect against the spec. Pass C ran 51 mutants: 38 killed, 4 equivalent, 9 survived; eight are killed below, and the ninth (a store error from the reopened state's config) left with the double load AS16 removes.
