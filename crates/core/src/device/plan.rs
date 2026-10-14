@@ -6,7 +6,7 @@
 use super::Device;
 use crate::crypto;
 use crate::error::Error;
-use crate::proto::config::url;
+use crate::proto::config::url::{self, ONION_SUFFIX};
 use crate::session::frames::{Frame, is_supported};
 
 /// The most channels on one connection without a proxy (R10).
@@ -88,6 +88,32 @@ fn socks_username() -> Result<String, Error> {
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
+/// A SOCKS username no run of `runs` holds, so that a proxy which
+/// isolates by username, as Tor does, never puts two channels, or a probe
+/// and a channel, on one circuit (R10, R12).
+///
+/// # Errors
+///
+/// `Internal` when libsodium fails.
+fn fresh_username(runs: &[ConnectionPlan]) -> Result<String, Error> {
+    loop {
+        let username = socks_username()?;
+        let taken = runs
+            .iter()
+            .any(|run| run.route.socks_username.as_ref() == Some(&username));
+        if !taken {
+            return Ok(username);
+        }
+    }
+}
+
+/// Adds `position` to the runs to mint, once.
+fn mark(changed: &mut Vec<usize>, position: usize) {
+    if !changed.contains(&position) {
+        changed.push(position);
+    }
+}
+
 /// Whether `frame` is a `hello` whose versions this build speaks, by the
 /// rule of spec 028-session-sans-io R2, for the create-time probe (R12).
 ///
@@ -127,7 +153,7 @@ impl Device {
         let proxy = self.settings.current().socks5_proxy.as_deref();
         let mut route = reach(server_url, proxy).ok_or(Error::BadConfig)?;
         if proxy.is_some() {
-            route.socks_username = Some(socks_username()?);
+            route.socks_username = Some(fresh_username(&self.runs)?);
         }
         Ok(Some(route))
     }
@@ -159,7 +185,7 @@ impl Device {
                     .any(|(wanted_id, route)| wanted_id == id && route.same_way(&run.route))
             });
             if run.channels.len() != before {
-                changed.push(position);
+                mark(&mut changed, position);
             }
         }
         for (id, route) in wanted {
@@ -172,10 +198,10 @@ impl Device {
             match room.and_then(|position| runs.get_mut(position).map(|run| (position, run))) {
                 Some((position, run)) => {
                     run.channels.push(id);
-                    changed.push(position);
+                    mark(&mut changed, position);
                 }
                 None => {
-                    changed.push(runs.len());
+                    mark(&mut changed, runs.len());
                     runs.push(ConnectionPlan {
                         id: 0,
                         route,
@@ -204,8 +230,7 @@ impl Device {
     }
 
     /// An `id` this device never used and, behind a proxy, a username no
-    /// other run of `runs` holds, so that two channels never share a
-    /// circuit (R10).
+    /// run of `runs` holds (R10).
     ///
     /// # Errors
     ///
@@ -216,24 +241,13 @@ impl Device {
         runs: &[ConnectionPlan],
     ) -> Result<(u64, Option<String>), Error> {
         let username = match route.socks5_proxy {
-            Some(_) => loop {
-                let username = socks_username()?;
-                let taken = runs
-                    .iter()
-                    .any(|run| run.route.socks_username.as_ref() == Some(&username));
-                if !taken {
-                    break Some(username);
-                }
-            },
+            Some(_) => Some(fresh_username(runs)?),
             None => None,
         };
         self.next_plan_id = self.next_plan_id.saturating_add(1);
         Ok((self.next_plan_id, username))
     }
 }
-
-/// The suffix of an onion host.
-const ONION_SUFFIX: &str = ".onion";
 
 /// Whether the host of `proxy` (`host:port`) is an IPv4 literal in
 /// `127.0.0.0/8`, never a host name, which would trust a resolver (R10);

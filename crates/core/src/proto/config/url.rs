@@ -22,7 +22,7 @@ const ONION_PORT: u16 = 80;
 
 /// A v3 onion address: 56 characters of base32 and the suffix.
 const ONION_LABEL_LEN: usize = 56;
-const ONION_SUFFIX: &str = ".onion";
+pub(crate) const ONION_SUFFIX: &str = ".onion";
 
 /// The host of a `server_url` that matches the grammar of R5, without the
 /// scheme or the port (R6).

@@ -110,30 +110,51 @@ fn s027_t10_r10_plan() {
     );
 }
 
-/// Spec 027, R10: a new channel joins the last run of its route with
-/// room, and every `id` minted is new.
+/// Spec 027, R10: a plan whose channels stand keeps its `id`, and every
+/// other plan gets an `id` greater than any minted before; a new channel
+/// joins the last run of its route with room.
 #[test]
 fn s027_t10_r10_plan_ids_are_new() {
     let fixture = saved(None);
     let mut device = fixture.open().unwrap();
-    let mut seen = Vec::new();
+    let mut before: Vec<ConnectionPlan> = Vec::new();
+    let mut highest = 0;
     for k in 1..=20 {
         import(&mut device, k, "wss://example.org");
-        for plan in device.connections() {
-            if !seen.contains(&plan.id) {
-                seen.push(plan.id);
+        let plans = device.connections();
+        for plan in &plans {
+            match before.iter().find(|old| old.id == plan.id) {
+                Some(old) => assert_eq!(old, plan, "{k}"),
+                None => {
+                    assert!(plan.id > highest, "{k}");
+                    highest = plan.id;
+                }
             }
         }
+        before = plans;
     }
-    let mut sorted = seen.clone();
-    sorted.sort_unstable();
-    sorted.dedup();
-    assert_eq!(sorted.len(), seen.len());
-    // A channel that leaves a full run leaves room the next one fills.
+    // The new channel joins the last run with room, not the one the
+    // leaver freed.
     let first = device.connections()[0].clone();
     device.leave(first.channels[0]).unwrap();
     let late = import(&mut device, 40, "wss://example.org");
     assert!(device.connections()[1].channels.contains(&late));
+}
+
+/// Spec 027, R10: 16 channels found at `open` make one run, minted once.
+#[test]
+fn s027_t01_r01_open_mints_each_run_once() {
+    let fixture = saved(None);
+    let mut device = fixture.open().unwrap();
+    for k in 1..=16 {
+        import(&mut device, k, "wss://example.org");
+    }
+    drop(device);
+    let device = fixture.open().unwrap();
+    let plans = device.connections();
+    assert_eq!(plans.len(), 1);
+    assert_eq!(plans[0].channels.len(), 16);
+    assert_eq!(plans[0].id, 1);
 }
 
 /// Spec 027, R10: with a proxy each channel is its own run, every `id`

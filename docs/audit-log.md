@@ -18,6 +18,16 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AU13 | `probe_hello` of garbage was checked as any error (A) | Low | `BadPayload` |
 | AU14 | A channel whose username cannot be drawn waits in no run while `needs_proxy` is false (A, B) | Far-fetched | None: `random_bytes` fails only when libsodium failed to initialise, and nothing connects |
 
+**Round 2.** Fresh passes on the whole change. AU6–AU14 hold; no production defect. Pass C ran 39 new mutants: 34 killed, 4 equivalent, 1 survived that only injected randomness could kill (the redraw of a username another run holds).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AU15 | The test of new `id`s could not fail: it kept only the `id`s it had not seen (A) | Medium | It checks that a plan seen again is unchanged and that every new `id` is above all earlier ones |
+| AU16 | `replan` minted a run once per channel that joined it, burning `id`s and draws (B, C) | Low | A run is minted once per `replan`; a T01 case: 16 channels at `open` make one run of `id` 1 |
+| AU17 | The redraw of a username another run holds had no requirement behind it, and the probe's username was not checked against the runs (A, B) | Low | R10 and R12 say a username is drawn again while another plan holds it, with a History line; the probe draws so too |
+| AU18 | `.onion` was a constant in `url.rs` and again in `plan.rs` (C) | Low | One constant |
+| AU19 | A test comment said a freed run is refilled first, the opposite of what it checks (A) | Low | Reworded |
+
 ## Audit AT
 
 **2026-10-14 — Audit AT, the code audit of slice (c) of spec 027-core-api (branch `027-dispatch`): the per-channel dispatch (R9) and the recovery of a failed store through the direct calls (R14, R15), with R8's retry of `leave` on a marked channel; round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit T's findings already took AT1–AT7, so this audit's are numbered from AT8. Two production defects (AT8, AT9). Pass C ran 53 mutants: 37 killed, 2 equivalent, 14 survived, each killed below.
