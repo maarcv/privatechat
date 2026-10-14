@@ -11,6 +11,7 @@ use crate::testing::{FailingVault, Faults, MemoryStore, MemoryVault, batch, reco
 
 mod channels;
 mod dispatch;
+mod plan;
 mod recovery;
 mod scripted;
 mod settings;

@@ -282,12 +282,15 @@ impl Device {
         }
         let proxy = proxy.map(str::to_owned);
         if self.settings.is_reset() {
-            return self
-                .settings
-                .release(self.vault.as_mut(), Some(proxy), false);
+            self.settings
+                .release(self.vault.as_mut(), Some(proxy), false)?;
+        } else {
+            self.settings
+                .set(self.vault.as_mut(), Change::Socks5Proxy(proxy))?;
         }
-        self.settings
-            .set(self.vault.as_mut(), Change::Socks5Proxy(proxy))
+        // The proxy decides every route and `needs_proxy` (R10).
+        self.replan();
+        Ok(())
     }
 
     /// The user has seen that the settings were lost or written by a newer
@@ -300,6 +303,9 @@ impl Device {
     /// `Store(e)` for a failed save, nothing changed.
     pub fn acknowledge_settings(&mut self, replace_newer: bool) -> Result<(), Error> {
         self.settings
-            .release(self.vault.as_mut(), None, replace_newer)
+            .release(self.vault.as_mut(), None, replace_newer)?;
+        // A file adopted after a passing error may bring its proxy (R2).
+        self.replan();
+        Ok(())
     }
 }

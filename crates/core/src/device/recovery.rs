@@ -47,6 +47,8 @@ impl Device {
         if failed {
             if self.reopen(position).is_err() {
                 events.push(Event::StorageFailed { channel });
+                // The broken channel leaves its run (R14).
+                self.replan();
                 return (result, events);
             }
             if !marked {

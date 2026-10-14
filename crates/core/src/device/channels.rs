@@ -162,12 +162,14 @@ impl Device {
         if marked && result == Err(Error::Store(StoreError::Io)) {
             if self.reopen(position).is_err() {
                 self.queued.push(Event::StorageFailed { channel });
+                self.replan();
                 return result;
             }
             result = self.channel_mut(channel)?.leave();
         }
         result?;
         self.channels.remove(position);
+        self.replan();
         Ok(())
     }
 
@@ -282,6 +284,7 @@ impl Device {
                     channel,
                     probe_at: None,
                 });
+                self.replan();
                 Ok(true)
             }
             Err(Error::Store(reason)) => {
@@ -313,6 +316,7 @@ impl Device {
         };
         let info = self.info(&open);
         self.channels.push(open);
+        self.replan();
         Ok((info, is_new))
     }
 
