@@ -59,7 +59,7 @@ Findings and applied changes of every audit of the specification, newest first; 
 | --- | --- | --- | --- |
 | AY48 | Round 2's mutant counts left out the 2 mutants of the test (A) | Low | The count corrected above |
 | AY49 | Nothing requires the acked list of AY44 to be non-empty (A) | Far-fetched | None: the crash run is deterministic and its acked lists are not empty |
-| AY50 | No run checked that the list holds every unexpired message and no expired one: a compaction dropping 20 minutes of live history, or a peer's message shown past its TTL, passed the first run (B) | Low | `check_shown` takes the time and the numbers required: nothing shown that expired more than `MARGIN` (15 min, the most the injected failure delays a display) before it, and every message expiring more than `MARGIN` after it shown, in both runs; both mutants checked to fail |
+| AY50 | No run checked that the list holds every unexpired message and no expired one: a compaction dropping 20 minutes of live history, or a peer's message shown past its TTL, passed the first run (B) | Low | `check_shown` takes the time and the numbers required: nothing expired shown, every unexpired message of `required` shown, in both runs (the 15-minute slack first written here was replaced by the exact rule in AY59); both mutants checked to fail |
 | AY51 | The order across senders was never checked: all peer messages listed before all own ones passed (B) | Low | `bodies` requires the list sorted by display time; the mutant checked to fail |
 | AY52 | Rows and events that are not text were skipped: a spurious key-retired or unreadable row passed (B) | Low | Every listed row and every `Message` event must be text |
 | AY53 | `state_eq` ignores the log position (B) | Far-fetched | None: R23 names `state_eq`; a position cutting a shown record fails the reopened list |
@@ -67,6 +67,17 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AY55 | The body format `name-n` was parsed three ways (C) | Low | One `number` |
 | AY56 | Bare numbers, and the resume's messages written as a tuple and as a range (C) | Low | `READ_BATCH`, the URL from `HOST`, `exchange` takes the numbers as a range, `RESUMED` |
 | AY57 | Repeated code in the crash run (C) | Low | The channel check out of the loop; `extra` built in one loop |
+
+**Round 6**, on the whole change with the findings above. Pass B ran 64 draws of an instrumented copy, the edges and the steps of every compaction among them, with no failure; pass C ran 15 production mutants: 7 killed, 1 survived (AY61), 4 out of R23 and 3 equivalent here, each killed by other tests. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AY59 | The 15-minute slack of AY50 rested on a false premise: a message's display expiry is its `sent_at`, rounded down to the minute, plus the TTL (spec 023 R1), whatever its display time; a list hiding messages up to 14 minutes early, or showing them 15 minutes late, passed (A) | Low | `expiry(n)` by that rule; a body is shown when, and only when, it has not expired; no slack |
+| AY60 | Subscriptions were bounded by `reconnects + storage_failed + 1`; a reopen keeps its session and subscribes nothing (A) | Low | Merged into AY61 |
+| AY61 | The bound passed with no `Subscribed` at all: `on_ok` dropping the event passed both runs (mutant M10) (C) | Low | Exactly one subscription per session: `subscribed == reconnects + 1` |
+| AY62 | A `Message` event's key, display time and expiry are not compared with the listed row (B) | Far-fetched | None: R23 asks for none of them; the tests of specs 021, 022 and 024 check them |
+
+The audit ends with round 6: passes A and C found only test gaps of Low severity, closed by the tests above, and pass B nothing but a far-fetched point. No production defect was found in any round. The local CI is clean.
 
 ## Audit AX
 

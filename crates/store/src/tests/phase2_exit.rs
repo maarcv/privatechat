@@ -46,9 +46,8 @@ const CRASH_APPEND: u64 = 26_000;
 const RESUMED: std::ops::Range<usize> = 100_000..100_020;
 /// The most frames read from the server at once.
 const READ_BATCH: usize = 200;
-/// The slack of the expiry checks: the most a message's display time may
-/// lag its send, through the injected failure's probe and reconnect.
-const MARGIN: u64 = 900_000;
+/// The unit `sent_at` is rounded down to (spec 021-channel-session R7).
+const MINUTE: u64 = 60_000;
 /// The rounds of frames a `pump` may take before it must be quiet.
 const PUMP_ROUNDS: usize = 20;
 /// The environment variables of the crash run's child.
@@ -364,19 +363,15 @@ fn check_delivered(sides: &[Side; 2], range: std::ops::Range<usize>, extra: &[Ve
 
 /// Checks a side's counters: `errors` failed calls and `storage_failed`
 /// stores reopened, nothing else; one reconnect per store reopened, from
-/// the probe that cleared its mark (R12); subscriptions bounded, one per
-/// session; no channel broken or failing to write.
+/// the probe that cleared its mark (R12); one subscription per session; no
+/// channel broken or failing to write.
 fn check_counters(side: &Side, errors: u32, storage_failed: u32) {
     assert!(side.fault.is_none(), "the fault was never armed");
     assert_eq!(side.errors, errors);
     assert_eq!(side.storage_failed, storage_failed);
     assert!(side.unexpected.is_empty(), "{:?}", side.unexpected);
     assert_eq!(side.reconnects, storage_failed, "reconnects");
-    assert!(
-        side.subscribed <= side.reconnects + storage_failed + 1,
-        "{} subscriptions",
-        side.subscribed
-    );
+    assert_eq!(side.subscribed, side.reconnects + 1, "subscriptions");
     assert!(side.device.status().broken.is_empty());
     assert!(side.device.channels().iter().all(|info| !info.write_failed));
 }
@@ -422,21 +417,24 @@ fn sent_time(n: usize, resume: u64) -> u64 {
     }
 }
 
+/// When message `n` leaves the screen: its `sent_at`, its send time
+/// rounded down to a minute, plus the TTL, for a peer's message and one's
+/// own delivered (spec 023-ttl-purge R1).
+fn expiry(n: usize, resume: u64) -> u64 {
+    let sent = sent_time(n, resume);
+    sent - sent % MINUTE + u64::from(TTL_SECONDS) * 1_000
+}
+
 /// Checks a list a device shows at `now`: not empty, each body once, each
-/// sender's in the order it sent them, nothing that expired more than
-/// `MARGIN` before `now`, and both sides' messages of `required`, which
-/// expire more than `MARGIN` after it.
+/// sender's in the order it sent them, nothing expired, and both sides'
+/// messages of `required`.
 fn check_shown(shown: &[String], now: u64, resume: u64, required: std::ops::Range<usize>) {
     assert!(!shown.is_empty(), "nothing shown");
-    let ttl = u64::from(TTL_SECONDS) * 1_000;
     for from in ["a", "b"] {
         let numbers: Vec<usize> = shown.iter().filter_map(|body| number(body, from)).collect();
         assert!(numbers.is_sorted_by(|a, b| a < b), "{from}: {numbers:?}");
         for n in &numbers {
-            assert!(
-                sent_time(*n, resume) + ttl + MARGIN >= now,
-                "{from}-{n} expired"
-            );
+            assert!(expiry(*n, resume) >= now, "{from}-{n} expired");
         }
         for n in required.clone() {
             assert!(numbers.contains(&n), "{from}-{n} not shown");
@@ -444,11 +442,9 @@ fn check_shown(shown: &[String], now: u64, resume: u64, required: std::ops::Rang
     }
 }
 
-/// The messages of the first run still shown at `now`, all but those
-/// within `MARGIN` of their expiry.
+/// The messages of the first run not yet expired at `now`.
 fn unexpired(now: u64) -> std::ops::Range<usize> {
-    let ttl = u64::from(TTL_SECONDS) * 1_000;
-    let first = (0..PER_SIDE).find(|n| sent_time(*n, 0) + ttl >= now + MARGIN);
+    let first = (0..PER_SIDE).find(|n| expiry(*n, 0) >= now);
     first.unwrap_or(PER_SIDE)..PER_SIDE
 }
 
