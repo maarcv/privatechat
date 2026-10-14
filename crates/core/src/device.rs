@@ -4,14 +4,18 @@
 //! `channel_id`.
 //!
 //! This module opens the device and keeps the broken channels (R1, R3);
-//! `settings.rs` keeps the settings and their gate (R1, R2, R13).
+//! `settings.rs` keeps the settings and their gate (R1, R2, R13),
+//! `channels.rs` the channels (R4–R8) and `plan.rs` the routes (R10).
 
 use crate::error::Error;
 use crate::session::channel::Channel;
 use crate::storage::{DirName, StoreError, Vault};
 
+mod channels;
+mod plan;
 mod settings;
 
+pub use self::channels::{ChannelInfo, ExportedFile, Imported};
 use self::settings::SettingsHolder;
 pub use self::settings::SettingsView;
 

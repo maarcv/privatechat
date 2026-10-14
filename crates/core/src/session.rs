@@ -8,4 +8,4 @@ pub(crate) mod channel;
 pub(crate) mod connection;
 mod expiry;
 pub(crate) mod frames;
-mod names;
+pub(crate) mod names;
