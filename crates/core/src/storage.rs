@@ -20,6 +20,7 @@ pub(crate) mod state;
 
 pub use self::log::LogRecord;
 pub(crate) use self::log::{Content, LogEntry, Message};
+pub(crate) use self::settings::MAX_LOCK_TIMEOUT_SECONDS;
 pub use self::settings::Settings;
 pub use self::state::ChannelState;
 
@@ -282,6 +283,14 @@ impl fmt::Debug for StorageKey {
 /// `channel_id` (R18), which the store writes as 32 lowercase hex characters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DirName(pub [u8; 16]);
+
+impl DirName {
+    /// The 32 lowercase hex characters the store names the directory with
+    /// (R18), which spec 027-core-api shows as `BrokenChannel::name`.
+    pub fn to_hex(&self) -> String {
+        self.0.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+}
 
 /// The directory name of `channel_id` under `key` (R18).
 ///

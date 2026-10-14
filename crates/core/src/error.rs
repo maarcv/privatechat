@@ -47,6 +47,9 @@ pub enum Error {
     ConfigMismatch,
     /// A `PeerId` with no peer record (spec 022-peers-tofu).
     UnknownPeer,
+    /// A `channel_id` of no open channel, or a name of no broken one (spec
+    /// 027-core-api R3, R9).
+    UnknownChannel,
     /// A label another peer holds, for a target that is not verified (spec
     /// 022-peers-tofu R7).
     LabelInUse,

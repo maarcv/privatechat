@@ -20,6 +20,8 @@
 #[allow(dead_code, reason = "reached through proto, spec 027-core-api")]
 mod crypto;
 
+mod device;
+
 mod error;
 
 #[cfg(any(test, fuzzing))]
@@ -40,6 +42,7 @@ pub mod testing;
 #[cfg(test)]
 mod vectors;
 
+pub use device::{BrokenChannel, Device, DeviceStatus, SettingsView};
 pub use error::Error;
 pub use proto::config::Config;
 pub use proto::fingerprint::Fingerprint;

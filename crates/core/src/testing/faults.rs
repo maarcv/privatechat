@@ -23,6 +23,7 @@ struct Armed {
     poison_after: Option<Countdown>,
     fail_commits: bool,
     fail_compactions: bool,
+    fail_loads: bool,
     /// Calls of `create` since `fail_create_at` was armed.
     creates: u32,
     fail_create_at: Option<u32>,
@@ -106,6 +107,11 @@ impl Faults {
     /// Fails every `compact` while on.
     pub fn fail_compactions(&self, on: bool) {
         self.armed().fail_compactions = on;
+    }
+
+    /// Fails every `Store::load` while on.
+    pub fn fail_loads(&self, on: bool) {
+        self.armed().fail_loads = on;
     }
 
     /// Fails every `Vault::create` while on.
@@ -217,7 +223,7 @@ impl Store for FailingStore {
     }
 
     fn load(&mut self) -> Result<Option<(ChannelState, Vec<LogRecord>)>, StoreError> {
-        if self.poisoned {
+        if self.poisoned || self.faults.armed().fail_loads {
             return Err(StoreError::Io);
         }
         self.inner.load()
