@@ -24,6 +24,7 @@ struct Armed {
     fail_commits: bool,
     fail_compactions: bool,
     fail_loads: bool,
+    fail_destroys: bool,
     /// Calls of `create` since `fail_create_at` was armed.
     creates: u32,
     fail_create_at: Option<u32>,
@@ -109,6 +110,11 @@ impl Faults {
         self.armed().fail_compactions = on;
     }
 
+    /// Fails every `Store::destroy` while on.
+    pub fn fail_destroys(&self, on: bool) {
+        self.armed().fail_destroys = on;
+    }
+
     /// Fails every `Store::load` while on.
     pub fn fail_loads(&self, on: bool) {
         self.armed().fail_loads = on;
@@ -160,7 +166,7 @@ impl Faults {
         let blocked = match call {
             Call::Commit => armed.fail_commits,
             Call::Compact => armed.fail_compactions,
-            Call::Destroy => false,
+            Call::Destroy => armed.fail_destroys,
         };
         if blocked || failing {
             Verdict::Fail
