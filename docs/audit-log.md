@@ -15,6 +15,18 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AT12 | The regeneration clauses ran with no own-key alert; the carry over a reopen was checked on `clock_off` alone; `leave` of a channel whose commits fail ran with the fault cleared (A) | Low | The alert planted and cleared; a carry with a gap and an ignored key; `leave` under the fault |
 | AT13 | `verify`, `verify_scanned`, `retire`, `forget` and `rename_channel` failing, a `Corrupt` state, every call's `now` timing the probe, a reopen among two channels keeping their order, the fresh instance's peers flag, the error path of `regenerate_identity` and a failed reopen inside `leave` were untested (C) | Medium | A case for each, in T08 and T14 |
 
+**Round 2.** Fresh passes on the whole change. AT8–AT13 hold. Pass C ran 18 new mutants: 5 killed, 4 equivalent, 9 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AT14 | A marked channel's `send` that stood with a new own name returned no event: AT9 compared the status alone, and a name changes only the peers flag, which a fresh instance always has set (B, C) | Medium | A marked channel's call that stood returns or queues `StatusChanged` whatever it changed; R14 says so; a T14 case |
+| AT15 | R15 held off a compaction on the reopened instance for ten minutes, where specs 021 R18 and 023 R5, which the code follows, start it with no attempt recorded (A) | Low | R15 says what 023 R5 says, with a History line |
+| AT16 | No test saw `create_channel`, the imports or `verify_scanned` time the probe; a `send` failing with an earlier entry of the current key waiting, a failed reopen of a marked channel in a direct writer, `LogFull` reopening nothing, and a marked channel keeping its mark and taking the fresh peers flag were untested (A, C) | Medium | A case for each |
+| AT17 | `leave` looked its position up again after a reopen that keeps it (C) | Low | One lookup |
+| AT18 | The change is over AGENTS 14's 400 lines (A) | Low | Justified in the pull request |
+| AT19 | A `send` whose commit stood and whose reopen then failed returns an error, and the message is published once the channel comes back (B) | Far-fetched | None: R14's last sentence tells the client a reopened state may hold a commit whose call failed |
+| AT20 | A writer inside the unlocked device restoring a copy from before a regeneration makes `outbox_ref` read the copy (B) | Far-fetched | None: outside `docs/spec.md` §2, and the rollback of the identity is the larger effect |
+
 ## Audit AS
 
 **2026-10-14 — Audit AS, the code audit of slice (b) of spec 027-core-api (branch `027-channels`): creating, importing, exporting, listing, renaming and leaving channels (R4–R8), the `needs_proxy` predicate `ChannelInfo` shows (R10's), and the settings of a fresh install saved by the first channel (R1); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit S's findings already took AS1–AS11, so this audit's are numbered from AS12. No production defect against the spec. Pass C ran 51 mutants: 38 killed, 4 equivalent, 9 survived; eight are killed below, and the ninth (a store error from the reopened state's config) left with the double load AS16 removes.

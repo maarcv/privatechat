@@ -153,7 +153,7 @@ impl Device {
     ///
     /// `UnknownChannel`; the store's error.
     pub fn leave(&mut self, channel: [u8; 16]) -> Result<(), Error> {
-        let mut position = self.position(channel)?;
+        let position = self.position(channel)?;
         let marked = self
             .channels
             .get(position)
@@ -164,7 +164,6 @@ impl Device {
                 self.queued.push(Event::StorageFailed { channel });
                 return result;
             }
-            position = self.position(channel)?;
             result = self.channel_mut(channel)?.leave();
         }
         result?;

@@ -2,7 +2,7 @@
 //! 027-core-api R14, R15, and R8 for a `write_failed` channel).
 
 use super::dispatch::{PEER, id, opened, with_peer};
-use super::{DAY_MS, Fixture, NOW, config};
+use super::{DAY_MS, Fixture, NOW, SERVER, config};
 use crate::Error;
 use crate::crypto::PublicKey;
 use crate::device::Device;
@@ -147,7 +147,8 @@ fn s027_t14_r14_outbox_full_reopens_nothing() {
 }
 
 /// Spec 027, R14: a direct `send` on a marked channel poisoned after its
-/// rename → reopened silently and `Ok(Sent)`, with no event.
+/// rename → reopened silently and `Ok(Sent)`, with no `StorageFailed` and
+/// the `StatusChanged` of a call that stood.
 #[test]
 fn s027_t14_r14_marked_send_poisoned_after_its_commit() {
     let (fixture, mut device) = opened();
@@ -157,7 +158,7 @@ fn s027_t14_r14_marked_send_poisoned_after_its_commit() {
     device.queued.clear();
     fixture.faults.poison_after(1);
     let sent = device.send(id, "hello", None, NOW).unwrap();
-    assert!(sent.events.is_empty());
+    assert_eq!(sent.events, [Event::StatusChanged { channel: id }]);
     assert!(device.queued.is_empty());
     assert_eq!(
         device.messages(id, NOW).unwrap()[0].client_ref,
@@ -310,8 +311,8 @@ fn s027_t14_r14_regeneration_failing_queues_its_event() {
     assert_eq!(device.queued, [Event::StorageFailed { channel: id }]);
 }
 
-/// Spec 027, R14: every writer that carries a `now` sets the time from
-/// which a later call without one counts the probe.
+/// Spec 027, R14: every call taking `&mut self` that carries a `now` sets
+/// the time from which a later call without one counts the probe.
 #[test]
 fn s027_t14_r14_every_now_times_the_probe() {
     type Call = Box<dyn Fn(&mut Device, [u8; 16], u64)>;
@@ -335,6 +336,31 @@ fn s027_t14_r14_every_now_times_the_probe() {
         (
             "regenerate_identity",
             Box::new(|d, id, now| drop(d.regenerate_identity(id, now).unwrap())),
+        ),
+        (
+            "verify_scanned",
+            Box::new(|d, id, now| {
+                let qr = verify_qr(config(1).id(), &PublicKey(PEER)).unwrap();
+                assert_eq!(d.verify_scanned(id, &qr, "ann", now), Ok(PEER));
+            }),
+        ),
+        (
+            "create_channel",
+            Box::new(|d, _, now| drop(d.create_channel(SERVER, 3_600, "room", now).unwrap())),
+        ),
+        (
+            "import_qr",
+            Box::new(|d, _, now| {
+                let qr = config(1).export_qr(NOW).unwrap();
+                drop(d.import_qr(&qr, false, now).unwrap());
+            }),
+        ),
+        (
+            "import_file",
+            Box::new(|d, _, now| {
+                let (file, password) = config(1).export_encrypted(NOW).unwrap();
+                drop(d.import_file(&file, &password, false, now).unwrap());
+            }),
         ),
     ];
     for (name, call) in calls {
@@ -497,4 +523,95 @@ fn s027_t14_r14_reopen_carries_gaps_and_ignored_keys() {
     assert_eq!(device.channel(id).unwrap().session_carry(), carry);
     assert_eq!(device.gaps(id).unwrap().len(), 1);
     assert_eq!(device.channel_status(id).unwrap().ignored_keys, 1);
+}
+
+/// Spec 027, R9: a `send` whose commit fails before its rename, with an
+/// earlier message of the same key still waiting, is not taken for that
+/// earlier entry.
+#[test]
+fn s027_t09_r09_send_failing_with_an_earlier_entry_waiting() {
+    let (fixture, mut device) = opened();
+    let id = id();
+    let waiting = device.send(id, "before", None, NOW).unwrap();
+    fixture.faults.fail_at(1);
+    assert_eq!(
+        device.send(id, "after", None, NOW).err(),
+        Some(Error::Store(StoreError::Io))
+    );
+    let messages = device.messages(id, NOW).unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].client_ref, Some(waiting.client_ref));
+}
+
+/// Spec 027, R14: a marked channel whose silent reopen in a direct writer
+/// fails moves to `broken` with `StorageFailed` queued.
+#[test]
+fn s027_t14_r14_marked_reopen_fails() {
+    let (fixture, mut device) = opened();
+    let id = id();
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id, PEER, true).is_err());
+    device.queued.clear();
+    fixture.faults.fail_at(1);
+    fixture.faults.fail_create(true);
+    assert!(device.label(id, PEER, "ann", NOW).is_err());
+    assert!(device.channels().is_empty());
+    assert_eq!(device.status().broken[0].channel_id, Some(id));
+    assert_eq!(device.queued, [Event::StorageFailed { channel: id }]);
+}
+
+/// Spec 027, R14: `LogFull` from `send` is returned as it is and reopens
+/// nothing.
+#[test]
+fn s027_t14_r14_log_full_reopens_nothing() {
+    let (_fixture, mut device) = opened();
+    let id = id();
+    // One byte inside spec 021 R18's headroom.
+    let full = crate::storage::MAX_LOG_LEN - 1_114_156 + 1;
+    let channel = device.channel_mut(id).unwrap();
+    channel.fill_log(NOW + DAY_MS, full);
+    // The flag a loaded channel starts with (spec 021 R1).
+    channel.take_peers_changed();
+    assert_eq!(
+        device.send(id, "hi", None, NOW).err(),
+        Some(Error::Store(StoreError::LogFull))
+    );
+    assert!(!device.channels()[0].write_failed);
+    assert!(device.queued.is_empty());
+}
+
+/// Spec 027, R14: a `send` on a marked channel poisoned after its rename
+/// that changed one's own name reports `StatusChanged`, as the same call
+/// on an unmarked channel does.
+#[test]
+fn s027_t14_r14_marked_send_reports_a_new_own_name() {
+    let (fixture, mut device) = opened();
+    let id = id();
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id, PEER, true).is_err());
+    device.queued.clear();
+    fixture.faults.poison_after(1);
+    let sent = device.send(id, "hello", Some("newname"), NOW).unwrap();
+    assert_eq!(
+        device.channels()[0].own_display_name.as_deref(),
+        Some("newname")
+    );
+    assert_eq!(sent.events, [Event::StatusChanged { channel: id }]);
+}
+
+/// Spec 027, R14: a further failure of a marked channel keeps its probe
+/// time, and its silent reopen takes the fresh instance's peers flag.
+#[test]
+fn s027_t14_r14_marked_failure_keeps_the_mark() {
+    let (fixture, mut device) = opened();
+    let id = id();
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id, PEER, true).is_err());
+    fixture.faults.fail_at(1);
+    assert!(device.label(id, PEER, "ann", NOW + 30_000).is_err());
+    let probe_at = device.channels.first().and_then(|open| open.probe_at);
+    assert_eq!(probe_at, Some(NOW + 60_000));
+    device.queued.clear();
+    assert_eq!(device.purge_expired(id, NOW + 30_000), Ok(0));
+    assert!(device.queued.is_empty());
 }

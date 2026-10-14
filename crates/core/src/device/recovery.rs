@@ -19,7 +19,8 @@ impl Device {
     /// Runs the direct writer `call` on `channel` with R14 around it, and
     /// returns its result and the events it produced: `StorageFailed` when
     /// the store failed and was reopened or the channel broke, and
-    /// `StatusChanged` when its status or its peers changed. After a
+    /// `StatusChanged` when its status or its peers changed, or when a
+    /// marked channel's call stood after its silent reopen. After a
     /// reopen, `outcome` reads from what stands whether the call committed
     /// (R9), and its value replaces the error.
     pub(super) fn direct<T>(
@@ -65,8 +66,9 @@ impl Device {
             // client to re-read everything with `StorageFailed`.
             open.channel.take_peers_changed();
             // A marked channel reopens with no `StorageFailed`: a call that
-            // stood still reports the status it changed.
-            if marked && result.is_ok() && open.channel.status() != before {
+            // stood changed what the client shows (a status, a peer, one's
+            // own name), which the fresh instance's flag cannot tell.
+            if marked && result.is_ok() {
                 events.push(Event::StatusChanged { channel });
             }
         } else if open.channel.take_peers_changed() || open.channel.status() != before {
