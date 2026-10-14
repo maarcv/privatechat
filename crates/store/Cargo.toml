@@ -21,6 +21,9 @@ privatechat-core = { path = "../core", version = "0.0.0" }
 [dev-dependencies]
 # The doubles and builders of `core::testing`, for the tests only (spec 020).
 privatechat-core = { path = "../core", version = "0.0.0", features = ["test-support"] }
+# The random choices of the phase 2 exit test, drawn by a proptest of one case
+# (spec 027-core-api R23), as `core` draws its round trips; a test dependency only.
+proptest = "1.8.0"
 
 [lints]
 workspace = true

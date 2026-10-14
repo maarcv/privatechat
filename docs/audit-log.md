@@ -2,6 +2,83 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AY
+
+**2026-10-14 — Audit AY, the code audit of slice (f) of spec 027-core-api (branch `027-exit`): the phase 2 exit test (R23); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit Y's findings already took AY1–AY18, so this audit's are numbered from AY19. No production defect; the test was weaker than R23's wording. Pass C ran 20 mutants, of the production code the test guards and of the test: 11 killed, 5 equivalent here, 4 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AY19 | "0 errors other than the injected ones" was not enforced: `StorageFailed` had no bound, and refusals, truncations, `NotDelivered`, full servers and reconnects went uncounted; any send error passed as the injected one (A, B) | Medium | Each side sees exactly one `StorageFailed`, the send error is `Store(Io)`, no unexpected event, at most two `Reconnect`s, and no channel left `write_failed` |
+| AY20 | The failed commit landed where the draw put it, so the session's recovery of R14 went untested in some runs, and nothing showed the fault fired (A, C) | Medium | One side fails the commit of a `send`, the other of a received frame, each from a drawn step; both counted |
+| AY21 | A side receiving its own messages back, and a duplicate delivered a second time, were never checked (C) | Medium | Nothing but the other side's bodies; every second delivery produces no message |
+| AY22 | The crash run's log length was read after `load` had cut it, so it held whatever the crash left; a side whose store vanished, and a resume on a fresh channel, passed (B, C) | Medium | The length read before and after, one side's log longer than committed; one store a side, the same channel resumed, nothing broken |
+| AY23 | The crash came before any compaction, and "one compaction run and checked" checked only that one ran (A, B) | Low | The crash past the first compaction, which the reopen checks; no record kept that expired in the first two hours |
+| AY24 | A failing run printed 25 000 drawn booleans; the crash append was a constant written as a seed; the child test was named apart from its precedent (A, C) | Low | A drawn seed marks the duplicates; named constants; `s027_t23_r23_crash_child` |
+| AY25 | The resume comes past the TTL, so a pre-crash `outbox` entry lost by the reopen is invisible to the crash run (C) | Far-fetched | None: the first run catches it, and R23 asks the crash run to resume, not to recount |
+| AY26 | The crash point models a killed process, not a power cut: fast mode keeps every write in the page cache (B) | Far-fetched | None: what R23 asks; durability order is spec 020's recovery tests |
+| AY27 | Duplicates are replayed at once, never after a reconnect or a compaction (B) | Far-fetched | None: the server re-pushes the backlog from the cursor at every reconnect, which the run does |
+
+**Round 2**, on the whole change with the findings above. Pass B ran the crash run instrumented and showed AY25 rested on a false premise; pass C ran 20 production mutants and 2 of the test: 13 killed (both of the test), 4 equivalent here, 4 out of R23 and killed by other tests, 1 survived (AY35). No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AY28 | The crash run resumed at T0 + 2 h, 1.6 h before the crash: the message pending in the `outbox` at the crash (`a-4333`) was republished, refused as from the future and reported `NotDelivered`, and the run passed; a correct delivery failed it. Reopens AY25 (A, B) | Medium | The resume comes after the end the full run would have had; each side's own unacked messages are read after the reopen and must reach the other side once, on top of the 20 new ones; at least one is pending |
+| AY29 | The resumed exchange checked none of the counters of the first run (A, B) | Medium | One `check_counters` for both runs: after the resume 0 errors, 0 `StorageFailed`, no unexpected event, bounded reconnects, nothing broken or `write_failed` |
+| AY30 | The failed commits were drawn among the first 1 000 of 5 000 steps (A) | Low | Drawn over all 5 000; runs with both at step 0 and at step 4 999 checked by hand |
+| AY31 | Order was never checked: `received` is keyed by body (B) | Low | Each side keeps the numbers it received in order; they must be strictly increasing |
+| AY32 | `pump` stopped after 20 rounds whether quiet or not, and `Subscribed` went uncounted, so a frame loop without `Reconnect` passed (B) | Low | A `pump` still moving frames after `PUMP_ROUNDS` fails; subscriptions bounded by one per session |
+| AY33 | Half the marked duplicates were echoes of one's own messages, rejected whatever happened, and "rejected" meant only "no message" (B, C) | Low | Only a push that brought a message is delivered twice, and its second delivery must produce no event at all |
+| AY34 | Neither run checked the content of the reopened log: a commit that overwrote the previous record kept the state and passed the main run (mutant M1) (B, C) | Medium | Before closing, each side's shown bodies are kept; a `Device` reopened over the directory must show the same, non-empty list; the crash run requires a non-empty list after the reopen |
+| AY35 | "No record expired in the first two hours" let a compaction keep 50 extra minutes of expired plaintext (mutant M10) (C) | Low | No record left that expired a TTL before the end, the most spec 023 R5's quarter rule keeps |
+| AY36 | `arm` took a boolean beside the `Fault` enum; `Duplicates` had a field and a method both named `next`; the file is over 400 lines (C) | Low | A `Step` enum; `is_marked` and `index`; the PR says why one end-to-end test stays in one file |
+
+**Round 3**, on the whole change with the findings above. Pass B ran the crash run instrumented at other crash points; pass C ran 11 production mutants: 5 killed, 1 survived (AY42), 3 equivalent here and 2 out of R23, each killed by other tests. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AY37 | R23 says "a seeded *k*"; the crash append is a fixed constant (A) | Far-fetched | None: a fixed *k* keeps the run deterministic and its assertions meaningful; the wording can follow at the next touch of the spec |
+| AY38 | 1 % of the messages are duplicated, not 1 % of the pushes, echoes included (A) | Far-fetched | None: what `docs/spec.md` §10 asks |
+| AY39 | The crash run passed while a message one side's server had acked was missing at the other: with the crash on a receive (`CRASH_APPEND` 25 996), `a-4332` was lost and nothing noticed; a reload of an older state passed too (B) | Medium | Exactly one side's log runs past its committed length; every own message the server acked is shown by the other side, but the last one when the stopped append was that side's receive of it, which only the fresh server lost; checked to fail at 25 996 without that allowance |
+| AY40 | The list a device shows was never checked for order or repeats, only compared with itself across a reopen (B) | Low | `check_shown`: not empty, each body once, each sender's numbers increasing; in the first run, after the crash and after the resume |
+| AY41 | Other crash points fail on "no message was pending" with nothing wrong (B) | Low | The constant's comment says it stops a send while the other side's is pending; the acked check of AY39 holds at any point |
+| AY42 | The crash run kept the records of the load that cut the log unread: a load that cut the file but returned the uncommitted record passed (mutant M4) (C) | Low | A second load must return the same records; `Corrupt` refused by the `expect` |
+| AY43 | `Duplicates` meant "none" by `index == u64::MAX` (C) | Low | `seed: Option<u64>` |
+
+**Round 4**, on the whole change with the findings above. Pass B rolled a side's `state.bin` back in an instrumented copy; pass C ran 13 production mutants: 6 killed, 3 survived (AY47), 3 out of R23 and 1 equivalent here, each killed by other tests. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AY44 | AY39's allowance applied whenever the receiving side's log was cut, but at the run's crash point the cut append is a send: a state reloaded two commits back, missing the other side's last acked message, passed (A, B) | Medium | No allowance: the crash stops a send, so every acked message of one side must be shown by the other |
+| AY45 | T23 names one test, `s027_t23_r23_phase2_exit`; the crash run is `…_after_a_crash` with its child (A) | Low | T23 names both, with the change that marks spec 027 implemented |
+| AY46 | The sender of a shown or delivered message was never checked: one's own shown as a peer's, or a peer's as a stranger, passed (B) | Low | A `Message` event must come from a peer; every listed body must come from its side, its own as `Own`, the other's from a known peer |
+| AY47 | Nothing read the status, the gaps or the delivery of one's own rows: a `clock_off` on every ack, a gap on every message, every delivered message shown as failed all passed (mutants M3, M4, M8) (C) | Low | `check_clean`: a clean `ChannelStatus`, no gap, every own message shown `Delivered`, in both runs |
+
+**Round 5**, on the whole change with the findings above. Pass B ran mutants in a scratch copy; pass C ran 12 production mutants: 5 killed, 1 survived (AY54), 6 out of R23 or equivalent here, each killed by other tests. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AY48 | Round 2's mutant counts left out the 2 mutants of the test (A) | Low | The count corrected above |
+| AY49 | Nothing requires the acked list of AY44 to be non-empty (A) | Far-fetched | None: the crash run is deterministic and its acked lists are not empty |
+| AY50 | No run checked that the list holds every unexpired message and no expired one: a compaction dropping 20 minutes of live history, or a peer's message shown past its TTL, passed the first run (B) | Low | `check_shown` takes the time and the numbers required: nothing expired shown, every unexpired message of `required` shown, in both runs (the 15-minute slack first written here was replaced by the exact rule in AY59); both mutants checked to fail |
+| AY51 | The order across senders was never checked: all peer messages listed before all own ones passed (B) | Low | `bodies` requires the list sorted by display time; the mutant checked to fail |
+| AY52 | Rows and events that are not text were skipped: a spurious key-retired or unreadable row passed (B) | Low | Every listed row and every `Message` event must be text |
+| AY53 | `state_eq` ignores the log position (B) | Far-fetched | None: R23 names `state_eq`; a position cutting a shown record fails the reopened list |
+| AY54 | `reconnects <= 2` allowed 0, so a failed `send` reopened without a mark, so without its probe, passed (mutant M9) (C) | Low | One `Reconnect` per store reopened, exactly |
+| AY55 | The body format `name-n` was parsed three ways (C) | Low | One `number` |
+| AY56 | Bare numbers, and the resume's messages written as a tuple and as a range (C) | Low | `READ_BATCH`, the URL from `HOST`, `exchange` takes the numbers as a range, `RESUMED` |
+| AY57 | Repeated code in the crash run (C) | Low | The channel check out of the loop; `extra` built in one loop |
+
+**Round 6**, on the whole change with the findings above. Pass B ran 64 draws of an instrumented copy, the edges and the steps of every compaction among them, with no failure; pass C ran 15 production mutants: 7 killed, 1 survived (AY61), 4 out of R23 and 3 equivalent here, each killed by other tests. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AY59 | The 15-minute slack of AY50 rested on a false premise: a message's display expiry is its `sent_at`, rounded down to the minute, plus the TTL (spec 023 R1), whatever its display time; a list hiding messages up to 14 minutes early, or showing them 15 minutes late, passed (A) | Low | `expiry(n)` by that rule; a body is shown when, and only when, it has not expired; no slack |
+| AY60 | Subscriptions were bounded by `reconnects + storage_failed + 1`; a reopen keeps its session and subscribes nothing (A) | Low | Merged into AY61 |
+| AY61 | The bound passed with no `Subscribed` at all: `on_ok` dropping the event passed both runs (mutant M10) (C) | Low | Exactly one subscription per session: `subscribed == reconnects + 1` |
+| AY62 | A `Message` event's key, display time and expiry are not compared with the listed row (B) | Far-fetched | None: R23 asks for none of them; the tests of specs 021, 022 and 024 check them |
+
+The audit ends with round 6: passes A and C found only test gaps of Low severity, closed by the tests above, and pass B nothing but a far-fetched point. No production defect was found in any round. The local CI is clean.
+
 ## Audit AX
 
 **2026-10-14 — Audit AX, the code audit of slice (e) of spec 027-core-api (branch `027-boundary`): the boundary checks (`unreachable_pub`, `api_surface.rs`), the amendments of specs 011 and 016, the `dead_code` allows removed, `init` and `generate_storage_key`, and the doc updates (R16–R22); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit X's findings already took AX1–AX18, so this audit's are numbered from AX19. No production defect: no secret crosses, no gate changes production, no parser of external bytes is left unfuzzed and unexcluded. Pass C ran 24 mutants: 20 killed, 1 equivalent, 3 survived, each killed below.

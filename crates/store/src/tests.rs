@@ -9,6 +9,7 @@
 
 mod files;
 mod golden;
+mod phase2_exit;
 mod recovery;
 
 use std::path::{Path, PathBuf};
