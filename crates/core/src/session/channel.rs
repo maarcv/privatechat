@@ -33,6 +33,9 @@ mod send;
 mod status;
 mod sync;
 
+pub use self::peers::Peer;
+pub use self::purge::{Delivery, Message, Stranger};
+
 #[cfg(test)]
 mod tests;
 

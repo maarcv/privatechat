@@ -2,10 +2,11 @@
 //! importing, exporting, listing, renaming and leaving them, and the
 //! recovery of a first commit that poisoned its store.
 
-use super::{Broken, BrokenChannel, Device, plan};
+use super::{Broken, BrokenChannel, Device, Open, plan};
 use crate::error::Error;
 use crate::proto::config::Config;
 use crate::session::channel::{Channel, ChannelStatus};
+use crate::session::connection::Event;
 use crate::session::names::shown_name;
 use crate::storage::StoreError;
 
@@ -54,10 +55,7 @@ impl Device {
     /// The open channels, in the order the device opened or created them
     /// (R7).
     pub fn channels(&self) -> Vec<ChannelInfo> {
-        self.channels
-            .iter()
-            .map(|channel| self.info(channel))
-            .collect()
+        self.channels.iter().map(|open| self.info(open)).collect()
     }
 
     /// Creates a channel on `server_url` (R4).
@@ -140,25 +138,41 @@ impl Device {
     /// `UnknownChannel`; `BadPayload` for an invalid name; `Store` when the
     /// commit fails.
     pub fn rename_channel(&mut self, channel: [u8; 16], name: &str) -> Result<(), Error> {
-        self.channel_mut(channel)?.set_local_name(name)
+        self.write(channel, |open| open.set_local_name(name))
     }
 
     /// Deletes `channel` and its directory (R8); on `Err` it stays open and
-    /// usable.
+    /// usable. A `write_failed` channel whose poisoned store refuses is
+    /// reopened silently once and asked again, so that the user can free
+    /// its space.
     ///
     /// # Errors
     ///
     /// `UnknownChannel`; the store's error.
     pub fn leave(&mut self, channel: [u8; 16]) -> Result<(), Error> {
-        let position = self.position(channel)?;
-        self.channel_mut(channel)?.leave()?;
+        let mut position = self.position(channel)?;
+        let marked = self
+            .channels
+            .get(position)
+            .is_some_and(|open| open.probe_at.is_some());
+        let mut result = self.channel_mut(channel)?.leave();
+        if marked && result == Err(Error::Store(StoreError::Io)) {
+            if self.reopen(position).is_err() {
+                self.queued.push(Event::StorageFailed { channel });
+                return result;
+            }
+            position = self.position(channel)?;
+            result = self.channel_mut(channel)?.leave();
+        }
+        result?;
         self.channels.remove(position);
         Ok(())
     }
 
     /// The `ChannelInfo` of an open channel (R7), its names cleaned as spec
     /// 022-peers-tofu R6 says.
-    fn info(&self, channel: &Channel) -> ChannelInfo {
+    fn info(&self, open: &Open) -> ChannelInfo {
+        let channel = &open.channel;
         let config = channel.config();
         ChannelInfo {
             id: config.channel_id(),
@@ -168,7 +182,7 @@ impl Device {
             own_display_name: channel.own_display_name().and_then(shown_name),
             ttl_seconds: config.ttl_seconds(),
             status: channel.status(),
-            write_failed: false,
+            write_failed: open.probe_at.is_some(),
             needs_proxy: plan::needs_proxy(
                 config.server_url(),
                 self.settings.current().socks5_proxy.as_deref(),
@@ -177,23 +191,29 @@ impl Device {
     }
 
     /// The position of the open channel `channel`.
-    fn position(&self, channel: [u8; 16]) -> Result<usize, Error> {
+    pub(super) fn position(&self, channel: [u8; 16]) -> Result<usize, Error> {
         self.channels
             .iter()
-            .position(|open| open.config().channel_id() == channel)
+            .position(|open| open.channel.config().channel_id() == channel)
             .ok_or(Error::UnknownChannel)
     }
 
     /// The open channel `channel`.
     pub(super) fn channel(&self, channel: [u8; 16]) -> Result<&Channel, Error> {
         let position = self.position(channel)?;
-        self.channels.get(position).ok_or(Error::UnknownChannel)
+        self.channels
+            .get(position)
+            .map(|open| &open.channel)
+            .ok_or(Error::UnknownChannel)
     }
 
     /// The open channel `channel`, to change.
     pub(super) fn channel_mut(&mut self, channel: [u8; 16]) -> Result<&mut Channel, Error> {
         let position = self.position(channel)?;
-        self.channels.get_mut(position).ok_or(Error::UnknownChannel)
+        self.channels
+            .get_mut(position)
+            .map(|open| &mut open.channel)
+            .ok_or(Error::UnknownChannel)
     }
 
     /// R5 for a parsed `config`: an open channel answers at once, a broken
@@ -227,12 +247,13 @@ impl Device {
     /// The answer for a channel already open: itself when the server
     /// matches (R5, `docs/spec.md` §5).
     fn existing(&self, config: &Config) -> Result<Imported, Error> {
-        let channel = self.channel(config.channel_id())?;
-        if channel.config().server_url() != config.server_url() {
+        let position = self.position(config.channel_id())?;
+        let open = self.channels.get(position).ok_or(Error::UnknownChannel)?;
+        if open.channel.config().server_url() != config.server_url() {
             return Err(Error::ConfigMismatch);
         }
         Ok(Imported {
-            info: self.info(channel),
+            info: self.info(open),
             is_new: false,
         })
     }
@@ -255,7 +276,10 @@ impl Device {
         match opened {
             Ok(channel) => {
                 self.broken.remove(position);
-                self.channels.push(channel);
+                self.channels.push(Open {
+                    channel,
+                    probe_at: None,
+                });
                 Ok(true)
             }
             Err(Error::Store(reason)) => {
@@ -281,8 +305,12 @@ impl Device {
             Err(Error::Store(StoreError::Io)) => (self.recover(config)?, true),
             Err(error) => return Err(error),
         };
-        let info = self.info(&channel);
-        self.channels.push(channel);
+        let open = Open {
+            channel,
+            probe_at: None,
+        };
+        let info = self.info(&open);
+        self.channels.push(open);
         Ok((info, is_new))
     }
 

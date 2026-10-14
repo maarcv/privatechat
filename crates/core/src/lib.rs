@@ -43,12 +43,15 @@ pub mod testing;
 mod vectors;
 
 pub use device::{
-    BrokenChannel, ChannelInfo, Device, DeviceStatus, ExportedFile, Imported, SettingsView,
+    BrokenChannel, ChannelInfo, Device, DeviceStatus, ExportedFile, Imported, Sent, SettingsView,
 };
 pub use error::Error;
 pub use proto::config::Config;
 pub use proto::fingerprint::Fingerprint;
-pub use session::channel::ChannelStatus;
+pub use session::channel::{
+    AckOutcome, ChannelStatus, ClientRef, Delivery, Gap, Message, MessageContent, OldKey, Peer,
+    PeerId, Received, Sender, Stranger,
+};
 pub use session::connection::Event;
 pub use session::frames::Frame;
 pub use storage::{

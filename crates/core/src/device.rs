@@ -5,17 +5,23 @@
 //!
 //! This module opens the device and keeps the broken channels (R1, R3);
 //! `settings.rs` keeps the settings and their gate (R1, R2, R13),
-//! `channels.rs` the channels (R4–R8) and `plan.rs` the routes (R10).
+//! `channels.rs` the channels (R4–R8), `dispatch.rs` the per-channel
+//! calls (R9), `recovery.rs` the reopening of a failed store (R14, R15)
+//! and `plan.rs` the routes (R10).
 
 use crate::error::Error;
 use crate::session::channel::Channel;
+use crate::session::connection::Event;
 use crate::storage::{DirName, StoreError, Vault};
 
 mod channels;
+mod dispatch;
 mod plan;
+mod recovery;
 mod settings;
 
 pub use self::channels::{ChannelInfo, ExportedFile, Imported};
+pub use self::dispatch::Sent;
 use self::settings::SettingsHolder;
 pub use self::settings::SettingsView;
 
@@ -60,9 +66,23 @@ struct Broken {
 /// `Clone`, `Debug` nor `Display` (R20): its channels hold their keys.
 pub struct Device {
     vault: Box<dyn Vault>,
-    channels: Vec<Channel>,
+    channels: Vec<Open>,
     broken: Vec<Broken>,
     settings: SettingsHolder,
+    /// The events produced outside a call that returns events, for the
+    /// next `on_tick` (R14).
+    queued: Vec<Event>,
+    /// The `now` of the last call that carried one, which times the calls
+    /// that take none (R14).
+    latest_now: u64,
+}
+
+/// An open channel and what the device keeps beside it.
+struct Open {
+    channel: Channel,
+    /// While the channel is `write_failed`, the time of its next probe
+    /// (R14).
+    probe_at: Option<u64>,
 }
 
 impl Device {
@@ -85,22 +105,32 @@ impl Device {
             channels: Vec::new(),
             broken: Vec::new(),
             settings,
+            queued: Vec::new(),
+            latest_now: now,
         };
         for store in stores {
             let dir = *store.name();
             match Channel::open_stored(store) {
-                Ok(channel) => device.channels.push(channel),
+                Ok(channel) => device.channels.push(Open {
+                    channel,
+                    probe_at: None,
+                }),
                 Err(Error::Store(reason)) => device.broken.push(Broken::at_open(dir, reason)),
                 // R1: any other error fails `open`; `open_stored` returns
                 // none today.
                 Err(error) => return Err(error),
             }
         }
-        for channel in &mut device.channels {
-            if channel.purge_due(now) {
-                // R15: a failed purge never fails `open`.
-                let _purged = channel.purge_expired(now);
-            }
+        let due: Vec<[u8; 16]> = device
+            .channels
+            .iter()
+            .filter(|open| open.channel.purge_due(now))
+            .map(|open| open.channel.config().channel_id())
+            .collect();
+        for id in due {
+            // R15: a failed purge never fails `open`; R14 handles it.
+            let (_, events) = device.direct(id, |channel| channel.purge_expired(now), |_| None);
+            device.queued.extend(events);
         }
         Ok(device)
     }
