@@ -6,7 +6,7 @@
 use super::Device;
 use super::routing::link_of;
 use crate::error::Error;
-use crate::session::channel::{AckOutcome, Channel, ChannelStatus};
+use crate::session::channel::{Channel, ChannelStatus};
 use crate::session::connection::Event;
 
 /// The wait between two probes of a channel that stays `write_failed`, and
@@ -20,7 +20,9 @@ impl Device {
     /// last one (R14).
     pub fn on_tick(&mut self, now: u64) -> Vec<Event> {
         self.latest_now = now;
-        let mut events = Vec::new();
+        // What came before the tick, first, so that a failure and the
+        // probe that clears it arrive in that order.
+        let mut events = core::mem::take(&mut self.queued);
         let connected: Vec<u64> = self
             .links
             .iter()
@@ -36,7 +38,6 @@ impl Device {
         events.extend(self.tick_unconnected(now));
         events.extend(self.compact_one(now));
         events.extend(self.probe_one(now));
-        events.extend(core::mem::take(&mut self.queued));
         events
     }
 
@@ -51,8 +52,10 @@ impl Device {
         self.latest_now = now;
         let mut first = Ok(());
         for channel in &mut self.channels {
-            if let Err(error) = channel.flush(now) {
-                first = first.and(Err(error));
+            if let Err(error) = channel.flush(now)
+                && first.is_ok()
+            {
+                first = Err(error);
             }
         }
         first
@@ -119,16 +122,11 @@ impl Device {
         let full: Vec<[u8; 16]> = self
             .channels
             .iter()
+            .filter(|channel| channel.status().storage_full)
             .map(|channel| channel.config().channel_id())
             .filter(|id| !self.marks.contains_key(id))
             .collect();
         for id in full {
-            if !self
-                .channel(id)
-                .is_ok_and(|channel| channel.status().storage_full)
-            {
-                continue;
-            }
             let (acted, events) = self.compact(id, |channel| channel.relieve_headroom(now));
             if acted {
                 return events;
@@ -219,14 +217,14 @@ pub(super) fn changed(channel: &mut Channel, before: ChannelStatus) -> bool {
     channel.take_peers_changed() | (channel.status() != before)
 }
 
-/// A channel's queued outcomes as `NotDelivered`, then `StatusChanged`
-/// when its status differs from `before` or its peers changed (R14).
+/// A channel's queued outcomes, which are all of entries it removed as
+/// not delivered (spec 021-channel-session R17), then `StatusChanged` when
+/// its status differs from `before` or its peers changed (R14).
 fn drain(channel: &mut Channel, before: ChannelStatus) -> Vec<Event> {
     let id = channel.config().channel_id();
     let mut events: Vec<Event> = channel
         .take_outcomes()
         .into_iter()
-        .filter(|outcome| outcome.outcome == AckOutcome::NotDelivered)
         .filter_map(|outcome| {
             outcome.sent_at.map(|sent_at| Event::NotDelivered {
                 channel: id,

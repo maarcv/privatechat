@@ -13,7 +13,9 @@ mod channels;
 mod dispatch;
 mod plan;
 mod recovery;
+mod routing;
 mod scripted;
+mod sessions;
 mod settings;
 mod tick;
 

@@ -115,6 +115,7 @@ impl Device {
                     _ => StoreError::Corrupt,
                 };
                 self.marks.remove(&id);
+                self.cleared.remove(&id);
                 self.broken.push(Broken {
                     dir,
                     info: BrokenChannel {

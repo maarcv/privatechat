@@ -6,17 +6,16 @@ use super::{Fixture, NOW, config};
 use crate::Error;
 use crate::device::Device;
 use crate::session::connection::Event;
-use crate::session::frames::Frame;
 use crate::storage::{Store, StoreError};
 use crate::testing::{MemoryServer, record, settings};
 
-const HOST: &str = "example.org";
-const MINUTE: u64 = 60_000;
-const TEN_MINUTES: u64 = 600_000;
+pub(super) const HOST: &str = "example.org";
+pub(super) const MINUTE: u64 = 60_000;
+pub(super) const TEN_MINUTES: u64 = 600_000;
 
 /// Connects every plan of `device` to `server` and exchanges frames until
 /// both are quiet, at `now`; returns the events.
-fn pump(device: &mut Device, server: &mut MemoryServer, now: u64) -> Vec<Event> {
+pub(super) fn pump(device: &mut Device, server: &mut MemoryServer, now: u64) -> Vec<Event> {
     let mut events = Vec::new();
     for _ in 0..50 {
         let mut moved = false;
@@ -38,7 +37,7 @@ fn pump(device: &mut Device, server: &mut MemoryServer, now: u64) -> Vec<Event> 
 }
 
 /// Opens a socket for every plan of `device`.
-fn connect_all(device: &mut Device, server: &mut MemoryServer, now: u64) {
+pub(super) fn connect_all(device: &mut Device, server: &mut MemoryServer, now: u64) {
     for plan in device.connections() {
         server.connect(plan.id, now);
         device.on_connect(plan.id, now);
@@ -47,7 +46,12 @@ fn connect_all(device: &mut Device, server: &mut MemoryServer, now: u64) {
 
 /// Ticks every second from `from` to `to`, pumping frames, and returns the
 /// events.
-fn run(device: &mut Device, server: &mut MemoryServer, from: u64, to: u64) -> Vec<Event> {
+pub(super) fn run(
+    device: &mut Device,
+    server: &mut MemoryServer,
+    from: u64,
+    to: u64,
+) -> Vec<Event> {
     let mut events = Vec::new();
     let mut now = from;
     while now <= to {
@@ -59,12 +63,12 @@ fn run(device: &mut Device, server: &mut MemoryServer, from: u64, to: u64) -> Ve
 }
 
 /// Whether `events` holds a `Subscribed` for `channel`.
-fn subscribed(events: &[Event], channel: [u8; 16]) -> bool {
+pub(super) fn subscribed(events: &[Event], channel: [u8; 16]) -> bool {
     events.contains(&Event::Subscribed { channel })
 }
 
 /// A device with saved settings and the channels of keys `1..=n`.
-fn with_channels(n: u8) -> (Fixture, Device) {
+pub(super) fn with_channels(n: u8) -> (Fixture, Device) {
     let fixture = Fixture::new();
     fixture.save_settings(&settings("wss://example.org", 30, None));
     for k in 1..=n {
@@ -75,52 +79,8 @@ fn with_channels(n: u8) -> (Fixture, Device) {
 }
 
 /// Spec 027, R11: frames reach the right session; an `id` not in the plan
-/// gets no event and no frame.
-#[test]
-fn s027_t11_r11_routing() {
-    let (_fixture, mut device) = with_channels(1);
-    let mut server = MemoryServer::new(&[HOST]);
-    let plan = device.connections()[0].id;
-    let unknown = plan + 100;
-    device.on_connect(unknown, NOW);
-    assert!(device.outgoing(unknown).is_empty());
-    let hello = Frame::Hello {
-        server_nonce: [9; 32],
-        proto_versions: vec![1],
-    }
-    .encode()
-    .unwrap();
-    assert!(device.on_frame(unknown, &hello, NOW).is_empty());
-    device.on_disconnect(unknown);
-
-    connect_all(&mut device, &mut server, NOW);
-    let events = run(&mut device, &mut server, NOW, NOW + 5_000);
-    assert!(subscribed(&events, config(1).channel_id()));
-}
-
 /// Spec 027, R11: a channel the server refuses with `bad_auth` is not
 /// subscribed on the next connection of the same plan, and a plan whose
-/// channels were all refused leaves the plan.
-#[test]
-fn s027_t11_r11_refused_channels() {
-    let (_fixture, mut device) = with_channels(1);
-    // A server configured for another host refuses every signature.
-    let mut server = MemoryServer::new(&["other.example.org"]);
-    let plan = device.connections()[0].id;
-    connect_all(&mut device, &mut server, NOW);
-    let events = run(&mut device, &mut server, NOW, NOW + 3_000);
-    let channel = config(1).channel_id();
-    assert!(events.contains(&Event::SubscribeRefused { channel }));
-    assert!(device.connections().is_empty());
-    device.on_disconnect(plan);
-    server.disconnect(plan);
-    server.connect(plan, NOW + 4_000);
-    device.on_connect(plan, NOW + 4_000);
-    pump(&mut device, &mut server, NOW + 4_000);
-    run(&mut device, &mut server, NOW + 4_000, NOW + 8_000);
-    assert!(device.outgoing(plan).is_empty());
-}
-
 /// Spec 027, R12: 16 channels ticked every second are all subscribed.
 #[test]
 fn s027_t12_r12_sixteen_channels_subscribe() {
@@ -197,7 +157,7 @@ fn s027_t12_r12_one_compaction_a_tick() {
 }
 
 /// Marks channel 1 of `device` `write_failed` through a failing `mute`.
-fn mark(fixture: &Fixture, device: &mut Device) {
+pub(super) fn mark(fixture: &Fixture, device: &mut Device) {
     fixture.faults.fail_at(1);
     assert!(device.mute(id(), PEER, true).is_err());
     device.on_tick(NOW);
@@ -472,49 +432,6 @@ fn s027_t24_r24_flush_with_a_failure() {
     assert!(synced.iter().any(|at| *at != Some(lock)), "{synced:?}");
 }
 
-/// Spec 027, R11: two plans on two servers each get their own frames.
-#[test]
-fn s027_t11_r11_two_plans() {
-    let (_fixture, mut device) = with_channels(1);
-    let other = crate::proto::config::Config::from_parts(
-        crate::crypto::Secret::from_bytes([9; 32]),
-        "wss://other.example.org",
-        3_600,
-        "room",
-        0,
-    )
-    .unwrap();
-    device
-        .import_qr(&other.export_qr(NOW).unwrap(), false, NOW)
-        .unwrap();
-    let plans = device.connections();
-    assert_eq!(plans.len(), 2);
-    let mut servers = [
-        MemoryServer::new(&[HOST]),
-        MemoryServer::new(&["other.example.org"]),
-    ];
-    for (plan, server) in plans.iter().zip(servers.iter_mut()) {
-        server.connect(plan.id, NOW);
-        device.on_connect(plan.id, NOW);
-    }
-    let mut events = Vec::new();
-    for now in (NOW..NOW + 5_000).step_by(1_000) {
-        events.extend(device.on_tick(now));
-        for _ in 0..5 {
-            for (plan, server) in plans.iter().zip(servers.iter_mut()) {
-                for frame in device.outgoing(plan.id) {
-                    server.receive(plan.id, &frame, now);
-                }
-                for frame in server.read(plan.id, 100) {
-                    events.extend(device.on_frame(plan.id, &frame, now));
-                }
-            }
-        }
-    }
-    assert!(subscribed(&events, config(1).channel_id()));
-    assert!(subscribed(&events, other.channel_id()));
-}
-
 /// Spec 027, R12: the periodic purge runs at a quarter of the log, and not
 /// below it before a day after the oldest expiry.
 #[test]
@@ -599,61 +516,12 @@ fn s027_t15_r15_compaction_failing_on_the_tick() {
 }
 
 /// A log one byte into the headroom of spec 021-channel-session R18.
-const FULL_LOG: u64 = crate::storage::MAX_LOG_LEN - 1_114_156 + 1;
+pub(super) const FULL_LOG: u64 = crate::storage::MAX_LOG_LEN - 1_114_156 + 1;
 
 /// Spec 027, R11: a plan stays in `connections()` while one of its
-/// channels is not refused, and leaves it once all are.
-#[test]
-fn s027_t11_r11_plan_left_out_only_when_all_refused() {
-    let (_fixture, mut device) = with_channels(2);
-    let plan = device.connections()[0].id;
-    let link = device.links.get_mut(&plan).unwrap();
-    link.refused.insert(config(1).channel_id());
-    assert_eq!(device.connections().len(), 1);
-    let link = device.links.get_mut(&plan).unwrap();
-    link.refused.insert(config(2).channel_id());
-    assert!(device.connections().is_empty());
-}
-
 /// Spec 027, R11: the next connection of a plan is told the channels
 /// refused on the last one, and subscribes none of them after its
-/// `hello`.
-#[test]
-fn s027_t11_r11_refused_channel_not_resubscribed() {
-    let (_fixture, mut device) = with_channels(1);
-    let mut server = MemoryServer::new(&["other.example.org"]);
-    let plan = device.connections()[0].id;
-    connect_all(&mut device, &mut server, NOW);
-    run(&mut device, &mut server, NOW, NOW + 3_000);
-    device.on_disconnect(plan);
-    server.disconnect(plan);
-    server.connect(plan, NOW + 4_000);
-    device.on_connect(plan, NOW + 4_000);
-    for frame in server.read(plan, 100) {
-        device.on_frame(plan, &frame, NOW + 4_000);
-    }
-    assert!(device.outgoing(plan).is_empty());
-}
-
 /// Spec 027, R11: a plan `id` that left the plan routes nothing, even
-/// when its socket was open.
-#[test]
-fn s027_t11_r11_old_plan_id_ignored() {
-    let (_fixture, mut device) = opened();
-    let old = device.connections()[0].id;
-    device.on_connect(old, NOW);
-    device
-        .import_qr(&config(2).export_qr(NOW).unwrap(), false, NOW)
-        .unwrap();
-    assert_ne!(device.connections()[0].id, old);
-    let mut server = MemoryServer::new(&[HOST]);
-    server.connect(old, NOW);
-    for frame in server.read(old, 100) {
-        assert!(device.on_frame(old, &frame, NOW).is_empty());
-    }
-    assert!(device.outgoing(old).is_empty());
-}
-
 /// Spec 027, R12, R14: a probe that clears a channel whose socket has
 /// closed asks for no `Reconnect`.
 #[test]
@@ -935,4 +803,140 @@ fn s027_t12_r12_relief_skips_a_channel_it_cannot_relieve() {
     let handle = crate::testing::MemoryStore::handle(&fixture.vault, second);
     device.on_tick(NOW + 2_000);
     assert!(handle.log_len() < FULL_LOG);
+}
+
+/// Spec 027, R12, R15: a relief that fails is the tick's one compaction:
+/// no other full channel is relieved on that tick.
+#[test]
+fn s027_t12_r12_failed_relief_is_the_ticks_compaction() {
+    let (fixture, _) = with_peer();
+    fixture.plant_channel(2, Vec::new());
+    let mut device = fixture.open().unwrap();
+    for channel in &mut device.channels {
+        channel.fill_log(NOW + 1_000, 2 * 1_048_576);
+        channel.fill_log(NOW + 36_000_000, FULL_LOG);
+    }
+    fixture.faults.fail_compactions(true);
+    let events = device.on_tick(NOW + 2_000);
+    let failed = events
+        .iter()
+        .filter(|event| matches!(event, Event::StorageFailed { .. }))
+        .count();
+    assert_eq!(failed, 1, "{events:?}");
+    let marked = device.channels().iter().filter(|c| c.write_failed).count();
+    assert_eq!(marked, 1);
+}
+
+/// Spec 027, R12: the tick relieves no channel whose log has its
+/// headroom, whatever has expired below a due purge.
+#[test]
+fn s027_t12_r12_no_relief_with_headroom() {
+    let (fixture, mut device) = opened();
+    let dir = *device.channels[0].dir_name();
+    device.channels[0].fill_log(NOW + 1_000, 2 * 1_048_576);
+    device.channels[0].fill_log(NOW + 36_000_000, 16 * 1_048_576);
+    assert!(!device.channels()[0].status.storage_full);
+    let handle = crate::testing::MemoryStore::handle(&fixture.vault, dir);
+    device.on_tick(NOW + 2_000);
+    assert_eq!(handle.log_len(), 16 * 1_048_576);
+}
+
+/// Spec 027, R12, R14: a probe that clears a connected channel whose log
+/// is full leaves it waiting for room, and the `Reconnect` comes once the
+/// tick has relieved the log.
+#[test]
+fn s027_t14_r14_probe_storage_full_reconnects_once_relieved() {
+    let (fixture, mut device) = opened();
+    let mut server = MemoryServer::new(&[HOST]);
+    connect_all(&mut device, &mut server, NOW);
+    run(&mut device, &mut server, NOW, NOW + 3_000);
+    let plan = device.connections()[0].id;
+    fixture.faults.fail_at(1);
+    assert!(device.mute(id(), PEER, true).is_err());
+    device.channels[0].fill_log(NOW + 1_000, 2 * 1_048_576);
+    device.channels[0].fill_log(NOW + 36_000_000, FULL_LOG);
+    let events = run(&mut device, &mut server, NOW + 4_000, NOW + 8_000 + MINUTE);
+    assert!(events.contains(&Event::StatusChanged { channel: id() }));
+    assert!(!device.channels()[0].status.storage_full);
+    assert!(events.contains(&Event::Reconnect { connection: plan }));
+}
+
+/// Spec 027, R12, R14: a compaction that changes no status reports
+/// nothing.
+#[test]
+fn s027_t12_r12_purge_without_a_status_change_is_silent() {
+    let fixture = Fixture::new();
+    fixture.save_settings(&settings("wss://example.org", 30, None));
+    let dir = fixture.plant_channel(1, vec![record(NOW + 1_000, 1_000)]);
+    let mut device = fixture.open().unwrap();
+    device.on_tick(NOW);
+    let handle = crate::testing::MemoryStore::handle(&fixture.vault, dir);
+    let len = handle.log_len();
+    assert_eq!(device.on_tick(NOW + 2_000), []);
+    assert!(handle.log_len() < len);
+}
+
+/// Spec 027, R11: a `replan` keeps the session of a plan it leaves
+/// Spec 027, R14: a probe whose reopen fails drops the mark with the
+/// channel, so that the channel imported again is not `write_failed`.
+#[test]
+fn s027_t14_r14_broken_by_a_probe_forgets_its_mark() {
+    let (fixture, mut device) = opened();
+    mark(&fixture, &mut device);
+    fixture.faults.fail_create(true);
+    assert_eq!(
+        device.on_tick(NOW + MINUTE),
+        [Event::StorageFailed { channel: id() }]
+    );
+    fixture.faults.fail_create(false);
+    device
+        .import_qr(&config(1).export_qr(NOW).unwrap(), false, NOW + MINUTE)
+        .unwrap();
+    assert!(!device.channels()[0].write_failed);
+}
+
+/// Spec 027, R14: a channel left forgets its mark and its clearing: once
+/// imported again it is not `write_failed`, and a new failure waits one
+/// minute for its first probe.
+#[test]
+fn s027_t14_r14_leave_forgets_mark_and_clearing() {
+    let (fixture, mut device) = opened();
+    mark(&fixture, &mut device);
+    device.leave(id()).unwrap();
+    device
+        .import_qr(&config(1).export_qr(NOW).unwrap(), false, NOW)
+        .unwrap();
+    assert!(!device.channels()[0].write_failed);
+
+    let (fixture, mut device) = opened();
+    mark(&fixture, &mut device);
+    device.on_tick(NOW + MINUTE);
+    assert!(!device.channels()[0].write_failed);
+    device.leave(id()).unwrap();
+    device
+        .import_qr(&config(1).export_qr(NOW).unwrap(), false, NOW + MINUTE)
+        .unwrap();
+    device.on_tick(NOW + MINUTE + 1_000);
+    fixture.faults.fail_at(1);
+    assert!(device.rename_channel(id(), "x").is_err());
+    assert_eq!(
+        super::first_probe_at(&device),
+        Some(NOW + 2 * MINUTE + 1_000)
+    );
+}
+
+/// Spec 027, R3, R12: a `remove_broken` makes the probe due at the next
+/// tick.
+#[test]
+fn s027_t14_r14_remove_broken_makes_the_probe_due() {
+    let (fixture, _) = with_peer();
+    let corrupt = fixture.plant_corrupt(9);
+    let mut device = fixture.open().unwrap();
+    mark(&fixture, &mut device);
+    device.remove_broken(&corrupt.to_hex()).unwrap();
+    assert_eq!(
+        device.on_tick(NOW + 1_000),
+        [Event::StatusChanged { channel: id() }]
+    );
+    assert!(!device.channels()[0].write_failed);
 }

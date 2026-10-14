@@ -21,6 +21,19 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AV16 | A plan `id` that `connections()` hides, behind the gate or all refused, is still routed (A) | Far-fetched | None: only a client using an `id` it was never given reaches it |
 | AV17 | `session_failure`'s guard of a marked channel and its `Io` or `Corrupt` filter, and `flush` returning the last error rather than the first, reach no test (C) | Far-fetched | None: a frozen session commits nothing, no step reports another error, and the doubles fail with `Io` alone |
 
+**Round 2.** Fresh passes on the whole change. AV6–AV17 hold; no production defect. Pass C ran 59 new mutants: 45 killed, 5 equivalent, 9 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AV18 | Four clauses whose behaviour (d2a) implements were still given to (d2b): T08's session half, T09's `outbox` step failing after `send`, T14's own-key push on a marked channel, T15's relief poisoned after its rename (A) | Medium | Moved to (d2a) with a test each; (d2b) keeps the retry of `broken` entries |
+| AV19 | A pending retirement not sealed again on the tick, a stale entry after a disconnect, and a compaction failing on a connected channel's tick were untested (A) | Medium | A case of each |
+| AV20 | A failed relief stopping the tick's compaction, the relief's `storage_full` guard, the `storage_full` the probe hands the session, a silent purge, `relink` keeping an unchanged plan's session, a broken channel's mark dropped, `leave` dropping the mark and the clearing, and `remove_broken` making probes due were untested (C) | Medium | A case of each |
+| AV21 | The events queued before a tick came after the tick's own, so a probe's clearing could precede the failure it clears (B) | Low | The queued events come first |
+| AV22 | A channel broken by a reopen kept its clearing time, which an import from `broken` inherited (A, B) | Low | Dropped with the mark |
+| AV23 | `drain` filtered outcome kinds the channel never queues; the relief listed every channel and looked each up again; `flush` kept its first error through `Result::and`; the tick tests were one file of 1 100 lines (C) | Low | One map; one filtered list; an `if`; routing tests in `tests/routing.rs`, sessions' in `tests/sessions.rs` |
+| AV24 | A clock flipping between two times eleven minutes apart probes a failing channel every tick (B) | Far-fetched | None: within R12's one reopen a tick, and the clock is not an adversary of §2 |
+| AV25 | A user sending on a marked channel whose commits stand while its probes fail makes it probe every tick, ahead of another marked channel (B) | Far-fetched | None: R12 prescribes it, and the other probe runs once the sends stop |
+
 ## Audit AU
 
 **2026-10-14 — Audit AU, the code audit of slice (d1) of spec 027-core-api (branch `027-plan`): the connection plan (R10), `probe_plan` and `probe_hello` (R12), and the settings gate over them (R2); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit U's findings already took AU1–AU5, so this audit's are numbered from AU6. No production defect. Pass C ran 38 mutants: 28 killed, 2 equivalent, 8 survived, each killed below or removed with the code it mutated.
