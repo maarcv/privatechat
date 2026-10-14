@@ -354,13 +354,20 @@ fn s010_t06_r05_random_bytes_differ() -> Result<(), CryptoError> {
     assert_ne!(first[32..], second[32..]);
     let (first, second) = (Secret::<64>::random()?, Secret::<64>::random()?);
     assert_ne!(first.expose()[32..], second.expose()[32..]);
-    let (mut secret_last, mut array_last) = (0u8, 0u8);
+    // A byte left at zero stays zero in every draw; a drawn byte is zero in
+    // eight draws with probability 2^-64.
+    let (mut secret_bytes, mut array_bytes) = ([0u8; 64], [0u8; 64]);
     for _ in 0..8 {
-        secret_last |= Secret::<64>::random()?.expose()[63];
-        array_last |= random_bytes::<64>()?[63];
+        let (secret, array) = (Secret::<64>::random()?, random_bytes::<64>()?);
+        for (index, byte) in secret.expose().iter().enumerate() {
+            secret_bytes[index] |= byte;
+        }
+        for (index, byte) in array.iter().enumerate() {
+            array_bytes[index] |= byte;
+        }
     }
-    assert_ne!(secret_last, 0);
-    assert_ne!(array_last, 0);
+    assert!(!secret_bytes.contains(&0), "{secret_bytes:?}");
+    assert!(!array_bytes.contains(&0), "{array_bytes:?}");
     assert_ne!(Secret::<32>::random()?.expose(), &[0u8; 32]);
     Ok(())
 }

@@ -42,7 +42,7 @@ fuzz_target!(|data: &[u8]| {{
 # R6: a `pub` parser, with or without a lifetime or generics, its parameters matched across
 # line breaks up to the closing parenthesis of the signature.
 PARSER = re.compile(
-    r"^( *)pub(?:\(crate\))? fn ((?:parse|decrypt|open|decode)\w*)\s*(?:<[^>]*>)?\(([^)]*)\)",
+    r"^( *)pub(?:\([^)]*\))? fn ((?:parse|decrypt|open|decode)\w*)\s*(?:<[^>]*>)?\(([^)]*)\)",
     re.MULTILINE)
 TAKES_BYTES = re.compile(r"&\s*(?:'\w+\s+)?\[u8\]")
 IMPL = re.compile(r"^impl(?:<[^>]*>)?\s+(\w+)", re.MULTILINE)
@@ -169,6 +169,8 @@ def self_test(sources: dict[str, str], entry: str, targets: dict[str, str],
          reach(parser.format(name="decode_new"))),
         ("a crate-internal parser without a target", "Box::parse_inner",
          reach(parser.format(name="parse_inner").replace("pub fn", "pub(crate) fn"))),
+        ("a module-internal parser without a target", "Box::parse_near",
+         reach(parser.format(name="parse_near").replace("pub fn", "pub(super) fn"))),
         ("a free parser reached only as a method", "parse: reached",
          reach("pub fn parse(\n    b: &[u8],\n) {")),
         ("an entry without a target", "fuzz_entry::new_entry",

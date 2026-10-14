@@ -6,6 +6,9 @@
 
 // `deny`, not `forbid`: `crypto/ffi.rs` alone will `allow` it (AGENTS 12).
 #![deny(unsafe_code)]
+// Spec 027-core-api R17: an item no build reaches is gated or removed, never
+// allowed; `forbid` refuses an `allow(dead_code)` in any module.
+#![forbid(dead_code)]
 // Tests may relax these four lints to build fixtures; production code never does (AGENTS 4).
 #![cfg_attr(
     test,

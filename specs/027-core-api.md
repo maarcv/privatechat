@@ -82,6 +82,7 @@ crates/core/src/device/tests.rs            s027_* tests
 crates/core/tests/api_surface.rs           R16
 crates/store/tests/api_surface.rs          R16
 crates/store/src/tests/phase2_exit.rs      R23
+crates/store/tests/without_init.rs         R20, in a process of its own
 ```
 
 ```rust
@@ -271,4 +272,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-10-14 slice (d2a) takes the store recovery through sessions and ticks, which share its code with the tick; (d2b) keeps the retry of `broken` entries
 - 2026-10-14 amended after audit AV (`docs/audit-log.md`): T03 names the probe a `remove_broken` makes due, T09 the `Reconnect` of a regeneration after an own-key alert
 - 2026-10-14 amended after audit AW (`docs/audit-log.md`): R12 takes a due retry of a `broken` entry before a due probe
-- 2026-10-14 amended after audit AX (`docs/audit-log.md`): R17 leaves `parse_verify_qr` out of the exclusions, reached by its module path; R22's doc updates land no later than the pull request that marks the spec `implemented`
+- 2026-10-14 amended after audit AX (`docs/audit-log.md`): R17 leaves `parse_verify_qr` out of the exclusions, reached by its module path; R22's doc updates land no later than the pull request that marks the spec `implemented`; the Interface names `crates/store/tests/without_init.rs`

@@ -11,3 +11,4 @@ PeerRecord::decode # spec 020: decoded only inside ChannelState's decoder, which
 OutboxEntry::decode # spec 020: decoded only inside ChannelState's decoder, which the state_decode target reaches
 OldKey::decode # spec 020: decoded only inside ChannelState's decoder, which the state_decode target reaches
 TestRecord::decode # spec 017: called by path in decode_test_record, which the record_decode target reaches
+probe_hello # spec 027 R12: `Frame::decode`, which the frame_decode target reaches, then a match on a list the decoder bounded

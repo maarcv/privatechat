@@ -4,7 +4,7 @@ use core::fmt;
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use super::{CryptoError, ct_eq, ffi, init};
+use super::{CryptoError, ct_eq};
 
 /// Fixed-size secret: root, master, header and message keys, seeds, keys
 /// derived from a password (`Secret<32>`) and Ed25519 secret keys
@@ -38,11 +38,10 @@ impl<const N: usize> Secret<N> {
     ///
     /// `CryptoError::InitFailed` when libsodium cannot initialise.
     pub(crate) fn random() -> Result<Self, CryptoError> {
-        init()?;
         // Drawn straight into the secret, as `copy_from` does, rather than
         // through an array `random_bytes` would hand back and leave (R18).
         let mut secret = Self([0; N]);
-        ffi::random_bytes(&mut secret.0);
+        super::fill_random(&mut secret.0)?;
         Ok(secret)
     }
 

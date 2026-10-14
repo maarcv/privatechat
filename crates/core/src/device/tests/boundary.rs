@@ -21,16 +21,10 @@ fn s027_t16_r16_public_items() {
 /// that reaches them.
 #[test]
 fn s027_t17_r17_amendments() {
-    // On the module's declaration or as an inner attribute of its file.
-    for source in [
-        include_str!("../../lib.rs"),
-        include_str!("../../crypto.rs"),
-        include_str!("../../proto.rs"),
-        include_str!("../../session.rs"),
-        include_str!("../../storage.rs"),
-    ] {
-        assert!(!source.contains("dead_code"));
-    }
+    // `forbid` at the crate root makes an `allow` in any module a compile
+    // error, inner attributes of a module file included.
+    let lib = include_str!("../../lib.rs");
+    assert!(lib.lines().any(|line| line == "#![forbid(dead_code)]"));
     let exclusions = include_str!("../../../../../scripts/fuzz_exclusions.txt");
     for decoder in [
         "PeerRecord::decode",
@@ -117,23 +111,20 @@ fn s027_t18_r18_error_variants() {
     assert_eq!(declared, names);
 }
 
-/// Spec 027, R20: `Device` is `Send`, and `create_channel` works whether
-/// `init` was called or not.
+/// Spec 027, R20: `Device` is `Send`, and `create_channel` works after
+/// `init`; without it, `crates/store/tests/without_init.rs` shows, in a
+/// process where nothing initialised libsodium before.
 #[test]
 fn s027_t20_r20_device_traits() {
     fn is_send<T: Send>() {}
     is_send::<Device>();
-    for with_init in [false, true] {
-        if with_init {
-            crate::device::init().unwrap();
-        }
-        let fixture = Fixture::new();
-        fixture.save_settings(&settings("wss://example.org", 30, None));
-        let mut device = fixture.open().unwrap();
-        device
-            .create_channel("wss://example.org", 3_600, "room", NOW)
-            .unwrap();
-    }
+    crate::device::init().unwrap();
+    let fixture = Fixture::new();
+    fixture.save_settings(&settings("wss://example.org", 30, None));
+    let mut device = fixture.open().unwrap();
+    device
+        .create_channel("wss://example.org", 3_600, "room", NOW)
+        .unwrap();
 }
 
 /// Spec 040-uniffi, R8: `generate_storage_key` fills the caller's 32 bytes
@@ -149,4 +140,15 @@ fn s040_t08_r08_generate_storage_key_core() {
     for (first, second) in first.chunks(8).zip(second.chunks(8)) {
         assert_ne!(first, second);
     }
+    // A byte left as the caller passed it stays zero in every draw; a drawn
+    // byte is zero in eight draws with probability 2^-64.
+    let mut drawn = [0u8; 32];
+    for _ in 0..8 {
+        let mut key = [0u8; 32];
+        crate::device::generate_storage_key(&mut key).unwrap();
+        for (index, byte) in key.iter().enumerate() {
+            drawn[index] |= byte;
+        }
+    }
+    assert!(!drawn.contains(&0), "{drawn:?}");
 }
