@@ -355,6 +355,7 @@ name = "privatechat-store"
 version = "0.0.0"
 dependencies = [
  "privatechat-core",
+ "proptest",
 ]
 
 [[package]]
