@@ -130,7 +130,17 @@ impl Device {
         if self.settings.is_reset() {
             return Vec::new();
         }
-        self.runs.clone()
+        // R11: a plan whose channels have all been refused since it was
+        // built is left out.
+        self.runs
+            .iter()
+            .filter(|run| {
+                self.links
+                    .get(&run.id)
+                    .is_none_or(|link| !run.channels.iter().all(|id| link.refused.contains(id)))
+            })
+            .cloned()
+            .collect()
     }
 
     /// The route of the create-time check of `server_url` (R12): `None`
@@ -164,8 +174,8 @@ impl Device {
         let wanted: Vec<([u8; 16], Route)> = self
             .channels
             .iter()
-            .filter_map(|open| {
-                let config = open.channel.config();
+            .filter_map(|channel| {
+                let config = channel.config();
                 let route = reach(config.server_url(), proxy.as_deref())?;
                 Some((config.channel_id(), route))
             })
@@ -223,6 +233,7 @@ impl Device {
         }
         runs.retain(|run| !run.channels.is_empty());
         self.runs = runs;
+        self.relink();
     }
 
     /// An `id` this device never used and, behind a proxy, a username no

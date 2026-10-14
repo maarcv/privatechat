@@ -6,8 +6,11 @@
 //! This module opens the device and keeps the broken channels (R1, R3);
 //! `settings.rs` keeps the settings and their gate (R1, R2, R13),
 //! `channels.rs` the channels (R4–R8), `dispatch.rs` the per-channel
-//! calls (R9), `recovery.rs` the reopening of a failed store (R14, R15)
-//! and `plan.rs` the routes (R10).
+//! calls (R9), `recovery.rs` the reopening of a failed store (R14, R15),
+//! `plan.rs` the routes (R10), `routing.rs` the connections (R11) and
+//! `tick.rs` the tick, the probes and `flush` (R12, R24).
+
+use std::collections::BTreeMap;
 
 use crate::error::Error;
 use crate::session::channel::Channel;
@@ -18,11 +21,14 @@ mod channels;
 mod dispatch;
 mod plan;
 mod recovery;
+mod routing;
 mod settings;
+mod tick;
 
 pub use self::channels::{ChannelInfo, ExportedFile, Imported};
 pub use self::dispatch::Sent;
 pub use self::plan::{ConnectionPlan, Route, probe_hello};
+use self::routing::Link;
 use self::settings::SettingsHolder;
 pub use self::settings::SettingsView;
 
@@ -67,7 +73,11 @@ struct Broken {
 /// `Clone`, `Debug` nor `Display` (R20): its channels hold their keys.
 pub struct Device {
     vault: Box<dyn Vault>,
-    channels: Vec<Open>,
+    channels: Vec<Channel>,
+    /// The probe time of each `write_failed` channel (R14).
+    marks: BTreeMap<[u8; 16], u64>,
+    /// When each channel's mark was last cleared (R12, R14).
+    cleared: BTreeMap<[u8; 16], u64>,
     broken: Vec<Broken>,
     settings: SettingsHolder,
     /// The events produced outside a call that returns events, for the
@@ -80,14 +90,8 @@ pub struct Device {
     runs: Vec<ConnectionPlan>,
     /// The last plan `id` minted.
     next_plan_id: u64,
-}
-
-/// An open channel and what the device keeps beside it.
-struct Open {
-    channel: Channel,
-    /// While the channel is `write_failed`, the time of its next probe
-    /// (R14).
-    probe_at: Option<u64>,
+    /// The session of each plan `id` (R11).
+    links: BTreeMap<u64, Link>,
 }
 
 impl Device {
@@ -108,20 +112,20 @@ impl Device {
         let mut device = Device {
             vault,
             channels: Vec::new(),
+            marks: BTreeMap::new(),
+            cleared: BTreeMap::new(),
             broken: Vec::new(),
             settings,
             queued: Vec::new(),
             latest_now: now,
             runs: Vec::new(),
             next_plan_id: 0,
+            links: BTreeMap::new(),
         };
         for store in stores {
             let dir = *store.name();
             match Channel::open_stored(store) {
-                Ok(channel) => device.channels.push(Open {
-                    channel,
-                    probe_at: None,
-                }),
+                Ok(channel) => device.channels.push(channel),
                 Err(Error::Store(reason)) => device.broken.push(Broken::at_open(dir, reason)),
                 // R1: any other error fails `open`; `open_stored` returns
                 // none today.
@@ -131,8 +135,8 @@ impl Device {
         let due: Vec<[u8; 16]> = device
             .channels
             .iter()
-            .filter(|open| open.channel.purge_due(now))
-            .map(|open| open.channel.config().channel_id())
+            .filter(|channel| channel.purge_due(now))
+            .map(|channel| channel.config().channel_id())
             .collect();
         for id in due {
             // R15: a failed purge never fails `open`; R14 handles it.
@@ -172,6 +176,8 @@ impl Device {
             .ok_or(Error::UnknownChannel)?;
         self.vault.remove(&dir)?;
         self.broken.remove(position);
+        // Space may have been freed (R3).
+        self.make_probes_due();
         Ok(())
     }
 }
