@@ -22,6 +22,7 @@ mod settings;
 
 pub use self::channels::{ChannelInfo, ExportedFile, Imported};
 pub use self::dispatch::Sent;
+pub use self::plan::{ConnectionPlan, Route, probe_hello};
 use self::settings::SettingsHolder;
 pub use self::settings::SettingsView;
 
@@ -75,6 +76,10 @@ pub struct Device {
     /// The `now` of the last call that carried one, which times the calls
     /// that take none (R14).
     latest_now: u64,
+    /// The runs of the connection plan (R10).
+    runs: Vec<ConnectionPlan>,
+    /// The last plan `id` minted.
+    next_plan_id: u64,
 }
 
 /// An open channel and what the device keeps beside it.
@@ -107,6 +112,8 @@ impl Device {
             settings,
             queued: Vec::new(),
             latest_now: now,
+            runs: Vec::new(),
+            next_plan_id: 0,
         };
         for store in stores {
             let dir = *store.name();
@@ -132,6 +139,7 @@ impl Device {
             let (_, events) = device.direct(id, |channel| channel.purge_expired(now), |_| None);
             device.queued.extend(events);
         }
+        device.replan();
         Ok(device)
     }
 

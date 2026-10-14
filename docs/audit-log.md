@@ -2,6 +2,46 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AU
+
+**2026-10-14 — Audit AU, the code audit of slice (d1) of spec 027-core-api (branch `027-plan`): the connection plan (R10), `probe_plan` and `probe_hello` (R12), and the settings gate over them (R2); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit U's findings already took AU1–AU5, so this audit's are numbered from AU6. No production defect. Pass C ran 38 mutants: 28 killed, 2 equivalent, 8 survived, each killed below or removed with the code it mutated.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AU6 | No test saw the plan take the proxy once the gate comes down: an `acknowledge_settings` adopting a stored proxy after a passing `Io`, or a `set_socks5_proxy` under the gate, could have released the direct routes built at `open` (A, C) | Medium | A T02 case of each, and one of a newer app's file releasing the plan |
+| AU7 | No test saw a broken channel leave its run, an `Io` entry reopened by an import join one, the plan built at `open`, or the run a channel joins get a new `id` (A, C) | Medium | A T01, T10 and T14 case of each |
+| AU8 | Runs differing in host or in port alone were untested: the two servers differed in both (A, C) | Medium | A T10 case: one port with two hosts, one host with two ports |
+| AU9 | The username's 8 characters were checked only when a random byte fell below `0x10` (C) | Low | 64 draws checked |
+| AU10 | Every caller of `reopen` had to replan after a failure (C) | Low | `reopen` replans when it breaks the channel |
+| AU11 | `mint` marked a failure with `id` 0, cleared a username no path needed cleared, and minted runs about to be dropped; `needs_proxy` read the scheme from the text and the URL was parsed three times (C) | Low | `mint` returns a `Result` and runs after the plan is settled; one `reach` parses once and gives the route or `None`, which `needs_proxy` reads |
+| AU12 | Two plans could draw the same 32-bit username, which Tor reads as one circuit (B) | Low | A username another run holds is drawn again |
+| AU13 | `probe_hello` of garbage was checked as any error (A) | Low | `BadPayload` |
+| AU14 | A channel whose username cannot be drawn waits in no run while `needs_proxy` is false (A, B) | Far-fetched | None: `random_bytes` fails only when libsodium failed to initialise, and nothing connects |
+
+**Round 2.** Fresh passes on the whole change. AU6–AU14 hold; no production defect. Pass C ran 39 new mutants: 34 killed, 4 equivalent, 1 survived that only injected randomness could kill (the redraw of a username another run holds).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AU15 | The test of new `id`s could not fail: it kept only the `id`s it had not seen (A) | Medium | It checks that a plan seen again is unchanged and that every new `id` is above all earlier ones |
+| AU16 | `replan` minted a run once per channel that joined it, burning `id`s and draws (B, C) | Low | A run is minted once per `replan`; a T01 case: 16 channels at `open` make one run of `id` 1 |
+| AU17 | The redraw of a username another run holds had no requirement behind it, and the probe's username was not checked against the runs (A, B) | Low | R10 and R12 say a username is drawn again while another plan holds it, with a History line; the probe draws so too |
+| AU18 | `.onion` was a constant in `url.rs` and again in `plan.rs` (C) | Low | One constant |
+| AU19 | A test comment said a freed run is refilled first, the opposite of what it checks (A) | Low | Reworded |
+
+**Round 3.** Fresh passes on the whole change. AU6–AU19 hold; no production defect. Pass C ran 32 new mutants: 26 killed, 3 equivalent, 3 survived: two that only a username collision reaches, and AU14's unreachable failure.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AU20 | T10's "kept while the plan is unchanged" behind a proxy ran no `replan`, so a `replan` that re-minted every proxied run passed (A) | Medium | A fifth channel is imported behind the proxy and the four earlier plans are found unchanged |
+| AU21 | The set of runs to mint was a `Vec` with a hand-written insert-once helper (C) | Low | A `BTreeSet` |
+| AU22 | A test of R10's minting was named after T01 (C) | Low | Renamed `s027_t10_r10_*` |
+| AU23 | The probe's username is not kept, so a run minted within the probe's 30 seconds may draw it again (B) | Far-fetched | None: a 32-bit collision in that window, and R12's probe is no plan |
+| AU24 | The redraw of a held username cannot be killed without scripting the random draw (C) | Far-fetched | None: AU12's code is right on reading |
+
+The audit closes with this round (`CLAUDE.md`, the audit): passes A and C found test gaps and a smaller helper, now closed, and pass B a far-fetched case.
+
+Decisions taken without the human: R10 and R12 say a SOCKS username is drawn again while another plan holds it (AU12, AU17), since a proxy that isolates by username, as Tor does, would otherwise put two channels on one circuit; it only narrows what is accepted.
+
 ## Audit AT
 
 **2026-10-14 — Audit AT, the code audit of slice (c) of spec 027-core-api (branch `027-dispatch`): the per-channel dispatch (R9) and the recovery of a failed store through the direct calls (R14, R15), with R8's retry of `leave` on a marked channel; round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit T's findings already took AT1–AT7, so this audit's are numbered from AT8. Two production defects (AT8, AT9). Pass C ran 53 mutants: 37 killed, 2 equivalent, 14 survived, each killed below.

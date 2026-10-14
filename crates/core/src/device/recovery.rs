@@ -80,7 +80,8 @@ impl Device {
     /// Drops the store of the channel at `position` and opens it again,
     /// carrying its gaps, ignored keys and `clock_off` and nothing else
     /// (R14); its mark is kept. When the reopen fails the channel moves to
-    /// `broken` with its error, its `channel_id` and its name.
+    /// `broken` with its error, its `channel_id` and its name, and leaves
+    /// its run.
     pub(super) fn reopen(&mut self, position: usize) -> Result<(), StoreError> {
         if position >= self.channels.len() {
             return Err(StoreError::Io);
@@ -122,6 +123,8 @@ impl Device {
                         channel_name,
                     },
                 });
+                // The broken channel leaves its run (R14).
+                self.replan();
                 Err(reason)
             }
         }

@@ -22,7 +22,7 @@ const ONION_PORT: u16 = 80;
 
 /// A v3 onion address: 56 characters of base32 and the suffix.
 const ONION_LABEL_LEN: usize = 56;
-const ONION_SUFFIX: &str = ".onion";
+pub(crate) const ONION_SUFFIX: &str = ".onion";
 
 /// The host of a `server_url` that matches the grammar of R5, without the
 /// scheme or the port (R6).
@@ -31,14 +31,32 @@ const ONION_SUFFIX: &str = ".onion";
 ///
 /// `BadConfig` for any text outside the grammar.
 pub(crate) fn parse(url: &str) -> Result<&str, Error> {
+    Ok(endpoint(url)?.host)
+}
+
+/// Where a `server_url` of the grammar of R5 points: its host, its port,
+/// written or implied by the scheme, and whether the scheme is TLS's
+/// (spec 027-core-api R10, ADR 0038).
+pub(crate) struct Endpoint<'a> {
+    pub(crate) host: &'a str,
+    pub(crate) port: u16,
+    pub(crate) tls: bool,
+}
+
+/// The endpoint of a `server_url` that matches the grammar of R5.
+///
+/// # Errors
+///
+/// `BadConfig` for any text outside the grammar.
+pub(crate) fn endpoint(url: &str) -> Result<Endpoint<'_>, Error> {
     if url.len() > MAX_URL {
         return Err(Error::BadConfig);
     }
-    let (rest, implied_port, is_host): (&str, u16, fn(&str) -> bool) =
+    let (rest, implied_port, is_host, tls): (&str, u16, fn(&str) -> bool, bool) =
         if let Some(rest) = url.strip_prefix(TLS_SCHEME) {
-            (rest, TLS_PORT, is_tls_host)
+            (rest, TLS_PORT, is_tls_host, true)
         } else if let Some(rest) = url.strip_prefix(ONION_SCHEME) {
-            (rest, ONION_PORT, is_onion_host)
+            (rest, ONION_PORT, is_onion_host, false)
         } else {
             return Err(Error::BadConfig);
         };
@@ -49,7 +67,11 @@ pub(crate) fn parse(url: &str) -> Result<&str, Error> {
     if !is_host(host) || port == Some(implied_port) {
         return Err(Error::BadConfig);
     }
-    Ok(host)
+    Ok(Endpoint {
+        host,
+        port: port.unwrap_or(implied_port),
+        tls,
+    })
 }
 
 /// Whether `text` is a SOCKS5 proxy of the app settings: a host by the

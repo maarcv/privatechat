@@ -43,7 +43,8 @@ pub mod testing;
 mod vectors;
 
 pub use device::{
-    BrokenChannel, ChannelInfo, Device, DeviceStatus, ExportedFile, Imported, Sent, SettingsView,
+    BrokenChannel, ChannelInfo, ConnectionPlan, Device, DeviceStatus, ExportedFile, Imported,
+    Route, Sent, SettingsView, probe_hello,
 };
 pub use error::Error;
 pub use proto::config::Config;

@@ -168,6 +168,7 @@ impl Device {
         }
         result?;
         self.channels.remove(position);
+        self.replan();
         Ok(())
     }
 
@@ -282,6 +283,7 @@ impl Device {
                     channel,
                     probe_at: None,
                 });
+                self.replan();
                 Ok(true)
             }
             Err(Error::Store(reason)) => {
@@ -313,6 +315,7 @@ impl Device {
         };
         let info = self.info(&open);
         self.channels.push(open);
+        self.replan();
         Ok((info, is_new))
     }
 
