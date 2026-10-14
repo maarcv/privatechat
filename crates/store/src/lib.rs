@@ -62,12 +62,12 @@ pub(crate) struct Shared {
 impl Shared {
     /// The directory of the channel `name`.
     pub(crate) fn dir(&self, name: &DirName) -> PathBuf {
-        self.channels.join(hex(name))
+        self.channels.join(name.to_hex())
     }
 
     /// The directory a `destroy` moves `name` to (R21).
     fn leaving(&self, name: &DirName) -> PathBuf {
-        self.channels.join(format!("{}{LEAVING}", hex(name)))
+        self.channels.join(format!("{}{LEAVING}", name.to_hex()))
     }
 
     pub(crate) fn channels(&self) -> &Path {
@@ -276,11 +276,6 @@ impl Vault for DataDir {
         written?;
         self.io.sync_dir(&self.path)
     }
-}
-
-/// The 32 lowercase hex characters of a directory name (R18).
-fn hex(name: &DirName) -> String {
-    name.0.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// The directory name of 32 lowercase hex characters, `None` for any other

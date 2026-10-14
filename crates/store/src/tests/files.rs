@@ -252,10 +252,10 @@ fn s020_t18_r18_directory_name_is_keyed() {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
     );
     assert!(!name.contains("abababab"));
-    assert_eq!(name, &crate::hex(&data.dir_name(&id(0xab)).expect("name")));
+    assert_eq!(name, &data.dir_name(&id(0xab)).expect("name").to_hex());
     let other_key = privatechat_core::StorageKey::from_bytes(&mut [8u8; 32]);
     let other = privatechat_core::dir_name(&other_key, &id(0xab)).expect("name");
-    assert_ne!(crate::hex(&other), *name);
+    assert_ne!(other.to_hex(), *name);
 }
 
 /// Spec 020, R19: `open` deletes `.leaving` directories and channels whose
@@ -332,7 +332,7 @@ fn s020_t19_r19_failed_cleanup_is_ignored() {
     let leaving = dir
         .path()
         .join("channels")
-        .join(format!("{}.leaving", crate::hex(&dir_name(1))));
+        .join(format!("{}.leaving", dir_name(1).to_hex()));
     std::fs::create_dir_all(leaving.join("inside")).expect("leaving");
     std::fs::set_permissions(&leaving, std::fs::Permissions::from_mode(0o500)).expect("chmod");
     let mut data = open(dir.path());
@@ -398,7 +398,7 @@ fn s020_t21_r21_destroy_and_remove() {
             let leaving = dir
                 .path()
                 .join("channels")
-                .join(format!("{}.leaving", crate::hex(&dir_name(2))));
+                .join(format!("{}.leaving", dir_name(2).to_hex()));
             assert!(leaving.exists(), "k={k}");
         }
         drop(faulty);
@@ -407,7 +407,7 @@ fn s020_t21_r21_destroy_and_remove() {
         let leaving = dir
             .path()
             .join("channels")
-            .join(format!("{}.leaving", crate::hex(&dir_name(2))));
+            .join(format!("{}.leaving", dir_name(2).to_hex()));
         assert!(!leaving.exists(), "k={k}");
         if channel.exists() {
             data.remove(&dir_name(2)).expect("remove");
@@ -425,7 +425,7 @@ fn s020_t21_r21_destroy_and_remove() {
     let leaving = dir
         .path()
         .join("channels")
-        .join(format!("{}.leaving", crate::hex(&dir_name(4))));
+        .join(format!("{}.leaving", dir_name(4).to_hex()));
     std::fs::create_dir_all(&leaving).expect("leaving");
     let mut store = data.create(&id(4)).expect("create");
     commit(store.as_mut(), 4, &[]).expect("commit");

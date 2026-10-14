@@ -78,7 +78,7 @@ fn id(n: u8) -> [u8; 16] {
 
 /// The directory of test channel `n` under the data directory `path`.
 fn channel_dir(path: &Path, n: u8) -> PathBuf {
-    path.join("channels").join(crate::hex(&dir_name(n)))
+    path.join("channels").join(dir_name(n).to_hex())
 }
 
 /// The directory name of test channel `n` under the test key.

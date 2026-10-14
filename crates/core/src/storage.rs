@@ -284,6 +284,14 @@ impl fmt::Debug for StorageKey {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DirName(pub [u8; 16]);
 
+impl DirName {
+    /// The 32 lowercase hex characters the store names the directory with
+    /// (R18), which spec 027-core-api shows as `BrokenChannel::name`.
+    pub fn to_hex(&self) -> String {
+        self.0.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+}
+
 /// The directory name of `channel_id` under `key` (R18).
 ///
 /// # Errors

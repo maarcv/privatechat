@@ -1,7 +1,7 @@
 //! Tests of spec 027-core-api over `MemoryVault`, each requirement checked
 //! through the calls of `Device` and what a reopened vault holds.
 
-use super::{Device, hex};
+use super::Device;
 use crate::Error;
 use crate::crypto::Secret;
 use crate::proto::config::Config;
@@ -131,8 +131,8 @@ fn s027_t01_r01_open() {
     let mut broken = device.status().broken;
     broken.sort_by(|a, b| a.name.cmp(&b.name));
     let mut want = vec![
-        (hex(&corrupt), StoreError::Corrupt),
-        (hex(&newer), StoreError::UnsupportedVersion),
+        (corrupt.to_hex(), StoreError::Corrupt),
+        (newer.to_hex(), StoreError::UnsupportedVersion),
     ];
     want.sort_by(|a, b| a.0.cmp(&b.0));
     let got: Vec<_> = broken
@@ -142,7 +142,7 @@ fn s027_t01_r01_open() {
     assert_eq!(got, want);
     assert!(broken.iter().all(|broken| broken.channel_id.is_none()));
     assert!(broken.iter().all(|broken| broken.channel_name.is_none()));
-    assert!(broken.iter().all(|broken| broken.name.len() == 32));
+    assert!(broken.iter().any(|broken| broken.name == "c0".repeat(16)));
     let status = device.status();
     assert!(!status.settings_reset);
     assert_eq!(status.settings_reason, None);
@@ -232,7 +232,7 @@ fn s027_t01_r01_open_settings_fallbacks() {
     assert!(!status.settings_reset);
     assert_eq!(status.settings_reason, None);
     assert_eq!(device.settings(), defaults_view());
-    assert!(!fixture.vault.has_settings());
+    assert!(fixture.vault.settings_raw().is_none());
 }
 
 /// Spec 027, R1: with `settings.bin` deleted and the channel directories
@@ -241,13 +241,19 @@ fn s027_t01_r01_open_settings_fallbacks() {
 #[test]
 fn s027_t01_r01_hidden_channels_save_nothing() {
     let fixture = Fixture::new();
-    let hidden = Fixture::new();
-    fixture.plant_channel(1, Vec::new());
-    let device = hidden.open().unwrap();
+    let name = fixture.plant_channel(1, Vec::new());
+    let (state, log) = fixture.vault.get_raw(&name);
+    fixture.vault.put_raw(&name, None, None);
+    let device = fixture.open().unwrap();
+    assert!(device.channels.is_empty());
     assert!(!device.status().settings_reset);
     drop(device);
-    assert!(!hidden.vault.has_settings());
+    assert!(fixture.vault.settings_raw().is_none());
+    fixture
+        .vault
+        .put_raw(&name, state.as_deref(), log.as_deref());
     let device = fixture.open().unwrap();
+    assert_eq!(open_ids(&device), [config(1).channel_id()]);
     assert!(device.status().settings_reset);
     assert_eq!(device.status().settings_reason, None);
 }
@@ -272,30 +278,30 @@ fn s027_t03_r03_remove_broken() {
     let mut device = fixture.open().unwrap();
     assert_eq!(device.status().broken.len(), 2);
 
-    let other = hex(&DirName([0xee; 16]));
+    let other = DirName([0xee; 16]).to_hex();
     assert_eq!(device.remove_broken(&other), Err(Error::UnknownChannel));
     assert_eq!(device.status().broken.len(), 2);
 
     fixture.faults.fail_remove(true);
     assert_eq!(
-        device.remove_broken(&hex(&corrupt)),
+        device.remove_broken(&corrupt.to_hex()),
         Err(Error::Store(StoreError::Io))
     );
     assert_eq!(device.status().broken.len(), 2);
     fixture.faults.fail_remove(false);
 
-    device.remove_broken(&hex(&corrupt)).unwrap();
+    device.remove_broken(&corrupt.to_hex()).unwrap();
     let broken = device.status().broken;
     assert_eq!(broken.len(), 1);
-    assert_eq!(broken[0].name, hex(&newer));
+    assert_eq!(broken[0].name, newer.to_hex());
     assert_eq!(
-        device.remove_broken(&hex(&corrupt)),
+        device.remove_broken(&corrupt.to_hex()),
         Err(Error::UnknownChannel)
     );
     drop(device);
     let device = fixture.open().unwrap();
     let names: Vec<String> = device.status().broken.into_iter().map(|b| b.name).collect();
-    assert_eq!(names, [hex(&newer)]);
+    assert_eq!(names, [newer.to_hex()]);
 }
 
 /// Spec 027, R21: `remove_broken` under a failing vault leaves the
@@ -306,10 +312,32 @@ fn s027_t21_r21_failing_remove_broken() {
     let corrupt = fixture.plant_corrupt(0xc0);
     let mut device = fixture.open().unwrap();
     fixture.faults.fail_remove(true);
-    assert!(device.remove_broken(&hex(&corrupt)).is_err());
+    assert!(device.remove_broken(&corrupt.to_hex()).is_err());
     drop(device);
     fixture.faults.fail_remove(false);
     let device = fixture.open().unwrap();
     let names: Vec<String> = device.status().broken.into_iter().map(|b| b.name).collect();
-    assert_eq!(names, [hex(&corrupt)]);
+    assert_eq!(names, [corrupt.to_hex()]);
+}
+
+/// Spec 027, R3: an `Io` entry from `open`, which carries no
+/// `channel_id`, is removed by `remove_broken`.
+#[test]
+fn s027_t03_r03_remove_io_broken() {
+    let fixture = Fixture::new();
+    let name = fixture.plant_channel(1, Vec::new());
+    fixture.faults.fail_loads(true);
+    let mut device = fixture.open().unwrap();
+    fixture.faults.fail_loads(false);
+    let broken = device.status().broken;
+    assert_eq!(broken.len(), 1);
+    assert_eq!(broken[0].reason, StoreError::Io);
+    assert_eq!(broken[0].channel_id, None);
+    assert_eq!(broken[0].channel_name, None);
+    device.remove_broken(&name.to_hex()).unwrap();
+    assert!(device.status().broken.is_empty());
+    drop(device);
+    let device = fixture.open().unwrap();
+    assert!(device.channels.is_empty());
+    assert!(device.status().broken.is_empty());
 }

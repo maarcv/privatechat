@@ -87,13 +87,14 @@ impl Device {
             match Channel::open_stored(store) {
                 Ok(channel) => device.channels.push(channel),
                 Err(Error::Store(reason)) => device.broken.push(Broken::at_open(dir, reason)),
+                // R1: any other error fails `open`; `open_stored` returns
+                // none today.
                 Err(error) => return Err(error),
             }
         }
         for channel in &mut device.channels {
             if channel.purge_due(now) {
-                // R15: a failed purge never fails `open`; the reopened
-                // channel's own hold of ten minutes spaces the next try.
+                // R15: a failed purge never fails `open`.
                 let _purged = channel.purge_expired(now);
             }
         }
@@ -120,15 +121,12 @@ impl Device {
     /// `UnknownChannel` for a name not in `status().broken`; the error of
     /// `Vault::remove`, the entry kept.
     pub fn remove_broken(&mut self, name: &str) -> Result<(), Error> {
-        let position = self
+        let (position, dir) = self
             .broken
             .iter()
-            .position(|broken| broken.info.name == name)
-            .ok_or(Error::UnknownChannel)?;
-        let dir = self
-            .broken
-            .get(position)
-            .map(|broken| broken.dir)
+            .enumerate()
+            .find(|(_, broken)| broken.info.name == name)
+            .map(|(position, broken)| (position, broken.dir))
             .ok_or(Error::UnknownChannel)?;
         self.vault.remove(&dir)?;
         self.broken.remove(position);
@@ -142,17 +140,11 @@ impl Broken {
         Broken {
             dir,
             info: BrokenChannel {
-                name: hex(&dir),
+                name: dir.to_hex(),
                 reason,
                 channel_id: None,
                 channel_name: None,
             },
         }
     }
-}
-
-/// The directory name as the store writes it, 32 lowercase hex characters
-/// (spec 020-store-files R18).
-fn hex(dir: &DirName) -> String {
-    dir.0.iter().map(|byte| format!("{byte:02x}")).collect()
 }

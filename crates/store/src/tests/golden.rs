@@ -25,7 +25,7 @@ fn s020_t31_r31_golden_v1_files() {
     let dir = TestDir::new("t31");
     let key = || StorageKey::from_bytes(&mut GOLDEN_KEY.clone());
     let name = privatechat_core::dir_name(&key(), &GOLDEN_CHANNEL).expect("name");
-    let channel = dir.path().join("channels").join(crate::hex(&name));
+    let channel = dir.path().join("channels").join(name.to_hex());
     std::fs::create_dir_all(&channel).expect("channel directory");
     std::fs::write(channel.join("state.bin"), STATE).expect("state");
     std::fs::write(channel.join("messages.log"), LOG).expect("log");

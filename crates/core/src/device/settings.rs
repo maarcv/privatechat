@@ -40,21 +40,13 @@ enum Mode {
     Reset {
         /// What `load_settings` returned, `None` for an absent file.
         reason: Option<StoreError>,
-        /// The setter changes made since, applied onto a file that reads
-        /// again.
-        changes: Changes,
+        /// The setter changes made since, in order, applied onto a file
+        /// that reads again.
+        changes: Vec<Change>,
     },
     /// The file of a newer app, which a downgrade never overwrites unless
     /// the user replaces it: the setters change memory alone (R2).
     Newer,
-}
-
-/// The setter changes made while the gate is up (R2).
-#[derive(Default)]
-struct Changes {
-    default_server_url: Option<String>,
-    lock_timeout_seconds: Option<u32>,
-    socks5_proxy: Option<Option<String>>,
 }
 
 /// One setter's change, already checked against its grammar (R13).
@@ -62,38 +54,6 @@ enum Change {
     DefaultServerUrl(String),
     LockTimeoutSeconds(u32),
     Socks5Proxy(Option<String>),
-}
-
-impl Changes {
-    /// Whether no setter was called.
-    fn is_empty(&self) -> bool {
-        self.default_server_url.is_none()
-            && self.lock_timeout_seconds.is_none()
-            && self.socks5_proxy.is_none()
-    }
-
-    /// Records `change`.
-    fn record(&mut self, change: &Change) {
-        match change {
-            Change::DefaultServerUrl(url) => self.default_server_url = Some(url.clone()),
-            Change::LockTimeoutSeconds(seconds) => self.lock_timeout_seconds = Some(*seconds),
-            Change::Socks5Proxy(proxy) => self.socks5_proxy = Some(proxy.clone()),
-        }
-    }
-
-    /// `settings` with every recorded change applied.
-    fn apply_to(&self, mut settings: Settings) -> Settings {
-        if let Some(url) = &self.default_server_url {
-            settings.default_server_url.clone_from(url);
-        }
-        if let Some(seconds) = self.lock_timeout_seconds {
-            settings.lock_timeout_seconds = seconds;
-        }
-        if let Some(proxy) = &self.socks5_proxy {
-            settings.socks5_proxy.clone_from(proxy);
-        }
-        settings
-    }
 }
 
 impl Change {
@@ -170,8 +130,8 @@ impl SettingsHolder {
             }
             Mode::Newer => self.current = change.apply_to(copy(&self.current)),
             Mode::Reset { changes, .. } => {
-                changes.record(&change);
                 self.current = change.apply_to(copy(&self.current));
+                changes.push(change);
             }
         }
         Ok(())
@@ -190,16 +150,18 @@ impl SettingsHolder {
             return self.acknowledge_outside_gate(vault, replace_newer);
         };
         let mut reason = *reason;
+        // `replace_newer` counts only for the reason the user was shown: a
+        // re-read that finds a newer file never replaces it unasked (R2).
+        let replace = replace_newer && reason == Some(StoreError::UnsupportedVersion);
         if reason == Some(StoreError::Io) {
             // A passing read error must not overwrite a stored proxy (R2).
             match vault.load_settings() {
                 Ok(Some(stored)) => {
-                    let had_changes = !changes.is_empty() || proxy.is_some();
-                    let mut next = changes.apply_to(stored);
-                    if let Some(proxy) = &proxy {
-                        next = proxy.apply_to(next);
-                    }
-                    if had_changes {
+                    let next = changes
+                        .iter()
+                        .chain(&proxy)
+                        .fold(stored, |settings, change| change.apply_to(settings));
+                    if !changes.is_empty() || proxy.is_some() {
                         vault.save_settings(&next)?;
                     }
                     self.current = next;
@@ -207,7 +169,7 @@ impl SettingsHolder {
                     return Ok(());
                 }
                 Err(StoreError::UnsupportedVersion) => {
-                    reason = Some(StoreError::UnsupportedVersion)
+                    reason = Some(StoreError::UnsupportedVersion);
                 }
                 Ok(None) | Err(_) => {}
             }
@@ -216,7 +178,7 @@ impl SettingsHolder {
             Some(proxy) => proxy.apply_to(copy(&self.current)),
             None => copy(&self.current),
         };
-        if reason == Some(StoreError::UnsupportedVersion) && !(replace_newer && proxy.is_none()) {
+        if reason == Some(StoreError::UnsupportedVersion) && !replace {
             // A newer app's file is never overwritten by a downgrade.
             self.current = next;
             self.mode = Mode::Newer;
@@ -254,7 +216,7 @@ impl Mode {
     fn reset(reason: Option<StoreError>) -> Mode {
         Mode::Reset {
             reason,
-            changes: Changes::default(),
+            changes: Vec::new(),
         }
     }
 }

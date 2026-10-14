@@ -108,6 +108,15 @@ impl MemoryVault {
         files.log = log.map(<[u8]>::to_vec);
     }
 
+    /// The bytes of the state and the log of directory `name`, `None` for a
+    /// file that is absent.
+    pub fn get_raw(&self, name: &DirName) -> (Option<Vec<u8>>, Option<Vec<u8>>) {
+        let shared = lock(&self.shared);
+        shared.dirs.get(name).map_or((None, None), |files| {
+            (files.state.clone(), files.log.clone())
+        })
+    }
+
     /// Plants arbitrary bytes as the `nonce ‖ box` of the settings.
     pub fn put_settings_raw(&self, bytes: &[u8]) {
         lock(&self.shared).settings = Some(bytes.to_vec());
@@ -119,11 +128,6 @@ impl MemoryVault {
         let sealed = Settings::seal_record(&fixed_key(), record)?;
         lock(&self.shared).settings = Some(sealed);
         Ok(())
-    }
-
-    /// Whether the vault holds a settings file.
-    pub fn has_settings(&self) -> bool {
-        lock(&self.shared).settings.is_some()
     }
 
     /// The `nonce ‖ box` of the settings, `None` when absent.

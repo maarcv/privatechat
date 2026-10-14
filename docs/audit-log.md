@@ -2,6 +2,24 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AR
+
+**2026-10-14 — Audit AR, the code audit of slice (a) of spec 027-core-api (branch `027-open`): `Device::open`, the settings and their gate, `acknowledge_settings`, the setters and `remove_broken` (R1–R3, R13), and `Error::UnknownChannel` (R18); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit R's findings already took AR1–AR11, so this audit's are numbered from AR12. One production defect (AR12). Pass C ran 35 mutants: 23 killed, 3 equivalent, 9 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AR12 | `acknowledge_settings(true)` read `replace_newer` after the re-read of an `Io`: a passing `Io` over a newer app's file, shown to the user as `Io`, then `true`, overwrote that file with the defaults, which R2 allows only behind the "newer version" confirmation (B) | Low | `replace_newer` counts only when the reason the call started from is `UnsupportedVersion`; a T02 case |
+| AR13 | `acknowledge_settings(true)` while the gate is up over a newer file was never run: the tests lowered it with `false` first (A, C) | Medium | A T02 case: the file replaced at once, the reason cleared, later setters saving |
+| AR14 | A second `acknowledge_settings(false)` over a kept newer file, a proxy set over one staying in memory, a failed save after a passing `Io`, a re-read that fails again, saved settings not saved again, and a URL set at the gate applied onto the adopted file were untested (C) | Medium | A case for each |
+| AR15 | T03's `Io` entry without a `channel_id` was missing: no double failed a `load` (A) | Low | `Faults::fail_loads`; a T03 case; spec 020's doubles paragraph names it |
+| AR16 | T01's hidden directories ran on two vaults, so the gate after the restore held by construction (A) | Low | One vault, its channel directory hidden with `put_raw` and restored from `get_raw` |
+| AR17 | A comment at `open` named a reopen that slice (c) brings (A) | Low | It cites R15 alone |
+| AR18 | The new doubles were not in spec 020's doubles paragraph (A) | Low | Named there, with a History line |
+| AR19 | The pending changes kept a proxy field no path set, `release` tested `proxy.is_none()` with no effect, and `Changes` applied changes a second way (C) | Low | The pending changes are a list of `Change`, folded with its one `apply_to` |
+| AR20 | The directory name was written by two functions, in `device.rs` and in `store`, and no test checked its case (C) | Low | `DirName::to_hex`, used by both; T01 checks a literal name |
+| AR21 | `remove_broken` looked its entry up twice; `has_settings` repeated `settings_raw`; a bad proxy at the gate was untested (C) | Low | One lookup; `has_settings` removed; a T13 case |
+| AR22 | A local writer that hides the channel directories for one unlock, while the user changes a setting, gets the defaults saved without the proxy (B) | Far-fetched | None: R1 promises only that the device writes nothing on its own, and a rollback of `settings.bin` does as much, documented in the Security section |
+
 ## Audit AQ
 
 **2026-10-13 — Audit AQ, the code audit of slice (e) of spec 028-session-sans-io (branch `028-no-oracle`): the no-oracle property (R18), the proptest T18; round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** No production code changed and no production defect found: a push's bytes reach the session only through the channel's verdict, which changes a frame only on a store error, outside R18's headroom condition. Pass C ran 13 mutants: 8 killed, 1 equivalent, 4 survived, each killed below.

@@ -31,7 +31,7 @@ fn s027_t02_r02_settings_reset_gate() {
         device.set_lock_timeout_seconds(10).unwrap();
         assert_eq!(device.settings().lock_timeout_seconds, 10);
         assert!(device.status().settings_reset);
-        assert!(!fixture.vault.has_settings());
+        assert!(fixture.vault.settings_raw().is_none());
         drop(device);
 
         let mut device = fixture.open().unwrap();
@@ -267,7 +267,7 @@ fn s027_t13_r13_settings() {
     for proxy in ["127.0.0.1", "127.0.0.1:0", "host:09050", "[::1]:9050"] {
         assert_eq!(device.set_socks5_proxy(Some(proxy)), Err(Error::BadConfig));
     }
-    assert!(!fixture.vault.has_settings());
+    assert!(fixture.vault.settings_raw().is_none());
     assert_eq!(device.settings(), defaults_view());
 
     device.set_default_server_url(OTHER_SERVER).unwrap();
@@ -330,4 +330,165 @@ fn s027_t21_r21_failing_settings_writes() {
         assert!(device.status().settings_reset);
         assert_eq!(device.status().settings_reason, reason);
     }
+}
+
+/// Spec 027, R2: `acknowledge_settings(true)` while the gate is up over a
+/// newer app's file replaces it at once: saved, the reason cleared, and
+/// later setters save.
+#[test]
+fn s027_t02_r02_replace_newer_at_the_gate() {
+    let fixture = Fixture::new();
+    fixture.plant_channel(1, Vec::new());
+    fixture.plant_newer_settings();
+    let mut device = fixture.open().unwrap();
+    device.set_lock_timeout_seconds(10).unwrap();
+    device.acknowledge_settings(true).unwrap();
+    let status = device.status();
+    assert!(!status.settings_reset);
+    assert_eq!(status.settings_reason, None);
+    let stored = fixture.stored_settings().unwrap();
+    assert!(settings_eq(
+        &stored,
+        &settings(crate::DEFAULT_SERVER_URL, 10, None)
+    ));
+    device.set_lock_timeout_seconds(20).unwrap();
+    assert_eq!(fixture.stored_settings().unwrap().lock_timeout_seconds, 20);
+}
+
+/// Spec 027, R2: `replace_newer` counts only for the reason the user was
+/// shown: after a passing `Io` over a newer app's file it replaces
+/// nothing, and the reason becomes `UnsupportedVersion`.
+#[test]
+fn s027_t02_r02_replace_newer_after_a_passing_io() {
+    let fixture = Fixture::new();
+    fixture.plant_channel(1, Vec::new());
+    fixture.plant_newer_settings();
+    let planted = fixture.vault.settings_raw();
+    fixture.faults.fail_load_settings(true);
+    let mut device = fixture.open().unwrap();
+    fixture.faults.fail_load_settings(false);
+    device.acknowledge_settings(true).unwrap();
+    assert!(!device.status().settings_reset);
+    assert_eq!(
+        device.status().settings_reason,
+        Some(StoreError::UnsupportedVersion)
+    );
+    assert_eq!(fixture.vault.settings_raw(), planted);
+}
+
+/// Spec 027, R2: once a newer app's file is kept, a second
+/// `acknowledge_settings(false)` still writes nothing.
+#[test]
+fn s027_t02_r02_second_acknowledgement_keeps_newer() {
+    let fixture = Fixture::new();
+    fixture.plant_channel(1, Vec::new());
+    fixture.plant_newer_settings();
+    let planted = fixture.vault.settings_raw();
+    let mut device = fixture.open().unwrap();
+    device.acknowledge_settings(false).unwrap();
+    device.acknowledge_settings(false).unwrap();
+    assert_eq!(fixture.vault.settings_raw(), planted);
+    assert_eq!(
+        device.status().settings_reason,
+        Some(StoreError::UnsupportedVersion)
+    );
+}
+
+/// Spec 027, R2: the proxy set over a newer app's file is kept in memory.
+#[test]
+fn s027_t02_r02_proxy_over_newer_settings_in_memory() {
+    let fixture = Fixture::new();
+    fixture.plant_channel(1, Vec::new());
+    fixture.plant_newer_settings();
+    let mut device = fixture.open().unwrap();
+    device.set_socks5_proxy(Some(PROXY)).unwrap();
+    assert_eq!(device.settings().socks5_proxy.as_deref(), Some(PROXY));
+}
+
+/// Spec 027, R2: after a passing `Io`, a save that fails while adopting
+/// the stored file keeps the settings, the flag and the reason.
+#[test]
+fn s027_t02_r02_failed_save_after_a_passing_io() {
+    let fixture = with_stored_proxy();
+    fixture.faults.fail_load_settings(true);
+    let mut device = fixture.open().unwrap();
+    fixture.faults.fail_load_settings(false);
+    device.set_lock_timeout_seconds(10).unwrap();
+    let before = device.settings();
+    fixture.faults.fail_save_settings(true);
+    assert_eq!(
+        device.acknowledge_settings(false),
+        Err(Error::Store(StoreError::Io))
+    );
+    assert_eq!(device.settings(), before);
+    assert_eq!(before.lock_timeout_seconds, 10);
+    assert_eq!(before.socks5_proxy, None);
+    assert!(device.status().settings_reset);
+    assert_eq!(device.status().settings_reason, Some(StoreError::Io));
+}
+
+/// Spec 027, R2: when the re-read after an `Io` still fails, the
+/// acknowledgement saves the settings in memory and lowers the gate.
+#[test]
+fn s027_t02_r02_persistent_io() {
+    let fixture = with_stored_proxy();
+    fixture.faults.fail_load_settings(true);
+    let mut device = fixture.open().unwrap();
+    device.acknowledge_settings(false).unwrap();
+    assert!(!device.status().settings_reset);
+    assert_eq!(device.status().settings_reason, None);
+    fixture.faults.fail_load_settings(false);
+    let stored = fixture.stored_settings().unwrap();
+    assert!(settings_eq(
+        &stored,
+        &settings(crate::DEFAULT_SERVER_URL, 60, None)
+    ));
+}
+
+/// Spec 027, R1, R2: saved settings, whether read at `open` or adopted
+/// after a passing `Io`, are not saved again by an acknowledgement.
+#[test]
+fn s027_t02_r02_acknowledging_saved_settings_saves_nothing() {
+    let fixture = with_stored_proxy();
+    let mut device = fixture.open().unwrap();
+    fixture.faults.fail_save_settings(true);
+    device.acknowledge_settings(false).unwrap();
+    device.acknowledge_settings(true).unwrap();
+
+    let fixture = with_stored_proxy();
+    fixture.faults.fail_load_settings(true);
+    let mut device = fixture.open().unwrap();
+    fixture.faults.fail_load_settings(false);
+    device.acknowledge_settings(false).unwrap();
+    fixture.faults.fail_save_settings(true);
+    device.acknowledge_settings(false).unwrap();
+}
+
+/// Spec 027, R2: a server URL set while the gate is up is applied onto the
+/// stored file adopted after a passing `Io`.
+#[test]
+fn s027_t02_r02_passing_io_applies_the_url() {
+    let fixture = with_stored_proxy();
+    fixture.faults.fail_load_settings(true);
+    let mut device = fixture.open().unwrap();
+    fixture.faults.fail_load_settings(false);
+    device.set_default_server_url(SERVER).unwrap();
+    device.acknowledge_settings(false).unwrap();
+    let stored = fixture.stored_settings().unwrap();
+    assert!(settings_eq(&stored, &settings(SERVER, 30, Some(PROXY))));
+}
+
+/// Spec 027, R13: a proxy outside the grammar is refused while the gate is
+/// up too, the gate kept and nothing saved.
+#[test]
+fn s027_t13_r13_bad_proxy_at_the_gate() {
+    let fixture = Fixture::new();
+    fixture.plant_channel(1, Vec::new());
+    let mut device = fixture.open().unwrap();
+    assert_eq!(
+        device.set_socks5_proxy(Some("127.0.0.1")),
+        Err(Error::BadConfig)
+    );
+    assert!(device.status().settings_reset);
+    assert!(fixture.vault.settings_raw().is_none());
 }
