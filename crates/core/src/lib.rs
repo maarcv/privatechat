@@ -17,7 +17,6 @@
     )
 )]
 
-#[allow(dead_code, reason = "reached through proto, spec 027-core-api")]
 mod crypto;
 
 mod device;
@@ -27,13 +26,10 @@ mod error;
 #[cfg(any(test, fuzzing))]
 pub mod fuzz_entry;
 
-#[allow(dead_code, reason = "reached through Device, spec 027-core-api")]
 mod proto;
 
-#[allow(dead_code, reason = "reached through Device, spec 027-core-api")]
 mod session;
 
-#[allow(dead_code, reason = "reached through Device, spec 027-core-api")]
 mod storage;
 
 #[cfg(any(test, fuzzing, feature = "test-support"))]
@@ -44,10 +40,9 @@ mod vectors;
 
 pub use device::{
     BrokenChannel, ChannelInfo, ConnectionPlan, Device, DeviceStatus, ExportedFile, Imported,
-    Route, Sent, SettingsView, probe_hello,
+    Route, Sent, SettingsView, generate_storage_key, init, probe_hello,
 };
 pub use error::Error;
-pub use proto::config::Config;
 pub use proto::fingerprint::Fingerprint;
 pub use session::channel::{
     AckOutcome, ChannelStatus, ClientRef, Delivery, Gap, Message, MessageContent, OldKey, Peer,

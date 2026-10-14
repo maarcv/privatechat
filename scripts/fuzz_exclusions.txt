@@ -7,3 +7,7 @@ Config::open_file_with_key # spec 011, crate-internal: checks the header with pa
 ChannelState::open # spec 020 R29: a sealed open, whose box a mutated input almost never passes; its decoder is fuzzed on its own over the plaintext, and the R29 round trip covers it
 LogRecord::open # spec 020 R29: a sealed open, whose box a mutated input almost never passes; its decoder is fuzzed on its own over the plaintext, and the R29 round trip covers it
 Settings::open # spec 020 R29: a sealed open, whose box a mutated input almost never passes; its decoder is fuzzed on its own over the plaintext, and the R29 round trip covers it
+PeerRecord::decode # spec 020: decoded only inside ChannelState's decoder, which the state_decode target reaches
+OutboxEntry::decode # spec 020: decoded only inside ChannelState's decoder, which the state_decode target reaches
+OldKey::decode # spec 020: decoded only inside ChannelState's decoder, which the state_decode target reaches
+TestRecord::decode # spec 017: called by path in decode_test_record, which the record_decode target reaches

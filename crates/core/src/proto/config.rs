@@ -113,7 +113,7 @@ impl ChannelId {
 /// It holds every field of the record but `invite_expires_at`, which an
 /// export writes and an import checks and drops (R10, ADR 0028), so a stored
 /// config never expires as an invitation.
-pub struct Config {
+pub(crate) struct Config {
     k_ch: Secret<32>,
     server_url: String,
     /// The host of `server_url`, parsed once when the config is built.
@@ -141,7 +141,7 @@ impl Config {
     ///
     /// `BadConfig` for a TTL, a name or a server URL out of range, and
     /// `Internal` when libsodium fails.
-    pub fn create(
+    pub(crate) fn create(
         server_url: &str,
         ttl_seconds: u32,
         suggested_name: &str,
@@ -159,7 +159,7 @@ impl Config {
     /// `UnsupportedVersion` for a `config_version` or `proto_version` other
     /// than 1; `InviteExpired` for an invitation that expired before `now`;
     /// `Internal` when libsodium fails.
-    pub fn parse(bytes: &[u8], now: u64) -> Result<Config, Error> {
+    pub(crate) fn parse(bytes: &[u8], now: u64) -> Result<Config, Error> {
         let fields = decode(bytes)?;
         let checked = check_ranges(fields.server_url, fields.ttl_seconds, fields.suggested_name)?;
         if fields.invite_expires_at.is_some_and(|expiry| expiry < now) {
@@ -175,7 +175,7 @@ impl Config {
     ///
     /// `BadConfig` for a text above 683 bytes or that is not the canonical
     /// base64url of some bytes, and the errors of [`Config::parse`].
-    pub fn parse_qr(text: &[u8], now: u64) -> Result<Config, Error> {
+    pub(crate) fn parse_qr(text: &[u8], now: u64) -> Result<Config, Error> {
         if text.len() > MAX_QR {
             return Err(Error::BadConfig);
         }
@@ -194,7 +194,7 @@ impl Config {
     ///
     /// `Internal` when `now` leaves no room for the expiry or libsodium
     /// fails.
-    pub fn export_qr(&self, now: u64) -> Result<Vec<u8>, Error> {
+    pub(crate) fn export_qr(&self, now: u64) -> Result<Vec<u8>, Error> {
         let expiry = now.checked_add(QR_INVITE_MS).ok_or(Error::Internal)?;
         let record = self.record(Some(expiry))?;
         let mut text = crypto::base64url_encode(&record)?;
@@ -213,7 +213,7 @@ impl Config {
     /// box (a corrupted file included), `BadConfig` for a box with no valid
     /// padding, then the errors of [`Config::parse`]; `Internal` when
     /// libsodium fails, the 64 MiB of Argon2id included.
-    pub fn open_encrypted(bytes: &[u8], password: &[u8], now: u64) -> Result<Config, Error> {
+    pub(crate) fn open_encrypted(bytes: &[u8], password: &[u8], now: u64) -> Result<Config, Error> {
         parse_file_header(bytes)?;
         let password = canonical_password(password)?;
         let key = crypto::password_key(&password, &Salt(region(bytes, SALT_RANGE)?))?;
@@ -228,7 +228,7 @@ impl Config {
     ///
     /// `Internal` when `now` leaves no room for the expiry or libsodium
     /// fails.
-    pub fn export_encrypted(&self, now: u64) -> Result<(Vec<u8>, Vec<u8>), Error> {
+    pub(crate) fn export_encrypted(&self, now: u64) -> Result<(Vec<u8>, Vec<u8>), Error> {
         // Checked before the draw, so that no Argon2id runs for a file that
         // `padded_record` would refuse.
         now.checked_add(FILE_INVITE_MS).ok_or(Error::Internal)?;
@@ -241,22 +241,22 @@ impl Config {
     }
 
     /// The channel's identifier on the server (R8).
-    pub fn channel_id(&self) -> [u8; 16] {
+    pub(crate) fn channel_id(&self) -> [u8; 16] {
         self.id.0
     }
 
     /// The exchange server of the channel, fixed at creation.
-    pub fn server_url(&self) -> &str {
+    pub(crate) fn server_url(&self) -> &str {
         &self.server_url
     }
 
     /// The channel name proposed by its creator.
-    pub fn suggested_name(&self) -> &str {
+    pub(crate) fn suggested_name(&self) -> &str {
         &self.suggested_name
     }
 
     /// How long a message of this channel lives.
-    pub fn ttl_seconds(&self) -> u32 {
+    pub(crate) fn ttl_seconds(&self) -> u32 {
         self.ttl_seconds
     }
 

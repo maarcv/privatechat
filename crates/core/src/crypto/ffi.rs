@@ -9,7 +9,7 @@
 #![allow(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-use core::ffi::{CStr, c_char, c_int, c_void};
+use core::ffi::{c_char, c_int, c_void};
 use core::ptr;
 
 /// Initialises the library. Negative on failure, `0` on the first call and
@@ -21,10 +21,11 @@ pub(super) fn sodium_init() -> i32 {
 }
 
 /// The version of the libsodium actually linked into this binary.
+#[cfg(test)]
 pub(super) fn version_string() -> Option<&'static str> {
     // SAFETY: libsodium returns a pointer to a static, NUL-terminated string
     // that lives for the whole process, so the borrow is `'static`.
-    let raw = unsafe { CStr::from_ptr(libsodium_sys::sodium_version_string()) };
+    let raw = unsafe { core::ffi::CStr::from_ptr(libsodium_sys::sodium_version_string()) };
     raw.to_str().ok()
 }
 
@@ -265,6 +266,7 @@ pub(super) fn sign_keypair_from_seed(
 }
 
 /// A fresh Ed25519 key pair (spec 010, R10).
+#[cfg(test)]
 pub(super) fn sign_keypair(public_key: &mut [u8; 32], secret_key: &mut [u8; 64]) -> bool {
     // SAFETY: both buffers are fixed-size arrays of exactly the lengths this
     // primitive writes.
