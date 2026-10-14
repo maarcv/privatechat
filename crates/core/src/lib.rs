@@ -6,6 +6,9 @@
 
 // `deny`, not `forbid`: `crypto/ffi.rs` alone will `allow` it (AGENTS 12).
 #![deny(unsafe_code)]
+// Spec 027-core-api R17: an item no build reaches is gated or removed, never
+// allowed; `forbid` refuses an `allow(dead_code)` in any module.
+#![forbid(dead_code)]
 // Tests may relax these four lints to build fixtures; production code never does (AGENTS 4).
 #![cfg_attr(
     test,
@@ -17,7 +20,6 @@
     )
 )]
 
-#[allow(dead_code, reason = "reached through proto, spec 027-core-api")]
 mod crypto;
 
 mod device;
@@ -27,13 +29,10 @@ mod error;
 #[cfg(any(test, fuzzing))]
 pub mod fuzz_entry;
 
-#[allow(dead_code, reason = "reached through Device, spec 027-core-api")]
 mod proto;
 
-#[allow(dead_code, reason = "reached through Device, spec 027-core-api")]
 mod session;
 
-#[allow(dead_code, reason = "reached through Device, spec 027-core-api")]
 mod storage;
 
 #[cfg(any(test, fuzzing, feature = "test-support"))]
@@ -44,10 +43,9 @@ mod vectors;
 
 pub use device::{
     BrokenChannel, ChannelInfo, ConnectionPlan, Device, DeviceStatus, ExportedFile, Imported,
-    Route, Sent, SettingsView, probe_hello,
+    Route, Sent, SettingsView, generate_storage_key, init, probe_hello,
 };
 pub use error::Error;
-pub use proto::config::Config;
 pub use proto::fingerprint::Fingerprint;
 pub use session::channel::{
     AckOutcome, ChannelStatus, ClientRef, Delivery, Gap, Message, MessageContent, OldKey, Peer,
@@ -69,12 +67,12 @@ pub use storage::{
 pub const DEFAULT_SERVER_URL: &str = "wss://server.invalid";
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::DEFAULT_SERVER_URL;
 
     /// The code lines of one `[section]` of a TOML file, comments and blank
     /// lines dropped, so that a commented-out copy of a line never counts.
-    fn section<'a>(toml: &'a str, header: &str) -> Vec<&'a str> {
+    pub(crate) fn section<'a>(toml: &'a str, header: &str) -> Vec<&'a str> {
         let mut lines = Vec::new();
         let mut inside = false;
         for line in toml.lines() {

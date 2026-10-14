@@ -9,7 +9,7 @@ Contents:
 1. `Secret<N>` — key material
 2. Fixed-offset parsing — the wire envelope (§4)
 3. `Store` trait and `WriteBatch` — one commit per operation
-4. Sans-I/O `Session`
+4. Sans-I/O `Session` behind one `Device`
 5. Encrypt: reserve before you emit
 6. Test vector loader
 
@@ -162,7 +162,7 @@ pub struct WriteBatch {
 }
 ```
 
-`Channel` builds one `WriteBatch` per logical operation and commits it once,
+`Channel` (crate-internal, behind `Device`) builds one `WriteBatch` per logical operation and commits it once,
 by reference, so that it can move the parts into memory after `Ok` and retry
 after `LogFull`; a rejection commits only a state whose cursor moved. The
 doubles live in `core::testing` (feature `test-support` for the `store`
@@ -171,39 +171,46 @@ tests): `MemoryStore` counts the commits of AGENTS 23 in `commits()`, and
 poisons a store after it (`poison_after`); tests reopen and compare with
 `state_eq`.
 
-## 4. Sans-I/O `Session` (ADR 0020)
+## 4. Sans-I/O `Session` behind one `Device` (ADR 0020, ADR 0037)
+
+The normative shapes are the Interfaces of specs 028-session-sans-io and
+027-core-api; in short, `Session` and `Channel` are crate-internal, and the
+clients reach them through the one handle `Device`, by plan `id`:
 
 ```rust
-pub struct Session { /* nonce, subscriptions, per-channel cursors, outbox view */ }
+pub(crate) struct Session { /* nonce, subscriptions, stalls, holds, outbox view */ }
 
-pub enum Event {
-    Subscribed(ChannelId),
-    Received { channel: ChannelId, message: Received },
-    Acked { channel: ChannelId, client_ref: ClientRef },
-    Gap { channel: ChannelId, peer: PeerId, missing: u64 },
-    Reconnect { after_ms: u64 },
-    Fatal(Error),
-}
+pub(crate) struct Step { pub(crate) events: Vec<Event>, pub(crate) failed: Vec<([u8; 16], StoreError)> }
 
 impl Session {
-    pub fn new(server_url: &str, channels: Vec<Channel>) -> Session; // all channels of one server (host and port)
-    pub fn on_connect(&mut self, now: u64);
-    pub fn on_frame(&mut self, frame: &[u8], now: u64) -> Result<Vec<Event>, Error>;
-    pub fn outgoing(&mut self) -> Vec<Vec<u8>>;
+    pub(crate) fn new(connection: u64, channel_ids: Vec<[u8; 16]>) -> Session;
+    pub(crate) fn on_connect(&mut self, now: u64, skip: &[[u8; 16]]);
+    pub(crate) fn on_frame(&mut self, frame: &[u8], channels: &mut Vec<Channel>, now: u64) -> Step;
+    pub(crate) fn on_tick(&mut self, channels: &mut Vec<Channel>, now: u64) -> Step;
+    pub(crate) fn outgoing(&mut self) -> Vec<Vec<u8>>;
+}
+
+impl Device {
+    pub fn connections(&self) -> Vec<ConnectionPlan>;             // one Session per plan id
+    pub fn on_frame(&mut self, connection: u64, frame: &[u8], now: u64) -> Vec<Event>;
+    pub fn on_tick(&mut self, now: u64) -> Vec<Event>;
 }
 ```
 
 The host loop is `architecture` §7 "Talking to the core". All protocol
 decisions — nonce expiry, `since` rounding, dedupe by `server_id`, paging —
-live inside `on_frame`. The integration test runs two `Session`s against the
-real server binary in Docker with a fake clock.
+live inside the session; a store failure in its step goes to `failed`, and
+the `Device` reopens the store and marks the channel `write_failed` (spec
+027-core-api R14). The phase 2 exit test runs two `Device`s against
+`testing::MemoryServer`; the integration test of phase 3 against the real
+server binary.
 
 ## 5. Encrypt: reserve before you emit (`docs/spec.md` §4 "Send counter")
 
 A sketch; spec 021-channel-session is normative.
 
 ```rust
-pub fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> Result<ClientRef, Error> {
+pub(crate) fn encrypt(&mut self, body: &str, display_name: Option<&str>, now: u64) -> Result<ClientRef, Error> {
     let payload = Payload::text(body, display_name, now)?; // the core builds and validates it
     let counter = self.state.send_counter;
     let next = counter.checked_add(1).ok_or(Error::CounterExhausted)?;

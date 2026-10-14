@@ -2,6 +2,34 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AX
+
+**2026-10-14 — Audit AX, the code audit of slice (e) of spec 027-core-api (branch `027-boundary`): the boundary checks (`unreachable_pub`, `api_surface.rs`), the amendments of specs 011 and 016, the `dead_code` allows removed, `init` and `generate_storage_key`, and the doc updates (R16–R22); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit X's findings already took AX1–AX18, so this audit's are numbered from AX19. No production defect: no secret crosses, no gate changes production, no parser of external bytes is left unfuzzed and unexcluded. Pass C ran 24 mutants: 20 killed, 1 equivalent, 3 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AX19 | `generate_storage_key` filling half the key passed its test; `Display` on `Device` and a `dead_code` allow inside a module file were caught by no test (C) | Medium | The two draws compared by 8-byte quarters; a `compile_fail` doctest for `Display`; the four module files read for `dead_code` |
+| AX20 | T20's "without `init()`" ran in a process where another test had initialised libsodium (A) | Low | A test binary of its own in `store`, which creates a channel before anything else touches libsodium |
+| AX21 | §9 said every function receiving external data returns `Result`, every byte-reading `pub` function has a fuzz target, and every other type of spec 027 crosses the bindings (B) | Low | §9 names `on_frame` and `on_tick`, the named exclusions, and the items `pub` for `store` and `server` that never cross |
+| AX22 | R17 put `parse_verify_qr` on the exclusion list, where spec 016 R6 counts it reached by its module path; R22 tied the doc updates to the marking pull request, where the slice list gives them to (e) (A) | Low | R17 and R22 amended, with a History line |
+| AX23 | T16's test name was missing; the rust skill's contents and its §5 sketch still showed a `pub` session and `encrypt` (A) | Low | `s027_t16_r16_public_items`; the skill brought up to date |
+| AX24 | A second copy of the TOML section reader; the R20 rule written twice on `Device`; two random draws doing the same; the by-path `Channel::decrypt` call unexplained (C) | Low | One reader; one sentence; `random_bytes` through `fill_random`; a comment on the call |
+
+**Round 2.** Fresh passes on the whole change. AX19–AX24 hold; no production defect. Pass C ran 21 new mutants: 14 killed, 1 equivalent, 1 that led to a stronger one, 5 survived, each killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AX25 | A random draw leaving one byte unfilled, in `fill_random` or `Secret::random`, passed every test, the storage key's included (C) | Medium | Eight draws ORed at every byte position, in `s010_t06` and `s040_t08` |
+| AX26 | A `dead_code` allow in any file but the five T17 read went unseen (C) | Low | `#![forbid(dead_code)]` at the crate root, which T17 checks |
+| AX27 | §9 called `Device` a uniffi `Object` and its records the types that cross the bindings, where spec 040 says `Device` does not cross; and gave the sockets to the client, where spec 042 R3 gives them to the connection host (A) | Low | The row defers to specs 040–042; "cross" means the `core` boundary; the bullet names the connection host |
+| AX28 | The Interface did not list `without_init.rs`; T20's in-process "without `init`" loop could not fail; `Secret::random` drew a third way; spec 020 still said `mod storage` carried its allow (A, C) | Low | Listed; one call after `init` pointing to the binary; `fill_random`; spec 020 amended |
+| AX29 | The reach check missed `pub(super)` and `pub(in …)` parsers, and `probe_hello` reads a server's bytes under no listed name (B) | Low | Any `pub(…)` read, with a self-test case; `probe_hello` excluded with the target behind it |
+| AX30 | `generate_storage_key` hands `K_db` out as bytes, where AGENTS 5 and §9's bindings reason say no key leaves by value (B) | Far-fetched | None here: spec 040 rewrites both when it is implemented, and the function keeps no copy |
+
+The audit closes with this round (`CLAUDE.md`, the audit): pass B found only far-fetched cases, pass A wording of §9 and of the Interface, and pass C test gaps, now closed.
+
+Decisions taken without the human: R17 leaves `parse_verify_qr` out of the exclusions and R22's doc updates land with this slice (AX22), the readings spec 016 R6 and the slice list already give; `#![forbid(dead_code)]` at the crate root (AX26), which only narrows what compiles.
+
 ## Audit AW
 
 **2026-10-14 — Audit AW, the code audit of slice (d2b) of spec 027-core-api (branch `027-retries`): the retry of `broken` entries on the tick (R12) and the retries `leave` and `remove_broken` make due (R3); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit W's findings already took AW1–AW5, so this audit's are numbered from AW6. No production defect. Pass C ran 19 mutants: 12 killed, 2 equivalent, 5 survived, each killed below.

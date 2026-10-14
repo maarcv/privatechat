@@ -67,6 +67,7 @@ pub(crate) enum RecordError {
     /// A `text` value that is not UTF-8 (R4).
     Utf8,
     /// A mandatory key that is absent (R6).
+    #[cfg(any(test, fuzzing))]
     Missing,
     /// A key the schema does not name, under [`UnknownKeys::Reject`] (R7).
     UnknownKey,
@@ -325,6 +326,7 @@ impl<'a> Reader<'a> {
     /// # Errors
     ///
     /// The framing errors of [`Reader::bytes`], then whatever `decode` returns.
+    #[cfg(any(test, fuzzing))]
     pub(crate) fn record<T, E: From<RecordError>>(
         &mut self,
         key: u8,

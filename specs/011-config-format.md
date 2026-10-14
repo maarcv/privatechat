@@ -110,19 +110,19 @@ impl ChannelId {
     pub(crate) fn derive(pk_ch: &PublicKey, ttl_seconds: u32) -> Result<ChannelId, Error>;   // spec 031 R3
 }
 
-pub struct Config { /* K_ch: Secret<32>, the fields of §5 except invite_expires_at, and the derived channel_id and host */ }
+pub(crate) struct Config { /* K_ch: Secret<32>, the fields of §5 except invite_expires_at, and the derived channel_id and host */ }
 
 impl Config {
-    pub fn create(server_url: &str, ttl_seconds: u32, suggested_name: &str, now: u64) -> Result<Config, Error>;
-    pub fn parse(bytes: &[u8], now: u64) -> Result<Config, Error>;
-    pub fn parse_qr(text: &[u8], now: u64) -> Result<Config, Error>;
-    pub fn open_encrypted(bytes: &[u8], password: &[u8], now: u64) -> Result<Config, Error>;
-    pub fn export_qr(&self, now: u64) -> Result<Vec<u8>, Error>;
-    pub fn export_encrypted(&self, now: u64) -> Result<(Vec<u8>, Vec<u8>), Error>; // (file, password)
-    pub fn channel_id(&self) -> [u8; 16];
-    pub fn server_url(&self) -> &str;
-    pub fn suggested_name(&self) -> &str;
-    pub fn ttl_seconds(&self) -> u32;
+    pub(crate) fn create(server_url: &str, ttl_seconds: u32, suggested_name: &str, now: u64) -> Result<Config, Error>;
+    pub(crate) fn parse(bytes: &[u8], now: u64) -> Result<Config, Error>;
+    pub(crate) fn parse_qr(text: &[u8], now: u64) -> Result<Config, Error>;
+    pub(crate) fn open_encrypted(bytes: &[u8], password: &[u8], now: u64) -> Result<Config, Error>;
+    pub(crate) fn export_qr(&self, now: u64) -> Result<Vec<u8>, Error>;
+    pub(crate) fn export_encrypted(&self, now: u64) -> Result<(Vec<u8>, Vec<u8>), Error>; // (file, password)
+    pub(crate) fn channel_id(&self) -> [u8; 16];
+    pub(crate) fn server_url(&self) -> &str;
+    pub(crate) fn suggested_name(&self) -> &str;
+    pub(crate) fn ttl_seconds(&self) -> u32;
 
     pub(crate) fn from_parts(k_ch: Secret<32>, server_url: &str, ttl_seconds: u32, suggested_name: &str, created_at: u64) -> Result<Config, Error>;
     pub(crate) fn seal_file(&self, password: &[u8], salt: &Salt, nonce: &Nonce, now: u64) -> Result<Vec<u8>, Error>;
@@ -257,3 +257,4 @@ None. Decided in audit F (`docs/audit-log.md`):
 - 2026-10-01 revised after audit Y (`docs/audit-log.md`): R20 names `BadEncoding` among the errors a call site matches first; R22 and the Vectors paragraph name `chatcfg_reference` as the one record without its QR text; T05 lists the scheme case, percent and onion cases its table holds; T15 checks every code point
 - 2026-10-09 amended by spec 028-session-sans-io R8: `created_at()`, crate-internal, for the order of subscribes and the truncation check
 - 2026-10-09 amended by spec 031-auth-channel-signature R3: R8's derivation is the one function `ChannelId::derive`
+- 2026-10-14 amended by spec 027-core-api R17: `Config` and its functions are `pub(crate)`; the clients reach a config through `Device` alone

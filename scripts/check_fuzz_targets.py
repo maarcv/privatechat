@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The fuzz targets of spec 016-fuzz-harness, read from the sources.
 
-T02: the targets of R2 exist, and no other. T06: every `pub` parser of `core` that
+T02: the targets of R2 exist, and no other. T06: every `pub` or `pub(crate)` parser of `core` that
 takes `&[u8]`, and every `pub` entry of `fuzz_entry`, is reached by a target or named with
 its reason in `fuzz_exclusions.txt`, and every exclusion names a function that exists
 (AGENTS 21). T07: each target is the one-call template, and each entry only calls its
@@ -41,8 +41,9 @@ fuzz_target!(|data: &[u8]| {{
 """
 # R6: a `pub` parser, with or without a lifetime or generics, its parameters matched across
 # line breaks up to the closing parenthesis of the signature.
-PARSER = re.compile(r"^( *)pub fn ((?:parse|decrypt|open)\w*)\s*(?:<[^>]*>)?\(([^)]*)\)",
-                    re.MULTILINE)
+PARSER = re.compile(
+    r"^( *)pub(?:\([^)]*\))? fn ((?:parse|decrypt|open|decode)\w*)\s*(?:<[^>]*>)?\(([^)]*)\)",
+    re.MULTILINE)
 TAKES_BYTES = re.compile(r"&\s*(?:'\w+\s+)?\[u8\]")
 IMPL = re.compile(r"^impl(?:<[^>]*>)?\s+(\w+)", re.MULTILINE)
 ANY_FN = re.compile(r"^( *)(?:pub(?:\([^)]*\))? )?fn (\w+)", re.MULTILINE)
@@ -164,6 +165,12 @@ def self_test(sources: dict[str, str], entry: str, targets: dict[str, str],
         ("a decrypt parser without a target", "Box::decrypt_new",
          reach(parser.format(name="decrypt_new"))),
         ("an open parser without a target", "Box::open_new", reach(parser.format(name="open_new"))),
+        ("a decode parser without a target", "Box::decode_new",
+         reach(parser.format(name="decode_new"))),
+        ("a crate-internal parser without a target", "Box::parse_inner",
+         reach(parser.format(name="parse_inner").replace("pub fn", "pub(crate) fn"))),
+        ("a module-internal parser without a target", "Box::parse_near",
+         reach(parser.format(name="parse_near").replace("pub fn", "pub(super) fn"))),
         ("a free parser reached only as a method", "parse: reached",
          reach("pub fn parse(\n    b: &[u8],\n) {")),
         ("an entry without a target", "fuzz_entry::new_entry",

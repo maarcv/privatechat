@@ -85,6 +85,7 @@ pub(crate) fn name_key(text: &str) -> String {
 }
 
 /// Whether two names collide (R4): equal, non-empty keys.
+#[cfg(test)]
 pub(crate) fn names_collide(first: &str, second: &str) -> bool {
     let key = name_key(first);
     !key.is_empty() && key == name_key(second)

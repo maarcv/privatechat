@@ -14,6 +14,14 @@ use crate::storage::StoreError;
 mod tests;
 
 /// Why a call of the core failed, one variant per condition of the specs.
+/// It has no `Display`: the core writes no text a user reads (spec
+/// 027-core-api R18).
+///
+/// ```compile_fail
+/// fn show(error: privatechat_core::Error) -> String {
+///     error.to_string()
+/// }
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     /// A blob or field of the wrong size.

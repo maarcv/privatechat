@@ -8,6 +8,7 @@
 pub(crate) const WORDS: &str = include_str!("bip39_english.txt");
 
 /// How many words the list holds: 2^11.
+#[cfg(test)]
 pub(crate) const WORD_COUNT: u16 = 2_048;
 
 /// The word at `index`, or `None` above the list.
