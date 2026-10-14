@@ -124,6 +124,7 @@ impl Device {
                         channel_id: Some(id),
                         channel_name,
                     },
+                    recorded_at: self.latest_now,
                 });
                 // The broken channel leaves its run (R14).
                 self.replan();
@@ -161,11 +162,15 @@ impl Device {
         })
     }
 
-    /// Every probe due at the next tick, as after a `leave` or a
-    /// `remove_broken` that may have freed space (R3).
+    /// Every probe and every retry of a `broken` entry due at the next
+    /// tick, as after a `leave` or a `remove_broken` that may have freed
+    /// space (R3).
     pub(super) fn make_probes_due(&mut self) {
         for probe_at in self.marks.values_mut() {
             *probe_at = 0;
+        }
+        for broken in &mut self.broken {
+            broken.recorded_at = 0;
         }
     }
 }

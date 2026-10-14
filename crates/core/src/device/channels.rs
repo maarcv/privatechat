@@ -282,6 +282,7 @@ impl Device {
             }
             Err(Error::Store(reason)) => {
                 if let Some(broken) = self.broken.get_mut(position) {
+                    broken.recorded_at = self.latest_now;
                     broken.info.reason = reason;
                     broken.info.channel_id = Some(config.channel_id());
                     broken.info.channel_name = shown_name(config.suggested_name());
@@ -347,6 +348,7 @@ impl Device {
                 channel_id: Some(id),
                 channel_name: shown_name(config.suggested_name()),
             },
+            recorded_at: self.latest_now,
         });
         Err(original)
     }
