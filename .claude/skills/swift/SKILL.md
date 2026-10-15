@@ -88,5 +88,5 @@ Platform/    Secure Enclave, Keychain, LAContext, files, pasteboard
   without a reason comment.
 - Reproducible builds: pinned Xcode version in CI, SwiftPM `Package.resolved`
   committed, no build phases that fetch from the network.
-- Release signing and notarisation happen in CI with the offline certificate;
-  development uses automatic signing.
+- CI builds; the owner signs on a local machine with hardware keys (spec
+  060-reproducible-builds). Development uses automatic signing.

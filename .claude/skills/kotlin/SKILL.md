@@ -92,4 +92,5 @@ platform/    Keystore, file paths, clipboard, biometrics
 - Reproducible builds: fixed Gradle wrapper, locked dependency versions, no
   build-time network access beyond dependency resolution. F-Droid requires
   this.
-- Debug builds sign with the debug key only; release signing happens in CI.
+- Debug builds sign with the debug key only. CI builds; the owner signs on a
+  local machine with hardware keys (spec 060-reproducible-builds).

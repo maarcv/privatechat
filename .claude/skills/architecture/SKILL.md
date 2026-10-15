@@ -241,7 +241,8 @@ the real keystore. Test names carry the spec id where they cover a requirement.
 
 **Tooling.** The platform linter and formatter run in CI and must be clean; no
 suppression without a reason comment. Builds are reproducible (§8 "Code
-integrity"); release signing happens in CI with the offline key.
+integrity"). CI builds; the owner signs on a local machine with hardware keys
+(spec 060-reproducible-builds).
 
 ## 8. Review checklist
 

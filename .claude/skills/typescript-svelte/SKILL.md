@@ -125,4 +125,5 @@ Follows the `rust` skill. Additionally:
   and in CI. No `eslint-disable` without a reason comment.
 - Reproducible builds: locked `pnpm-lock.yaml`, pinned Node in `.nvmrc`, no
   postinstall scripts that fetch, Tauri bundler with deterministic settings.
-  Release signatures and notarisation happen in CI with offline keys.
+  CI builds; the owner signs on a local machine with hardware keys (spec
+  060-reproducible-builds).
