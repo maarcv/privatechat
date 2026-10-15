@@ -4,12 +4,12 @@
 use std::path::Path;
 
 use privatechat_core::testing::{batch, record, settings, settings_eq, state_for};
-use privatechat_core::{DirName, MAX_STATE_FILE, Store, StoreError, Vault};
+use privatechat_core::{DirName, MAX_LOG_ENTRY, MAX_STATE_FILE, Store, StoreError, Vault};
 
 use super::{TestDir, channel_dir, commit, dir_name, id, key, loaded, open, seed};
 use crate::DataDir;
 use crate::frame::{self, LOG_HEADER_LEN};
-use crate::fs::Io;
+use crate::fs::{Call, Io};
 
 fn read(path: &Path) -> Vec<u8> {
     std::fs::read(path).expect("read a test file")
@@ -26,6 +26,15 @@ fn state_file(n: u8, len: u64, generation: u32) -> Vec<u8> {
         .seal(&key(), &dir_name(n), len, generation)
         .expect("seal");
     frame::frame(frame::STATE_MAGIC, &sealed)
+}
+
+/// Directory names under `channels/` that are not 32 lowercase hex
+/// characters: a channel's name in uppercase and 32 characters that are not
+/// hex (R20).
+fn not_names() -> [String; 2] {
+    let upper = dir_name(9).to_hex().to_uppercase();
+    assert_ne!(upper, dir_name(9).to_hex());
+    [upper, "g".repeat(32)]
 }
 
 /// Spec 020, R4: `state.bin` and `settings.bin` begin with their magic and
@@ -159,6 +168,44 @@ fn s020_t07_r07_open_check_order() {
     assert_eq!(reopen_in(&mut data, 1), Err(StoreError::Corrupt));
 }
 
+/// Spec 020, R7: the size limit admits a file of exactly the limit and
+/// refuses one byte more.
+#[test]
+fn s020_t07_r07_size_limit_is_inclusive() {
+    let limit = frame::MIN_FILE + 10;
+    let file = |len: usize| [&b"PSTA\x01"[..], &vec![0u8; len - 5]].concat();
+    let open = |bytes: &[u8]| frame::open_framed(bytes, frame::STATE_MAGIC, limit, |_| Ok(()));
+    assert_eq!(open(&file(limit)), Ok(()));
+    assert_eq!(open(&file(limit + 1)), Err(StoreError::Corrupt));
+}
+
+/// Spec 020, R7: the entry of a message with the largest body loads. No
+/// valid record reaches the `len` bound itself, which only bounds the read.
+#[test]
+fn s020_t07_r07_largest_entry_loads() {
+    let dir = TestDir::new("t07-entry");
+    let mut data = open(dir.path());
+    let mut store = data.create(&id(1)).expect("create");
+    commit(store.as_mut(), 1, &[]).expect("first commit");
+    store
+        .commit(&batch(state_for(id(1)), vec![record(1, 64_511)]))
+        .expect("commit");
+    drop(store);
+    let log = read(&channel_dir(dir.path(), 1).join("messages.log"));
+    let len: [u8; 4] = log[LOG_HEADER_LEN..LOG_HEADER_LEN + 4]
+        .try_into()
+        .expect("len");
+    let len = u32::from_be_bytes(len) as usize;
+    assert!(len > 64_511 && len <= MAX_LOG_ENTRY, "{len}");
+    let mut store = data.create(&id(1)).expect("create");
+    assert_eq!(
+        loaded(store.as_mut())
+            .expect("load")
+            .map(|(_, records)| records),
+        Some(vec![1])
+    );
+}
+
 /// Loads test channel `n` from a fresh store of `data`.
 fn reopen_in(data: &mut DataDir, n: u8) -> Result<(), StoreError> {
     let mut store = data.create(&id(n))?;
@@ -193,6 +240,35 @@ fn s020_t13_r13_first_commit() {
     commit(store.as_mut(), 1, &[]).expect("first commit");
     assert_eq!(read(&log), frame::log_header(0));
     assert_eq!(store.log_len(), LOG_HEADER_LEN as u64);
+}
+
+/// Spec 020, R13: a first commit writes and syncs the log's header and syncs
+/// the directory before it writes the state and renames it.
+#[test]
+fn s020_t13_r13_first_commit_order() {
+    use Call::{Open, Read, Rename, Sync, Write};
+    let dir = TestDir::new("t13-order");
+    let mut data = open(dir.path());
+    drop(data.create(&id(1)).expect("create"));
+    let mut store = data
+        .store_with(dir_name(1), Io::failing_at(0))
+        .expect("store");
+    commit(&mut store, 1, &[]).expect("first commit");
+    let kinds = store.io().kinds();
+    let rename = kinds
+        .iter()
+        .position(|kind| *kind == Rename)
+        .expect("a rename");
+    // No `state.bin`, no log; the log's header; the directory, where it can
+    // be synced; the state's copy and its rename.
+    let sync_dir: &[Call] = if cfg!(windows) { &[] } else { &[Open, Sync] };
+    let expected = [
+        &[Read, Read, Write, Write, Sync][..],
+        sync_dir,
+        &[Write, Write, Sync, Rename],
+    ]
+    .concat();
+    assert_eq!(kinds[..=rename], expected[..]);
 }
 
 /// Spec 020, R16: an append past the limit writes nothing and is `LogFull`,
@@ -285,15 +361,20 @@ fn s020_t19_r19_open_cleans_leftovers() {
     // No `state.bin` and a log that cannot be read: kept too.
     drop(data.create(&id(6)).expect("create"));
     std::fs::create_dir(channel_dir(dir.path(), 6).join("messages.log")).expect("unreadable");
-    // Not a name R20 lists: never deleted, whatever it holds.
+    // Not a name R20 lists: never deleted, whatever it holds, even nothing.
     let backup = dir.path().join("channels").join("backup");
     std::fs::create_dir(&backup).expect("backup");
+    let strays = not_names().map(|name| dir.path().join("channels").join(name));
+    for stray in &strays {
+        std::fs::create_dir(stray).expect("stray");
+    }
     drop(data);
     let mut data = open(dir.path());
     assert!(!channel_dir(dir.path(), 1).exists());
     assert!(!channel_dir(dir.path(), 2).exists());
     assert!(!leaving.exists());
     assert!(backup.is_dir());
+    assert!(strays.iter().all(|stray| stray.is_dir()));
     assert!(channel_dir(dir.path(), 5).is_dir());
     assert!(channel_dir(dir.path(), 6).is_dir());
     let listed: Vec<DirName> = data
@@ -351,6 +432,9 @@ fn s020_t20_r20_one_store_per_directory() {
     }
     write(&dir.path().join("channels").join("stray"), b"x");
     std::fs::create_dir(dir.path().join("channels").join("backup")).expect("backup");
+    for name in not_names() {
+        std::fs::create_dir(dir.path().join("channels").join(name)).expect("stray");
+    }
     let stores = data.list().expect("list");
     assert_eq!(stores.len(), 3);
     assert!(matches!(data.create(&id(1)), Err(StoreError::Locked)));

@@ -51,7 +51,7 @@ pub(crate) fn frame(magic: [u8; 4], sealed: &[u8]) -> Vec<u8> {
 /// version (a version other than 1 whose box still opens as version 1 is a
 /// forged header, so `Corrupt`), its size limit, and then `open` of `core`,
 /// which checks the box and the record.
-fn open_framed<T>(
+pub(crate) fn open_framed<T>(
     bytes: &[u8],
     magic: [u8; 4],
     limit: usize,
