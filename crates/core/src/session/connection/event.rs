@@ -44,7 +44,8 @@ pub enum Event {
         server_id: [u8; 16],
         /// When it is listed, clamped (spec 021-channel-session R17).
         received_at: u64,
-        /// When the server drops it: `received_at + ttl_ms`.
+        /// When its row leaves the screen: `sent_at + ttl_ms`, as the
+        /// `Message` of spec 023-ttl-purge R1 (ADR 0044).
         expires_at: u64,
     },
     /// An entry left the `outbox` unsent: stale, overtaken or refused
