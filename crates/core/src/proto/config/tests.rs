@@ -655,19 +655,21 @@ fn s011_t16_r16_export_draws_the_password() {
     assert!(other_password != password);
     assert_ne!(file[SALT_RANGE], other_file[SALT_RANGE]);
     assert_ne!(file[NONCE_RANGE], other_file[NONCE_RANGE]);
-    // Every pair of the 14 bytes is drawn: across four passwords each
-    // position takes at least two words (false failure about 2048^-3 per
-    // position).
-    let more = [draw_password().unwrap(), draw_password().unwrap()];
-    let drawn: Vec<Vec<&str>> = [&password, &other_password, &more[0], &more[1]]
-        .into_iter()
-        .map(|bytes| core::str::from_utf8(bytes).unwrap().split(' ').collect())
-        .collect();
-    for position in 0..7 {
-        let first = drawn[0][position];
-        let varies = drawn.iter().any(|words| words[position] != first);
-        assert!(varies, "position {position}");
+    // Every byte of the 14 is drawn: across 64 passwords each of the 77
+    // index bits is seen both set and clear (false failure about 77 · 2^-63).
+    let list: Vec<&str> = wordlist::WORDS.lines().collect();
+    let (mut ones, mut zeros) = ([0u16; 7], [0u16; 7]);
+    for _ in 0..64 {
+        let drawn = draw_password().unwrap();
+        let text = core::str::from_utf8(&drawn).unwrap();
+        for (position, word) in text.split(' ').enumerate() {
+            let index = u16::try_from(list.iter().position(|w| *w == word).unwrap()).unwrap();
+            ones[position] |= index;
+            zeros[position] |= !index & 0x7ff;
+        }
     }
+    assert_eq!(ones, [0x7ff; 7]);
+    assert_eq!(zeros, [0x7ff; 7]);
     for bit in 0..11 {
         let index = 1u16 << bit;
         let mut draws = [0u8; 14];
