@@ -17,7 +17,7 @@ Everything cryptographic in the project comes from libsodium (`docs/spec.md` §4
 - R2 `sodium_init()` MUST be called at most once per process through `std::sync::OnceLock` before any other libsodium call; a return value of −1 MUST surface as `CryptoError::InitFailed` from the function being called, never as a panic.
 - R3 `Secret<const N: usize>` MUST wrap `[u8; N]`, derive `Zeroize` and `ZeroizeOnDrop`, implement `Debug` as the literal `[REDACTED]` and `PartialEq` through `ct_eq`, and MUST NOT implement `Clone`, `Copy`, `Default`, `Display`, `Hash`, `Ord`, `PartialOrd`, `AsRef<[u8]>`, `Deref` or `serde` traits; its bytes are reachable only through `pub(crate) fn expose(&self) -> &[u8; N]`. In this spec the only instantiations are `Secret<32>` and `Secret<64>`, and both are listed in `SECRET_TYPES`.
 - R4 `ct_eq(a: &[u8; N], b: &[u8; N]) -> bool` MUST call `sodium_memcmp` and MUST be the only equality used on fixed-size byte arrays anywhere in `core`.
-- R5 `random_bytes::<N>() -> Result<[u8; N], CryptoError>` and `Secret::<N>::random()` MUST use `randombytes_buf` and MUST be the only randomness source in `core`.
+- R5 `random_bytes::<N>() -> Result<[u8; N], CryptoError>`, `fill_random(out: &mut [u8]) -> Result<(), CryptoError>` (added by spec 040-uniffi R8) and `Secret::<N>::random()` MUST use `randombytes_buf` and MUST be the only randomness source in `core`.
 - R6 `aead_encrypt(key: &Secret<32>, nonce: &Nonce, aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError>` MUST return `crypto_aead_xchacha20poly1305_ietf` ciphertext followed by its 16-byte tag (output length = input length + 16); `aead_decrypt` with the same arguments MUST return the plaintext, or `CryptoError::Forged` when the tag does not verify, including any single-byte change to ciphertext, tag, `aad` or nonce.
 - R7 `stream_xor(key: &Secret<32>, nonce: &Nonce, buf: &mut [u8]) -> Result<(), CryptoError>` MUST apply `crypto_stream_xchacha20_xor` in place, so that applying it twice with the same key and nonce restores `buf`.
 - R8 `kdf_derive(key: &Secret<32>, context: &KdfContext) -> Result<Secret<32>, CryptoError>` MUST call `crypto_kdf_derive_from_key` with `subkey_len = 32`, `subkey_id = 0` and the 8-byte context; `KdfContext` MUST be constructible only from exactly 8 bytes.
@@ -58,6 +58,7 @@ crates/core/src/crypto/secret.rs       Secret<N>
 crates/core/src/crypto/tests.rs        s010_* tests
 crates/core/src/vectors.rs             loader of `010.json` and every vector file, `cfg(test)`: no dependency, no I/O (spec 015-test-vectors moved it here from `crypto/vectors.rs`)
 clippy.toml                            disallowed-methods (R17)
+scripts/check_core_sources.sh          the `SOURCES` list of T01 against git, with its self-test
 ```
 
 ```rust
@@ -75,12 +76,13 @@ pub(crate) enum CryptoError { InitFailed, TooLong, BadLength, Forged, BadPadding
 
 pub(crate) const TAG_LEN: usize = 16;
 pub(crate) const HASH_LEN: usize = 32;
-pub(crate) const SECRET_TYPES: [&str; 3] = ["Secret<32>", "Secret<64>", "StorageKey"];   // the checklist of AGENTS 5; `StorageKey` since spec 020
+#[cfg(test)] pub(crate) const SECRET_TYPES: [&str; 3] = ["Secret<32>", "Secret<64>", "StorageKey"];   // the checklist of AGENTS 5; `StorageKey` since spec 020
 
 pub(crate) fn init() -> Result<(), CryptoError>;                             // R2
-pub(crate) fn version() -> Result<&'static str, CryptoError>;                // R16
+#[cfg(test)] pub(crate) fn version() -> Result<&'static str, CryptoError>;   // R16
 pub(crate) fn ct_eq<const N: usize>(a: &[u8; N], b: &[u8; N]) -> bool;
 pub(crate) fn random_bytes<const N: usize>() -> Result<[u8; N], CryptoError>;
+pub(crate) fn fill_random(out: &mut [u8]) -> Result<(), CryptoError>;      // R5, added by spec 040-uniffi R8
 impl<const N: usize> Secret<N> {
     pub(crate) fn from_bytes(bytes: [u8; N]) -> Self;
     pub(crate) fn copy_from(bytes: &[u8; N]) -> Self;   // added by spec 011-config-format R19, inside this impl block
@@ -96,7 +98,7 @@ pub(crate) fn kdf_derive(key: &Secret<32>, context: &KdfContext) -> Result<Secre
 pub(crate) fn hash(input: &[u8]) -> Result<[u8; 32], CryptoError>;
 pub(crate) fn keyed_hash(key: &Secret<32>, input: &[u8]) -> Result<Secret<32>, CryptoError>;
 pub(crate) fn sign_keypair_from_seed(seed: &Secret<32>) -> Result<(PublicKey, Secret<64>), CryptoError>;
-pub(crate) fn sign_keypair() -> Result<(PublicKey, Secret<64>), CryptoError>;
+#[cfg(test)] pub(crate) fn sign_keypair() -> Result<(PublicKey, Secret<64>), CryptoError>;
 pub(crate) fn sign_detached(sk: &Secret<64>, message: &[u8]) -> Result<Signature, CryptoError>;
 pub(crate) fn verify_detached(pk: &PublicKey, message: &[u8], signature: &Signature) -> Result<(), CryptoError>;
 pub(crate) fn password_key(password: &[u8], salt: &Salt) -> Result<Secret<32>, CryptoError>;
@@ -126,7 +128,7 @@ Every function returns `Result` because each one may be the first libsodium call
 
 Every test is in `crates/core/src/crypto/tests.rs` unless stated; every negative test asserts the exact variant.
 
-- T01 (covers R1): `s010_t01_r01_unsafe_only_in_ffi` reads every `.rs` under `crates/core/src` with `include_str!`/a build-time list and asserts the token `unsafe` appears only in `crypto/ffi.rs`; clippy `undocumented_unsafe_blocks` covers the `// SAFETY:` comments.
+- T01 (covers R1): `s010_t01_r01_unsafe_only_in_ffi` reads every `.rs` under `crates/core/src` with `include_str!`/a build-time list and asserts the token `unsafe` appears only in `crypto/ffi.rs`; the CI step `s010_t01_r01_sources_list_complete` runs `scripts/check_core_sources.sh`, which fails when the list `SOURCES` of `crypto/tests.rs` differs from `git ls-files 'crates/core/src/*.rs'` or an entry's `include_str!` path does not resolve to the file it names; clippy `undocumented_unsafe_blocks` covers the `// SAFETY:` comments.
 - T02 (covers R2): `s010_t02_r02_init_runs_once`: two calls to `crypto::init()` return `Ok` and the `OnceLock` is set once (observable through a counter in a test-only hook).
 - T03 (covers R3): `s010_t03_r03_debug_is_redacted`: `format!("{:?}")` of each entry of `SECRET_TYPES` (one `Secret<32>`, one `Secret<64>`, both non-zero) is exactly `[REDACTED]`. `s010_t04_r03_secret_has_no_forbidden_traits` reads `secret.rs` and asserts the exact derive list and the exact set of `impl` blocks, so any added trait fails the test (a `compile_fail` doctest cannot name a `pub(crate)` type; open question 010-R3).
 - T05 (covers R4): `s010_t05_r04_ct_eq_agrees_with_equality`: proptest over pairs of `[u8; 32]`, `ct_eq(a, b) == (a == b)`.
@@ -222,3 +224,5 @@ A bump of `libsodium-sys-stable` moves three pinned values at once (the version 
 - 2026-09-30 amended by spec 020-store-files R2: `secretbox_open` returns `Zeroizing<Vec<u8>>` (R12, Interface); `core` may declare the feature `test-support`, which enables nothing outside the module `testing` (R16, T25)
 - 2026-10-01 revised after audit Y (`docs/audit-log.md`, ADR 0042): T15 and the Vectors table gain the ed25519-speccheck cases and rename three negatives after what they hold; the Security section says which vectors prove strictness; R13 and T21 say the multiple of `block` is the caller's; R14 and the Limits give `pad`'s real bound; R16 names `version()`; R17 lists more methods; the Interface lists `init`, `version` and the constants and names the loader's file
 - 2026-10-01 revised after audit AA round 2 (`docs/audit-log.md`): R17 bans twenty-four more calls of the file system, the process and the environment, among them the `Path` methods that reach the disk, so that `store` keeps them in `fs.rs` (spec 020 R23)
+- 2026-10-15 amended after audit BB (`docs/audit-log.md`, BB-A1-5): R5 and the Interface name `fill_random`, added by spec 040-uniffi R8; the Interface marks `version`, `sign_keypair` and `SECRET_TYPES` `#[cfg(test)]`, as the code has them
+- 2026-10-15 amended after audit BB round 2 (`docs/audit-log.md`, BB-R2A-3): T01 and the Interface name `scripts/check_core_sources.sh` and its CI step `s010_t01_r01_sources_list_complete`

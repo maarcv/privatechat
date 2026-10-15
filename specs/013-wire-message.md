@@ -90,6 +90,8 @@ pub(crate) const KEY_RETIRED_COUNTER: u64 = u64::MAX;    // R15, ADR 0033; used 
 
 pub(crate) fn ttl_ms(ttl_seconds: u32) -> u64;            // u64(ttl_seconds) × 1000 (R13); used by spec 021-channel-session
 
+pub(crate) const MINUTE_MS: u64 = 60_000;              // R8; used by specs 021 and 028
+pub(crate) fn minute_of(time: u64) -> u64;             // R8: sent_at, the since of a subscribe, the cursor step
 pub(crate) struct Payload { pub(crate) kind: PayloadKind, pub(crate) display_name: Option<String>, pub(crate) sent_at: u64, pub(crate) body: Vec<u8> }
 pub(crate) enum PayloadKind { Text, KeyRetired, Unknown(u8) }
 
@@ -162,7 +164,7 @@ pub(crate) enum Content { Message(Payload), Unreadable, Stale }
 
 Every item of this spec is `pub(crate)`. `SenderKey::from_seed` is the only constructor of a `SenderKey` (R5) and `ChannelCtx::from_config` the only constructor of a `ChannelCtx` (R19); neither has a public field. `Payload` implements no `Display` (R14). `message_key` of spec 012-message-keys is called by `seal_padded` and `Verified::open` only, never by `verify`.
 
-`s013_vectors_dispatch` calls `vectors::check_all("013", …)` with one entry per vector and is the only code that loads `013.json` (spec 015-test-vectors R3).
+`s013_vectors_dispatch` calls `vectors::check_all("013", …)` with one entry per vector and is this spec's only test that checks `013.json` whole (spec 015-test-vectors R3); spec 021-channel-session reproduces the file through its own `check_all`, and other tests read single vectors as inputs.
 
 **PR slices.** The spec is implemented in three pull requests of at most 400 lines each (AGENTS 14), each carrying the vectors, the script section and the dispatch arms its tests read, and is marked `implemented` only after the last one: (a) the payload schema, `encode`, `decode` and `validate` (R6–R10, R14); (b) `ChannelCtx`, `SenderKey`, `seal`, `seal_padded` and `verify`, with the mutation table, the dispatch test and the first vectors (R1–R5, R11, R15, R18–R20); (c) `open`, the stale rule, the forged-blob vectors and the byte-by-byte property (R12, R13, R16, R17). The script section grows with every slice that adds a vector.
 
@@ -285,3 +287,5 @@ None. Closed after audit H: the expiry of `Unreadable` messages is spec 023-ttl-
 - 2026-09-29 implemented: three slices with the audit U fixes, reviewed (Marc Vilardebó)
 - 2026-10-01 revised after audit Y (`docs/audit-log.md`): R17 and the mutation table hold at times that pass step 2; `Payload::decode` is compiled for the tests and the fuzz target alone, and `PayloadHead` is visible in `proto` alone
 - 2026-10-13 Security points to the exceptions to the no-oracle rule that `docs/spec.md` §4 names after spec 028-session-sans-io R18 (audit AQ round 4, `docs/audit-log.md`)
+- 2026-10-15 amended after audit BB (`docs/audit-log.md`, BB-A1-2): the dispatch sentence of the Interface says spec 021 reproduces `013.json` and other tests read single vectors, as spec 015 R3 now allows
+- 2026-10-15 amended after audit BB round 2 (`docs/audit-log.md`, BB-R2A-4): the Interface lists `MINUTE_MS` and `minute_of`, shared with specs 021 and 028

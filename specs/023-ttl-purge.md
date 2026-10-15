@@ -63,6 +63,7 @@ impl Channel {   // pub(crate); spec 027-core-api exposes them through Device
 - An expired message leaves the screen at its `expires_at` (R1, R3); its plaintext leaves the disk once expired records reach a quarter of the log, or within a day at most (R5), at open, at unlock or while the app stays open, which bounds the flash writes a flood of short-lived messages can force (audit J, J2-B6) while keeping `docs/spec.md` §1 "deleted … on the client".
 - Deletion is physical and does not resist older copies of the flash (`docs/spec.md` §2); the guarantee is the destruction of `K_db`.
 - A device clock set ahead by more than a channel's TTL makes every message of that channel expire by the local clock, so the purge at open or at unlock removes them from `messages.log` for good, before any connection could raise `clock_off` (spec 021-channel-session); correcting the clock later brings back only what the server still holds. The behaviour is kept, since deleting early is the safe direction for privacy, and Help says to keep automatic time on (spec 056-chat-screens R18). Documented residual.
+- The same purge drops one's own kept signatures early (spec 021-channel-session R15): a clock set ahead by more than `ttl_ms + 360 000` purges a kept signature while a receiver can still accept its blob by the true time, so after the clock is corrected the server's replay of that genuine blob matches no kept signature and raises the false alert that one's own key is used elsewhere (spec 021-channel-session R14). Kept for the same reason; the alert is wrong in the safe direction and Help says to keep automatic time on. Documented residual.
 
 ## Public API changes
 
@@ -123,3 +124,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-10-04 amended after audit AC and ADR 0044 (`docs/audit-log.md`): display expiry from the signed `sent_at`, `received_at` only for the order (R1, Security)
 - 2026-10-05 text: T03's "ALlCE", a look-alike that ADR 0043 no longer folds, written "ALICE"; the Interface paths under `session/channel/`, as spec 022's
 - 2026-10-05 revised after audit AF (`docs/audit-log.md`, decisions of the human reviewer): a delivered own message ties at its acked record (R2); `server_id` when delivered or received (R3); the retries after a reopen (R5)
+- 2026-10-15 amended after audit BB (`docs/audit-log.md`, BB-B2-2): Security documents the residual of a clock set ahead and then corrected, whose purge of kept signatures makes a replay of one's own genuine blob raise a false own-key alert

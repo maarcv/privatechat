@@ -73,8 +73,15 @@ impl Writer {
     pub(crate) fn u64(&mut self, key: u8, value: u64) -> Result<(), RecordError>;
     pub(crate) fn bytes(&mut self, key: u8, value: &[u8]) -> Result<(), RecordError>;
     pub(crate) fn text(&mut self, key: u8, value: &str) -> Result<(), RecordError>;
+    pub(crate) fn bool(&mut self, key: u8, value: bool) -> Result<(), RecordError>;                // added by spec 020-store-files R1
+    pub(crate) fn list<I: AsRef<[u8]>>(&mut self, key: u8, items: &[I]) -> Result<(), RecordError>;   // added by spec 020-store-files R1
     pub(crate) fn finish(self) -> Zeroizing<Vec<u8>>;
 }
+
+// The encoded length of a record whose present fields have these value lengths, and of a list of
+// items of these lengths, saturating, for a writer allocated at its exact size (added by spec 020-store-files R1, R25).
+pub(crate) fn record_len(values: &[Option<usize>]) -> usize;
+pub(crate) fn list_len(items: impl IntoIterator<Item = usize>) -> usize;
 
 #[must_use]
 pub(crate) struct Reader<'a> { /* the bytes left, the last key framed, the last key asked for, a field framed ahead, the policy */ }
@@ -86,6 +93,12 @@ impl<'a> Reader<'a> {
     pub(crate) fn bytes(&mut self, key: u8, max: usize) -> Result<Option<&'a [u8]>, RecordError>;
     pub(crate) fn bytes_n<const N: usize>(&mut self, key: u8) -> Result<Option<&'a [u8; N]>, RecordError>;
     pub(crate) fn text(&mut self, key: u8, max: usize) -> Result<Option<&'a str>, RecordError>;
+    // added by spec 020-store-files R1:
+    pub(crate) fn bool(&mut self, key: u8) -> Result<Option<bool>, RecordError>;
+    #[cfg(any(test, fuzzing))]
+    pub(crate) fn record<T, E: From<RecordError>>(&mut self, key: u8, decode: impl FnOnce(&'a [u8]) -> Result<T, E>) -> Result<Option<T>, E>;
+    pub(crate) fn list<T, E: From<RecordError>>(&mut self, key: u8, max_items: usize, max_item_len: usize,
+                                               decode: impl FnMut(&'a [u8]) -> Result<T, E>) -> Result<Option<Vec<T>>, E>;
     pub(crate) fn end(self) -> Result<(), RecordError>;
 }
 ```
@@ -177,3 +190,4 @@ None. Decided in audit F (`docs/audit-log.md`):
 - 2026-09-29 implemented: slices (a) and (b) with the audit R fixes, reviewed (Marc Vilardebó)
 - 2026-09-30 amended by spec 020-store-files R1: `bool`, nested records and `list<T>` added; R9 and the Security lines say no schema is recursive; the largest value is the `outbox` list; a sealed `open` has its decoder fuzzed on its own
 - 2026-09-30 amended by audit X of spec 020-store-files: the test schema's paragraph says `record_decode` also drives 020's codec schema
+- 2026-10-15 amended after audit BB (`docs/audit-log.md`, BB-A1-5): the Interface lists what spec 020-store-files R1 and R25 added, `Writer::bool` and `Writer::list`, `Reader::bool`, `Reader::record` and `Reader::list`, `record_len` and `list_len`
