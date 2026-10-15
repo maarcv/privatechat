@@ -30,6 +30,8 @@ before writing here.
 ```
 src/
 ├─ content/{site,home,security}/<lang>.json   ← all the copy, one file per language
+├─ content/{residuals,guide,server,verify,privacy,legal}/
+│                                             ← planned: the pages of spec 062-security-docs R1
 ├─ content.config.ts                          ← the Zod schema of that copy
 ├─ lib/                                       ← what is not copy: languages, addresses,
 │                                                section anchors, the readers of docs/

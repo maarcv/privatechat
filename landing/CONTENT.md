@@ -16,13 +16,24 @@ Wording rules for the whole site:
 
 ## Site structure
 
-One long page per language with six sections, plus one separate page per language for the
-full "promises and limits" table, because it is long and it must be quotable on its own.
+One long page per language with six sections, plus the seven public documents of spec
+062-security-docs R1, one page each per language, because each is long and must be quotable on
+its own.
 
 | Route | Page | Sections |
 | --- | --- | --- |
 | `/{lang}/` | Home | 1 Idea · 2 What it is · 3 How it works · 4 Run it yourself · 5 Check it yourself · 6 Open source |
 | `/{lang}/security/` | Promises and limits | The three lists of section 7 and the adversary table |
+| `/{lang}/security/residuals/` | Known residual risks | Every entry of `docs/residuals.md`, grouped by audience |
+| `/{lang}/guide/` | Using it safely | The steps of spec 062-security-docs R1 |
+| `/{lang}/server/` | Run your own server | `deploy/README.md`, what the operator sees, `docs/public-server.md` |
+| `/{lang}/verify/` | Check a download | The steps of spec 060-reproducible-builds R8 |
+| `/{lang}/privacy/` | Privacy policy | The content of spec 062-security-docs R2 |
+| `/{lang}/legal/` | Requests from authorities | The content of spec 066-public-server R8 |
+
+Planned, not built yet (spec 062-security-docs R1; `/{lang}/legal/` lands with spec
+066-public-server): `/{lang}/security/residuals/`, `/{lang}/guide/`, `/{lang}/server/`,
+`/{lang}/verify/`, `/{lang}/privacy/` and `/{lang}/legal/`.
 
 Languages and prefixes: `en` (source, default), `es`, `fr`, `ca`, `it`. Navigation: the six
 section anchors, the security page, the repository. Footer: licence, repository, security page.
