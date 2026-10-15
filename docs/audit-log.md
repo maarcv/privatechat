@@ -2,6 +2,24 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AZ
+
+**2026-10-15 — Audit AZ, the second reading of spec 027-core-api: its Interface read next to specs 040-uniffi and 041-desktop-bridge, every type checked to cross (branch `027-second-reading`).** The acceptance criterion of spec 027 asks a second person for this reading; the human reviewer chose to have it done by an audit, as for spec 021. Audit Z's findings already took AZ1–AZ24, so this audit's are numbered from AZ25. Round 1 had three passes (A: conformance; B: the adversary; C: a scratch crate outside the repository that mirrored every record and enum with uniffi 0.32.2, generated Kotlin and Swift, and type-checked the Swift). The three verdicts: every type crosses, and none crosses with a privacy or security defect. Pass C ran 4 mutants of the core code that decides what crosses: all killed.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ25 | The derived `Debug` of `ChannelInfo`, `BrokenChannel`, `ConnectionPlan`, `Route` and `Frame` printed full `channel_id`s, keys, names, URLs, the SOCKS username, signatures and the server's free text, against AGENTS 19, which the core's other types follow (B) | Low | Manual `Debug` with the 4-byte prefix and none of the rest; R20 says so; `s027_t20_r20_debug_redacted` |
+| AZ26 | `AckOutcome` was `pub` though no `pub` signature reaches it (C) | Low | `pub(crate)`, out of `lib.rs`, of 027's list and of 040 R2's exceptions; spec 021's Interface amended |
+| AZ27 | 040 R2's exceptions left out `Sent`, which spec 042's `SentView` replaces (A, C) | Low | Excepted |
+| AZ28 | 027 still said the bindings wrap `Mutex<Device>` and credited `DataDir::open` to the bindings and `StorageKey::from_bytes` to `store` alone (A) | Low | The host wraps `Mutex<Option<Device>>`; `DataDir::open` is the host's; `from_bytes` also the host's and the bindings' |
+| AZ29 | 040 R3 called the QR bytes fixed-size, so a binding would answer a wrong-length verification QR with `BadLength` instead of the core's `BadPayload` (A) | Low | The QR bytes cross unchecked |
+| AZ30 | 041 R5 did not say how `verify_scanned`'s `qr` crosses, nor how `Fingerprint.qr`, bytes, becomes a string in a `From` (A, B, C) | Low | Both as the ASCII string, `from_utf8_lossy` |
+| AZ31 | 040 R3 and 041 R5 caught a new enum variant but not a new record field (C) | Low | Each conversion destructures its source with no `..` |
+| AZ32 | 041's unzeroed copies left out the `qrcode` crate's buffers, the SVG response body and the password response (B) | Low | Named in Security; R6 moves the renderer's `String` into `Zeroizing` at once |
+| AZ33 | The generated `Ffi*` records print their text fields in `toString` and reflection (A, B, C) | Low | 040 Security says so and that the guarantee rests on spec 053 R22 |
+| AZ34 | 040 R3 named no translation for `bool` and `Vec<T>` (C) | Far-fetched | Named anyway, one clause |
+| AZ35 | `DirName`'s public field was not in the Interface (B) | Far-fetched | Named in 027's list |
+
 ## Audit AY
 
 **2026-10-14 — Audit AY, the code audit of slice (f) of spec 027-core-api (branch `027-exit`): the phase 2 exit test (R23); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit Y's findings already took AY1–AY18, so this audit's are numbered from AY19. No production defect; the test was weaker than R23's wording. Pass C ran 20 mutants, of the production code the test guards and of the test: 11 killed, 5 equivalent here, 4 survived, each killed below.

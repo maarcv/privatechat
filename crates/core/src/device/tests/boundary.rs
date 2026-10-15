@@ -3,8 +3,9 @@
 //! `Config` by `compile_fail` doctests on `Device` and `Error`.
 
 use super::{Fixture, NOW};
-use crate::device::Device;
+use crate::device::{BrokenChannel, Device};
 use crate::error::Error;
+use crate::session::frames::Frame;
 use crate::storage::StoreError;
 use crate::testing::settings;
 use crate::tests::section;
@@ -125,6 +126,74 @@ fn s027_t20_r20_device_traits() {
     device
         .create_channel("wss://example.org", 3_600, "room", NOW)
         .unwrap();
+}
+
+/// Spec 027, R20: the `Debug` of the records that carry a `channel_id`, a
+/// key or a name shows at most the 4-byte prefix and no name, URL, SOCKS
+/// username, signature, blob or free text.
+#[test]
+fn s027_t20_r20_debug_redacted() {
+    let fixture = Fixture::new();
+    fixture.save_settings(&settings("wss://example.org", 30, Some("127.0.0.1:9050")));
+    let mut device = fixture.open().unwrap();
+    let info = device
+        .create_channel("wss://example.org", 3_600, "secret room", NOW)
+        .unwrap();
+    device.rename_channel(info.id, "my local name").unwrap();
+    let hex = |bytes: &[u8]| -> String { bytes.iter().map(|b| format!("{b:02x}")).collect() };
+    let id = hex(&info.id);
+    let info = device.channels().remove(0);
+    let plan = device.connections().remove(0);
+    let username = plan.route.socks_username.clone().unwrap();
+    let broken = BrokenChannel {
+        name: "00".repeat(16),
+        reason: StoreError::Io,
+        channel_id: Some(info.id),
+        channel_name: Some("broken name".to_owned()),
+    };
+    let frames = [
+        Frame::Publish {
+            channel_id: info.id,
+            client_ref: [7; 16],
+            blob: b"sealed blob".to_vec(),
+        },
+        Frame::Subscribe {
+            pk_ch: [9; 32],
+            ttl_seconds: 3_600,
+            sig: [5; 64],
+            since: None,
+        },
+        Frame::Error {
+            code: "rate_limited".to_owned(),
+            message: "free text".to_owned(),
+            channel_id: Some(info.id),
+            client_ref: None,
+        },
+    ];
+    let mut shown = vec![
+        format!("{info:?}"),
+        format!("{plan:?}"),
+        format!("{broken:?}"),
+    ];
+    shown.extend(frames.iter().map(|frame| format!("{frame:?}")));
+    for text in &shown {
+        for hidden in [
+            id.as_str(),
+            &id[8..],
+            "secret room",
+            "my local name",
+            "example.org",
+            "broken name",
+            username.as_str(),
+            &hex(&[9; 32])[8..],
+            &hex(&[5; 64])[..16],
+            "sealed blob",
+            "free text",
+        ] {
+            assert!(!text.contains(hidden), "{hidden} in {text}");
+        }
+    }
+    assert!(shown[0].contains(&id[..8]));
 }
 
 /// Spec 040-uniffi, R8: `generate_storage_key` fills the caller's 32 bytes

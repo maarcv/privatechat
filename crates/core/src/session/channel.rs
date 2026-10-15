@@ -158,7 +158,7 @@ impl fmt::Debug for MessageContent {
 
 /// What became of a message this device sent (R16, R17, R22).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AckOutcome {
+pub(crate) enum AckOutcome {
     /// The server stored it in time for receivers to show it.
     Delivered,
     /// It was not stored, or not in time: it failed.

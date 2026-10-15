@@ -105,7 +105,7 @@ pub enum Sender { Peer { pk: PeerId }, Own, OwnKeyElsewhere { pk: PeerId } }
 pub enum MessageContent { Text { body: String, display_name: Option<String> }, KeyRetired, Unreadable }
 pub struct Received { pub server_id: [u8; 16], pub sender: Sender, pub received_at: u64, pub sent_at: Option<u64>,
                       pub expires_at: u64, pub content: MessageContent }
-pub enum AckOutcome { Delivered, NotDelivered, RetirementDelivered, Ignored }
+pub(crate) enum AckOutcome { Delivered, NotDelivered, RetirementDelivered, Ignored }
 pub struct Gap { pub peer: PeerId, pub missing: u64, pub anomalous: bool, pub spans_truncation: bool }
 pub struct ChannelStatus { pub own_key_used_elsewhere: bool, pub read_only: bool, pub retirement_pending: bool,
                            pub storage_full: bool, pub ignored_keys: u32, pub unknown_limit_reached: bool, pub labelled_limit_reached: bool,
@@ -285,3 +285,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-10-12 R23 names the paused channel of spec 028-session-sans-io R14 among the callers of `expire_outbox` (`docs/audit-log.md`, audit AP)
 - 2026-10-13 Security names the exceptions to the no-oracle rule that `docs/spec.md` §4 names after spec 028-session-sans-io R18 (audit AQ round 4, `docs/audit-log.md`)
 - 2026-10-14 amended after audit AT of spec 027-core-api (`docs/audit-log.md`): `outbox_ref` names an entry of the current key only (R33, T33), so that a `send` whose commit did not stand after a regeneration is not taken for one that did
+- 2026-10-15 amended after audit AZ (`docs/audit-log.md`): `AckOutcome` is `pub(crate)`, since no `pub` signature reaches it
