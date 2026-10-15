@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 # Each tuple of the list as `name path`: its name and the path of its `include_str!`,
 # whether the tuple sits on one line or rustfmt breaks it.
 pairs() {
-  awk '/^const SOURCES/,/^];/' "$1/crypto/tests.rs" | tr '\n' ' ' |
+  awk '/^const SOURCES/,/^];/' "$1/crypto/tests.rs" | sed 's|//.*||' | tr '\n' ' ' |
     grep -oE '\( *"[^"]+", *include_str!\("[^"]+"\),? *\)' |
     sed -E 's/^\( *"([^"]+)", *include_str!\("([^"]+)"\).*$/\1 \2/'
 }
@@ -77,6 +77,11 @@ s010_t01_r01_sources_list_complete() {
   case "$(differences "$tmp/src")" in
     "missing: a/deep.rs") ;;
     *) echo "check_core_sources: the self-test misses a missing entry"; return 1 ;;
+  esac
+  write_list "${complete[@]:0:2}" '    // ("a/deep.rs", include_str!("../a/deep.rs")),'
+  case "$(differences "$tmp/src")" in
+    "missing: a/deep.rs") ;;
+    *) echo "check_core_sources: the self-test lists a commented-out entry"; return 1 ;;
   esac
   write_list "${complete[@]}" '    ("gone.rs", include_str!("../gone.rs")),'
   case "$(differences "$tmp/src")" in
