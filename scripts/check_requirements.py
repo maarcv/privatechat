@@ -4,13 +4,13 @@
 An `accepted` spec is not gated: its tests are written after acceptance, so the
 gate would fail for the whole of the spec-to-code step of the flow.
 
-For each `specs/NNN-*.md` with `Status: implemented`, every line
-`- R<k>` in `## Requirements` must be covered by an identifier `sNNN_tTT_rKK_` (two
-digits each), optionally prefixed (`check_s003_…`), somewhere in the tracked
-tree: a Rust test name, a doc_lint check function, a CI step name or comment,
-a Kotlin/Swift/TS test name. `specs/`, `docs/`, `.claude/` and `AGENTS.md` are
-skipped: they describe tests and quote example test names, and an example must
-not satisfy the check.
+For each `specs/NNN-*.md` with `Status: implemented`, which must have a
+`## Requirements` section, every line `- R<k>` in it must be covered by an
+identifier `sNNN_tTT_rKK_` (two digits each), optionally prefixed
+(`check_s003_…`), somewhere in the tracked tree: a Rust test name, a doc_lint
+check function, a CI step name or comment, a Kotlin/Swift/TS test name.
+`specs/`, `docs/`, `.claude/` and `AGENTS.md` are skipped: they describe tests
+and quote example test names, and an example must not satisfy the check.
 """
 
 from __future__ import annotations
@@ -49,8 +49,11 @@ def missing_tests(root: Path) -> list[str]:
             continue
         nnn = spec.stem[:3]
         start = text.find("## Requirements")
+        if start < 0:
+            missing.append(f"{spec.name}: implemented with no `## Requirements` section")
+            continue
         end = text.find("\n## ", start + 3)
-        section = text[start:end] if start >= 0 else ""
+        section = text[start : end if end >= 0 else len(text)]
         for m in re.finditer(r"^- R(\d+)\b", section, re.MULTILINE):
             rr = f"{int(m.group(1)):02d}"
             if not re.search(rf"(?<![A-Za-z0-9])s{nnn}_t\d\d_r{rr}_", corpus):
@@ -66,23 +69,30 @@ def check_s001_t07_r07_the_gate_fires() -> list[str]:
             "## Limits\n\n- R3 is not a requirement here.\n\n"
             "## Test cases\n\n- T02 `s999_t02_r02_described`, T10 `s999_t10_r10_described`.\n")
     every = "s999_t01_r01_a s999_t02_r02_b s999_t10_r10_c"
+    # The same spec with `## Requirements` as its last section, ending on a requirement
+    # number with no newline (the whole of it must be read), and with no such section.
+    last = spec[: spec.index("## Limits")] + "- R12"
+    none = spec.replace("## Requirements", "## Needs")
     cases = [
-        # (what the case shows, the spec's state, the tracked test file, gate fails?)
-        ("an implemented spec with every test", "implemented", every, False),
-        ("a requirement with no test", "implemented", "s999_t01_r01_a s999_t10_r10_c", True),
-        ("a requirement under a ### subheading with no test", "implemented", "s999_t01_r01_a s999_t02_r02_b", True),
-        ("a test of another requirement", "implemented", "s999_t01_r01_a s999_t02_r03_b s999_t10_r10_c", True),
-        ("a test of R100 for R10", "implemented", "s999_t01_r01_a s999_t02_r02_b s999_t10_r100_c", True),
-        ("a test of another spec", "implemented", "s999_t01_r01_a s998_t02_r02_b s999_t10_r10_c", True),
-        ("a name glued to a longer word", "implemented", "s999_t01_r01_a xs999_t02_r02_b s999_t10_r10_c", True),
-        ("an accepted spec, not gated", "accepted", "", False),
+        # (what the case shows, the spec, its state, the tracked test file, gate fails?)
+        ("an implemented spec with every test", spec, "implemented", every, False),
+        ("a requirement with no test", spec, "implemented", "s999_t01_r01_a s999_t10_r10_c", True),
+        ("a requirement under a ### subheading with no test", spec, "implemented", "s999_t01_r01_a s999_t02_r02_b", True),
+        ("a test of another requirement", spec, "implemented", "s999_t01_r01_a s999_t02_r03_b s999_t10_r10_c", True),
+        ("a test of R100 for R10", spec, "implemented", "s999_t01_r01_a s999_t02_r02_b s999_t10_r100_c", True),
+        ("a test of another spec", spec, "implemented", "s999_t01_r01_a s998_t02_r02_b s999_t10_r10_c", True),
+        ("a name glued to a longer word", spec, "implemented", "s999_t01_r01_a xs999_t02_r02_b s999_t10_r10_c", True),
+        ("an accepted spec, not gated", spec, "accepted", "", False),
+        ("a last section whose last requirement has no test", last, "implemented", every, True),
+        ("a last section with every test", last, "implemented", every + " s999_t12_r12_d", False),
+        ("an implemented spec with no requirements section", none, "implemented", every, True),
     ]
     errors = []
-    for name, state, tests, should_fail in cases:
+    for name, text, state, tests, should_fail in cases:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "specs").mkdir()
-            (root / "specs" / "999-fixture.md").write_text(spec.format(state=state), encoding="utf-8")
+            (root / "specs" / "999-fixture.md").write_text(text.format(state=state), encoding="utf-8")
             (root / "tests.rs").write_text(tests + "\n", encoding="utf-8")
             # A test named only in specs/, docs/, .claude/ or AGENTS.md is a description, never a test.
             for described in ("docs/notes.md", ".claude/notes.md", "AGENTS.md"):
