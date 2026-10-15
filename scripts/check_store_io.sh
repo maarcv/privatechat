@@ -10,10 +10,12 @@ cd "$(dirname "$0")/.."
 
 ALLOWED=" collections path sync fmt mem cmp ops iter convert num borrow array slice str string vec boxed hash marker option result "
 
-# The offending lines under `src`: every `.rs` but `fs.rs` and the test modules.
+# The offending lines under `src`: every `.rs` but `src/fs.rs` itself and the test
+# modules. Only the top-level `fs.rs` is R23's one module; an `fs.rs` deeper in the
+# tree is an ordinary source.
 offenders() {
   local src="$1"
-  find "$src" -name '*.rs' ! -name 'fs.rs' ! -name 'tests.rs' ! -path '*/tests/*' -print0 |
+  find "$src" -name '*.rs' ! -path "$src/fs.rs" ! -name 'tests.rs' ! -path '*/tests/*' -print0 |
     sort -z |
     while IFS= read -r -d '' file; do
       sed -e 's#//.*$##' "$file" | { grep -noE 'std::([a-z_]+|[{])' || true; } |
@@ -39,6 +41,13 @@ s020_t23_r23_io_in_one_module() {
   if [ -n "$(offenders "$tmp/src")" ]; then
     echo "check_store_io: the self-test flags an allowed place"; return 1
   fi
+  # An `fs.rs` below the top level is not the audited module.
+  mkdir -p "$tmp/src/sub"
+  printf 'pub fn h() { let _ = std::fs::remove_file("a"); }\n' > "$tmp/src/sub/fs.rs"
+  if [ -z "$(offenders "$tmp/src")" ]; then
+    echo "check_store_io: the self-test accepts a nested sub/fs.rs"; return 1
+  fi
+  rm -r "$tmp/src/sub"
   for line in 'pub fn g() { let _ = std::fs::rename("a", "b"); }' 'use std::io::Write;' 'use std::io;' \
               'fn e() { std::process::exit(1) }' 'let _ = std::env::var("x");' 'use std::os::unix::fs::symlink;' \
               'use std::{fs, io::Write as W};' 'use std::io::{stdout, Write};' 'use std::io::prelude::*;'; do
