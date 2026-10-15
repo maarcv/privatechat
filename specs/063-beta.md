@@ -37,7 +37,7 @@ The beta is the first time people outside the project use the app. The human rev
   - what the beta is, how long it lasts, that each build stops working 90 days after it was made (R3), and that updates are announced by mail to the invitation address, never with a file attached and never with a fingerprint, so that every update is checked against the fingerprints on paper;
   - that the app sends nothing about them to the project;
   - what Apple shows the project for a TestFlight tester (their email address and name, device model, operating system version, installs, sessions, crash logs they allow, and the screenshots and comments they send with TestFlight's feedback), and that the project exports none of it;
-  - that the project's server sees each tester's IP address and which connections read the same channel at the same time, so that its operator, who knows every tester by name, could tell who talks with whom; that the operator commits not to correlate this; and that Tor or Orbot hides the address (the "Tor" help of spec 056-chat-screens R18);
+  - that the project's server sees each tester's IP address, which connections read the same channel at the same time and which one sends each message, so that its operator, who knows every tester by name, could tell who talks with whom and who wrote each message and when; that the operator commits not to correlate this; and that Tor or Orbot hides the address, not the connection (the "Tor" help of spec 056-chat-screens R18);
   - never to send the text of a message or a screenshot of a conversation, by mail, in TestFlight's feedback or in a GitHub issue, since it holds other people's words;
   - the links to "Promises and limits" and "Known residual risks" (spec 062-security-docs);
   - how to report a problem (R5), and that a security problem goes through `.github/SECURITY.md`, never a public channel;
@@ -128,3 +128,4 @@ The checks of T01, T02, T04–T09 green, T03 green in each app's CI. Non-automat
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the server runs as spec 066-public-server says, which it now depends on; R6 and R8 a measured unlock time with 16 near-full channels on a low-end API 30 phone, at most 10 000 ms at the end
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): R1 cites spec 066's acceptance criterion instead of a gate; Depends in order
 - 2026-09-28 accepted (Marc Vilardebó)
+- 2026-10-15 amended after audit BB round 5 (`docs/audit-log.md`, BB-R5B-3, the human's decision on BB-R2B-1): R4's letter says the operator sees which connection sends each message, and that Tor hides the address, not the connection
