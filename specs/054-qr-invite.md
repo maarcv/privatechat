@@ -172,7 +172,7 @@ impl Device {
 
 Dependencies each justified in the pull request that adds them (AGENTS 8): on Android `com.google.zxing:core` and the three CameraX artefacts (`camera-camera2`, `camera-lifecycle`, `camera-compose`), pinned in the version catalog; on iOS none beyond the system frameworks; on the desktop none.
 
-**PR slices** (AGENTS 14), one per platform and group: (a) create form and probe (R1–R3); (b) QR display and file export (R4–R10); (c) the scanner (R12), which spec 055-verify-ui then reuses; (d) the core's preview (R17), in `crates/core`, before any platform's (e); (e) import by file, the confirmation and the outcomes (R11, R13–R16). Each platform slice lands inside the platform specs 050, 051 and 052.
+**PR slices** (AGENTS 14), one per platform and group: (a) create form and probe (R1–R3); (b) QR display and file export (R4–R10); (c) the scanner (R12), which spec 055-verify-ui then reuses; (d) the core's preview (R17), in `crates/core`, before any platform's (e), which lands as slice (g) of spec 027-core-api (R25); (e) import by file, the confirmation and the outcomes (R11, R13–R16). Each platform slice lands inside the platform specs 050, 051 and 052.
 
 ## Security
 
@@ -242,3 +242,4 @@ None.
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the QR's 60 s limit is essential under WCAG 2.2.1, showing it again is the extension, and the countdown is announced twice
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): the 60 s limit cites WCAG's Understanding note for 2.2.1, with no "extension" wording; the security texts named for the reviewer rule of spec 062-security-docs R7
 - 2026-09-28 accepted (Marc Vilardebó)
+- 2026-10-15 the amendments of R17 to specs 027-core-api, 040-uniffi, 041-desktop-bridge and the skills applied after audit AZ (`docs/audit-log.md`, AZ57); slice (d), the core's preview, lands as slice (g) of spec 027-core-api (R25)

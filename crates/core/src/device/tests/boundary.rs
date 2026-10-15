@@ -251,7 +251,7 @@ fn s027_t20_r20_debug_redacted() {
             channel_id: channel,
             server_id,
             received_at: NOW,
-            blob,
+            blob: blob.clone(),
         },
         Frame::Error {
             code: "rate_limited".to_owned(),
@@ -271,20 +271,22 @@ fn s027_t20_r20_debug_redacted() {
         format!("{:?}", ClientRef { bytes: client_ref }),
     ];
     shown.extend(frames.iter().map(|frame| format!("{frame:?}")));
-    // Every 4 bytes of each array but the first 4, as hex and as a derived
-    // `Debug` prints them: what a printed prefix never holds.
-    let arrays = [
-        &channel[..],
-        &server_id,
-        &client_ref,
-        &pk,
-        &sig,
-        &nonce,
-        &claimed,
+    // Every 4 bytes of each id and key but its first 4, and every 4 bytes of
+    // a signature, a nonce or a blob, which show no prefix, as hex and as a
+    // derived `Debug` prints them.
+    let arrays: [(&[u8], usize); 8] = [
+        (&channel, 1),
+        (&server_id, 1),
+        (&client_ref, 1),
+        (&pk, 1),
+        (&claimed, 1),
+        (&sig, 0),
+        (&nonce, 0),
+        (&blob, 0),
     ];
     let tails: Vec<(String, String)> = arrays
         .iter()
-        .flat_map(|array| array.windows(4).skip(1))
+        .flat_map(|(array, shown_prefix)| array.windows(4).skip(*shown_prefix))
         .map(|tail| {
             let hex = tail.iter().map(|byte| format!("{byte:02x}")).collect();
             let decimal = tail

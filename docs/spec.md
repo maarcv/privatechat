@@ -1,6 +1,6 @@
 # Private E2E chat — Specification and plan (SDD)
 
-Version: mvp · Post-audit I revision · Updated: 2026-10-14 · Marc Vilardebó (audits in `docs/audit-log.md`)
+Version: mvp · Post-audit I revision · Updated: 2026-10-15 · Marc Vilardebó (audits in `docs/audit-log.md`)
 
 This file, on the default branch (`mvp` until the first release), is the canonical source of the specification (see §11 "Governance"). Read copy, may lag behind: https://claude.ai/code/artifact/1527bf13-79e8-485a-908d-a515cbd062a4
 
@@ -450,7 +450,7 @@ flowchart TD
 | --- | --- | --- |
 | `core` | Stable Rust pinned in `rust-toolchain.toml` (exact version in spec 000), `libsodium-sys-stable` and `zeroize`; the name comparison of §7 uses the standard library only (ADR 0043); nothing else (own record encoding, ADR 0023) | One implementation, controlled memory, no GC leaving keys on the heap |
 | `store` | Separate Rust crate: `std::fs` and the seal and open functions of `core` (spec 020-store-files), never libsodium on its own. Implements the `Store` trait of `core` with two files per channel and atomic commit via `rename` (ADR 0021). No SQLite, no C outside libsodium | Outside `core` because it does I/O (AGENTS 10); a single implementation for the three platforms, fuzzable from Rust |
-| Mobile bindings | `uniffi` (proc macros; no UDL), over the one handle `Device` of `core` (ADR 0037) that the bindings wrap (specs 040-uniffi, 041-desktop-bridge, 042-connection-host); which records cross the bindings is spec 040's. | Generates Kotlin and Swift; secrets do not cross the boundary by value |
+| Mobile bindings | `uniffi` (proc macros; no UDL), over the one handle `Device` of `core` (ADR 0037), which the connection host holds (ADR 0041) and the bindings reach (specs 040-uniffi, 041-desktop-bridge, 042-connection-host); which records cross the bindings is spec 040's. | Generates Kotlin and Swift; secrets do not cross the boundary by value |
 | Desktop | Tauri 2 + Svelte 5 + TypeScript; the core is linked in as a Rust crate, no wasm | Pinned and signed code, OS keychain, one more reproducible build |
 | Android | Kotlin, Jetpack Compose, minSdk 26. No Room or SQLite: storage belongs to the core | Current standard |
 | iOS | Swift 5.10, SwiftUI, iOS 16+. No GRDB or SQLite: storage belongs to the core | Current standard |
@@ -546,7 +546,7 @@ Seven phases; each one closes when its specifications have green tests and a hum
 4. Week 5: server 030–035 and integration test.
 5. Week 6: bindings 040–041. The desktop MVP (050) starts when phase 4 is closed.
 
-From then on the three clients advance in parallel over a core whose API no longer changes.
+From then on the three clients advance in parallel over a core whose API no longer changes, but for the import preview that spec 054-qr-invite R17 adds (spec 027-core-api R25).
 
 **Definition of done, for the whole project** (the PR template renders these items as checkboxes, in this order)
 

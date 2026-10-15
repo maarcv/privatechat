@@ -2,10 +2,6 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
-## Phase 2 closed
-
-**2026-10-15 — Phase 2 (session and storage) closed on `mvp`.** Specs 020–028 are `implemented`. The exit criterion of `docs/spec.md` §10 holds: T23 of spec 027-core-api (`crates/store/src/tests/phase2_exit.rs`) runs two `Device`s over data directories on disk exchanging 10 000 messages with 1 % of them duplicated and a failed commit on each side, then a process killed between the append to the log and the write of `state.bin`: no error but the injected ones, every duplicate rejected, each reopened state equal to the last committed, the log compacted; on the CI runner the two runs take about 43 s and 37 s (PR #67). The review by a second person of spec 027's Interface was done by audit AZ, as the human reviewer decided on 2026-10-15; until the release, the audits of each slice (AR–AZ for spec 027) stand in for the human review of the code (decision of 2026-10-09).
-
 ## Audit AZ
 
 **2026-10-15 — Audit AZ, the second reading of spec 027-core-api: its Interface read next to specs 040-uniffi and 041-desktop-bridge, every type checked to cross (branch `027-second-reading`).** The acceptance criterion of spec 027 asks a second person for this reading; the human reviewer chose to have it done by an audit, as for spec 021. Audit Z's findings already took AZ1–AZ24, so this audit's are numbered from AZ25. Round 1 had three passes (A: conformance; B: the adversary; C: a scratch crate outside the repository that mirrored every record and enum with uniffi 0.32.2, generated Kotlin and Swift, and type-checked the Swift). The three verdicts: every type crosses, and none crosses with a privacy or security defect. Pass C ran 4 mutants of the core code that decides what crosses: all killed.
@@ -34,7 +30,7 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AZ39 | 040 Security's list of what the generated records print left out URLs and the proxy, and said spec 053 R22 checks what its lint checks only for log calls (B) | Low | Both stated |
 | AZ40 | 027's History left out R23's rewording (AY37) and the Context and Interface changes (A) | Low | History completed |
 | AZ41 | 027 said the host calls `StorageKey::from_bytes`; spec 042's host takes a built `StorageKey` (A) | Low | The bindings crates only |
-| AZ42 | Phase 2's close was not recorded (A) | Low | Its entry above |
+| AZ42 | Phase 2's close was not recorded (A) | Low | Its entry is written with the change that marks 027 `implemented` (AZ57) |
 | AZ43 | `Frame::Error`'s `Debug` prints the `code`, up to 32 bytes the server chooses (A, C) | Far-fetched | None: the server's own text, no user data, escaped by `Debug` |
 | AZ44 | Spec 028's Interface did not mention `Frame`'s redacted `Debug` (A) | Far-fetched | Named anyway |
 | AZ45 | The SVG renderer's intermediate buffers and each `qr://` response body are further unzeroed copies (B) | Far-fetched | None: a memory read of the device is outside the model; §8 promises non-retention |
@@ -53,6 +49,17 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AZ53 | The oracle refused bytes 4–8 only; bytes 8–12 of a `server_id` passed (C) | Low | Every 4-byte window past the prefix refused, in hex and in decimal |
 | AZ54 | The `proxied` flag's value was never checked (C) | Far-fetched | Asserted anyway |
 | AZ55 | The prefix check chose its records by position (C) | Far-fetched | Named records |
+
+**Round 4**, on the whole change. Pass C ran 13 mutants: 9 killed, 3 survived and were killed after AZ58, 1 far-fetched. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ56 | §9, AGENTS 20 and the rust skill still said the bindings wrap the `Device`; R22 asks them to follow this spec (A) | Low | The connection host holds it (ADR 0041) and the bindings reach it |
+| AZ57 | Three accepted specs owed amendments "in the pull request that marks this spec accepted", never applied: spec 054 R17 (`preview_qr`, `preview_file` and `ConfigPreview` in 027, their twins in 040, `import_qr` dropped and `preview_file` added in 041, the QR built from one byte segment, the skills' zeroing wording), spec 055 R20 (`verify_scanned` dropped from 041, which round 1 had just given a crossing form) and spec 053 (§10 and 027's Context allow the preview). An import could join before the user confirms, and the desktop kept a way to paste a peer's verification text (B) | Medium | Asked of three advisors, who agreed: the amendments are accepted text and are applied here as written; the preview is implemented in core as one more slice of 027 before 027 is marked `implemented` and phase 2 closes, so 027 goes back to `accepted` in this change (decision taken without the human) |
+| AZ58 | The oracle let a signature, a nonce or a blob show a 4-byte prefix, which R20 says to show none of (C) | Low | Those arrays allow no window at all |
+| AZ59 | `Route`'s `proxied` flag could be a constant (C) | Far-fetched | None |
+| AZ60 | A truncated name passes the test (C) | Far-fetched | None: no idiom of the code prints part of a name |
+| AZ61 | `DirName` derives `Debug` and prints its 16 bytes (B) | Far-fetched | None: the keyed-hash directory name, already on disk and shown by `BrokenChannel::name` |
 
 ## Audit AY
 
