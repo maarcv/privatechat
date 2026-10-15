@@ -110,7 +110,8 @@ Key messages:
 - Each channel picks its server when it is created; the app ships with the project's server as
   the default and it can be changed in the settings or per channel (§1, §8, ADR 0022).
 - Running a server means seeing the metadata of the "honest-but-curious server" row and
-  nothing else: which channels are read, from which IP, when (§2). Say it, do not hide it.
+  nothing else: which channels are read, from which IP, when, and which connection (without
+  Tor, which IP) sends each message (§1, §2). Say it, do not hide it.
 - Tor and `.onion` are supported for people for whom the IP matters (§2).
 
 Call to action: link to `deploy/README.md`. No copy-paste command on the site until phase 3
