@@ -92,7 +92,12 @@ s010_t01_r01_sources_list_complete() {
   write_list '    ("crypto/tests.rs", include_str!("../tests.rs")),' "${complete[@]:1}"
   case "$(differences "$tmp/src")" in
     "mismatched: crypto/tests.rs reads ../tests.rs") ;;
-    *) echo "check_core_sources: the self-test misses a mismatched pair in crypto/"; return 1 ;;
+    *) echo "check_core_sources: the self-test misses a mismatched ../ path"; return 1 ;;
+  esac
+  write_list '    ("crypto/tests.rs", include_str!("lib.rs")),' "${complete[@]:1}"
+  case "$(differences "$tmp/src")" in
+    "mismatched: crypto/tests.rs reads lib.rs") ;;
+    *) echo "check_core_sources: the self-test misses a mismatched path in crypto/"; return 1 ;;
   esac
   # The whole script, not only its comparison, fails on such a tree.
   if "$self" "$tmp/src" > /dev/null; then
