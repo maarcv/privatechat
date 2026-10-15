@@ -10,7 +10,7 @@ An end-to-end encrypted group chat where the server is just a mailbox: it has no
 - Expired messages are deleted on the server and on the client according to the channel TTL.
 - Every message is authenticated: the receiver knows it comes from the same key it had already labelled.
 - No global identity: a user's key is different in every channel.
-- The server does not know who writes: it sees opaque blobs per channel, not per member.
+- The server cannot tell by key which member writes: it sees opaque blobs per channel. It does see the address that sends each one, so without Tor members at different addresses are told apart.
 
 ## What it does not promise
 
@@ -27,7 +27,7 @@ In plain words; the normative list is `docs/spec.md` §1.
 - On desktop, within the user's session any of their processes can read the data files and the keychain.
 - Reinstalling the app, restoring a backup or a hardware failure erases all local data; recovery is re-importing the config. After losing every device, that needs a fresh invitation from a member who still has the channel. What comes back is the messages the server still holds; the names you gave others, your verifications and your own key do not.
 - Two devices of one person are two members: each sees the other as an unknown key with the same name, to be labelled and verified like anyone else's.
-- No push notifications in v1, so that the server does not learn which channels each device follows.
+- No push notifications in v1, so that no server or push provider stores a map of which channels each device follows.
 - If the leak came from a member's device, a new channel will leak again by the same path.
 - The per-channel quota protects the server, not the channel: someone with the config can keep the channel full until its messages expire; the only answer is a new channel.
 
