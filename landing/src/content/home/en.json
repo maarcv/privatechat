@@ -83,7 +83,7 @@
       },
       {
         "title": "Every message is sealed and signed",
-        "body": "Each message is encrypted with a key of its own and then signed with the sender's key for that channel. The server stores an opaque blob padded to a fixed size class, and does not know who wrote it."
+        "body": "Each message is encrypted with a key of its own and then signed with the sender's key for that channel. The server stores an opaque blob padded to a fixed size class, and cannot tell from it which member wrote it."
       },
       {
         "title": "You verify people, not accounts",
@@ -113,7 +113,7 @@
       },
       {
         "title": "What running a server lets you see",
-        "body": "Which channels are being listened to, from which IP address and when. Not the content and not who writes. If you host the server for your group, you see your group's IP addresses: that is said here rather than left to be discovered."
+        "body": "Which channels are being listened to, from which IP address and when, and which connection sends each message. Not the content, and not which member's key wrote it. If you host the server for your group, you see your group's IP addresses: that is said here rather than left to be discovered."
       },
       {
         "title": "Tor and .onion",

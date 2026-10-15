@@ -25,16 +25,17 @@ file is the iOS delta. Logic that would also make sense on Android belongs in
 ```
 Views/       SwiftUI views
 ViewModels/  one @Observable class per screen: state enum, send(_ intent:)
-Platform/    Secure Enclave, Keychain, LAContext, socket, files, pasteboard
+Platform/    Secure Enclave, Keychain, LAContext, files, pasteboard
 ```
 
 - State is a value type, one `enum ChannelState { loading, locked,
   ready(ChannelData), failed(ErrorKind) }` per screen; intents are an `enum`.
-- View models take protocols (`StorageKeyProviding`, `SocketOpening`) in
-  `init`; `AppGraph` wires the real ones at launch. No singletons except the
-  graph.
-- The socket is an `actor` with one long-lived task and an explicit `close()`.
-  `Task.detached` and stored `Task`s without cancellation are bugs.
+- View models take protocols (`StorageKeyProviding`) in `init`; `AppGraph`
+  wires the real ones at launch. No singletons except the graph.
+- The app opens no server connection of its own: sockets, TLS, the proxy and
+  the tick belong to the connection host (spec 042-connection-host), which
+  the app reaches through `Core` (spec 040-uniffi R9). `Task.detached` and
+  stored `Task`s without cancellation are bugs.
 
 ## Swift idioms that carry a project rule
 
@@ -65,11 +66,13 @@ Platform/    Secure Enclave, Keychain, LAContext, socket, files, pasteboard
 - Screens that show a QR or the password words blur on `willResignActive` and
   observe `capturedDidChange` (§8 "Screenshot blocking").
 - Lifecycle: `sceneDidEnterBackground`, `protectedDataWillBecomeUnavailable`
-  and screen lock → close the socket, zero the key, drop the store. Reconnect
-  on foreground with the core's cursor. No background modes, no push.
+  and screen lock → `Core.lock()`, whose lock routine closes the connections
+  and drops the device. Open again on foreground; the host reconnects from
+  the core's cursor. No background modes, no push.
 - Files: `isExcludedFromBackup = true` on the data directory. Keychain items
   `ThisDeviceOnly`.
-- Networking: `URLSessionWebSocketTask`. `now` is `Date.now` in milliseconds.
+- Networking: none in Swift, no `URLSession` task to a server; the host reads
+  the clock, so the app passes no `now`.
 - Pasteboard: `UIPasteboard.general.setItems(_, options: [.localOnly: true,
   .expirationDate: …])`. Configs are never copied to the pasteboard.
 
@@ -85,5 +88,5 @@ Platform/    Secure Enclave, Keychain, LAContext, socket, files, pasteboard
   without a reason comment.
 - Reproducible builds: pinned Xcode version in CI, SwiftPM `Package.resolved`
   committed, no build phases that fetch from the network.
-- Release signing and notarisation happen in CI with the offline certificate;
-  development uses automatic signing.
+- CI builds; the owner signs on a local machine with hardware keys (spec
+  060-reproducible-builds). Development uses automatic signing.

@@ -3,7 +3,7 @@
 What the public site says, section by section, before any component is written. Every claim
 about privacy points to its source in `docs/spec.md` (§) or an ADR; a sentence with no source
 does not go on the site. English is the source text; the other four languages are translations
-of the accepted English (`docs/spec.md` §9).
+of the accepted English (`docs/spec.md` §12).
 
 Wording rules for the whole site:
 
@@ -11,18 +11,29 @@ Wording rules for the whole site:
 - "Cannot read", never "cannot see": the server sees that a channel exists and when it is read (§2).
 - Every promise sits next to its limit. The site never lists guarantees without the page that
   lists what is not guaranteed.
-- No downloads, no store badges and no server address until they exist (§10: phase 0 today).
+- No downloads, no store badges and no server address until they exist (§10).
   A status line says which phase the project is in and links to the repository.
 
 ## Site structure
 
-One long page per language with six sections, plus one separate page per language for the
-full "promises and limits" table, because it is long and it must be quotable on its own.
+One long page per language with six sections, plus the seven public documents of spec
+062-security-docs R1, one page each per language, because each is long and must be quotable on
+its own.
 
 | Route | Page | Sections |
 | --- | --- | --- |
 | `/{lang}/` | Home | 1 Idea · 2 What it is · 3 How it works · 4 Run it yourself · 5 Check it yourself · 6 Open source |
 | `/{lang}/security/` | Promises and limits | The three lists of section 7 and the adversary table |
+| `/{lang}/security/residuals/` | Known residual risks | Every entry of `docs/residuals.md`, grouped by audience |
+| `/{lang}/guide/` | Using it safely | The steps of spec 062-security-docs R1 |
+| `/{lang}/server/` | Run your own server | `deploy/README.md`, what the operator sees, `docs/public-server.md` |
+| `/{lang}/verify/` | Check a download | The steps of spec 060-reproducible-builds R8 |
+| `/{lang}/privacy/` | Privacy policy | The content of spec 062-security-docs R2 |
+| `/{lang}/legal/` | Requests from authorities | The content of spec 066-public-server R8 |
+
+Planned, not built yet (spec 062-security-docs R1; `/{lang}/legal/` lands with spec
+066-public-server): `/{lang}/security/residuals/`, `/{lang}/guide/`, `/{lang}/server/`,
+`/{lang}/verify/`, `/{lang}/privacy/` and `/{lang}/legal/`.
 
 Languages and prefixes: `en` (source, default), `es`, `fr`, `ca`, `it`. Navigation: the six
 section anchors, the security page, the repository. Footer: licence, repository, security page.
@@ -79,7 +90,7 @@ Four steps, one illustration each:
    never sees the invitation (§5).
 3. **Every message is sealed and signed.** Encrypted with a per-message key, then signed with
    the sender's key for that channel. The server stores an opaque blob padded to a fixed size
-   class and does not know who wrote it (§4 envelope, ADR 0013, 0015, 0018).
+   class and cannot tell from it which member wrote it (§4 envelope, ADR 0013, 0015, 0018).
 4. **You verify people, not accounts.** A member is a key that has written. To know it is your
    friend you compare a QR or twelve words in person. Nothing goes through the server (§7, §4
    "User fingerprint", ADR 0005, 0006).
@@ -99,7 +110,8 @@ Key messages:
 - Each channel picks its server when it is created; the app ships with the project's server as
   the default and it can be changed in the settings or per channel (§1, §8, ADR 0022).
 - Running a server means seeing the metadata of the "honest-but-curious server" row and
-  nothing else: which channels are read, from which IP, when (§2). Say it, do not hide it.
+  nothing else: which channels are read, from which IP, when, and which connection (without
+  Tor, which IP) sends each message (§1, §2). Say it, do not hide it.
 - Tor and `.onion` are supported for people for whom the IP matters (§2).
 
 Call to action: link to `deploy/README.md`. No copy-paste command on the site until phase 3
@@ -157,7 +169,8 @@ Structure of the page:
      no forward secrecy or post-compromise security in v1; a leak from a device leaks the new
      channel too; a full channel is only fixed by a new channel.
    - The server and the network: it can delete or delay; it knows IP and time of every
-     listener; the default server is the project's; no push notifications in v1.
+     listener, and which connection (without Tor, which IP) sends each message; the default
+     server is the project's; no push notifications in v1.
    - The operating system and the store: they know the app is installed and when it is used.
 3. **Who can see what** — the adversary table of §2, three columns as in the source.
 4. **Outside the model** — the one line of §2.

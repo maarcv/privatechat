@@ -2,7 +2,7 @@
  * Languages of the site and the paths they live at.
  *
  * English is the source language; the other four are translations of the accepted
- * English text (`docs/spec.md` §9, `landing/CONTENT.md`). A language exists on the
+ * English text (`docs/spec.md` §12, `landing/CONTENT.md`). A language exists on the
  * site only once its content entries exist, so this list is the set of languages the
  * site may publish, not the set it currently publishes: `availableLocales()` in
  * `src/lib/content.ts` reports the latter.

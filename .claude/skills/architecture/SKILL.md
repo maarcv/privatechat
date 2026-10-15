@@ -17,8 +17,10 @@ if the two ever differ, `AGENTS.md` wins.
 ## 1. Layers and the direction of dependencies
 
 ```
-UI (Kotlin / Swift / Svelte)       pixels, sockets, keystore prompts. No logic.
-   │  bytes, opaque handles, events
+UI (Kotlin / Swift / Svelte)       pixels, keystore prompts, dialogs. No logic.
+   │  bytes, records, events (uniffi or Tauri commands)
+Connection host (host crate)       sockets, TLS, proxy, tick; holds the `Device`
+   │
 Session (core, sans-I/O)           protocol state machine: hello/subscribe/push/ack
    │
 Channel (core)                     encrypt/decrypt, peers, counters, outbox
@@ -28,13 +30,16 @@ Store (store crate)                two encrypted files per channel, atomic commi
 crypto (core::crypto)              the only module that touches libsodium
 ```
 
-These are call layers. The crate graph is `store → core` and `server → core`;
-`core` defines the `Store` trait and receives a `Box<dyn Store>`.
+These are call layers. The crate graph is `store → core`, `server → core` and
+`host → core, store`; `core` defines the `Store` trait and receives a
+`Box<dyn Store>`.
 
 Dependencies point **down** only. `core` knows nothing about files, sockets,
 clocks or screens (AGENTS 10): it receives bytes and a `now`, and returns bytes
-and events. The UI knows nothing about the protocol: it opens a TLS socket,
-shovels frames in both directions, and renders what `Session` tells it. This
+and events. The UI knows nothing about the protocol and opens no server
+connection: the connection host (spec 042-connection-host, ADR 0041), one
+Rust crate for the three clients, opens the TLS sockets, shovels frames in
+both directions and ticks the core, and the UI renders what it reports. This
 keeps the security-critical code testable without a device and identical on
 three platforms.
 
@@ -145,8 +150,11 @@ the addition in the PR in one sentence (AGENTS 8). Dev dependencies count.
 
 ## 7. Client shape
 
-The three clients are the same program in three languages: open a socket,
-drive `Session`, render what it says, ask the platform keystore for a key.
+The three clients are the same program in three languages: ask the platform
+keystore for a key, open the device through the connection host, render what
+it reports, send the user's intents through it. No app opens a server
+connection of its own: sockets, TLS, the proxy and the tick belong to the host
+(spec 042-connection-host).
 Everything below holds for Kotlin, Swift and Svelte alike; each language skill
 adds only the platform mechanics (versions, directories, platform APIs,
 lifecycle hooks, test frameworks, linters).
@@ -156,9 +164,10 @@ lifecycle hooks, test frameworks, linters).
 ```
 ui         views / composables / components. Render state, emit intents. No logic.
 state      one state owner per screen (ViewModel, @Observable, .svelte.ts module).
-platform   keystore, socket, files, clipboard, biometrics. The only code that
+platform   keystore, file dialogs, clipboard, biometrics. The only code that
            touches platform APIs beyond the UI toolkit.
-core       via uniffi or Tauri commands: opaque handles and records (AGENTS 20).
+core       the connection host, via uniffi or Tauri commands: records and
+           events (AGENTS 20).
 ```
 
 **State and intents.**
@@ -172,14 +181,19 @@ core       via uniffi or Tauri commands: opaque handles and records (AGENTS 20).
 - Dependencies by constructor, wired by hand in one `AppGraph` at startup. No
   DI framework: the app has a dozen classes and the framework would be its
   largest dependency.
-- Structured concurrency: every task belongs to a state owner or to the socket
-  and is cancelled with it. Detached or unscoped tasks are bugs.
+- Structured concurrency: every task belongs to a state owner and is
+  cancelled with it. Detached or unscoped tasks are bugs.
 
 **Talking to the core.**
 
-- The socket loop is a pure host for `Session`: read a frame → `onFrame(frame,
-  now)` → apply the events → write whatever `outgoing()` returns. It never
-  looks inside a frame. `now` is the platform clock, passed **into** the core.
+- The connection host is the one caller of the `Device`: it reads a frame →
+  `on_frame(frame, now)` → takes out the events → writes whatever `outgoing()`
+  returns, ticks every second and reconnects with backoff. It never looks
+  inside a frame, and it reads the clock itself, so no app passes a `now`.
+  The app calls the host's methods and receives its `Sink` calls (an event,
+  a connection state, `locked`), filtered by generation in one place
+  (spec 042-connection-host R5). An event names a message and carries no
+  body: the screen re-reads the channel's messages.
 - Secrets cross as byte arrays. The storage key is passed once, to `open`:
   platform code holds it only from its creation (`generate_storage_key`,
   spec 040 R8) or its unwrap until `open` (a re-wrap of spec 053 R7 comes
@@ -215,9 +229,10 @@ core       via uniffi or Tauri commands: opaque handles and records (AGENTS 20).
   accessibility label; a screen-reader pass once per screen.
 
 **Lifecycle and device rules** are `docs/spec.md` §8, one row per platform:
-lock or background → close the session, zero the key, drop the store; on
-return, reconnect with the core's cursor; no background work, no push, no
-third-party SDK. The socket is configured as in §6 "Transport".
+lock or background → the host's lock routine closes the connections and drops
+the device (spec 042-connection-host R12); on return, open again and the host reconnects from the core's cursor; no
+background work, no push, no third-party SDK. The host configures the socket
+as in §6 "Transport", the same bytes on every platform.
 
 **Testing.** Drive the state owner with intents and assert the state sequence;
 platform classes have in-memory fakes; UI tests for exactly two flows (import a
@@ -226,7 +241,8 @@ the real keystore. Test names carry the spec id where they cover a requirement.
 
 **Tooling.** The platform linter and formatter run in CI and must be clean; no
 suppression without a reason comment. Builds are reproducible (§8 "Code
-integrity"); release signing happens in CI with the offline key.
+integrity"). CI builds; the owner signs on a local machine with hardware keys
+(spec 060-reproducible-builds).
 
 ## 8. Review checklist
 
