@@ -90,6 +90,8 @@ pub(crate) const KEY_RETIRED_COUNTER: u64 = u64::MAX;    // R15, ADR 0033; used 
 
 pub(crate) fn ttl_ms(ttl_seconds: u32) -> u64;            // u64(ttl_seconds) × 1000 (R13); used by spec 021-channel-session
 
+pub(crate) const MINUTE_MS: u64 = 60_000;              // R8; used by specs 021 and 028
+pub(crate) fn minute_of(time: u64) -> u64;             // R8: sent_at, the since of a subscribe, the cursor step
 pub(crate) struct Payload { pub(crate) kind: PayloadKind, pub(crate) display_name: Option<String>, pub(crate) sent_at: u64, pub(crate) body: Vec<u8> }
 pub(crate) enum PayloadKind { Text, KeyRetired, Unknown(u8) }
 
@@ -286,3 +288,4 @@ None. Closed after audit H: the expiry of `Unreadable` messages is spec 023-ttl-
 - 2026-10-01 revised after audit Y (`docs/audit-log.md`): R17 and the mutation table hold at times that pass step 2; `Payload::decode` is compiled for the tests and the fuzz target alone, and `PayloadHead` is visible in `proto` alone
 - 2026-10-13 Security points to the exceptions to the no-oracle rule that `docs/spec.md` §4 names after spec 028-session-sans-io R18 (audit AQ round 4, `docs/audit-log.md`)
 - 2026-10-15 amended after audit BB (`docs/audit-log.md`, BB-A1-2): the dispatch sentence of the Interface says spec 021 reproduces `013.json` and other tests read single vectors, as spec 015 R3 now allows
+- 2026-10-15 amended after audit BB round 2 (`docs/audit-log.md`, BB-R2A-4): the Interface lists `MINUTE_MS` and `minute_of`, shared with specs 021 and 028
