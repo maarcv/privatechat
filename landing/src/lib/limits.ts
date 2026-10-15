@@ -17,6 +17,7 @@ export const LIMIT_GROUPS = [
       'any of their processes can read the data files',
       'Reinstalling the app',
       'Two devices of one person are two members',
+      "judges a message's life by the device's clock",
     ],
   },
   {
