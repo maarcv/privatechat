@@ -58,6 +58,7 @@ crates/core/src/crypto/secret.rs       Secret<N>
 crates/core/src/crypto/tests.rs        s010_* tests
 crates/core/src/vectors.rs             loader of `010.json` and every vector file, `cfg(test)`: no dependency, no I/O (spec 015-test-vectors moved it here from `crypto/vectors.rs`)
 clippy.toml                            disallowed-methods (R17)
+scripts/check_core_sources.sh          the `SOURCES` list of T01 against git, with its self-test
 ```
 
 ```rust
@@ -127,7 +128,7 @@ Every function returns `Result` because each one may be the first libsodium call
 
 Every test is in `crates/core/src/crypto/tests.rs` unless stated; every negative test asserts the exact variant.
 
-- T01 (covers R1): `s010_t01_r01_unsafe_only_in_ffi` reads every `.rs` under `crates/core/src` with `include_str!`/a build-time list and asserts the token `unsafe` appears only in `crypto/ffi.rs`; clippy `undocumented_unsafe_blocks` covers the `// SAFETY:` comments.
+- T01 (covers R1): `s010_t01_r01_unsafe_only_in_ffi` reads every `.rs` under `crates/core/src` with `include_str!`/a build-time list and asserts the token `unsafe` appears only in `crypto/ffi.rs`; the CI step `s010_t01_r01_sources_list_complete` runs `scripts/check_core_sources.sh`, which fails when the list `SOURCES` of `crypto/tests.rs` differs from `git ls-files 'crates/core/src/*.rs'` or an entry's `include_str!` path does not resolve to the file it names; clippy `undocumented_unsafe_blocks` covers the `// SAFETY:` comments.
 - T02 (covers R2): `s010_t02_r02_init_runs_once`: two calls to `crypto::init()` return `Ok` and the `OnceLock` is set once (observable through a counter in a test-only hook).
 - T03 (covers R3): `s010_t03_r03_debug_is_redacted`: `format!("{:?}")` of each entry of `SECRET_TYPES` (one `Secret<32>`, one `Secret<64>`, both non-zero) is exactly `[REDACTED]`. `s010_t04_r03_secret_has_no_forbidden_traits` reads `secret.rs` and asserts the exact derive list and the exact set of `impl` blocks, so any added trait fails the test (a `compile_fail` doctest cannot name a `pub(crate)` type; open question 010-R3).
 - T05 (covers R4): `s010_t05_r04_ct_eq_agrees_with_equality`: proptest over pairs of `[u8; 32]`, `ct_eq(a, b) == (a == b)`.
@@ -224,3 +225,4 @@ A bump of `libsodium-sys-stable` moves three pinned values at once (the version 
 - 2026-10-01 revised after audit Y (`docs/audit-log.md`, ADR 0042): T15 and the Vectors table gain the ed25519-speccheck cases and rename three negatives after what they hold; the Security section says which vectors prove strictness; R13 and T21 say the multiple of `block` is the caller's; R14 and the Limits give `pad`'s real bound; R16 names `version()`; R17 lists more methods; the Interface lists `init`, `version` and the constants and names the loader's file
 - 2026-10-01 revised after audit AA round 2 (`docs/audit-log.md`): R17 bans twenty-four more calls of the file system, the process and the environment, among them the `Path` methods that reach the disk, so that `store` keeps them in `fs.rs` (spec 020 R23)
 - 2026-10-15 amended after audit BB (`docs/audit-log.md`, BB-A1-5): R5 and the Interface name `fill_random`, added by spec 040-uniffi R8; the Interface marks `version`, `sign_keypair` and `SECRET_TYPES` `#[cfg(test)]`, as the code has them
+- 2026-10-15 amended after audit BB round 2 (`docs/audit-log.md`, BB-R2A-3): T01 and the Interface name `scripts/check_core_sources.sh` and its CI step `s010_t01_r01_sources_list_complete`
