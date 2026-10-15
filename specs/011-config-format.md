@@ -99,7 +99,10 @@ crates/core/src/proto/bip39_english.txt  the list itself
 pub enum Error {
     BadLength, UnsupportedVersion, WrongChannel, Expired, RetiredKey, PeerLimit,
     Replay, BadSignature, BadPayload, CounterExhausted,
-    BadConfig, BadPassword, InviteExpired, ConfigMismatch, Internal,
+    BadConfig, BadPassword, InviteExpired, ConfigMismatch,
+    UnknownPeer, UnknownChannel, LabelInUse, OwnKey, RetirementPending,   // specs 022, 027, 022, 022 and 025
+    Internal,
+    Store(StoreError),                                                   // spec 020-store-files R1
 }
 
 pub(crate) const CHANNEL_ID_TAG: &[u8; 19] = b"privatechat/chid/v1";
@@ -125,6 +128,7 @@ impl Config {
     pub(crate) fn ttl_seconds(&self) -> u32;
 
     pub(crate) fn from_parts(k_ch: Secret<32>, server_url: &str, ttl_seconds: u32, suggested_name: &str, created_at: u64) -> Result<Config, Error>;
+    pub(crate) fn duplicate(&self) -> Config;   // the one deep copy, `K_ch` through `Secret::copy_from` (spec 021-channel-session)
     pub(crate) fn seal_file(&self, password: &[u8], salt: &Salt, nonce: &Nonce, now: u64) -> Result<Vec<u8>, Error>;
     pub(crate) fn seal_file_with_key(&self, key: &Secret<32>, salt: &Salt, nonce: &Nonce, now: u64) -> Result<Vec<u8>, Error>;
     pub(crate) fn open_file_with_key(bytes: &[u8], key: &Secret<32>, now: u64) -> Result<Config, Error>;
@@ -141,11 +145,11 @@ pub(crate) fn draw_password() -> Result<Zeroizing<Vec<u8>>, Error>;
 pub(crate) fn parse_file_header(bytes: &[u8]) -> Result<(), Error>;   // R13, before the password and before any key
 ```
 
-`Config` exposes exactly the accessors of `docs/spec.md` §9 (`channel_id()`, `server_url()`, `suggested_name()`, `ttl_seconds()`); `host()` and `channel_key()` are `pub(crate)`. `Config` implements none of `Clone`, `Debug` or `Display`. No `pub` function takes a password to seal with (ADR 0028), and none takes an expiry: the exports take `now` because they write the fixed expiry of R18, and `core` never reads a clock (AGENTS 10). `from_parts` and `seal_file` take fixed inputs, which the tests need; the public functions draw those inputs and call them. `seal_file_with_key` is the only non-test code that builds a file (T13 seals its malformed files directly with `crypto::secretbox_seal`). `seal_file` and `open_encrypted` derive the key with Argon2id and then call `seal_file_with_key` and `open_file_with_key`, which the file round-trip property test of R24 uses with a fixed key, so that `cargo test` does not run Argon2id at 64 MiB hundreds of times.
+`Config` and every function above are `pub(crate)` (spec 027-core-api R17): a client sees a channel's `channel_id`, `server_url`, `suggested_name` and `ttl_seconds` through `Device`, never a `Config`. `Config` implements none of `Clone`, `Debug` or `Display`; `duplicate` is its only copy. No `pub` function takes a password to seal with (ADR 0028), and none takes an expiry: the exports take `now` because they write the fixed expiry of R18, and `core` never reads a clock (AGENTS 10). `from_parts` and `seal_file` take fixed inputs, which the tests need; `create` and `export_encrypted` draw those inputs and call them. `seal_file_with_key` is the only non-test code that builds a file (T13 seals its malformed files directly with `crypto::secretbox_seal`). `seal_file` and `open_encrypted` derive the key with Argon2id and then call `seal_file_with_key` and `open_file_with_key`, which the file round-trip property test of R24 uses with a fixed key, so that `cargo test` does not run Argon2id at 64 MiB hundreds of times.
 
 Base64url is the codec of spec 010-primitives-wrapper R19; spec 014-fingerprint uses it too, and no other code encodes or decodes base64. Every fallible function of `proto` outside `proto::record` returns `core::Error`, except `wordlist::word`, which returns `None` above the list; `RecordError` does not leave the core's decoders; every `pub` function returns `Error` or `StoreError` (amended by spec 020-store-files R1). `seal_file` takes the password as canonical bytes (R15) and does not canonicalise it: its only caller outside the tests passes `draw_password()`.
 
-`s011_vectors_dispatch` calls `vectors::check_all("011", …)` with one entry per vector and is the only code that loads `011.json` (spec 015-test-vectors R3); where a test below names a vector, the dispatch checks it and the test checks the same rule on bytes built by hand.
+`s011_vectors_dispatch` calls `vectors::check_all("011", …)` with one entry per vector and is the only test that checks `011.json` whole (spec 015-test-vectors R3; other tests read single vectors as inputs); where a test below names a vector, the dispatch checks it and the test checks the same rule on bytes built by hand.
 
 ## Security
 
@@ -258,3 +262,4 @@ None. Decided in audit F (`docs/audit-log.md`):
 - 2026-10-09 amended by spec 028-session-sans-io R8: `created_at()`, crate-internal, for the order of subscribes and the truncation check
 - 2026-10-09 amended by spec 031-auth-channel-signature R3: R8's derivation is the one function `ChannelId::derive`
 - 2026-10-14 amended by spec 027-core-api R17: `Config` and its functions are `pub(crate)`; the clients reach a config through `Device` alone
+- 2026-10-15 amended after audit BB (`docs/audit-log.md`): the Interface lists the 21 `Error` variants of today, `Config` and its functions `pub(crate)` per spec 027-core-api R17 and `Config::duplicate` (BB-A1-5); the dispatch sentence lets other tests read single vectors (BB-A1-2)
