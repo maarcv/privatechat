@@ -2,6 +2,61 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BB
+
+**2026-10-15 — Audit BB, a whole-project audit of everything done up to the close of phase 2 (`mvp` at 2f5dbd2): specs 000–028 against their code, the accepted specs 030–066 against what is implemented, and `docs/spec.md`, the threat model, `AGENTS.md`, the README, the skills and the landing against each other.** Round 1 had eight passes in parallel: A1 conformance of phases 0–1, A2 of 020–024, A3 of 025–028 and of the core's API against what 030–056 call; B1 the adversary on the crypto core, B2 on the session and the store; C1 quality and 43 hand mutants of `core`, C2 of `store`, the fuzz crate, the scripts and the CI (25 mutants); D the coherence of the specification set. Rounds 2–6 had three passes each (A, B, C) on the whole change, rounds 7–13 on the text each previous round changed. No production defect of the core or the store was found; the core's API is what specs 030–056 call. The fixes landed in five pull requests: `bb-docs`, `bb-skills`, `bb-specs`, `bb-core`, `bb-store`.
+
+**The human's decisions.** BB-B2-1: the log's entry lengths in the clear are documented as a residual, not padded. BB-B1-2: the verification QR carrying the `channel_id` is documented, with no new format. BB-D-1 and the other §1/§2 text: the text is aligned with what holds (spec 033 unchanged). BB-D-9: until the first release the agent sets `adr-not-needed`, with a comment giving the reason. BB-R2B-1: §1's "the server does not know who writes" is qualified to "by key": the server sees the connection that publishes each blob, and without Tor its address. Accepted ADRs are not edited: the "who writes" of ADR 0018 and ADR 0032 is to be read "by key" (BB-R4A-2).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BB-D-1 | §2, §6 and the threat model said per-IP limits apply only before authenticating; spec 033 R8–R12 counts every connection, budgets bytes per address and keeps it 60 s (D) | High | §2 row, threat model, §6, 051/052 R10 aligned with 033 (human's decision) |
+| BB-B2-1 | Each `messages.log` entry's length is in the clear: a stolen locked device shows each message's exact length and direction (B2) | Medium | Documented residual: §2 theft row, threat model, 020 Security (human's decision) |
+| BB-A1-1 | The `unsafe` and `Secret`-trait scans of 010 T01/T04 read 69 of 123 core files (A1) | Medium | `SOURCES` lists all; `scripts/check_core_sources.sh` (CI step `s010_t01_r01_sources_list_complete`) checks the list against `git ls-files` and each `include_str!` path |
+| BB-A1-2 | 015 R3 said one dispatch per vector file; 013's vectors are checked three times, as 021 allows (A1) | Medium | 015 R3 and the 011/013 Interfaces allow a later spec's `check_all` and single-vector reads |
+| BB-A1-3 | AGENTS 18 froze only phase 1's vectors; `020.json` and `028.json` could change with a label (A1) | Medium | A file freezes when its phase closes; 020.json and 028.json froze on 2026-10-15 |
+| BB-D-2 | §6 never brought up to date for specs 030–035 (D) | Medium | §6 rewritten from each spec's "Public API changes" |
+| BB-D-3 | The amendments 041 R3 and 042 R3 owed at acceptance were not made: the skills gave each app its socket (D) | Medium | §2, §6, §8, §9, AGENTS 2/11/24 and the four skills say the connection host owns every connection; the doc-lint checks `check_s041_t03_r03`/`check_s042_t03_r03` wait for 041/042 slice (a), whose files they check |
+| BB-D-4 | 060 R11 and 062 R6 amendments not made (D) | Medium | Skills: the owner signs on a local machine; §8 code integrity; the landing plan lists 062's seven routes |
+| BB-D-5, BB-B2-3 | 028 R12 dated an own message's expiry by the server's `received_at`, against ADR 0044 (D, B2) | Medium | `expires_at = sent_at + ttl_ms`, spec and code, T12 |
+| BB-D-6 | 056 R8 relied on a NotDelivered→Delivered change the core no longer makes (D) | Medium | Dropped from 056 R8 and T08 |
+| BB-D-8 | The App Review answer (052 R12, 051 R11) claimed beyond §1 (D, then R2B-1) | Medium | "The operator cannot read them; the app has no moderation" |
+| BB-D-9 | AGENTS 18 and §10 said a human sets `adr-not-needed`, CLAUDE.md the agent (D) | Medium | Aligned (human's decision); a libsodium bump keeps the human who read the build script (BB-R2A-5) |
+| BB-R2B-1 | §1 "the server does not know who writes" while it sees the publishing address (B, round 2) | Medium | Qualified "by key" in §1, §2, §3, §4, README, landing, 012, 062 R2, 063 R4, 066; with or without Tor, blobs on one connection are one device and two connections open at once on one channel are two (BB-R3B-2, BB-R4B-1, BB-R5A-1) |
+| BB-R2C-1, BB-R3C-1, BB-R4C-1 | T16 missed a partial or copied fill of the password draw (C, rounds 2–4) | Medium | Over 64 draws every one of the 77 index bits is seen set and clear and every two word positions differ |
+| BB-B1-1 | The client-side TTL and the refusal of revived blobs rest on the device clock, unstated (B1) | Low | §1 and §2 say so |
+| BB-B1-2 | The verification QR carries the full `channel_id` (B1) | Low | §2 physical observer, 014 and 055 Security, 055 R17 text (human's decision); 014 no longer says "shown only face to face" (BB-R2B-6) |
+| BB-B1-3 | §4 claimed two independent safeguards where the header keystream and a re-sealed `key_retired` rest on the nonce alone (B1) | Low | §4 reworded |
+| BB-B1-4 | `draw_password` left an unwiped copy of its 14 bytes (B1) | Low | `fill_random` into `Zeroizing<[u8; 14]>`; 011 R16; the word lookup's timing documented in 011 Security |
+| BB-B2-2 | A clock set ahead then corrected purges kept signatures early: false own-key alert (B2) | Low | Documented in 023 Security and 021 |
+| BB-A1-4 | AGENTS 11 cited §9 for the UI languages; AGENTS 24 lacked `muda` (A1) | Low | §12; `muda` named; landing files too (BB-R5A-2) |
+| BB-A1-5 | Interfaces of 010, 011, 016, 017 stale after later amendments (A1) | Low | Updated: `Error`'s 21 variants, `Config` `pub(crate)`, `Config::duplicate`, `fill_random`, the codec types, `probe_hello` |
+| BB-A2-1 | 021's Interface named files that moved (A2) | Low | Listed under `session/channel/` |
+| BB-A2-2 | Two R32 failing-store tests did not check the reopened state (A2) | Low | `state_eq` after a reopen |
+| BB-A2-3 | `MemoryStore::copy` in no spec; `channel.rs` doc stale (A2) | Low | 020 Interface; module doc names each submodule's spec |
+| BB-A3-1 | Six T* names of 027/028 matched no test (A3) | Low | Written as prefixes |
+| BB-A3-2 | `Event::StorageFailed`'s doc gave only the full-log meaning (A3) | Low | Both meanings and the re-read of 027 R14 |
+| BB-A3-3 | 027's Interface listed 2 of the `device/` files (A3) | Low | All listed |
+| BB-C1-1 | The minute rounding written four times again (C1) | Low | One `MINUTE_MS`, one `minute_of` in `proto::payload`; 013 Interface (BB-R2A-4) |
+| BB-C2-1–9 | `store` and script test gaps: size limit, R12 directory check, largest entry, R14 generations, first-commit sync order, uppercase hex, stale tail, `check_store_io.sh` nested `fs.rs`, `check_requirements.py` missing section (C2) | Low | A test per gap, each killing its mutant; the exact `MAX_LOG_ENTRY` bound is unreachable (largest valid entry 64 693 B), so that mutant is equivalent |
+| BB-D-10 | README status and §1 items stale (D) | Low | Phases 0–2 closed, every §1 item |
+| BB-D-11–13 | Stale references across 030, 031, 041, 055, 056, 060, 062, 064, 066, §9, §10, §13 (D) | Low | Each corrected |
+| BB-R2A-1–3 | §6 error fields and hold bound inexact; the new script in no spec (A, round 2) | Low | Per 030 R13 and R8; 010 T01, §10, §11 name the script |
+| BB-R2B-2–5 | Platform still visible by the TCP/IP stack; WAL purge conditional; theft and shared-address denial of service unstated (B, round 2) | Low | §2, §6, threat model |
+| BB-R2C-2, BB-R3C-2, BB-R4C-2 | `check_core_sources.sh` checked names only, missed a plain-path mismatch, counted a commented-out entry (C) | Low | Fixed with a self-test case each |
+| BB-R4B-2–4 | §6 said only Tor prevents linking a device's channels; log lengths; 033 Security retention (B, round 4) | Low | Tor prevents only the link by IP; "body with its display name"; 60 s after the last connection or publish |
+| BB-R5B-1–4, BB-R6B-1 | The provider sees which IP sends each message; 062 R2 and 063 R4 omitted the publishing address; `settings.bin`'s size and a directory's creation time (B, rounds 5–6) | Low | §2 rows, threat model, 020, 062, 063, 066 |
+| BB-R7A-1, BB-R7B-1 | `settings.bin`'s size shows a proxy only when the URL is the default (A, B, round 7) | Low | 020, §2 theft row, threat model |
+| BB-R7A-2, BB-R7B-2 | The theft row listed some timestamps as if complete (A, B, round 7) | Low | "The timestamps of every file and directory", with examples |
+| BB-R8B-1 | The theft row said "encrypted local files" while spec 053 keeps the Android grace file and Windows' `presence.none` in the clear (B, round 8) | Low | Named in the row |
+| BB-R9B-1 | Spec 054 R9's shared invitation file lies outside `K_db` (B, round 9) | Low | §2 theft row, threat model, 054 Security |
+| BB-R10A-1, BB-R10B-1, BB-R11B-1, BB-R12B-1 | The text gave that file "up to 10 minutes", then "the next unlock", then left "unlock" ambiguous; R9 keeps it until the app's first unlock or launch after 600 000 ms unless the app is in the foreground then, and the device's own unlock does not delete it (A, B, rounds 10–12) | Medium | Worded as R9 does, in the row, the threat model and 054 Security |
+| — | C1 mutant M33 (AV17), C2 M4/M12/M16, R5C one-byte and byte-swapped copies, trailing or block-commented `SOURCES` tuples; R3B–R9A wording preferences and overstatements on the safe side; R13B a clock set back delaying R9's age check (a correct clock is assumed, §1) | Far-fetched | None |
+
+Open question 056-R11 (a delta read) stays with its spec: measure before slice (b). Follow-up for a later simplification: after BB-D-6, 056 R21's `subscribed` flag and `ChannelState.subscribed` in 040/042 may have no consumer left.
+
+The audit ends with round 13: passes A and C found nothing, pass B one far-fetched point. Accepted ADRs were not edited; `CLAUDE.md`'s pointer to `AGENTS.md` "Flow" now names "Per-feature flow".
+
 ## Phase 2 closed
 
 **2026-10-15 — Phase 2 (session and storage) closed on `mvp`.** Specs 020–028 are `implemented`. The exit criterion of `docs/spec.md` §10 holds: T23 of spec 027-core-api (`crates/store/src/tests/phase2_exit.rs`) runs two `Device`s over data directories on disk exchanging 10 000 messages with 1 % of them duplicated and a failed commit on each side, then a process killed between the append to the log and the write of `state.bin`: no error but the injected ones, every duplicate rejected, each reopened state equal to the last committed, the log compacted; on the CI runner the two runs take about 43 s and 37 s (PR #67). The core's API is complete for the clients: the import preview that spec 054-qr-invite required (R25) landed before the close (audit BA). The review by a second person of spec 027's Interface was done by audits AZ and BA, as the human reviewer decided on 2026-10-15; until the release, the audits of each slice stand in for the human review of the code (decision of 2026-10-09).

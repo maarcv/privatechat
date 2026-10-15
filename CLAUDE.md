@@ -14,7 +14,7 @@ giving the reason) when the PR implements an accepted spec without changing
 a format, wait for every CI check, merge (merge commit) once the audit has
 closed and the CI is green, check the PR is `MERGED`, then delete the
 branch. Never ask the human to run a git or `gh` command, and never ask them
-to review a PR (`AGENTS.md`, "Flow"). If a tool call is denied, split it
+to review a PR (`AGENTS.md`, "Per-feature flow"). If a tool call is denied, split it
 into smaller commands and retry; only a single, isolated command that is
 still denied goes to the human, explained.
 
