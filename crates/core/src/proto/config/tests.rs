@@ -672,8 +672,8 @@ fn s011_t16_r16_export_draws_the_password() {
         for (position, index) in indices.iter().enumerate() {
             ones[position] |= index;
             zeros[position] |= !index & 0x7ff;
-            for (other, apart) in apart[position].iter_mut().enumerate() {
-                *apart |= other == position || indices[other] != *index;
+            for (other, differs) in apart[position].iter_mut().enumerate() {
+                *differs |= other == position || indices[other] != *index;
             }
         }
     }
