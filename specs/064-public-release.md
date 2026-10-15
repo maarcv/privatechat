@@ -52,7 +52,7 @@ docs/release-keys.md                           R4: the Play upload and code-tran
 
 - The direct downloads and F-Droid ship the exact reproducible build, signed by the owner, and F-Droid checks it independently (R2, R3).
 - Google Play and the App Store repackage and re-sign what they deliver; code transparency lets a Play user check the code against the owner's key, and the iOS residual is unchanged (R4, R5). Both are stated where users choose a download.
-- The key fingerprints come from places an attacker who took the GitHub account and the landing's host does not control (R6), and every public manifest is in Rekor (R2), so a forged release shown to one person differs from the one the log holds.
+- The key fingerprints come from places an attacker who took the GitHub account and the landing's host does not control (R6), and every public manifest is in Rekor (R1), so a forged release shown to one person differs from the one the log holds.
 - Play installs are signed by Google, not by the owner: a documented residual, stated on the "Check a download" page next to the iOS one (R4).
 - A Play install and an F-Droid or direct install cannot update each other, since their signers differ: a documented residual, stated on the same page (R4).
 - Code transparency does not cover a Play app's manifest or resources, so Google could change a permission or a manifest flag unseen: a documented residual (R4).
@@ -98,3 +98,4 @@ None.
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): R1 gates on every spec but 064 and 065 `implemented` (no spec left in `draft`), the export-compliance record `docs/release-legal.md` of 052 R10, and the server of spec 066 running the release's image; R2 no image in a registry, its digest in `SHA256SUMS`; later releases to spec 065; store screenshots to 051 and 052; phase 6 closes with 064, 065 and 066; depends on 066, blocks 065
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): depends on 065, which R1 now gates on like every other spec, so its feed and checks run from the first release; R1 and T01 check a "Deployments" row of spec 066 for the release tag and open question 066-R8 closed; phase 6 closes with this spec
 - 2026-09-28 accepted (Marc Vilardebó)
+- 2026-10-15 amended after audit BB (`docs/audit-log.md`, BB-D-12): Security cites R1, which logs the manifest in Rekor, not R2
