@@ -2,6 +2,25 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Phase 2 closed
+
+**2026-10-15 — Phase 2 (session and storage) closed on `mvp`.** Specs 020–028 are `implemented`. The exit criterion of `docs/spec.md` §10 holds: T23 of spec 027-core-api (`crates/store/src/tests/phase2_exit.rs`) runs two `Device`s over data directories on disk exchanging 10 000 messages with 1 % of them duplicated and a failed commit on each side, then a process killed between the append to the log and the write of `state.bin`: no error but the injected ones, every duplicate rejected, each reopened state equal to the last committed, the log compacted; on the CI runner the two runs take about 43 s and 37 s (PR #67). The core's API is complete for the clients: the import preview that spec 054-qr-invite required (R25) landed before the close (audit BA). The review by a second person of spec 027's Interface was done by audits AZ and BA, as the human reviewer decided on 2026-10-15; until the release, the audits of each slice stand in for the human review of the code (decision of 2026-10-09).
+
+## Audit BA
+
+**2026-10-15 — Audit BA, the code audit of slice (g) of spec 027-core-api (branch `027-preview`): R25, the import preview (`preview_qr`, `preview_file`, `ConfigPreview`), and R20's `ConfigPreview`; it is also the second reading of the preview's Interface next to specs 040-uniffi and 041-desktop-bridge, which found that it crosses as those specs say. One round of three passes.** No production defect; the preview cannot mislead the confirmation of spec 054 R15, commit or leak anything (B). Pass C ran 24 mutants of `preview`: 22 killed, 2 survived, killed below.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BA1 | No test previewed another channel on a device with a broken entry, so a lookup that matched any entry passed (C) | Low | T25 previews `config(2)` there: no `broken_reason` |
+| BA2 | No `.chatcfg` vector is expired, so a `preview_file` that ignored `now` passed (C) | Low | T25: the reference file at `u64::MAX` gives `InviteExpired` |
+| BA3 | The preview looked the open channel up its own way beside `Device::channel` (C) | Low | `self.channel(id)` |
+| BA4 | For a channel open on the same server the preview named the directory, which the import never does (A, B, C) | Far-fetched | Fixed anyway: `Vault::dir_name` only for a channel not open, as R5 orders it |
+| BA5 | With `is_open`, `name_collides` is also set, by the channel itself (B) | Far-fetched | None: spec 054 R15 shows only "You already have this channel" then |
+| BA6 | `name_collides` ignores broken channels' names (B) | Far-fetched | None: R25 says open channels, and no input breaks another's channel |
+
+The audit ends with round 1: passes A and B found only far-fetched points, pass C test gaps, now closed. `docs/spec.md` §9 lists the previews (R22).
+
 ## Audit AZ
 
 **2026-10-15 — Audit AZ, the second reading of spec 027-core-api: its Interface read next to specs 040-uniffi and 041-desktop-bridge, every type checked to cross (branch `027-second-reading`).** The acceptance criterion of spec 027 asks a second person for this reading; the human reviewer chose to have it done by an audit, as for spec 021. Audit Z's findings already took AZ1–AZ24, so this audit's are numbered from AZ25. Round 1 had three passes (A: conformance; B: the adversary; C: a scratch crate outside the repository that mirrored every record and enum with uniffi 0.32.2, generated Kotlin and Swift, and type-checked the Swift). The three verdicts: every type crosses, and none crosses with a privacy or security defect. Pass C ran 4 mutants of the core code that decides what crosses: all killed.

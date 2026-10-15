@@ -483,8 +483,10 @@ pub const DEFAULT_SERVER_URL: &str;
 impl Device {
     pub fn open(vault: Box<dyn Vault>, now: u64) -> Result<Device, Error>;
     pub fn status(&self) -> DeviceStatus;                                // lost settings, broken channels
-    // channels: create, import (QR or .chatcfg, as bytes), export, list, rename, leave
+    // channels: create, preview and import (QR or .chatcfg, as bytes), export, list, rename, leave
     pub fn create_channel(&mut self, server_url: &str, ttl_seconds: u32, name: &str, now: u64) -> Result<ChannelInfo, Error>;
+    pub fn preview_qr(&self, text: &[u8], now: u64) -> Result<ConfigPreview, Error>;    // what the user confirms (spec 054-qr-invite R15)
+    pub fn preview_file(&self, bytes: &[u8], password: &[u8], now: u64) -> Result<ConfigPreview, Error>;
     pub fn import_qr(&mut self, text: &[u8], replace_broken: bool, now: u64) -> Result<Imported, Error>;
     pub fn import_file(&mut self, bytes: &[u8], password: &[u8], replace_broken: bool, now: u64) -> Result<Imported, Error>;
     pub fn export_qr(&self, channel: [u8; 16], now: u64) -> Result<Vec<u8>, Error>;

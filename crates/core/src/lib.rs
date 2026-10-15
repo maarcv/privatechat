@@ -42,8 +42,8 @@ pub mod testing;
 mod vectors;
 
 pub use device::{
-    BrokenChannel, ChannelInfo, ConnectionPlan, Device, DeviceStatus, ExportedFile, Imported,
-    Route, Sent, SettingsView, generate_storage_key, init, probe_hello,
+    BrokenChannel, ChannelInfo, ConfigPreview, ConnectionPlan, Device, DeviceStatus, ExportedFile,
+    Imported, Route, Sent, SettingsView, generate_storage_key, init, probe_hello,
 };
 pub use error::Error;
 pub use proto::fingerprint::Fingerprint;

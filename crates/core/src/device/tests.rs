@@ -13,6 +13,7 @@ mod boundary;
 mod channels;
 mod dispatch;
 mod plan;
+mod preview;
 mod recovery;
 mod retries;
 mod routing;
