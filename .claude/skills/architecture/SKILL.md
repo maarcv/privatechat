@@ -186,12 +186,15 @@ core       via uniffi or Tauri commands: opaque handles and records (AGENTS 20).
   before `open`, which zeroes it), or in the re-wrap array of R7, and zeroes
   it on every exit (spec 053 Security). The `.chatcfg` password and the
   scanned invitation text get a fresh copy for each core call (preview,
-  import, replace retry), zeroed after that call in a `finally` / `defer` /
-  `.fill(0)`; the kept copy is zeroed when the screen closes, on lock (on
-  mobile also on background), and after an import that returns `Ok` or an
-  error that spec 054 R16 leaves no retry for, never after one that keeps the
-  screen open for another "Join" (spec 054 R15). A string cannot be zeroed,
-  so a password never becomes one.
+  import, and on mobile the replace retry; on the desktop the bridge makes
+  that retry from its own copy, spec 041-desktop-bridge R6), zeroed after
+  that call in a `finally` / `defer` / `.fill(0)`; the kept copy is zeroed
+  when the screen closes, on lock (on mobile also on background), after an
+  import that returns `Ok`, and after a preview or an import that returns an
+  error spec 054 R16 leaves no retry for, never after an import that keeps
+  the screen open for another "Join"; a preview that returns `BadPassword`
+  zeroes the password alone (spec 054 R15). A string cannot be zeroed, so a
+  password never becomes one.
 - Secrets never reach a view as a string. The config QR is drawn from bytes
   the core returns; the password words are shown from a byte array and cleared
   when the screen goes away.

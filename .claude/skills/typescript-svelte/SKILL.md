@@ -51,10 +51,11 @@ src-tauri/          Rust: Tauri commands → core::Session / Channel / Store,
   in a `finally` after that call; the page makes no replace retry, which the
   bridge makes from its own copy after the native confirmation (spec
   041-desktop-bridge R6). The kept copy is zeroed when the screen closes, on
-  lock, and after an import that returns `Ok` or an error that spec 054 R16
-  leaves no retry for, never after one that keeps the screen open for another
-  "Join" (spec 054 R15); it is never held as a `string` longer than the input
-  element forces.
+  lock, after an import that returns `Ok`, after a preview or an import that
+  returns an error spec 054 R16 leaves no retry for, and after a preview that
+  returns `BadPassword`, never after an import that keeps the screen open for
+  another "Join" (spec 054 R15); it is never held as a `string` longer than
+  the input element forces.
 - The config QR is rendered from an image the Rust side produces; the
   password words are shown from a `Uint8Array` and zeroed on destroy.
 - No `localStorage`, `sessionStorage`, `IndexedDB` or cookies. The web view

@@ -114,6 +114,18 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AZ98 | 054 R17's skills bullet still asked for the wording AZ83 replaced (A, C) | Low | The skills' wording |
 | AZ99 | §9's bindings row promised secrets zeroed on both sides, against 040 Security and §8; AZ86 placed the row in §11 (A, B) | Low | Each side zeroes what it is given, the other copies residuals of §8; §9 |
 
+**Round 8**, on the whole change. No production defect, no join before the confirmation, no secret lost (B); the core suite passes, 564 tests (C).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ100 | After an outcome with no retry the screen stayed with "Join", so a second tap sent zeroed bytes and showed "not a valid invitation" (B) | Low | 054 R15: that outcome's text with no "Join", or the screen closes; T15 checks no core call follows |
+| AZ101 | A preview's final error, and a `preview_file` that returns `BadPassword`, had no zeroing point; T15 used import outcomes a successful preview makes unreachable (B, C) | Low | Zeroed after a preview or an import with no retry; the password alone after a `BadPassword` preview; `InviteExpired` the example |
+| AZ102 | 054 T15 asked the desktop page for a replace retry it never makes (A) | Low | Android and iOS only; 041 T06 covers the bridge's; the architecture skill scoped likewise |
+| AZ103 | 053 Security's creation path left out the desktop's first run (041 R16) (A) | Low | Named |
+| AZ104 | R25 said `&self` refuses every store call but `Vault::dir_name`; `Store::name` and `Store::log_len` read memory through `&self` (A, C) | Far-fetched | Reworded anyway: any store call that reads or writes a file |
+
+The audit ends with round 8: its findings, and those of rounds 5 to 7, are wording of spec 054 and the skills, which describe phase 5 clients with no code yet, and none is a production defect; spec 054's own audit reads them again when it is implemented. The local CI is clean. The preview of R25 is implemented, with T25 and T20's `ConfigPreview` clause, in slice (g), whose audit also reads the preview's Interface against specs 040 and 041.
+
 ## Audit AY
 
 **2026-10-14 — Audit AY, the code audit of slice (f) of spec 027-core-api (branch `027-exit`): the phase 2 exit test (R23); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit Y's findings already took AY1–AY18, so this audit's are numbered from AY19. No production defect; the test was weaker than R23's wording. Pass C ran 20 mutants, of the production code the test guards and of the test: 11 killed, 5 equivalent here, 4 survived, each killed below.
