@@ -169,7 +169,8 @@ Structure of the page:
      no forward secrecy or post-compromise security in v1; a leak from a device leaks the new
      channel too; a full channel is only fixed by a new channel.
    - The server and the network: it can delete or delay; it knows IP and time of every
-     listener; the default server is the project's; no push notifications in v1.
+     listener, and which connection (without Tor, which IP) sends each message; the default
+     server is the project's; no push notifications in v1.
    - The operating system and the store: they know the app is installed and when it is used.
 3. **Who can see what** — the adversary table of §2, three columns as in the source.
 4. **Outside the model** — the one line of §2.
