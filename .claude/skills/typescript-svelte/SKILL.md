@@ -47,9 +47,10 @@ src-tauri/          Rust: Tauri commands → core::Session / Channel / Store,
 - The storage key, `K_ch`, `sk_u` and message keys **never** enter the web
   view. They live in `src-tauri/` as `Secret<N>`.
 - The `.chatcfg` password is kept as `Uint8Array` (`TextEncoder`): each core
-  call (`invoke`) gets a fresh copy; the kept copy is filled with zeros
-  (`.fill(0)`) on every exit; it is never held as a `string` longer than the
-  input element forces.
+  call (`invoke`: preview, import, replace retry) gets a fresh copy, zeroed
+  with `.fill(0)` in a `finally` after that call; the kept copy is zeroed when
+  the screen closes, after the last import call, and on lock (spec 054 R15);
+  it is never held as a `string` longer than the input element forces.
 - The config QR is rendered from an image the Rust side produces; the
   password words are shown from a `Uint8Array` and zeroed on destroy.
 - No `localStorage`, `sessionStorage`, `IndexedDB` or cookies. The web view

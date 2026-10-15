@@ -123,7 +123,7 @@ impl FfiHost {
     pub async fn send(&self, channel: Vec<u8>, body: String, display_name: Option<String>) -> Result<FfiSentView, FfiError>;
     pub async fn probe_server(&self, url: String) -> Result<FfiProbeResult, FfiError>;
     pub async fn import_file(&self, bytes: Vec<u8>, password: Vec<u8>, replace_broken: bool) -> Result<FfiImported, FfiError>;
-    pub async fn preview_qr(&self, text: Vec<u8>) -> Result<FfiConfigPreview, FfiError>;                      // spec 054-qr-invite R17
+    pub async fn preview_qr(&self, text: Vec<u8>) -> Result<FfiConfigPreview, FfiError>;                      // spec 027-core-api R25
     pub async fn preview_file(&self, bytes: Vec<u8>, password: Vec<u8>) -> Result<FfiConfigPreview, FfiError>;
     // one async method per Device method that spec 042-connection-host leaves to its callers, types by R3, no `now`
 }
@@ -290,4 +290,4 @@ None. Decided with the human reviewer on 2026-09-26 and 2026-09-27 (`docs/audit-
 - 2026-09-27 the exception for an iOS `NWConnection` removed, since 042-R10 measured that none is needed
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-10-15 amended after audit AZ, the second reading of spec 027-core-api (`docs/audit-log.md`): `Sent` excepted in R2 and `AckOutcome` no longer `pub`; the QR bytes cross unchecked, `bool` and `Vec<T>` named, records destructured with no `..` (R3); the generated records' printing stated in Security
-- 2026-10-15 amended after audit AZ (`docs/audit-log.md`, AZ57), as spec 054-qr-invite R17 asked at its acceptance: `previewQr`, `previewFile` and `FfiConfigPreview` in the Interface, and R7 and R9 zero their arguments as they do those of the imports
+- 2026-10-15 amended after audit AZ (`docs/audit-log.md`, AZ57), as spec 054-qr-invite R17 asked at its acceptance: `previewQr`, `previewFile` and `FfiConfigPreview` in the Interface, R7 and R9 zero their arguments as they do those of the imports (T07, T09), and Security lists the preview's password and text among the secrets that cross by value (six places become eight); round 6: the Interface cites spec 027-core-api R25

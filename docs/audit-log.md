@@ -80,6 +80,28 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AZ74 | On the desktop the confirmation of 054 R15 is enforced by the page only (B) | Far-fetched | Named in 041 Security as a residual of the UI's power |
 | AZ75 | `Vault::dir_name` can fail if libsodium does (A) | Far-fetched | R25 returns it as the import does |
 
+**Round 6**, on the whole change. No production defect, and no path where an invitation joins before the confirmation (B); pass C ran 4 mutants on `Frame`'s `Debug`, all killed. Spec 014 is back to its text on `mvp`: R3's bytes hold at every boundary, no binding carrying the verification QR as a string (AZ73).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ76 | T25 planted the `Corrupt` entry with `plant_corrupt`, whose directory is no channel's, so the clause could not be built (A, C) | Low | A corrupt state put at `Vault::dir_name` of that `channel_id`, as T05 does; the newer and `Io` cases preview `config(k)` |
+| AZ77 | A preview that ran R5's `Io` retry passed T25 (C) | Low | After the preview, `broken` (its `channel_id` still `None`), `channels()` and `connections()` unchanged |
+| AZ78 | T25's "every fault" left out compaction and removal, and its no-commit check was vacuous with commits failing (A, C) | Low | Nine faults armed, the same preview; with none armed, no commit and no plan change |
+| AZ79 | R25 called `ConfigMismatch` the one error that is not the parse's, then named a second (C) | Low | The three kinds of error listed |
+| AZ80 | 054 R17 restated R25's contract, and the two copies already differed (C) | Low | R17 points to 027 R25 |
+| AZ81 | 054 R15 and T15 had the UI compute "new server" from `channels()`, beside the core's `server_known` (A) | Low | The mark shows when `server_known` is false |
+| AZ82 | 054 T15 tested the `broken_reason` texts again, and said "Cancel" zeroes what the desktop's bridge keeps (C) | Low | T17 is their one test; the desktop's pending file stays until R15's events |
+| AZ83 | The skills' "kept copy zeroed on every exit, in a `finally`" read as zeroing it after each call, so "Join" would send zeros (C) | Low | A fresh copy per call, zeroed after it; the kept copy zeroed on close, after the last import and on lock |
+| AZ84 | The skill and 053 Security said the platform holds the storage key "for one call", while 053 R5 and R7 use it to check and re-wrap; a re-wrap after `open` would wrap zeros (B) | Low | Held from its unwrap until `open`, or in R7's re-wrap array, zeroed on every exit |
+| AZ85 | 054 R17's last bullet still asked for the wording AZ71 split (A, B) | Low | Reworded to the split |
+| AZ86 | §11's "Mobile bindings" row said secrets do not cross by value; 040 counts eight places (B) | Low | Only as byte arrays, zeroed on both sides |
+| AZ87 | 054 R13 cited 041 R6 for a scanned text on the desktop, which takes none (B) | Low | Removed |
+| AZ88 | 022 R6's list of names the core cleans did not name `ConfigPreview::suggested_name` (A) | Low | Named |
+| AZ89 | 041 R6 kept "another `choose_chatcfg` replaces it", which a dismissed choice does not do (A) | Low | "the next `choose_chatcfg` drops it" |
+| AZ90 | AZ57 called 053's bullet owed at acceptance; 053 R20 asks for it at implementation (A) | Low | 053's History says it was applied ahead |
+| AZ91 | History lines of 027, 040 and 054 left out changes, and loose references in 054's slices and a 040 comment (A, C) | Low | Completed |
+| AZ92 | On the desktop the pending file outlives a "Cancel" on the confirmation (B) | Far-fetched | Named in 041's Security residual: picked, or seen and cancelled |
+
 ## Audit AY
 
 **2026-10-14 — Audit AY, the code audit of slice (f) of spec 027-core-api (branch `027-exit`): the phase 2 exit test (R23); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit Y's findings already took AY1–AY18, so this audit's are numbered from AY19. No production defect; the test was weaker than R23's wording. Pass C ran 20 mutants, of the production code the test guards and of the test: 11 killed, 5 equivalent here, 4 survived, each killed below.
