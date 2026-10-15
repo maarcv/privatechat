@@ -7,7 +7,7 @@ use privatechat_core::testing::state_for;
 use privatechat_core::{Store, StoreError, Vault};
 
 use super::{
-    CRASH_STATUS, CRASH_VAR, TestDir, channel_dir, commit, dir_name, id, loaded, open, reopen,
+    CRASH_STATUS, CRASH_VAR, TestDir, channel_dir, commit, dir_name, id, key, loaded, open, reopen,
     run_helper, seed,
 };
 use crate::DataDir;
@@ -96,6 +96,27 @@ fn s020_t09_r09_entry_bound_to_place() {
     assert_eq!(loaded(store.as_mut()), Err(StoreError::Corrupt));
 }
 
+/// Spec 020, R9: a state sealed under this directory's key and name opens,
+/// but one that names another channel is `Corrupt`.
+#[test]
+fn s020_t09_r09_state_of_another_channel() {
+    let dir = TestDir::new("t09-state");
+    committed_two(dir.path());
+    let channel = channel_dir(dir.path(), 1);
+    let len = u64::try_from(read(&channel.join("messages.log")).len()).unwrap();
+    for (n, expected) in [(1, Ok(vec![1, 2])), (2, Err(StoreError::Corrupt))] {
+        let sealed = state_for(id(n))
+            .seal(&key(), &dir_name(1), len, 0)
+            .expect("seal");
+        write(
+            &channel.join("state.bin"),
+            &frame::frame(frame::STATE_MAGIC, &sealed),
+        );
+        let records = reopen(dir.path(), 1).map(|found| found.expect("committed").1);
+        assert_eq!(records, expected, "n={n}");
+    }
+}
+
 /// Spec 020, R10: a crash after the append or before the rename gives the
 /// previous commit; stale bytes past the committed end are overwritten.
 #[test]
@@ -123,19 +144,27 @@ fn s020_t10_r10_commit_order() {
         assert_eq!(read(&log).len(), before, "{point}");
         assert!(!channel_dir(dir.path(), 1).join("state.bin.tmp").exists());
     }
-    let dir = TestDir::new("t10-ok");
-    committed_two(dir.path());
-    let log = channel_dir(dir.path(), 1).join("messages.log");
-    let mut stale = read(&log);
-    stale.extend_from_slice(&[0xee; 100]);
-    write(&log, &stale);
-    let mut data = open(dir.path());
-    let mut store = data.create(&id(1)).expect("create");
-    commit(store.as_mut(), 1, &[3]).expect("commit over stale bytes");
-    drop((store, data));
-    let ((len, _), records) = reopen(dir.path(), 1).expect("load").expect("committed");
-    assert_eq!(records, vec![1, 2, 3]);
-    assert_eq!(read(&log).len() as u64, len);
+    // Stale bytes found by a store that reads the files before it commits,
+    // and planted after a load, where only step 1's cut removes them.
+    for loaded_first in [false, true] {
+        let dir = TestDir::new(&format!("t10-ok-{loaded_first}"));
+        committed_two(dir.path());
+        let log = channel_dir(dir.path(), 1).join("messages.log");
+        let mut stale = read(&log);
+        stale.extend_from_slice(&[0xee; 1_000]);
+        let mut data = open(dir.path());
+        let mut store = data.create(&id(1)).expect("create");
+        if loaded_first {
+            store.load().expect("load");
+        }
+        write(&log, &stale);
+        commit(store.as_mut(), 1, &[3]).expect("commit over stale bytes");
+        assert_eq!(read(&log).len() as u64, store.log_len(), "{loaded_first}");
+        drop((store, data));
+        let ((len, _), records) = reopen(dir.path(), 1).expect("load").expect("committed");
+        assert_eq!(records, vec![1, 2, 3]);
+        assert_eq!(read(&log).len() as u64, len);
+    }
 }
 
 /// What one faulty call left, seen by the store that made it and by a fresh
@@ -315,6 +344,45 @@ fn s020_t14_r14_interrupted_compaction() {
     apart[5..9].copy_from_slice(&3u32.to_be_bytes());
     write(&log, &apart);
     assert_eq!(reopen(dir.path(), 1), Err(StoreError::Corrupt));
+}
+
+/// Spec 020, R14: a log two generations behind its state is `Corrupt`, even
+/// next to a valid `messages.log.new` of the state's generation, which is not
+/// renamed; after a compaction cut past its state, a `.new` whose header
+/// names a generation other than the state's is `Corrupt`.
+#[test]
+fn s020_t14_r14_generation_mismatches() {
+    let dir = TestDir::new("t14-behind");
+    {
+        let mut data = open(dir.path());
+        let mut store = data.create(&id(1)).expect("create");
+        seed(store.as_mut(), 1, &[1, 2, 3]).expect("seed");
+        let (state, _) = store.load().expect("load").expect("committed");
+        assert_eq!(store.compact(&state, 2), Ok(1));
+        assert_eq!(store.compact(&state, 3), Ok(1));
+    }
+    let channel = channel_dir(dir.path(), 1);
+    let log = channel.join("messages.log");
+    let valid = read(&log);
+    assert_eq!(frame::read_log_header(&valid), Ok(2));
+    write(&channel.join("messages.log.new"), &valid);
+    let mut behind = valid.clone();
+    behind[5..9].copy_from_slice(&0u32.to_be_bytes());
+    write(&log, &behind);
+    assert_eq!(reopen(dir.path(), 1), Err(StoreError::Corrupt));
+    assert_eq!(read(&log), behind);
+    assert_eq!(read(&channel.join("messages.log.new")), valid);
+
+    let dir = TestDir::new("t14-ahead");
+    committed_two(dir.path());
+    crash(dir.path(), "compact", "after_compact_state:1");
+    let new = channel_dir(dir.path(), 1).join("messages.log.new");
+    let mut ahead = read(&new);
+    assert_eq!(frame::read_log_header(&ahead), Ok(1));
+    ahead[5..9].copy_from_slice(&2u32.to_be_bytes());
+    write(&new, &ahead);
+    assert_eq!(reopen(dir.path(), 1), Err(StoreError::Corrupt));
+    assert_eq!(read(&new), ahead);
 }
 
 /// Spec 020, R15: the dropped count, the survivors in order at new offsets
