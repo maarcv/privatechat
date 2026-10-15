@@ -263,6 +263,7 @@ The `testing` module compiles under `cfg(any(test, fuzzing, feature = "test-supp
 - The channel directory name is a keyed hash (R18): a forensic copy without `K_db` sees how many channels exist and their sizes, not which `channel_id`s.
 - `state.bin` is not padded: its size tells a forensic copy roughly how many peers and pending messages a channel has.
 - `messages.log` is not padded either, unlike the wire (spec 013-wire-message R10): a forensic copy without `K_db` sees the number of entries and each entry's exact `len` (R5), so the exact length of each message body with its display name, and, from the fixed-size records around them (acked, not delivered, kept signature, seen), which messages were sent and which received, and which of one's own were delivered and which not. Documented residual (`docs/spec.md` §2, theft of the locked device).
+- The files' timestamps tell a forensic copy without `K_db` when each channel last changed: `state.bin` and `messages.log` are rewritten on every commit, and while connected the cursor alone commits at most once a minute (spec 021-channel-session R20). Documented residual.
 - Deleting a message is physical, by compaction (R15), and does not resist older copies of the flash (`docs/spec.md` §2).
 - A failed `fsync` is not retried on the same data (R11): on Linux a retry can report success for data already lost. Before the state's rename the next commit rewrites from the committed end; at or after it the store stops and the next open decides.
 - `fsync` is `File::sync_all`, which on Apple platforms is `F_FULLFSYNC`; a plain `fsync(2)` or `sync_data` there would void R10–R15, since the drive could keep the data in its cache.
@@ -384,3 +385,4 @@ Decided on 2026-09-25: 020-R5, R9 and R18 (log header, generation and offset, ke
 - 2026-10-14 amended by spec 027-core-api slice (c): `fail_destroys` among the doubles
 - 2026-10-14 amended by spec 027-core-api R17: the `dead_code` allow of `mod storage` is gone
 - 2026-10-15 amended after audit BB (`docs/audit-log.md`): Security documents that `messages.log` is not padded, so a forensic copy without `K_db` sees each entry's length and, from the records around it, sent or received and delivered or not (BB-B2-1, the human's decision); the Interface lists `MemoryStore::copy`, added by spec 028 (BB-A2-3)
+- 2026-10-15 amended after audit BB round 2 (`docs/audit-log.md`, BB-R2B-4): Security documents that the files' timestamps tell when each channel last changed
