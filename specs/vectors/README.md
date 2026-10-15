@@ -2,7 +2,7 @@
 
 JSON files validated by Rust, Kotlin and Swift: they guarantee that the three platforms produce exactly the same bytes (`docs/spec.md` §9, ADR 0012, 0023). One file per spec: `NNN.json`.
 
-The reference script `scripts/reference/vectors.py` of spec 015-test-vectors produces every file from 011 on (R5); the Rust tests, and later Kotlin and Swift, reproduce them. They freeze when phase 1 closes, once `cargo test` reproduces every vector the script wrote. From then on they are rewritten **only** with a `proto_version` change accompanied by an ADR (AGENTS 18); the CI (`adr-guard`) refuses a diff that touches this directory without a new ADR, unless a human sets `adr-not-needed`.
+The reference script `scripts/reference/vectors.py` of spec 015-test-vectors produces every file from 011 on (R5); the Rust tests, and later Kotlin and Swift, reproduce them. A file freezes when its spec's phase closes, once `cargo test` reproduces every vector the script wrote: those of phase 1 at its close, `020.json` and `028.json` with phase 2 on 2026-10-15. From then on a frozen file is rewritten **only** with a `proto_version` change accompanied by an ADR (AGENTS 18, which names the one exception, `010.json`); the CI (`adr-guard`) refuses a diff that touches this directory without a new ADR, unless the `adr-not-needed` label is set (by the agent, with its reason, until the first release; by a human from then on).
 
 ## Schema
 
