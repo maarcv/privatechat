@@ -15,7 +15,7 @@ the chat promises and does not promise (`docs/spec.md` §1) and links to the cli
 ## Languages
 
 English is the source and default language. The site is published in the same five languages as
-the clients (`docs/spec.md` §9): English, Spanish, French, Catalan and Italian, one route prefix per
+the clients (`docs/spec.md` §12): English, Spanish, French, Catalan and Italian, one route prefix per
 language. The copy lives in Astro content collections, one folder per language, never inline in a
 component. This directory is the explicit exception to AGENTS.md rule 11: the user-facing copy is
 translated; code, comments, file names and commit messages stay in English.

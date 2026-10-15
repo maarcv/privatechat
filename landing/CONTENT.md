@@ -3,7 +3,7 @@
 What the public site says, section by section, before any component is written. Every claim
 about privacy points to its source in `docs/spec.md` (§) or an ADR; a sentence with no source
 does not go on the site. English is the source text; the other four languages are translations
-of the accepted English (`docs/spec.md` §9).
+of the accepted English (`docs/spec.md` §12).
 
 Wording rules for the whole site:
 
@@ -11,7 +11,7 @@ Wording rules for the whole site:
 - "Cannot read", never "cannot see": the server sees that a channel exists and when it is read (§2).
 - Every promise sits next to its limit. The site never lists guarantees without the page that
   lists what is not guaranteed.
-- No downloads, no store badges and no server address until they exist (§10: phase 0 today).
+- No downloads, no store badges and no server address until they exist (§10).
   A status line says which phase the project is in and links to the repository.
 
 ## Site structure
