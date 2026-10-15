@@ -26,15 +26,17 @@ maths or anything about messages beyond displaying them, stop: it belongs in
 ```
 ui/          Composables
 viewmodel/   one ViewModel per screen: StateFlow<XxxUiState>, onIntent(XxxIntent)
-platform/    Keystore, socket, file paths, clipboard, biometrics
+platform/    Keystore, file paths, clipboard, biometrics
 ```
 
 - State and intents are `sealed interface`s; state is exposed as
   `StateFlow<ChannelUiState>`. Composables receive the state and a lambda per
   intent; they never call a ViewModel method from deep in the tree.
 - Everything runs in `viewModelScope` or a scope cancelled with its owner.
-  `GlobalScope` and un-scoped `launch` are bugs. Socket I/O is one coroutine
-  per connection with an explicit `cancel()` on lock.
+  `GlobalScope` and un-scoped `launch` are bugs.
+- The app opens no server connection of its own: sockets, TLS, the proxy and
+  the tick belong to the connection host (spec 042-connection-host), which
+  the app reaches through `Core` (spec 040-uniffi R9).
 
 ## Kotlin idioms that carry a project rule
 
@@ -65,12 +67,14 @@ platform/    Keystore, socket, file paths, clipboard, biometrics
   (§8 "Keyboard").
 - Screens that show a QR or the password words set `FLAG_SECURE`; the whole
   app does (§8 "Screenshot blocking").
-- Lifecycle: `onStop` and screen-off → `Session.close()`, zero the key, drop
-  the store handle. Reconnect in `onStart` with the core's cursor. No
-  foreground service, no WorkManager, no push.
+- Lifecycle: `onStop` and screen-off → `Core.lock()`, whose lock routine
+  closes the connections and drops the device. Open again in `onStart`; the
+  host reconnects from the core's cursor. No foreground service, no
+  WorkManager, no push.
 - Manifest: `allowBackup="false"`, `dataExtractionRules` excluding everything,
   no `exported` components, no `usesCleartextTraffic`, no custom URL scheme.
-- Networking: OkHttp WebSocket. `now` is `System.currentTimeMillis()`.
+- Networking: none in Kotlin, no HTTP or WebSocket library; the host reads
+  the clock, so the app passes no `now`.
 - Clipboard: `ClipDescription.EXTRA_IS_SENSITIVE`, cleared after 60 s (§8).
 
 ## Testing
