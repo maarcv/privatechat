@@ -90,7 +90,7 @@ Four steps, one illustration each:
    never sees the invitation (§5).
 3. **Every message is sealed and signed.** Encrypted with a per-message key, then signed with
    the sender's key for that channel. The server stores an opaque blob padded to a fixed size
-   class and does not know who wrote it (§4 envelope, ADR 0013, 0015, 0018).
+   class and cannot tell from it which member wrote it (§4 envelope, ADR 0013, 0015, 0018).
 4. **You verify people, not accounts.** A member is a key that has written. To know it is your
    friend you compare a QR or twelve words in person. Nothing goes through the server (§7, §4
    "User fingerprint", ADR 0005, 0006).
