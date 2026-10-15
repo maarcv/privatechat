@@ -1,6 +1,6 @@
 # Private E2E chat — Specification and plan (SDD)
 
-Version: mvp · Post-audit I revision · Updated: 2026-10-15 · Marc Vilardebó (audits in `docs/audit-log.md`)
+Version: mvp · Updated: 2026-10-15 · Marc Vilardebó (audits in `docs/audit-log.md`)
 
 This file, on the default branch (`mvp` until the first release), is the canonical source of the specification (see §11 "Governance"). Read copy, may lag behind: https://claude.ai/code/artifact/1527bf13-79e8-485a-908d-a515cbd062a4
 
@@ -684,4 +684,4 @@ None of the open decisions blocks phases 0–2. Those that would change the wire
 
 ## 13. Audit log
 
-Audits A (2026-09-19), B, C and D (2026-09-20), E, F, G, H and I (2026-09-24), the decisions taken while drafting phase 2, audit J, the decisions taken while drafting phase 3 and audit K (2026-09-25), the decisions taken while drafting phase 4 and audit L (2026-09-26), audits M, N and O (2026-09-26/27) and audit P (2026-09-28): findings and applied changes are in `docs/audit-log.md`. Every PR that changes §3–§6 adds a row there.
+Every audit, from audit A (2026-09-19) on, and the decisions taken while drafting each phase are in `docs/audit-log.md`, with their findings and the changes applied; this section does not list them. Every PR that changes §3–§6 adds a row there.
