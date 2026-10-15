@@ -20,8 +20,15 @@ pub enum Event {
         /// What it holds.
         received: Received,
     },
-    /// A push met a full log: the channel takes no more on this
-    /// connection, and asks for one once there is room (R10).
+    /// The channel's storage failed. From the session, a push met a full
+    /// log: the channel takes no more on this connection, and asks for
+    /// one once there is room (R10). From the `Device` (spec 027-core-api
+    /// R14, R15), its store failed and was reopened, the channel now
+    /// `write_failed`, or the reopen failed and the channel is `broken`.
+    /// Either way the client re-reads `channels()`, `status()` and the
+    /// channel's `messages`, `peers`, `channel_status` and `gaps`, since
+    /// the stored state may hold a commit whose call returned an error
+    /// (spec 027-core-api R14).
     StorageFailed {
         /// The channel.
         channel: [u8; 16],
