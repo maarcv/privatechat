@@ -2,10 +2,15 @@
 //! log records of the last commit, the in-session values beside them, and
 //! the one commit every change goes through (R1, R2, AGENTS 23).
 //!
-//! Sending, receiving, the `outbox` and the reads are the later slices of
-//! spec 021, the peers spec 022's (`peers.rs`); the message list,
-//! retirement spec 024's, regeneration spec 025's (`regen.rs`) and the
-//! peer limits spec 026's (`limits.rs`).
+//! The submodules, each of one spec: sending (`send.rs`), receiving
+//! (`receive.rs`), the `outbox` (`outbox.rs`), one's own key
+//! (`own_key.rs`), the log headroom (`headroom.rs`), the gaps (`gaps.rs`),
+//! the values that move without a message (`sync.rs`) and the status
+//! (`status.rs`) are spec 021's; the peers spec 022's (`peers.rs`); the
+//! message list and the purge spec 023's (`purge.rs`); retirement spec
+//! 024's (`retired.rs`); regeneration spec 025's (`regen.rs`); the peer
+//! limits spec 026's (`limits.rs`); the local names spec 027's
+//! (`local.rs`).
 
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};

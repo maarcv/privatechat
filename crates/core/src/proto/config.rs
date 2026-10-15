@@ -458,14 +458,16 @@ impl Config {
     }
 }
 
-/// Seven words of the list joined by single spaces, drawn with
-/// `random_bytes` (R16).
+/// Seven words of the list joined by single spaces, drawn from the source
+/// of `random_bytes` (R16). The draws are written straight into the array
+/// that wipes them, so no copy of the drawn buffer is left behind.
 ///
 /// # Errors
 ///
 /// `Internal` when libsodium fails.
 pub(crate) fn draw_password() -> Result<Zeroizing<Vec<u8>>, Error> {
-    let draws = Zeroizing::new(crypto::random_bytes::<PASSWORD_DRAW_LEN>()?);
+    let mut draws = Zeroizing::new([0u8; PASSWORD_DRAW_LEN]);
+    crypto::fill_random(draws.as_mut_slice())?;
     password_of(&draws)
 }
 

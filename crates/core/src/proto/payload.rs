@@ -33,8 +33,16 @@ pub(crate) fn is_padded_len(len: usize) -> bool {
 /// The largest `display_name`, in bytes of UTF-8 (R7, R9).
 pub(crate) const MAX_DISPLAY_NAME: usize = 64;
 
-/// `sent_at` is rounded down to the minute (R8).
-const MINUTE_MS: u64 = 60_000;
+/// `sent_at` is rounded down to the minute (R8); the session rounds the
+/// cursor and times its holds by the same minute.
+pub(crate) const MINUTE_MS: u64 = 60_000;
+
+/// The whole minute of `time`: a blob's `sent_at` (R8), the `since` of a
+/// `subscribe` (spec 028-session-sans-io R6) and the step of a cursor
+/// committed alone (spec 021-channel-session R20).
+pub(crate) fn minute_of(time: u64) -> u64 {
+    time.saturating_sub(time % MINUTE_MS)
+}
 
 /// The keys of the payload record, `docs/spec.md` §4 (R6).
 const KEY_TYPE: u8 = 0;

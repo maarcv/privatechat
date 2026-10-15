@@ -49,7 +49,8 @@ fn publishes(session: &mut Session) -> Vec<(ClientRef, Vec<u8>)> {
 }
 
 /// Spec 028, R12: an in-time `ack` → `Delivered` with its `server_id`,
-/// `received_at` and `expires_at`, the time clamped to `now`; a late one → `NotDelivered`; an entry
+/// `received_at` and `expires_at` (`sent_at + ttl_ms`, ADR 0044), the time
+/// clamped to `now`; a late one → `NotDelivered`; an entry
 /// dropped as stale while in flight, its `ack` `Ignored` → nothing; a
 /// second `ack` and an unknown `client_ref` → nothing.
 #[test]
@@ -68,7 +69,7 @@ fn s028_t12_r12_ack_routing() {
         client_ref: on_time,
         server_id: [1; 16],
         received_at: T0 + 200,
-        expires_at: T0 + 200 + DAY_MS,
+        expires_at: T0 + DAY_MS,
     };
     assert_eq!(step.events, [delivered]);
     assert!(step.failed.is_empty());
@@ -91,7 +92,7 @@ fn s028_t12_r12_ack_routing() {
         client_ref: ahead,
         server_id: [5; 16],
         received_at: T0 + 450,
-        expires_at: T0 + 450 + DAY_MS,
+        expires_at: T0 + DAY_MS,
     };
     // Its live sample, a minute off, clears the warning the late `ack`
     // raised.

@@ -8,7 +8,7 @@ use super::{Channel, ClientRef};
 use crate::crypto::{self, Nonce, Signature};
 use crate::error::Error;
 use crate::proto::envelope::{self, ChannelCtx, SenderKey};
-use crate::proto::payload::{Payload, PayloadKind};
+use crate::proto::payload::{Payload, PayloadKind, minute_of};
 use crate::storage::state::MAX_OUTBOX;
 use crate::storage::state::items::{OutboxEntry, OutboxKind};
 use crate::storage::{Content, LogEntry, LogRecord, Message, StoreError};
@@ -19,15 +19,6 @@ const MAX_ORDINARY_OUTBOX: usize = MAX_OUTBOX - 1;
 
 /// A send counter with no value left (spec 020-store-files).
 const EXHAUSTED: u64 = u64::MAX;
-
-/// `sent_at` is a whole minute (spec 013-wire-message R8).
-const MINUTE_MS: u64 = 60_000;
-
-/// The whole minute of `now`, a blob's `sent_at` (spec 013-wire-message
-/// R8).
-pub(super) fn minute_of(now: u64) -> u64 {
-    now.saturating_sub(now % MINUTE_MS)
-}
 
 impl Channel {
     /// Seals `body` with the next counter and commits the counter, the

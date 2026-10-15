@@ -109,15 +109,22 @@ impl Session {
     fn report(&mut self, channel: &Channel, outcome: Outcome, step: &mut Step) {
         let channel_id = channel.config().channel_id();
         let client_ref = outcome.client_ref;
-        match (outcome.outcome, outcome.server_id, outcome.received_at) {
-            (AckOutcome::Delivered, Some(server_id), Some(received_at)) => {
+        match (
+            outcome.outcome,
+            outcome.server_id,
+            outcome.received_at,
+            outcome.sent_at,
+        ) {
+            // The row leaves at `sent_at + ttl_ms` (ADR 0044), as the
+            // `Message` read back (spec 023-ttl-purge R1).
+            (AckOutcome::Delivered, Some(server_id), Some(received_at), Some(sent_at)) => {
                 let ttl = ttl_ms(channel.config().ttl_seconds());
                 step.events.push(Event::Delivered {
                     channel: channel_id,
                     client_ref,
                     server_id,
                     received_at,
-                    expires_at: received_at.saturating_add(ttl),
+                    expires_at: sent_at.saturating_add(ttl),
                 });
             }
             (AckOutcome::NotDelivered, ..) => {

@@ -10,7 +10,7 @@ use crate::proto::envelope;
 use crate::proto::payload::{Payload, PayloadKind};
 use crate::session::channel::{Channel, ClientRef};
 use crate::storage::{LogEntry, StoreError};
-use crate::testing::{Faults, MemoryStore};
+use crate::testing::{Faults, MemoryStore, state_eq};
 
 /// A `key_retired` sealed with this channel's own key elsewhere.
 fn own_key_retired(channel: &Channel, counter: u64, sent_at: u64) -> Vec<u8> {
@@ -155,20 +155,26 @@ fn s021_t19_r19_retiring_and_failures() {
         assert_eq!(channel.check_own_key(&thief, NOW, NOW), Ok(false));
         assert_eq!(counters(&channel), kept, "{sent_at}");
     }
-    let (mut channel, _, faults, old_seed, _) = retiring();
+    let (mut channel, handle, faults, old_seed, _) = retiring();
     let thief = text_from(&channel, old_seed, 1_000, NOW);
+    let before = channel.state.duplicate();
     faults.fail_commits(true);
     let result = channel.check_own_key(&thief, NOW, NOW);
     assert_eq!(result, Err(Error::Store(StoreError::Io)));
     assert_eq!(counters(&channel), [300, 301, u64::MAX]);
+    assert!(state_eq(&channel.state, &before));
+    assert!(state_eq(&reopened(&handle).state, &before));
 
-    let (mut channel, _, faults, _) = stalled();
+    let (mut channel, handle, faults, _) = stalled();
     let foreign = own_text(&channel, 12, NOW);
+    let before = channel.state.duplicate();
     faults.fail_commits(true);
     let result = channel.check_own_key(&foreign, NOW, NOW);
     assert_eq!(result, Err(Error::Store(StoreError::Io)));
     assert!(!channel.status().own_key_used_elsewhere);
     assert_eq!(counters(&channel), [10, 11]);
+    assert!(state_eq(&channel.state, &before));
+    assert!(state_eq(&reopened(&handle).state, &before));
     faults.fail_commits(false);
     assert_eq!(channel.check_own_key(&foreign, NOW, NOW), Ok(true));
     assert!(channel.status().own_key_used_elsewhere);

@@ -655,6 +655,31 @@ fn s011_t16_r16_export_draws_the_password() {
     assert!(other_password != password);
     assert_ne!(file[SALT_RANGE], other_file[SALT_RANGE]);
     assert_ne!(file[NONCE_RANGE], other_file[NONCE_RANGE]);
+    // Every byte of the 14 is drawn, each pair on its own: across 64
+    // passwords each of the 77 index bits is seen both set and clear (false
+    // failure about 77 · 2^-63), and every two positions differ in some
+    // password (about 21 · 2^-704).
+    let list: Vec<&str> = wordlist::WORDS.lines().collect();
+    let (mut ones, mut zeros) = ([0u16; 7], [0u16; 7]);
+    let mut apart = [[false; 7]; 7];
+    for _ in 0..64 {
+        let drawn = draw_password().unwrap();
+        let text = core::str::from_utf8(&drawn).unwrap();
+        let indices: Vec<u16> = text
+            .split(' ')
+            .map(|word| u16::try_from(list.iter().position(|w| *w == word).unwrap()).unwrap())
+            .collect();
+        for (position, index) in indices.iter().enumerate() {
+            ones[position] |= index;
+            zeros[position] |= !index & 0x7ff;
+            for (other, differs) in apart[position].iter_mut().enumerate() {
+                *differs |= other == position || indices[other] != *index;
+            }
+        }
+    }
+    assert_eq!(ones, [0x7ff; 7]);
+    assert_eq!(zeros, [0x7ff; 7]);
+    assert_eq!(apart, [[true; 7]; 7]);
     for bit in 0..11 {
         let index = 1u16 << bit;
         let mut draws = [0u8; 14];

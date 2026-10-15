@@ -4,12 +4,11 @@
 //! only for that one message (R7); its echoes are spec 021's step 5 (R3).
 
 use super::outbox::old_key_waits;
-use super::send::minute_of;
 use super::{AckOutcome, Channel, ClientRef, OldKey, Outcome};
 use crate::crypto::{self, Nonce, Secret, Signature};
 use crate::error::Error;
 use crate::proto::envelope::{self, ChannelCtx, KEY_RETIRED_COUNTER, SenderKey};
-use crate::proto::payload::{Payload, PayloadKind};
+use crate::proto::payload::{Payload, PayloadKind, minute_of};
 use crate::storage::state::MAX_OLD_KEYS;
 use crate::storage::state::items::{self, OutboxEntry, OutboxKind};
 use crate::storage::{ChannelState, StoreError};

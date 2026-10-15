@@ -5,9 +5,7 @@
 
 use super::Channel;
 use crate::error::Error;
-
-/// The cursor is committed alone once per minute of its value.
-const CURSOR_STEP_MS: u64 = 60_000;
+use crate::proto::payload::minute_of;
 
 /// `synced_at` is committed alone at most once per hour.
 const SYNCED_AT_STEP_MS: u64 = 3_600_000;
@@ -75,10 +73,10 @@ impl Channel {
             || self.truncated_at != self.state.truncated_at
     }
 
-    /// The cursor's minute differs from the committed one's.
+    /// The cursor's minute differs from the committed one's: the cursor is
+    /// committed alone once per minute of its value.
     fn cursor_due(&self) -> bool {
-        let minute = |cursor: Option<u64>| cursor.map(|v| v.saturating_sub(v % CURSOR_STEP_MS));
-        minute(self.cursor) != minute(self.state.cursor)
+        self.cursor.map(minute_of) != self.state.cursor.map(minute_of)
     }
 
     /// The committed `synced_at` is absent, ahead of `now`, or older than

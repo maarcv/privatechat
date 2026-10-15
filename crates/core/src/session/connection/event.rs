@@ -20,8 +20,15 @@ pub enum Event {
         /// What it holds.
         received: Received,
     },
-    /// A push met a full log: the channel takes no more on this
-    /// connection, and asks for one once there is room (R10).
+    /// The channel's storage failed. From the session, a push met a full
+    /// log: the channel takes no more on this connection, and asks for
+    /// one once there is room (R10). From the `Device` (spec 027-core-api
+    /// R14, R15), its store failed and was reopened, the channel now
+    /// `write_failed`, or the reopen failed and the channel is `broken`.
+    /// Either way the client re-reads `channels()`, `status()` and the
+    /// channel's `messages`, `peers`, `channel_status` and `gaps`, since
+    /// the stored state may hold a commit whose call returned an error
+    /// (spec 027-core-api R14).
     StorageFailed {
         /// The channel.
         channel: [u8; 16],
@@ -44,7 +51,8 @@ pub enum Event {
         server_id: [u8; 16],
         /// When it is listed, clamped (spec 021-channel-session R17).
         received_at: u64,
-        /// When the server drops it: `received_at + ttl_ms`.
+        /// When its row leaves the screen: `sent_at + ttl_ms`, as the
+        /// `Message` of spec 023-ttl-purge R1 (ADR 0044).
         expires_at: u64,
     },
     /// An entry left the `outbox` unsent: stale, overtaken or refused
