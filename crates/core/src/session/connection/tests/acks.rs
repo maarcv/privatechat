@@ -531,20 +531,21 @@ fn s028_t17_r17_outgoing_drains() {
     let second = channels[0].encrypt("two", None, T0).unwrap();
     let mut session = subscribed(&mut channels, T0);
     let frames = session.outgoing();
-    let kinds: Vec<String> = frames
+    // Each frame's kind, with the whole `client_ref` of a publish.
+    let kinds: Vec<(&str, Option<ClientRef>)> = frames
         .iter()
         .map(|frame| match Frame::decode(frame).unwrap() {
-            Frame::Subscribe { .. } => "subscribe".to_owned(),
-            Frame::Publish { client_ref, .. } => format!("{:?}", ClientRef { bytes: client_ref }),
-            _ => "other".to_owned(),
+            Frame::Subscribe { .. } => ("subscribe", None),
+            Frame::Publish { client_ref, .. } => ("publish", Some(ClientRef { bytes: client_ref })),
+            _ => ("other", None),
         })
         .collect();
     assert_eq!(
         kinds,
         [
-            "subscribe".to_owned(),
-            format!("{first:?}"),
-            format!("{second:?}")
+            ("subscribe", None),
+            ("publish", Some(first)),
+            ("publish", Some(second))
         ]
     );
     assert!(session.outgoing().is_empty());

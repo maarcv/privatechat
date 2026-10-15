@@ -40,6 +40,20 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AZ45 | The SVG renderer's intermediate buffers and each `qr://` response body are further unzeroed copies (B) | Far-fetched | None: a memory read of the device is outside the model; §8 promises non-retention |
 | AZ46 | `Route`'s `Debug` prints the port (B) | Far-fetched | None: no rule asks to hide it, and a port names no server |
 
+**Round 3**, on the whole change. Pass C ran 18 mutants of the new impls and of the test's oracle: 13 killed, 4 survived (AZ51–AZ53), 1 far-fetched (a `ClientRef` printing its last bytes reversed, a reordered spelling like AZ36's `{:02x?}`). No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ47 | R20 said "no name" while `BrokenChannel`'s `Debug` shows its directory name in full (A, B) | Low | R20 and the doc comment: no channel or display name; the directory's keyed-hash name shown |
+| AZ48 | 027's Context cited the host's mutex without ADR 0041, which moved it there; ADR 0037 still says the bindings wrap it (A) | Low | ADR 0041 in the header and the Context |
+| AZ49 | 041 R5 carries the verification QR as a string, citing spec 014 R3, which says it never crosses as one (A, B) | Low | 014 R3 speaks of the core boundary; past it a binding may carry this public text as a string |
+| AZ50 | 040 R3 credited only spec 014 with rejecting a bad QR; the invitation's is spec 011's (A) | Low | Both cited |
+| AZ51 | `s028_t17_r17_outgoing_drains` compared `client_ref`s through their `Debug`, now 4 bytes: a publish with the right prefix and a wrong tail passed (B) | Low | The values compared |
+| AZ52 | `Message`'s `stranger` was never set in the test, so a full `claims_name_of` or the 4 words passed (C) | Low | Set, its key and words refused |
+| AZ53 | The oracle refused bytes 4–8 only; bytes 8–12 of a `server_id` passed (C) | Low | Every 4-byte window past the prefix refused, in hex and in decimal |
+| AZ54 | The `proxied` flag's value was never checked (C) | Far-fetched | Asserted anyway |
+| AZ55 | The prefix check chose its records by position (C) | Far-fetched | Named records |
+
 ## Audit AY
 
 **2026-10-14 — Audit AY, the code audit of slice (f) of spec 027-core-api (branch `027-exit`): the phase 2 exit test (R23); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit Y's findings already took AY1–AY18, so this audit's are numbered from AY19. No production defect; the test was weaker than R23's wording. Pass C ran 20 mutants, of the production code the test guards and of the test: 11 killed, 5 equivalent here, 4 survived, each killed below.

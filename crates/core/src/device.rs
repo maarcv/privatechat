@@ -52,7 +52,8 @@ pub struct DeviceStatus {
 }
 
 /// A channel directory that could not be opened (R1, R3); its `Debug`
-/// shows the `channel_id`'s prefix and no name (AGENTS 19).
+/// shows the `channel_id`'s prefix and no channel name, and the directory's
+/// name in full, a keyed hash already on disk (AGENTS 19).
 #[derive(Clone, PartialEq, Eq)]
 pub struct BrokenChannel {
     /// The directory name, 32 lowercase hex characters.

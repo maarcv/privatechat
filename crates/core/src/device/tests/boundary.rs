@@ -6,7 +6,7 @@ use super::{Fixture, NOW};
 use crate::device::{BrokenChannel, ChannelInfo, ConnectionPlan, Device, Route, SettingsView};
 use crate::error::Error;
 use crate::session::channel::{
-    ChannelStatus, ClientRef, Message, MessageContent, Received, Sender,
+    ChannelStatus, ClientRef, Message, MessageContent, Received, Sender, Stranger,
 };
 use crate::session::frames::Frame;
 use crate::storage::StoreError;
@@ -149,6 +149,7 @@ fn s027_t20_r20_debug_redacted() {
     let pk: [u8; 32] = bytes(0x70);
     let sig: [u8; 64] = bytes(0x90);
     let nonce: [u8; 32] = bytes(0xd0);
+    let claimed: [u8; 32] = bytes(0xf0);
     let status = ChannelStatus {
         own_key_used_elsewhere: false,
         read_only: false,
@@ -207,7 +208,11 @@ fn s027_t20_r20_debug_redacted() {
         expires_at: NOW,
         content: content(),
         delivery: None,
-        stranger: None,
+        stranger: Some(Stranger {
+            short: vec!["stranger word".to_owned()],
+            claims_name_of: Some(claimed),
+            claims_own_name: false,
+        }),
     };
     let received = Received {
         server_id,
@@ -266,12 +271,21 @@ fn s027_t20_r20_debug_redacted() {
         format!("{:?}", ClientRef { bytes: client_ref }),
     ];
     shown.extend(frames.iter().map(|frame| format!("{frame:?}")));
-    // Bytes 4 to 8 of each array, as hex and as a derived `Debug` prints
-    // them: what a printed prefix of 4 bytes never holds.
-    let tails: Vec<(String, String)> = [&channel[..], &server_id, &client_ref, &pk, &sig, &nonce]
+    // Every 4 bytes of each array but the first 4, as hex and as a derived
+    // `Debug` prints them: what a printed prefix never holds.
+    let arrays = [
+        &channel[..],
+        &server_id,
+        &client_ref,
+        &pk,
+        &sig,
+        &nonce,
+        &claimed,
+    ];
+    let tails: Vec<(String, String)> = arrays
         .iter()
-        .map(|array| {
-            let tail = &array[4..8];
+        .flat_map(|array| array.windows(4).skip(1))
+        .map(|tail| {
             let hex = tail.iter().map(|byte| format!("{byte:02x}")).collect();
             let decimal = tail
                 .iter()
@@ -295,6 +309,7 @@ fn s027_t20_r20_debug_redacted() {
         "sender name",
         "sealed blob",
         "free text",
+        "stranger word",
     ];
     for text in &shown {
         for (hex, decimal) in &tails {
@@ -309,11 +324,17 @@ fn s027_t20_r20_debug_redacted() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    // The records that name a channel show its prefix: info, plan, broken.
-    for text in &shown[..4] {
-        if !text.starts_with("Route") {
-            assert!(text.contains(&prefix), "no prefix in {text}");
-        }
+    // The records that name a channel show its prefix.
+    for text in [
+        format!("{info:?}"),
+        format!("{plan:?}"),
+        format!("{broken:?}"),
+    ] {
+        assert!(text.contains(&prefix), "no prefix in {text}");
+    }
+    // The records that hide the proxy say whether one is set.
+    for text in [format!("{route:?}"), format!("{settings:?}")] {
+        assert!(text.contains("proxied: true"), "no proxy flag in {text}");
     }
 }
 
