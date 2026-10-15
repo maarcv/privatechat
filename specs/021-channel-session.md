@@ -91,10 +91,17 @@ The peers are spec 022-peers-tofu's, the message list 023-ttl-purge's, a receive
 ## Interface
 
 ```
-crates/core/src/session/channel.rs          Channel, create, open_stored, encrypt, acked, outbox, cursor, status, gaps, leave
-crates/core/src/session/receive.rs          the pipeline of R9–R12
-crates/core/src/session/own_key.rs          R13–R15, R19
-crates/core/src/session/channel/tests.rs    s021_* tests
+crates/core/src/session/channel.rs                Channel, its memory, create, open_stored and the one commit (R1, R2, R4–R6, R21)
+crates/core/src/session/channel/send.rs           encrypt (R7, R8, R33)
+crates/core/src/session/channel/headroom.rs       the log headroom and its compaction (R18)
+crates/core/src/session/channel/outbox.rs         acked, outbox, expire_outbox, abandon (R15–R17, R22, R23, R31)
+crates/core/src/session/channel/receive.rs        the pipeline of R9–R12 and the cursor (R3, R20)
+crates/core/src/session/channel/own_key.rs        R13, R14, R19
+crates/core/src/session/channel/gaps.rs           the gap count and the history truncation (R24)
+crates/core/src/session/channel/sync.rs           synced, flush, probe: the values that move without a message (R20)
+crates/core/src/session/channel/status.rs         cursor, synced_at, status, gaps, the clock sample and leave (R25, R27)
+crates/core/src/session/channel/tests.rs          s021_* tests of the memory and the commit
+crates/core/src/session/channel/tests/            s021_* tests, one file per area: edges, extremes, gaps, headroom, outbox, own_key, property, receive, send, stall, status, sync
 crates/core/fuzz/fuzz_targets/channel_decrypt.rs
 ```
 
@@ -125,7 +132,7 @@ impl Channel {   // pub(crate): reached through Device (spec 027-core-api)
     pub(crate) fn check_own_key(&mut self, blob: &[u8], received_at: u64, now: u64) -> Result<bool, Error>;
     pub(crate) fn acked(&mut self, client_ref: ClientRef, server_id: [u8; 16], received_at: u64, now: u64) -> Result<Outcome, Error>;
     pub(crate) fn outbox(&mut self, now: u64, in_flight: &[ClientRef], withhold_current: bool) -> Result<OutboxStep, Error>;
-    pub(crate) fn expire_outbox(&mut self, now: u64, in_flight: &[ClientRef]) -> Result<OutboxStep, Error>;   // `publish` always empty   // with sent_at
+    pub(crate) fn expire_outbox(&mut self, now: u64, in_flight: &[ClientRef]) -> Result<OutboxStep, Error>;   // `publish` always empty
     pub(crate) fn abandon(&mut self, client_ref: ClientRef) -> Result<Option<u64>, Error>;   // the removed entry's sent_at
     pub(crate) fn synced(&mut self, now: u64) -> Result<(), Error>;
     pub(crate) fn take_outcomes(&mut self) -> Vec<Outcome>;
@@ -159,7 +166,7 @@ impl Channel {   // pub(crate): reached through Device (spec 027-core-api)
 - R10's display-expiry check: a message that would expire before it is shown is not consumed, so it cannot move `max_counter` and hide a deletion from the gap signal while never being shown. Its life runs from its signed `sent_at`, which no server can change (ADR 0044): a server that keeps a blob past its TTL cannot revive it for a member with no `max_counter` for its sender.
 - A message is shown for `ttl_ms` from its `sent_at`, not from its arrival: one that waited in the `outbox` or on the server for `d` lives `ttl_ms − d` on a receiver, and a reader who connects more than a TTL after it was written misses it although the server still holds it. Documented; the TTL means "gone a TTL after it was written" (ADR 0044).
 - "Counter before blob" (§4): R7 commits `send_counter + 1` before the blob exists outside the core, so no crash can make two blobs share a counter, and so no (`mk`, nonce) pair repeats.
-- The own-key alert decides by the signature this device kept, never by a counter the thief also controls (ADR 0029). R15 keeps each signature one TTL longer than any receiver accepts the blob; those of a retired key stay compared until their purge and can match nothing, since a blob of that key stops at step 5 (ADR 0034). R19 applies the same retention rule under a full log, so a replay of an old genuine blob raises no false alarm there either.
+- The own-key alert decides by the signature this device kept, never by a counter the thief also controls (ADR 0029). R15 keeps each signature one TTL longer than any receiver accepts the blob, which covers a clock stepped back, not one set ahead by more than `ttl_ms + 360 000` and then corrected: the purge of spec 023-ttl-purge drops the signature early and a replay of the genuine blob raises a false alert (spec 023-ttl-purge Security, documented residual); those of a retired key stay compared until their purge and can match nothing, since a blob of that key stops at step 5 (ADR 0034). R19 applies the same retention rule under a full log, so a replay of an old genuine blob raises no false alarm there either.
 - An echo acknowledges nothing (R13): delivery is known only from an `ack`, and a lost `ack` costs one republished copy, which counts against the channel's quota and which every receiver rejects as `Replay`. When the entry goes stale before the reconnect, it is reported not delivered although the server stored it, and a resend shows the text twice. Documented residual.
 - A stale message moves nothing but the cursor (ADR 0027): R10 and R14.
 - The cursor stays in the server's time and is clamped to the local clock (R20), so a server that sends a `received_at` in the far future cannot push it past every later message, and a device clock ahead of the server cannot skip what the server receives next, nor what it still holds (R20's exception for pushes already expired by the local clock). A cursor-only commit happens at most once a minute, which bounds what a stream of junk pushes can make the device write.
@@ -286,3 +293,4 @@ Decided with the human reviewer on 2026-09-25 (recommendations accepted, `docs/a
 - 2026-10-13 Security names the exceptions to the no-oracle rule that `docs/spec.md` §4 names after spec 028-session-sans-io R18 (audit AQ round 4, `docs/audit-log.md`)
 - 2026-10-14 amended after audit AT of spec 027-core-api (`docs/audit-log.md`): `outbox_ref` names an entry of the current key only (R33, T33), so that a `send` whose commit did not stand after a regeneration is not taken for one that did
 - 2026-10-15 amended after audit AZ (`docs/audit-log.md`): `AckOutcome` is `pub(crate)`, since no `pub` signature reaches it
+- 2026-10-15 amended after audit BB (`docs/audit-log.md`): the Interface lists the files under `session/channel/` and drops a duplicate comment on `expire_outbox` (BB-A2-1); the Security note on R15 names the clock set ahead and then corrected (BB-B2-2)
