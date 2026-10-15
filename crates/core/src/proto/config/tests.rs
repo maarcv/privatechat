@@ -655,6 +655,19 @@ fn s011_t16_r16_export_draws_the_password() {
     assert!(other_password != password);
     assert_ne!(file[SALT_RANGE], other_file[SALT_RANGE]);
     assert_ne!(file[NONCE_RANGE], other_file[NONCE_RANGE]);
+    // Every pair of the 14 bytes is drawn: across four passwords each
+    // position takes at least two words (false failure about 2048^-3 per
+    // position).
+    let more = [draw_password().unwrap(), draw_password().unwrap()];
+    let drawn: Vec<Vec<&str>> = [&password, &other_password, &more[0], &more[1]]
+        .into_iter()
+        .map(|bytes| core::str::from_utf8(bytes).unwrap().split(' ').collect())
+        .collect();
+    for position in 0..7 {
+        let first = drawn[0][position];
+        let varies = drawn.iter().any(|words| words[position] != first);
+        assert!(varies, "position {position}");
+    }
     for bit in 0..11 {
         let index = 1u16 << bit;
         let mut draws = [0u8; 14];

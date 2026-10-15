@@ -460,8 +460,7 @@ impl Config {
 
 /// Seven words of the list joined by single spaces, drawn from the source
 /// of `random_bytes` (R16). The draws are written straight into the array
-/// that wipes them, so no copy of the bits of the password is left behind
-/// on the stack.
+/// that wipes them, so no copy of the drawn buffer is left behind.
 ///
 /// # Errors
 ///
