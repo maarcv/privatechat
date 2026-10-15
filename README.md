@@ -10,7 +10,7 @@ An end-to-end encrypted group chat where the server is just a mailbox: it has no
 - Expired messages are deleted on the server and on the client according to the channel TTL.
 - Every message is authenticated: the receiver knows it comes from the same key it had already labelled.
 - No global identity: a user's key is different in every channel.
-- The server cannot tell by key which member writes: it sees opaque blobs per channel. It does see which connection sends each one, and without Tor its address: with or without Tor, messages sent over one connection come from one device and messages sent over two connections open at the same time come from two devices, so members online together are told apart.
+- The server cannot tell by key which member writes: it sees opaque blobs per channel. It does see which connection sends each one, and without Tor its address: with or without Tor, messages sent over one connection come from one device and messages sent over two connections open at the same time on one channel come from two devices, so members online together are told apart.
 
 ## What it does not promise
 
