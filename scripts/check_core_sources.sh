@@ -7,11 +7,29 @@ set -euo pipefail
 self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")/.."
 
-# The names in the list: the first string of each tuple, on the tuple's line or alone on
-# the next one when rustfmt breaks it.
+# Each tuple of the list as `name path`: its name and the path of its `include_str!`,
+# whether the tuple sits on one line or rustfmt breaks it.
+pairs() {
+  awk '/^const SOURCES/,/^];/' "$1/crypto/tests.rs" | tr '\n' ' ' |
+    grep -oE '\( *"[^"]+", *include_str!\("[^"]+"\),? *\)' |
+    sed -E 's/^\( *"([^"]+)", *include_str!\("([^"]+)"\).*$/\1 \2/'
+}
+
+# The names in the list.
 listed() {
-  awk '/^const SOURCES/,/^];/' "$1/crypto/tests.rs" |
-    sed -nE 's/^ *\(?"([^"]+\.rs)",.*$/\1/p' | sort
+  pairs "$1" | cut -d' ' -f1 | sort
+}
+
+# The tuples whose `include_str!`, resolved from `crypto/`, reads another file than the
+# name says: `../x.rs` reads `x.rs`, `x.rs` reads `crypto/x.rs`.
+mismatched() {
+  local name path
+  pairs "$1" | while read -r name path; do
+    case "$path" in
+      ../*) [ "${path#../}" = "$name" ] || echo "mismatched: $name reads $path" ;;
+      *) [ "crypto/$path" = "$name" ] || echo "mismatched: $name reads $path" ;;
+    esac
+  done
 }
 
 tracked() {
@@ -19,7 +37,7 @@ tracked() {
 }
 
 # One line per difference: `missing` names a tracked file the list lacks, `stale` a listed
-# file that is not tracked.
+# file that is not tracked, `mismatched` a tuple that reads another file than it names.
 differences() {
   local src="$1" tmp
   tmp="$(mktemp -d)"
@@ -27,11 +45,13 @@ differences() {
   tracked "$src" > "$tmp/tracked"
   comm -13 "$tmp/listed" "$tmp/tracked" | sed 's/^/missing: /'
   comm -23 "$tmp/listed" "$tmp/tracked" | sed 's/^/stale: /'
+  mismatched "$src"
   rm -rf "$tmp"
 }
 
 # Spec 010, T01: the check passes on a complete list and fails on a missing or a stale entry,
-# whether the tuple sits on one line or rustfmt breaks it.
+# or on a name paired with another file, whether the tuple sits on one line or rustfmt
+# breaks it.
 s010_t01_r01_sources_list_complete() {
   local tmp
   tmp="$(mktemp -d)"
@@ -62,6 +82,17 @@ s010_t01_r01_sources_list_complete() {
   case "$(differences "$tmp/src")" in
     "stale: gone.rs") ;;
     *) echo "check_core_sources: the self-test misses a stale entry"; return 1 ;;
+  esac
+  write_list '    ("crypto/tests.rs", include_str!("tests.rs")),' '    ("lib.rs", include_str!("../a/deep.rs")),' \
+             '    (' '        "a/deep.rs",' '        include_str!("../a/deep.rs"),' '    ),'
+  case "$(differences "$tmp/src")" in
+    "mismatched: lib.rs reads ../a/deep.rs") ;;
+    *) echo "check_core_sources: the self-test misses a mismatched pair"; return 1 ;;
+  esac
+  write_list '    ("crypto/tests.rs", include_str!("../tests.rs")),' "${complete[@]:1}"
+  case "$(differences "$tmp/src")" in
+    "mismatched: crypto/tests.rs reads ../tests.rs") ;;
+    *) echo "check_core_sources: the self-test misses a mismatched pair in crypto/"; return 1 ;;
   esac
   # The whole script, not only its comparison, fails on such a tree.
   if "$self" "$tmp/src" > /dev/null; then
