@@ -31,6 +31,7 @@ cargo build --workspace --all-targets
 cargo test --workspace
 cargo deny --all-features check -D checksum-mismatch
 scripts/check_layout.sh
+scripts/check_core_sources.sh
 scripts/check_store_io.sh
 (cd crates/store/tests/golden/v1 && shasum -a 256 -c SHA256SUMS)
 scripts/doc_lint.sh

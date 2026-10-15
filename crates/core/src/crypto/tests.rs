@@ -16,51 +16,94 @@ use super::{
 use crate::vectors::{self, Kind};
 
 /// Every `.rs` file of the crate. `core` does no I/O (AGENTS 10), so the test
-/// cannot walk the directory: a new file is added to this list by hand.
-const SOURCES: [(&str, &str); 69] = [
-    ("lib.rs", include_str!("../lib.rs")),
+/// cannot walk the directory: a new file is added to this list by hand, in
+/// the order of `git ls-files`, and `scripts/check_core_sources.sh` fails CI
+/// when the list and the tracked files differ.
+const SOURCES: [(&str, &str); 123] = [
     ("crypto.rs", include_str!("../crypto.rs")),
     ("crypto/ffi.rs", include_str!("ffi.rs")),
     ("crypto/secret.rs", include_str!("secret.rs")),
     ("crypto/tests.rs", include_str!("tests.rs")),
-    ("vectors.rs", include_str!("../vectors.rs")),
-    ("vectors/tests.rs", include_str!("../vectors/tests.rs")),
+    ("device.rs", include_str!("../device.rs")),
+    ("device/channels.rs", include_str!("../device/channels.rs")),
+    ("device/dispatch.rs", include_str!("../device/dispatch.rs")),
+    ("device/plan.rs", include_str!("../device/plan.rs")),
+    (
+        "device/plan/tests.rs",
+        include_str!("../device/plan/tests.rs"),
+    ),
+    ("device/preview.rs", include_str!("../device/preview.rs")),
+    ("device/recovery.rs", include_str!("../device/recovery.rs")),
+    ("device/routing.rs", include_str!("../device/routing.rs")),
+    ("device/settings.rs", include_str!("../device/settings.rs")),
+    ("device/tests.rs", include_str!("../device/tests.rs")),
+    (
+        "device/tests/boundary.rs",
+        include_str!("../device/tests/boundary.rs"),
+    ),
+    (
+        "device/tests/channels.rs",
+        include_str!("../device/tests/channels.rs"),
+    ),
+    (
+        "device/tests/dispatch.rs",
+        include_str!("../device/tests/dispatch.rs"),
+    ),
+    (
+        "device/tests/plan.rs",
+        include_str!("../device/tests/plan.rs"),
+    ),
+    (
+        "device/tests/preview.rs",
+        include_str!("../device/tests/preview.rs"),
+    ),
+    (
+        "device/tests/recovery.rs",
+        include_str!("../device/tests/recovery.rs"),
+    ),
+    (
+        "device/tests/retries.rs",
+        include_str!("../device/tests/retries.rs"),
+    ),
+    (
+        "device/tests/routing.rs",
+        include_str!("../device/tests/routing.rs"),
+    ),
+    (
+        "device/tests/scripted.rs",
+        include_str!("../device/tests/scripted.rs"),
+    ),
+    (
+        "device/tests/sessions.rs",
+        include_str!("../device/tests/sessions.rs"),
+    ),
+    (
+        "device/tests/settings.rs",
+        include_str!("../device/tests/settings.rs"),
+    ),
+    (
+        "device/tests/tick.rs",
+        include_str!("../device/tests/tick.rs"),
+    ),
+    ("device/tick.rs", include_str!("../device/tick.rs")),
     ("error.rs", include_str!("../error.rs")),
+    ("error/tests.rs", include_str!("../error/tests.rs")),
     ("fuzz_entry.rs", include_str!("../fuzz_entry.rs")),
     (
         "fuzz_entry/tests.rs",
         include_str!("../fuzz_entry/tests.rs"),
     ),
-    ("error/tests.rs", include_str!("../error/tests.rs")),
+    ("lib.rs", include_str!("../lib.rs")),
     ("proto.rs", include_str!("../proto.rs")),
+    ("proto/auth.rs", include_str!("../proto/auth.rs")),
     ("proto/config.rs", include_str!("../proto/config.rs")),
-    (
-        "proto/config/url.rs",
-        include_str!("../proto/config/url.rs"),
-    ),
     (
         "proto/config/tests.rs",
         include_str!("../proto/config/tests.rs"),
     ),
-    ("proto/record.rs", include_str!("../proto/record.rs")),
     (
-        "proto/record/test_schema.rs",
-        include_str!("../proto/record/test_schema.rs"),
-    ),
-    (
-        "proto/record/tests.rs",
-        include_str!("../proto/record/tests.rs"),
-    ),
-    ("proto/wordlist.rs", include_str!("../proto/wordlist.rs")),
-    ("proto/keys.rs", include_str!("../proto/keys.rs")),
-    (
-        "proto/keys/tests.rs",
-        include_str!("../proto/keys/tests.rs"),
-    ),
-    ("proto/header.rs", include_str!("../proto/header.rs")),
-    (
-        "proto/header/tests.rs",
-        include_str!("../proto/header/tests.rs"),
+        "proto/config/url.rs",
+        include_str!("../proto/config/url.rs"),
     ),
     ("proto/envelope.rs", include_str!("../proto/envelope.rs")),
     (
@@ -79,54 +122,92 @@ const SOURCES: [(&str, &str); 69] = [
         "proto/fingerprint/tests.rs",
         include_str!("../proto/fingerprint/tests.rs"),
     ),
-    ("storage.rs", include_str!("../storage.rs")),
-    ("storage/tests.rs", include_str!("../storage/tests.rs")),
-    ("storage/state.rs", include_str!("../storage/state.rs")),
+    ("proto/header.rs", include_str!("../proto/header.rs")),
     (
-        "storage/state/tests.rs",
-        include_str!("../storage/state/tests.rs"),
+        "proto/header/tests.rs",
+        include_str!("../proto/header/tests.rs"),
     ),
-    ("storage/log.rs", include_str!("../storage/log.rs")),
+    ("proto/keys.rs", include_str!("../proto/keys.rs")),
     (
-        "storage/log/tests.rs",
-        include_str!("../storage/log/tests.rs"),
+        "proto/keys/tests.rs",
+        include_str!("../proto/keys/tests.rs"),
     ),
-    (
-        "storage/settings.rs",
-        include_str!("../storage/settings.rs"),
-    ),
-    (
-        "storage/settings/tests.rs",
-        include_str!("../storage/settings/tests.rs"),
-    ),
-    (
-        "storage/state/items.rs",
-        include_str!("../storage/state/items.rs"),
-    ),
-    ("testing.rs", include_str!("../testing.rs")),
-    (
-        "testing/builders.rs",
-        include_str!("../testing/builders.rs"),
-    ),
-    ("testing/compare.rs", include_str!("../testing/compare.rs")),
-    ("testing/faults.rs", include_str!("../testing/faults.rs")),
-    ("testing/memory.rs", include_str!("../testing/memory.rs")),
-    ("testing/tests.rs", include_str!("../testing/tests.rs")),
     ("proto/payload.rs", include_str!("../proto/payload.rs")),
     (
         "proto/payload/tests.rs",
         include_str!("../proto/payload/tests.rs"),
     ),
-    ("session.rs", include_str!("../session.rs")),
-    ("session/expiry.rs", include_str!("../session/expiry.rs")),
-    ("session/channel.rs", include_str!("../session/channel.rs")),
+    ("proto/record.rs", include_str!("../proto/record.rs")),
     (
-        "session/channel/tests.rs",
-        include_str!("../session/channel/tests.rs"),
+        "proto/record/test_schema.rs",
+        include_str!("../proto/record/test_schema.rs"),
     ),
+    (
+        "proto/record/tests.rs",
+        include_str!("../proto/record/tests.rs"),
+    ),
+    ("proto/wordlist.rs", include_str!("../proto/wordlist.rs")),
+    ("session.rs", include_str!("../session.rs")),
+    ("session/channel.rs", include_str!("../session/channel.rs")),
     (
         "session/channel/gaps.rs",
         include_str!("../session/channel/gaps.rs"),
+    ),
+    (
+        "session/channel/headroom.rs",
+        include_str!("../session/channel/headroom.rs"),
+    ),
+    (
+        "session/channel/limits.rs",
+        include_str!("../session/channel/limits.rs"),
+    ),
+    (
+        "session/channel/local.rs",
+        include_str!("../session/channel/local.rs"),
+    ),
+    (
+        "session/channel/outbox.rs",
+        include_str!("../session/channel/outbox.rs"),
+    ),
+    (
+        "session/channel/own_key.rs",
+        include_str!("../session/channel/own_key.rs"),
+    ),
+    (
+        "session/channel/peers.rs",
+        include_str!("../session/channel/peers.rs"),
+    ),
+    (
+        "session/channel/purge.rs",
+        include_str!("../session/channel/purge.rs"),
+    ),
+    (
+        "session/channel/receive.rs",
+        include_str!("../session/channel/receive.rs"),
+    ),
+    (
+        "session/channel/regen.rs",
+        include_str!("../session/channel/regen.rs"),
+    ),
+    (
+        "session/channel/retired.rs",
+        include_str!("../session/channel/retired.rs"),
+    ),
+    (
+        "session/channel/send.rs",
+        include_str!("../session/channel/send.rs"),
+    ),
+    (
+        "session/channel/status.rs",
+        include_str!("../session/channel/status.rs"),
+    ),
+    (
+        "session/channel/sync.rs",
+        include_str!("../session/channel/sync.rs"),
+    ),
+    (
+        "session/channel/tests.rs",
+        include_str!("../session/channel/tests.rs"),
     ),
     (
         "session/channel/tests/edges.rs",
@@ -137,48 +218,52 @@ const SOURCES: [(&str, &str); 69] = [
         include_str!("../session/channel/tests/extremes.rs"),
     ),
     (
-        "session/channel/tests/property.rs",
-        include_str!("../session/channel/tests/property.rs"),
-    ),
-    (
         "session/channel/tests/gaps.rs",
         include_str!("../session/channel/tests/gaps.rs"),
     ),
     (
-        "session/channel/headroom.rs",
-        include_str!("../session/channel/headroom.rs"),
+        "session/channel/tests/headroom.rs",
+        include_str!("../session/channel/tests/headroom.rs"),
     ),
     (
-        "session/channel/outbox.rs",
-        include_str!("../session/channel/outbox.rs"),
+        "session/channel/tests/limits.rs",
+        include_str!("../session/channel/tests/limits.rs"),
     ),
     (
-        "session/channel/send.rs",
-        include_str!("../session/channel/send.rs"),
-    ),
-    (
-        "session/channel/own_key.rs",
-        include_str!("../session/channel/own_key.rs"),
-    ),
-    (
-        "session/channel/receive.rs",
-        include_str!("../session/channel/receive.rs"),
+        "session/channel/tests/outbox.rs",
+        include_str!("../session/channel/tests/outbox.rs"),
     ),
     (
         "session/channel/tests/own_key.rs",
         include_str!("../session/channel/tests/own_key.rs"),
     ),
     (
+        "session/channel/tests/peers.rs",
+        include_str!("../session/channel/tests/peers.rs"),
+    ),
+    (
+        "session/channel/tests/property.rs",
+        include_str!("../session/channel/tests/property.rs"),
+    ),
+    (
+        "session/channel/tests/purge.rs",
+        include_str!("../session/channel/tests/purge.rs"),
+    ),
+    (
         "session/channel/tests/receive.rs",
         include_str!("../session/channel/tests/receive.rs"),
     ),
     (
-        "session/channel/status.rs",
-        include_str!("../session/channel/status.rs"),
+        "session/channel/tests/regen.rs",
+        include_str!("../session/channel/tests/regen.rs"),
     ),
     (
-        "session/channel/sync.rs",
-        include_str!("../session/channel/sync.rs"),
+        "session/channel/tests/retired.rs",
+        include_str!("../session/channel/tests/retired.rs"),
+    ),
+    (
+        "session/channel/tests/send.rs",
+        include_str!("../session/channel/tests/send.rs"),
     ),
     (
         "session/channel/tests/stall.rs",
@@ -193,17 +278,108 @@ const SOURCES: [(&str, &str); 69] = [
         include_str!("../session/channel/tests/sync.rs"),
     ),
     (
-        "session/channel/tests/outbox.rs",
-        include_str!("../session/channel/tests/outbox.rs"),
+        "session/connection.rs",
+        include_str!("../session/connection.rs"),
     ),
     (
-        "session/channel/tests/headroom.rs",
-        include_str!("../session/channel/tests/headroom.rs"),
+        "session/connection/event.rs",
+        include_str!("../session/connection/event.rs"),
     ),
     (
-        "session/channel/tests/send.rs",
-        include_str!("../session/channel/tests/send.rs"),
+        "session/connection/limits.rs",
+        include_str!("../session/connection/limits.rs"),
     ),
+    (
+        "session/connection/outcomes.rs",
+        include_str!("../session/connection/outcomes.rs"),
+    ),
+    (
+        "session/connection/sync.rs",
+        include_str!("../session/connection/sync.rs"),
+    ),
+    (
+        "session/connection/tests.rs",
+        include_str!("../session/connection/tests.rs"),
+    ),
+    (
+        "session/connection/tests/acks.rs",
+        include_str!("../session/connection/tests/acks.rs"),
+    ),
+    (
+        "session/connection/tests/limits.rs",
+        include_str!("../session/connection/tests/limits.rs"),
+    ),
+    (
+        "session/connection/tests/no_oracle.rs",
+        include_str!("../session/connection/tests/no_oracle.rs"),
+    ),
+    (
+        "session/connection/tests/ok.rs",
+        include_str!("../session/connection/tests/ok.rs"),
+    ),
+    (
+        "session/connection/tests/tick.rs",
+        include_str!("../session/connection/tests/tick.rs"),
+    ),
+    (
+        "session/connection/tests/traffic.rs",
+        include_str!("../session/connection/tests/traffic.rs"),
+    ),
+    (
+        "session/connection/tests/truncation.rs",
+        include_str!("../session/connection/tests/truncation.rs"),
+    ),
+    (
+        "session/connection/traffic.rs",
+        include_str!("../session/connection/traffic.rs"),
+    ),
+    ("session/expiry.rs", include_str!("../session/expiry.rs")),
+    ("session/frames.rs", include_str!("../session/frames.rs")),
+    (
+        "session/frames/tests.rs",
+        include_str!("../session/frames/tests.rs"),
+    ),
+    ("session/names.rs", include_str!("../session/names.rs")),
+    (
+        "session/names/tests.rs",
+        include_str!("../session/names/tests.rs"),
+    ),
+    ("storage.rs", include_str!("../storage.rs")),
+    ("storage/log.rs", include_str!("../storage/log.rs")),
+    (
+        "storage/log/tests.rs",
+        include_str!("../storage/log/tests.rs"),
+    ),
+    (
+        "storage/settings.rs",
+        include_str!("../storage/settings.rs"),
+    ),
+    (
+        "storage/settings/tests.rs",
+        include_str!("../storage/settings/tests.rs"),
+    ),
+    ("storage/state.rs", include_str!("../storage/state.rs")),
+    (
+        "storage/state/items.rs",
+        include_str!("../storage/state/items.rs"),
+    ),
+    (
+        "storage/state/tests.rs",
+        include_str!("../storage/state/tests.rs"),
+    ),
+    ("storage/tests.rs", include_str!("../storage/tests.rs")),
+    ("testing.rs", include_str!("../testing.rs")),
+    (
+        "testing/builders.rs",
+        include_str!("../testing/builders.rs"),
+    ),
+    ("testing/compare.rs", include_str!("../testing/compare.rs")),
+    ("testing/faults.rs", include_str!("../testing/faults.rs")),
+    ("testing/memory.rs", include_str!("../testing/memory.rs")),
+    ("testing/server.rs", include_str!("../testing/server.rs")),
+    ("testing/tests.rs", include_str!("../testing/tests.rs")),
+    ("vectors.rs", include_str!("../vectors.rs")),
+    ("vectors/tests.rs", include_str!("../vectors/tests.rs")),
 ];
 
 /// Spec 010, R1: `crypto/ffi.rs` is the only file that uses the keyword, and

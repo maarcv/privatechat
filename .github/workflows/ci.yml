@@ -75,6 +75,9 @@ jobs:
         run: |
           deps="$(cargo tree -p privatechat-core -e normal --prefix none)"
           if printf '%s\n' "$deps" | grep -E '^(log|tracing[a-z_-]*|slog[a-z_-]*|env_logger|log4rs|fern) v'; then exit 1; fi
+      - name: s010_t01_r01_sources_list_complete
+        # The list of core sources the 010 T01 test reads is every tracked file; the script tests itself first.
+        run: scripts/check_core_sources.sh
       - name: s020_t23_r23_io_in_one_module
         # Every system call of store in crates/store/src/fs.rs; the script tests itself first.
         run: scripts/check_store_io.sh
