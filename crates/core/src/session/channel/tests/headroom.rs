@@ -5,7 +5,7 @@ use super::{FULL, HEADROOM, RESERVE, SERVER, config_on, fill, new_channel, new_s
 use crate::Error;
 use crate::session::channel::Channel;
 use crate::storage::{ENTRY_LEN_LEN, MAX_LOG_ENTRY, StoreError};
-use crate::testing::{FailingStore, Faults, MemoryStore, record};
+use crate::testing::{FailingStore, Faults, MemoryStore, record, state_eq};
 
 const NOW: u64 = 1_790_000_000_000;
 const EXPIRED: u64 = NOW - 1;
@@ -116,10 +116,15 @@ fn s021_t18_r18_exact_mebibyte_at_full_log() {
 fn s021_t18_r18_failed_compaction() {
     let (mut channel, handle, faults) = filled(MIB, FULL - HEADROOM + 1);
     let records = channel.records.len();
+    let before = channel.state.duplicate();
     faults.fail_compactions(true);
     let result = channel.encrypt("hi", None, NOW);
     assert_eq!(result, Err(Error::Store(StoreError::Io)));
     assert_eq!(channel.records.len(), records);
+    assert!(state_eq(&channel.state, &before));
+    let stored = Channel::open_stored(Box::new(handle.reopen())).unwrap();
+    assert!(state_eq(&stored.state, &before));
+    assert_eq!(stored.records.len(), records);
     assert_eq!(channel.expiry.expired_bytes(NOW), MIB);
     // Faults still on: an attempt would be `Io`.
     let result = channel.decrypt(&[], [1; 16], NOW + 599_999, NOW + 599_999);
