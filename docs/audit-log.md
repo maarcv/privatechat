@@ -61,6 +61,25 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AZ60 | A truncated name passes the test (C) | Far-fetched | None: no idiom of the code prints part of a name |
 | AZ61 | `DirName` derives `Debug` and prints its 16 bytes (B) | Far-fetched | None: the keyed-hash directory name, already on disk and shown by `BrokenChannel::name` |
 
+**Round 5**, on the owed amendments of AZ57. Every amendment its source asks for is there and none is invented (A); the preview leaks and commits nothing before the user confirms, and `import_qr` and `verify_scanned` are gone from every desktop path (B); pass C re-ran 3 mutants on the redaction impls, all killed.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ62 | T25 did not check `ConfigMismatch`, the one error of R5 before the store that is not a parse error (A, C) | Medium | Named in R25; T25 holds the channel with another server |
+| AZ63 | T25 did not check that the suggested name is cleaned, which the confirmation of spec 054 R15 relies on (A) | Medium | T25: a U+202E name shown without it, a U+200B one as `""` |
+| AZ64 | `name_collides` dropped "non-empty" from spec 022 R4 (A, C) | Low | R25 and 054 R17 cite 022 R4; T25 has an empty-key pair |
+| AZ65 | `needs_proxy` read "in no plan", which R2 makes true of every channel while the settings are reset (A, C) | Low | As `ChannelInfo::needs_proxy` would show it under the current proxy (R10); T25 checks it with the settings reset and against `config_onion_ws` |
+| AZ66 | 054 T17 asked for a second core test of the same behaviour, with "no vault call" against R25's `dir_name` and a UI clause (A, C) | Low | Its core clauses are 027 T25; it keeps the confirmation texts as a platform test |
+| AZ67 | T25's "a `FailingVault` sees no call" could not be observed, `FailingVault` counting no calls (A, C) | Low | Every vault fault armed, the same preview, no commit and no plan change |
+| AZ68 | T25's three flags shared one fixture, so a swapped flag passed; it named "collision vectors" that spec 022 does not have (C) | Low | One device per flag; a pair of 022 T04's table |
+| AZ69 | Slice (g) did not name R20's `ConfigPreview` or T20 (A, B, C) | Low | Named; T20 builds a `ConfigPreview` |
+| AZ70 | 040 Security counted six places where secrets cross; there are eight (A, C) | Low | Eight |
+| AZ71 | The architecture skill's new wording also let a client keep the storage key across calls (B) | Low | Split: the key passed once to `open` and zeroed; the password and the scanned text a fresh copy per call |
+| AZ72 | On the desktop the pending `.chatcfg` outlived a cancelled or failed choice, so the next import could use the rejected file (B) | Low | `choose_chatcfg` drops it before its dialog; 054 R15 says the bridge holds the bytes until then |
+| AZ73 | 041 R5 handed every peer's verification text to the web view, which needs none (B) | Far-fetched | Dropped from the mirror anyway; 014 R3 back to bytes, never a string, which reverses AZ30 and AZ49 |
+| AZ74 | On the desktop the confirmation of 054 R15 is enforced by the page only (B) | Far-fetched | Named in 041 Security as a residual of the UI's power |
+| AZ75 | `Vault::dir_name` can fail if libsodium does (A) | Far-fetched | R25 returns it as the import does |
+
 ## Audit AY
 
 **2026-10-14 — Audit AY, the code audit of slice (f) of spec 027-core-api (branch `027-exit`): the phase 2 exit test (R23); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit Y's findings already took AY1–AY18, so this audit's are numbered from AY19. No production defect; the test was weaker than R23's wording. Pass C ran 20 mutants, of the production code the test guards and of the test: 11 killed, 5 equivalent here, 4 survived, each killed below.

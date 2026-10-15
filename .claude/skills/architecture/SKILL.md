@@ -180,9 +180,12 @@ core       via uniffi or Tauri commands: opaque handles and records (AGENTS 20).
 - The socket loop is a pure host for `Session`: read a frame → `onFrame(frame,
   now)` → apply the events → write whatever `outgoing()` returns. It never
   looks inside a frame. `now` is the platform clock, passed **into** the core.
-- The storage key and the `.chatcfg` password are byte arrays: each core call
-  gets a fresh copy; the kept copy is filled with zeros on every exit, in a
-  `finally` / `defer` / `.fill(0)`. A string cannot be zeroed, so a password
+- Secrets cross as byte arrays. The storage key is passed once, to `open`,
+  then filled with zeros: platform code holds it for that one call (spec 053
+  Security). The `.chatcfg` password and the scanned invitation text get a
+  fresh copy for each core call (preview, import, replace retry), and the
+  kept copy is filled with zeros on every exit, in a `finally` / `defer` /
+  `.fill(0)` (spec 054 R15, R17). A string cannot be zeroed, so a password
   never becomes one.
 - Secrets never reach a view as a string. The config QR is drawn from bytes
   the core returns; the password words are shown from a byte array and cleared
