@@ -412,7 +412,7 @@ The device is where the real attacks land; these measures are mandatory in v1 un
 | App lock | **It is the system prompt** (BiometricPrompt with `DEVICE_CREDENTIAL`) that unwraps the key; no app-specific PIN or password. App `lock_timeout` = Keystore timeout; default 1 min; "strict" option = lock on app switch; quick action "Lock now". The user is recommended a device PIN over biometrics | Same with `LAContext` (`.userPresence`) | App password only if the OS has no keychain; documented |
 | Key life cycle | The unwrapped key lives only in Rust (`Secret<32>`) while the app is unlocked in the foreground. It is zeroized, the files are closed and the connection is cut on: lock by timeout, `onStop`, screen off | Same: `sceneDidEnterBackground`, `protectedDataWillBecomeUnavailable`, screen off | Same: OS session lock or timeout |
 | Background | None. Locked ⇔ disconnected; on unlock it reconnects with `since`. No in-memory queue | Same | n/a |
-| Backup exclusion | `android:allowBackup="false"` **and** `dataExtractionRules` excluding `cloud-backup` and `device-transfer` | `isExcludedFromBackup` on the files; Keychain `ThisDeviceOnly` (excludes iCloud Keychain) | Outside the user's sync directory; Time Machine / File History exclusion documented in `deploy/` |
+| Backup exclusion | `android:allowBackup="false"` **and** `dataExtractionRules` excluding `cloud-backup` and `device-transfer` | `isExcludedFromBackup` on the files; Keychain `ThisDeviceOnly` (excludes iCloud Keychain) | In the local, never the roaming, application data directory, outside the user's sync directory; on macOS the Time Machine exclusion attribute `com.apple.metadata:com_apple_backup_excludeItem` (spec 041-desktop-bridge R15); File History exclusion documented |
 | Screenshot blocking | `FLAG_SECURE` across the whole app | Blur on `willResignActive`; detect `capturedDidChange` and cover | Not possible; documented |
 | Local notifications | Never content nor channel or peer name; fixed text "New messages" | Same | Same; on macOS the Notification Center persists the time |
 | Push notifications | None in v1 (§12) | None | None |
@@ -421,15 +421,15 @@ The device is where the real attacks land; these measures are mandatory in v1 un
 | FFI boundary | The password is passed as a `ByteArray` and zeroized on the UI side after the call; the boundary types are listed in §9; outside the core no erasure is promised, **non-retention** is promised (no cache, no log, no `toString`) | Same with `Data` | Rust to Rust; the Svelte UI strings are copied into a `Uint8Array` and filled with zeros |
 | Deletion | Purge of expired messages on open and on unlock = compaction of `messages.log` (rewrite without the expired ones, `rename`). Leaving the channel = deleting the channel directory. The cryptographic guarantee covers all files (`K_db` in the Keystore/SE); deleting a record is physical and does not resist old copies (§2) | Same | Same |
 | Clipboard | Copying a message: `ClipDescription.EXTRA_IS_SENSITIVE`; cleared after 60 s. The OS or keyboard clipboard histories are not erased; the config is never copied to the clipboard | `UIPasteboard.setItems(_, options: [.localOnly: true, .expirationDate: +60 s])` (best-effort) | Cleared after 60 s; Win+V may retain it |
-| Window and WebView | n/a | n/a | Fixed window title = app name; WebView without cache or persistent storage (temporary `data_directory`) |
-| Code integrity | Reproducible builds published with hash; F-Droid or direct APK as an alternative to Google Play | Reproducible builds; published hash | Reproducible builds; published hash and signature |
+| Window and WebView | n/a | n/a | Fixed window title = app name; one `incognito` window whose web view data directory is a new temporary directory, deleted at quit and any leftover one at the next start (spec 041-desktop-bridge R8) |
+| Code integrity | Every artefact built twice in CI and rebuilt by the owner, who signs only what matches, on his own machines with hardware keys; the signed manifest `SHA256SUMS` lists the hash of every unsigned and signed artefact (spec 060-reproducible-builds). Anyone rebuilds the APK in the pinned container; F-Droid or direct APK as an alternative to Google Play. A residual on every platform: the first release's tag is checked against its own signers file | Same manifest; only the unsigned archive can be compared, since the App Store re-signs and encrypts the installed app (a residual) | Same manifest; the Linux artefacts rebuilt by anyone; the macOS and Windows ones comparable only on their own build hosts, and the Windows app links the libsodium binary built by libsodium's author (residuals) |
 | Root / jailbreak / accessibility | Not blocked (it would break legitimate users); one-time warning if detected. Production without `debuggable`, without `usesCleartextTraffic`, no `exported` component | One-time warning if jailbreak is detected | Within the session, any process of the user can read keychain and files; documented |
 
 **Logging.** No log with content, names, keys, full `channel_id` or `pk`: only the 4-byte hex prefix when debugging is needed; in production, `warn` level and nothing else. All key material lives in the `Secret<N>` type (no `Clone`, no `Default`, manual `Debug` = `[REDACTED]`, `PartialEq` via `sodium_memcmp`). Redacted-`Debug` test (spec 010): `format!("{:?}")` of every type listed in `SECRET_TYPES` is exactly `[REDACTED]`. `core` emits no log in v1: it has no logging dependency, and spec 021-channel-session checks it. Log test (spec 035-server-ops, the server being the first crate that emits): in-memory `tracing` subscriber at TRACE level over a full flow with real clients, assert that neither hex nor base64 of `K_ch`, `sk_u`, `sk_ch`, `K_msg`, `K_hdr`, `mk` nor a full `channel_id`, `server_id` or IP appears in it.
 
 ## 9. Architecture and technical stack
 
-A Rust core holds all the cryptography, the protocol, the state and the session; the three clients are thin UI layers that open a socket and paint. This way there is only one implementation to audit, and the transaction that keeps message, counter and cursor coherent exists once.
+A Rust core holds all the cryptography, the protocol, the state and the session; the three clients are thin UI layers that paint, over one connection host in Rust that opens every server connection (spec 042-connection-host, ADR 0041). This way there is only one implementation to audit, and the transaction that keeps message, counter and cursor coherent exists once.
 
 ```mermaid
 flowchart TD
@@ -440,23 +440,26 @@ flowchart TD
     end
     store["store (Rust: encrypted files, atomic commit)"]
     core --> store
-    core --> uniffi[uniffi bindings]
-    core --> tauri[Tauri commands]
+    host["host (Rust: sockets, SOCKS5, TLS, tick)"]
+    core --> host
+    host --> uniffi[uniffi bindings]
+    host --> tauri[Tauri commands]
     uniffi --> android[Android: Kotlin + Compose]
     uniffi --> ios[iOS: Swift + SwiftUI]
     tauri --> desktop[Desktop: Svelte + TS]
-    android & ios & desktop --> server[server: Rust axum + WS]
+    host --> server[server: Rust axum + WS]
 ```
 
 | Component | Technology | Reason |
 | --- | --- | --- |
 | `core` | Stable Rust pinned in `rust-toolchain.toml` (exact version in spec 000), `libsodium-sys-stable` and `zeroize`; the name comparison of §7 uses the standard library only (ADR 0043); nothing else (own record encoding, ADR 0023) | One implementation, controlled memory, no GC leaving keys on the heap |
 | `store` | Separate Rust crate: `std::fs` and the seal and open functions of `core` (spec 020-store-files), never libsodium on its own. Implements the `Store` trait of `core` with two files per channel and atomic commit via `rename` (ADR 0021). No SQLite, no C outside libsodium | Outside `core` because it does I/O (AGENTS 10); a single implementation for the three platforms, fuzzable from Rust |
+| Connection host | Rust workspace of its own (`crates/host/`): `rustls` with `ring`, `webpki-roots`, `tokio-tungstenite`, `tokio`; it holds the `Device` (spec 042-connection-host, ADR 0041) | One implementation of the sockets, the proxy and TLS for the three clients |
 | Mobile bindings | `uniffi` (proc macros; no UDL), over the one handle `Device` of `core` (ADR 0037), which the connection host holds (ADR 0041) and the bindings reach (specs 040-uniffi, 041-desktop-bridge, 042-connection-host); which records cross the bindings is spec 040's. | Generates Kotlin and Swift; secrets cross only as byte arrays; each side zeroes what it is given, and the remaining copies are residuals of §8 "FFI boundary" (spec 040-uniffi Security) |
 | Desktop | Tauri 2 + Svelte 5 + TypeScript; the core is linked in as a Rust crate, no wasm | Pinned and signed code, OS keychain, one more reproducible build |
 | Android | Kotlin, Jetpack Compose, minSdk 26. No Room or SQLite: storage belongs to the core | Current standard |
 | iOS | Swift 5.10, SwiftUI, iOS 16+. No GRDB or SQLite: storage belongs to the core | Current standard |
-| Server | Rust, `axum`, `tokio-tungstenite`, `rusqlite` (plain SQLite, `bundled`, WAL); verifies Ed25519 via `core::crypto` | Performance, a single binary, self-hostable with Docker |
+| Server | Rust, `axum` (its WebSocket over `tungstenite`), `tokio`, `rusqlite` (plain SQLite, `bundled`, WAL); checks blobs and verifies subscriptions only through the `relay` items of `core`, which call `core::crypto` (spec 030-ws-protocol) | Performance, a single binary, self-hostable with Docker |
 | Protocol tests | JSON test vectors in `specs/vectors/`; the reference script of spec 015-test-vectors produces them, the Rust tests reproduce them, and Kotlin and Swift reproduce them through the bindings | Guarantees interoperability |
 | CI | GitHub Actions (§10 "CI per phase") | |
 
@@ -548,7 +551,7 @@ Seven phases; each one closes when its specifications have green tests and a hum
 2. Weeks 2–3: implement phase 1 in the order of the table; produce the vectors with the reference script, reproduce them in Rust and freeze them; fuzzing.
 3. Week 4: specs and implementation 020–028.
 4. Week 5: server 030–035 and integration test.
-5. Week 6: bindings 040–041. The desktop MVP (050) starts when phase 4 is closed.
+5. Week 6: bindings 040–042. The desktop MVP (050) starts when phase 4 is closed.
 
 From then on the three clients advance in parallel over a core whose API no longer changes, but for the import preview that spec 054-qr-invite R17 adds (spec 027-core-api R25).
 
