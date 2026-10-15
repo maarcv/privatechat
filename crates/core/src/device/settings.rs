@@ -3,6 +3,8 @@
 //! lost file has not been seen by the user, the changes made in memory
 //! alone.
 
+use std::fmt;
+
 use super::Device;
 use crate::DEFAULT_SERVER_URL;
 use crate::error::Error;
@@ -12,8 +14,9 @@ use crate::storage::{MAX_LOCK_TIMEOUT_SECONDS, Settings, StoreError, Vault};
 /// The lock timeout of a fresh install (R13).
 const DEFAULT_LOCK_TIMEOUT_SECONDS: u32 = 60;
 
-/// The settings as the client reads them.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// The settings as the client reads them; its `Debug` shows neither the
+/// server URL nor the proxy's address.
+#[derive(Clone, PartialEq, Eq)]
 pub struct SettingsView {
     /// The server a new channel is created on.
     pub default_server_url: String,
@@ -21,6 +24,15 @@ pub struct SettingsView {
     pub lock_timeout_seconds: u32,
     /// `host:port` of the SOCKS5 proxy every connection goes through.
     pub socks5_proxy: Option<String>,
+}
+
+impl fmt::Debug for SettingsView {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SettingsView")
+            .field("lock_timeout_seconds", &self.lock_timeout_seconds)
+            .field("proxied", &self.socks5_proxy.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 /// The settings in memory and how they stand against `settings.bin`.

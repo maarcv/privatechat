@@ -82,7 +82,7 @@ Since the decision of 2026-09-25 (`docs/spec.md` §6), this spec also fixes the 
 ## Interface
 
 ```
-crates/core/src/session/frames.rs            Frame, encode, decode (R1–R3)
+crates/core/src/session/frames.rs            Frame, encode, decode (R1–R3), its redacted Debug (spec 027 R20)
 crates/core/src/session/frames/tests.rs      s028_* tests of R1–R3 and the vectors
 crates/core/src/session/connection.rs        Session, Step, Event, Channels (R5–R18)
 crates/core/src/session/connection/event.rs  Event and its redacted Debug
@@ -268,3 +268,4 @@ Decided on 2026-09-25: the frame keys belong to this spec (`docs/spec.md` §6).
 - 2026-10-13 amended after audit AQ round 3 (`docs/audit-log.md`): R18 leaves out the key being retired with one's own key, and names the store's work at that call or a later one, its time and its failures, beside the commit's time, as `docs/spec.md` §4 now does
 - 2026-10-13 amended after audit AQ round 4 (`docs/audit-log.md`): T18 regenerates one's own key; R18's store exception covers a later call
 - 2026-10-13 implemented: slices (a)–(e), audits AJ–AQ (`docs/audit-log.md`)
+- 2026-10-15 amended after audit AZ (`docs/audit-log.md`): the Interface names `Frame`'s redacted `Debug`, required by spec 027-core-api R20

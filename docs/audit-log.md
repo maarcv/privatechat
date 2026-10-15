@@ -2,6 +2,10 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Phase 2 closed
+
+**2026-10-15 — Phase 2 (session and storage) closed on `mvp`.** Specs 020–028 are `implemented`. The exit criterion of `docs/spec.md` §10 holds: T23 of spec 027-core-api (`crates/store/src/tests/phase2_exit.rs`) runs two `Device`s over data directories on disk exchanging 10 000 messages with 1 % of them duplicated and a failed commit on each side, then a process killed between the append to the log and the write of `state.bin`: no error but the injected ones, every duplicate rejected, each reopened state equal to the last committed, the log compacted; on the CI runner the two runs take about 43 s and 37 s (PR #67). The review by a second person of spec 027's Interface was done by audit AZ, as the human reviewer decided on 2026-10-15; until the release, the audits of each slice (AR–AZ for spec 027) stand in for the human review of the code (decision of 2026-10-09).
+
 ## Audit AZ
 
 **2026-10-15 — Audit AZ, the second reading of spec 027-core-api: its Interface read next to specs 040-uniffi and 041-desktop-bridge, every type checked to cross (branch `027-second-reading`).** The acceptance criterion of spec 027 asks a second person for this reading; the human reviewer chose to have it done by an audit, as for spec 021. Audit Z's findings already took AZ1–AZ24, so this audit's are numbered from AZ25. Round 1 had three passes (A: conformance; B: the adversary; C: a scratch crate outside the repository that mirrored every record and enum with uniffi 0.32.2, generated Kotlin and Swift, and type-checked the Swift). The three verdicts: every type crosses, and none crosses with a privacy or security defect. Pass C ran 4 mutants of the core code that decides what crosses: all killed.
@@ -19,6 +23,22 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AZ33 | The generated `Ffi*` records print their text fields in `toString` and reflection (A, B, C) | Low | 040 Security says so and that the guarantee rests on spec 053 R22 |
 | AZ34 | 040 R3 named no translation for `bool` and `Vec<T>` (C) | Far-fetched | Named anyway, one clause |
 | AZ35 | `DirName`'s public field was not in the Interface (B) | Far-fetched | Named in 027's list |
+
+**Round 2**, on the change above. Pass C ran 30 mutants of the new `Debug` impls against the test: 19 survived the first test; the rewritten test kills every one but a third spelling of bytes (`{:02x?}`), far-fetched. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ36 | The redaction test looked only for hex: a derived `Debug` prints bytes as a decimal list, so putting back any derived field passed; four `Frame` variants, the display name, the proxy and `client_ref` were never checked, nor that a prefix is shown (A, B, C) | Medium | Every record built by hand with distinct bytes, every `Frame` variant; bytes 4–8 of each id and key refused in hex and in decimal; every name, URL, proxy, blob and free text refused; the records that name a channel must show its prefix |
+| AZ37 | `ClientRef` printed its 16 bytes, and through it `Sent` and `Message`; `Message` and `Received` printed the full `server_id`, which `Frame` shortens (B, C) | Low | Manual `Debug` for `ClientRef`, `Message` and `Received`, with prefixes; named in R20 |
+| AZ38 | `SettingsView` printed the server URL and the proxy that `Route` and `ChannelInfo` hide (A, B, C) | Low | Manual `Debug`: the lock timeout and whether a proxy is set; named in R20 |
+| AZ39 | 040 Security's list of what the generated records print left out URLs and the proxy, and said spec 053 R22 checks what its lint checks only for log calls (B) | Low | Both stated |
+| AZ40 | 027's History left out R23's rewording (AY37) and the Context and Interface changes (A) | Low | History completed |
+| AZ41 | 027 said the host calls `StorageKey::from_bytes`; spec 042's host takes a built `StorageKey` (A) | Low | The bindings crates only |
+| AZ42 | Phase 2's close was not recorded (A) | Low | Its entry above |
+| AZ43 | `Frame::Error`'s `Debug` prints the `code`, up to 32 bytes the server chooses (A, C) | Far-fetched | None: the server's own text, no user data, escaped by `Debug` |
+| AZ44 | Spec 028's Interface did not mention `Frame`'s redacted `Debug` (A) | Far-fetched | Named anyway |
+| AZ45 | The SVG renderer's intermediate buffers and each `qr://` response body are further unzeroed copies (B) | Far-fetched | None: a memory read of the device is outside the model; §8 promises non-retention |
+| AZ46 | `Route`'s `Debug` prints the port (B) | Far-fetched | None: no rule asks to hide it, and a port names no server |
 
 ## Audit AY
 

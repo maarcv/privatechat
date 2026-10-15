@@ -59,8 +59,9 @@ impl fmt::Debug for Stranger {
     }
 }
 
-/// A message as a client paints it (R3); its `Debug` hides the content.
-#[derive(Debug, PartialEq, Eq)]
+/// A message as a client paints it (R3); its `Debug` hides the content
+/// and shows the `server_id`'s prefix.
+#[derive(PartialEq, Eq)]
 pub struct Message {
     /// The server's identifier, once known.
     pub server_id: Option<[u8; 16]>,
@@ -80,6 +81,25 @@ pub struct Message {
     pub delivery: Option<Delivery>,
     /// For a sender with no peer record.
     pub stranger: Option<Stranger>,
+}
+
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Message")
+            .field(
+                "server_id",
+                &self.server_id.as_ref().map(|id| key_prefix(id)),
+            )
+            .field("client_ref", &self.client_ref)
+            .field("sender", &self.sender)
+            .field("received_at", &self.received_at)
+            .field("sent_at", &self.sent_at)
+            .field("expires_at", &self.expires_at)
+            .field("content", &self.content)
+            .field("delivery", &self.delivery)
+            .field("stranger", &self.stranger)
+            .finish()
+    }
 }
 
 /// What a delivery record says of one's own message.
