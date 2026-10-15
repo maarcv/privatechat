@@ -181,15 +181,17 @@ core       via uniffi or Tauri commands: opaque handles and records (AGENTS 20).
   now)` → apply the events → write whatever `outgoing()` returns. It never
   looks inside a frame. `now` is the platform clock, passed **into** the core.
 - Secrets cross as byte arrays. The storage key is passed once, to `open`:
-  platform code holds it only from its unwrap until `open` (a re-wrap of
-  spec 053 R7 comes before `open`, which zeroes it) or in the re-wrap array
-  of R7, and zeroes it on every exit (spec 053 Security). The `.chatcfg`
-  password and the scanned invitation text get a fresh copy for each core
-  call (preview, import, replace retry), zeroed after that call in a
-  `finally` / `defer` / `.fill(0)`; the kept copy is zeroed when the screen
-  closes, after the last import call, and on lock (on mobile also on
-  background) (spec 054 R15). A string cannot be zeroed, so a password never
-  becomes one.
+  platform code holds it only from its creation (`generate_storage_key`,
+  spec 040 R8) or its unwrap until `open` (a re-wrap of spec 053 R7 comes
+  before `open`, which zeroes it), or in the re-wrap array of R7, and zeroes
+  it on every exit (spec 053 Security). The `.chatcfg` password and the
+  scanned invitation text get a fresh copy for each core call (preview,
+  import, replace retry), zeroed after that call in a `finally` / `defer` /
+  `.fill(0)`; the kept copy is zeroed when the screen closes, on lock (on
+  mobile also on background), and after an import that returns `Ok` or an
+  error that spec 054 R16 leaves no retry for, never after one that keeps the
+  screen open for another "Join" (spec 054 R15). A string cannot be zeroed,
+  so a password never becomes one.
 - Secrets never reach a view as a string. The config QR is drawn from bytes
   the core returns; the password words are shown from a byte array and cleared
   when the screen goes away.

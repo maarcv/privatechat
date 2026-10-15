@@ -94,13 +94,25 @@ Findings and applied changes of every audit of the specification, newest first; 
 | AZ83 | The skills' "kept copy zeroed on every exit, in a `finally`" read as zeroing it after each call, so "Join" would send zeros (C) | Low | A fresh copy per call, zeroed after it; the kept copy zeroed on close, after the last import and on lock |
 | AZ84 | The skill and 053 Security said the platform holds the storage key "for one call", while 053 R5 and R7 use it to check and re-wrap; a re-wrap after `open` would wrap zeros (B) | Low | Held from its unwrap until `open`, or in R7's re-wrap array, zeroed on every exit |
 | AZ85 | 054 R17's last bullet still asked for the wording AZ71 split (A, B) | Low | Reworded to the split |
-| AZ86 | §11's "Mobile bindings" row said secrets do not cross by value; 040 counts eight places (B) | Low | Only as byte arrays, zeroed on both sides |
+| AZ86 | §9's "Mobile bindings" row said secrets do not cross by value; 040 counts eight places (B) | Low | Only as byte arrays, each side zeroing what it is given (AZ99) |
 | AZ87 | 054 R13 cited 041 R6 for a scanned text on the desktop, which takes none (B) | Low | Removed |
 | AZ88 | 022 R6's list of names the core cleans did not name `ConfigPreview::suggested_name` (A) | Low | Named |
 | AZ89 | 041 R6 kept "another `choose_chatcfg` replaces it", which a dismissed choice does not do (A) | Low | "the next `choose_chatcfg` drops it" |
 | AZ90 | AZ57 called 053's bullet owed at acceptance; 053 R20 asks for it at implementation (A) | Low | 053's History says it was applied ahead |
 | AZ91 | History lines of 027, 040 and 054 left out changes, and loose references in 054's slices and a 040 comment (A, C) | Low | Completed |
 | AZ92 | On the desktop the pending file outlives a "Cancel" on the confirmation (B) | Far-fetched | Named in 041's Security residual: picked, or seen and cancelled |
+
+**Round 7**, on the whole change. No production defect and no join before the confirmation (B); pass C compiled a `&self` preview that calls `Vault::create`: it does not build (E0596).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ93 | T25's fault, commit and no-retry clauses tested what `&self` already forbids, so no mutant that compiles could fail them (C) | Low | R25 says the functions take `&self` and `api_surface.rs` pins the receiver; the vacuous clauses dropped, the three `broken_reason` cases kept |
+| AZ94 | The desktop skill listed a page-side replace retry, which 041 R6 leaves to the bridge after the native confirmation (A, B) | Low | The page invokes preview and import; the bridge retries from its own copy |
+| AZ95 | The kept invitation copy was zeroed after any failed import, so a second "Join" after a retry text would send zeros (B) | Low | Zeroed on close, lock and background, and after `Ok` or an error R16 gives no retry; 054 T15 checks it whole after `BadPassword` |
+| AZ96 | The storage key's window left out its creation by `generate_storage_key` (A, B) | Low | From its creation or its unwrap until `open`, or in R7's re-wrap array (053 Security, the skill) |
+| AZ97 | 054 R16 said the preview never returns `Store(Corrupt)`; a failed `Vault::dir_name` does (A) | Low | Only then, shown with the save-error text, never the replace confirmation |
+| AZ98 | 054 R17's skills bullet still asked for the wording AZ83 replaced (A, C) | Low | The skills' wording |
+| AZ99 | §9's bindings row promised secrets zeroed on both sides, against 040 Security and §8; AZ86 placed the row in §11 (A, B) | Low | Each side zeroes what it is given, the other copies residuals of §8; §9 |
 
 ## Audit AY
 
