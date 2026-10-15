@@ -122,7 +122,7 @@ pub(crate) fn check_all(spec: &str, entries: &[(&str, Checker)]) {
 }
 
 /// Every vector of the committed file of this spec.
-fn all(spec: &str) -> Vec<Vector> {
+pub(crate) fn all(spec: &str) -> Vec<Vector> {
     let (_, source) = FILES
         .iter()
         .find(|(file, _)| *file == spec)

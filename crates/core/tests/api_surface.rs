@@ -7,8 +7,8 @@
 #![allow(clippy::type_complexity)]
 
 use privatechat_core::{
-    ChannelInfo, ChannelState, ChannelStatus, ConnectionPlan, DEFAULT_SERVER_URL, Device,
-    DeviceStatus, DirName, Error, Event, ExportedFile, Fingerprint, Frame, Gap, Imported,
+    ChannelInfo, ChannelState, ChannelStatus, ConfigPreview, ConnectionPlan, DEFAULT_SERVER_URL,
+    Device, DeviceStatus, DirName, Error, Event, ExportedFile, Fingerprint, Frame, Gap, Imported,
     LogRecord, MAX_LOG_ENTRY, MAX_LOG_LEN, MAX_SETTINGS_FILE, MAX_STATE_FILE, Message, OldKey,
     Peer, PeerId, Route, Sent, Settings, SettingsView, StorageKey, Store, StoreError, Vault,
     WriteBatch, dir_name, generate_storage_key, init, probe_hello,
@@ -124,6 +124,14 @@ fn s027_t16_r16_items_for_other_crates() {
     let _: fn(&[u8]) -> Result<Frame, Error> = Frame::decode;
     let _: [usize; 3] = [MAX_STATE_FILE, MAX_SETTINGS_FILE, MAX_LOG_ENTRY];
     let _: u64 = MAX_LOG_LEN;
+}
+
+/// Spec 027, R25: the previews read the device and take their invitation
+/// as bytes.
+#[test]
+fn s027_t25_r25_preview_signatures() {
+    let _: fn(&Device, &[u8], u64) -> Result<ConfigPreview, Error> = Device::preview_qr;
+    let _: fn(&Device, &[u8], &[u8], u64) -> Result<ConfigPreview, Error> = Device::preview_file;
 }
 
 /// Spec 027, R19: the storage key enters as a mutable array it zeroes, the

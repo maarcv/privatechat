@@ -3,7 +3,9 @@
 //! `Config` by `compile_fail` doctests on `Device` and `Error`.
 
 use super::{Fixture, NOW};
-use crate::device::{BrokenChannel, ChannelInfo, ConnectionPlan, Device, Route, SettingsView};
+use crate::device::{
+    BrokenChannel, ChannelInfo, ConfigPreview, ConnectionPlan, Device, Route, SettingsView,
+};
 use crate::error::Error;
 use crate::session::channel::{
     ChannelStatus, ClientRef, Message, MessageContent, Received, Sender, Stranger,
@@ -190,6 +192,16 @@ fn s027_t20_r20_debug_redacted() {
         channel_id: Some(channel),
         channel_name: Some("broken room".to_owned()),
     };
+    let previewed = ConfigPreview {
+        suggested_name: "previewed room".to_owned(),
+        server_url: "wss://previewed.example".to_owned(),
+        ttl_seconds: 3_600,
+        is_open: false,
+        server_known: false,
+        name_collides: false,
+        needs_proxy: false,
+        broken_reason: None,
+    };
     let settings = SettingsView {
         default_server_url: "wss://default.example".to_owned(),
         lock_timeout_seconds: 60,
@@ -266,6 +278,7 @@ fn s027_t20_r20_debug_redacted() {
         format!("{plan:?}"),
         format!("{broken:?}"),
         format!("{settings:?}"),
+        format!("{previewed:?}"),
         format!("{message:?}"),
         format!("{received:?}"),
         format!("{:?}", ClientRef { bytes: client_ref }),
@@ -307,6 +320,8 @@ fn s027_t20_r20_debug_redacted() {
         "abcdef12",
         "broken room",
         "default.example",
+        "previewed room",
+        "previewed.example",
         "message body",
         "sender name",
         "sealed blob",
