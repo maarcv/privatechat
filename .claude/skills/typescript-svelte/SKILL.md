@@ -1,6 +1,6 @@
 ---
 name: typescript-svelte
-description: TypeScript, Svelte 5 and Tauri 2 standard for the desktop client in `clients/desktop/`. Use it whenever you create or edit a `.ts`, `.svelte` or `.svelte.ts` file, a Tauri command or capability, `tauri.conf.json`, Vite/ESLint/Prettier config or `package.json`, or when reviewing desktop code — including small component tweaks. It assumes you have read the `architecture` skill, whose §7 "Client shape" holds everything the three clients share; this skill adds only the desktop mechanics, where the web view is the least trusted part and the Rust side of the Tauri process holds the socket, the store and the key.
+description: TypeScript, Svelte 5 and Tauri 2 standard for the desktop client in `clients/desktop/`. Use it whenever you create or edit a `.ts`, `.svelte` or `.svelte.ts` file, a Tauri command or capability, `tauri.conf.json`, Vite/ESLint/Prettier config or `package.json`, or when reviewing desktop code — including small component tweaks. It assumes you have read the `architecture` skill, whose §7 "Client shape" holds everything the three clients share; this skill adds only the desktop mechanics, where the web view is the least trusted part and the Rust side of the Tauri process holds the key and, through the connection host, the sockets and the store.
 ---
 
 # TypeScript / Svelte / Tauri standard
@@ -30,17 +30,21 @@ src/lib/ui/         Svelte components
 src/lib/state/      *.svelte.ts modules: one per screen, owns $state, send(intent)
 src/lib/bridge/     typed wrappers around Tauri `invoke` and events; the only
                     place that knows command names
-src-tauri/          Rust: Tauri commands → core::Session / Channel / Store,
-                    keychain, socket. Follows the `rust` skill.
+src-tauri/          Rust: commands → the bridge → the connection host of
+                    spec 042 → `Device`; keychain. Follows the `rust` skill.
 ```
 
 - State and intents are discriminated unions (`{ kind: 'loading' } | { kind:
   'locked' } | { kind: 'ready'; data } | { kind: 'failed'; error }`), held in a
   `.svelte.ts` module as `$state`; components receive them via `$props()`.
-- **The bridge is the only caller of `invoke`.** Its argument and return
-  types are **generated from Rust** (`tauri-specta` or equivalent), never
-  hand-written twins that drift. Commands return `Result<T, E>` as a tagged
-  union; `try/catch` is for IPC breakage only, mapped once to `failed`.
+- **`src/lib/bridge/` is the only caller of `invoke`.** Its argument and
+  return types are **generated from Rust** by `tauri-specta` into
+  `generated.ts`, which is not committed (AGENTS 16, spec 041-desktop-bridge
+  R5), never hand-written twins that drift. The only hand-written wrappers
+  are those of the raw commands (`raw.ts`, spec 041-desktop-bridge R6),
+  whose password crosses as a raw body or a raw response, never as JSON.
+  Commands return `Result<T, E>` as a tagged union; `try/catch` is for IPC
+  breakage only, mapped once to `failed`.
 
 ## Secrets in the web view
 
@@ -56,15 +60,19 @@ src-tauri/          Rust: Tauri commands → core::Session / Channel / Store,
   returns `BadPassword`, never after an import that keeps the screen open for
   another "Join" (spec 054 R15); it is never held as a `string` longer than
   the input element forces.
-- The config QR is rendered from an image the Rust side produces; the
-  password words are shown from a `Uint8Array` and zeroed on destroy.
+- The config QR is an image the Rust side renders and serves on the `qr`
+  scheme: `export_qr` returns only its URL, and the config text never enters
+  the web view (spec 041-desktop-bridge R6). The password words are shown
+  from a `Uint8Array` and zeroed on destroy.
 - No `localStorage`, `sessionStorage`, `IndexedDB` or cookies. The web view
   runs with a temporary `data_directory` and no persistent cache
   (`docs/spec.md` §8 "Window and WebView"). Draft text is component state
   only.
-- CSP in `tauri.conf.json` is strict: `default-src 'none'; script-src
-  'self'; style-src 'self'; img-src 'self' asset:`. No inline scripts, no
-  `eval`, no remote origins. Tauri capabilities grant only the commands the
+- CSP in `tauri.conf.json` is exactly that of spec 041-desktop-bridge R8:
+  `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'
+  qr: http://qr.localhost; connect-src ipc: http://ipc.localhost;
+  form-action 'none'; base-uri 'none'; frame-ancestors 'none'`. No inline
+  scripts, no `eval`, no remote origins, no asset protocol. Tauri capabilities grant only the commands the
   bridge uses.
 - Window title is the app name only — never a channel or peer name (§8).
 
@@ -90,10 +98,14 @@ src-tauri/          Rust: Tauri commands → core::Session / Channel / Store,
 
 Follows the `rust` skill. Additionally:
 
-- Commands are thin: deserialise arguments, call `core`, serialise `Result`.
-- `Session` runs in one `tokio` task per server with bounded channels; events
-  reach the web view with `emit`. The socket is closed and the key zeroed on
-  lock or when the window loses focus past `lock_timeout` (§8).
+- Commands are thin: commands → the bridge → the connection host of spec
+  042 → `Device` (spec 041-desktop-bridge R10). The bridge keeps no
+  `Device`, no socket and no tick of its own; the host opens every
+  connection.
+- The host's events reach the web view with `emit`, filtered by generation
+  in the bridge (spec 041-desktop-bridge R7). A lock runs the host's lock
+  routine and recreates the window (spec 041-desktop-bridge R17), on `lock`
+  or when the window loses focus past `lock_timeout` (§8).
 - The storage key is read from the OS keychain (`keyring` crate, one type
   `StorageKey`), never written to disk, never sent to the web view.
 
