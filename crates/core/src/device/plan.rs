@@ -4,11 +4,13 @@
 //! route of the create-time probe.
 
 use std::collections::BTreeSet;
+use std::fmt;
 
 use super::Device;
 use crate::crypto;
 use crate::error::Error;
 use crate::proto::config::url::{self, ONION_SUFFIX};
+use crate::session::channel::key_prefix;
 use crate::session::frames::{Frame, is_supported};
 
 /// The most channels on one connection without a proxy (R10).
@@ -18,8 +20,10 @@ const MAX_RUN: usize = 16;
 /// characters (R10).
 const SOCKS_USERNAME_BYTES: usize = 4;
 
-/// How a connection reaches its server (R10).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// How a connection reaches its server (R10); its `Debug` shows neither
+/// the host, which names the channels' server, nor the SOCKS username,
+/// which unlinks the plan's channels.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Route {
     /// The server's host, as the URL writes it.
     pub host: String,
@@ -36,9 +40,19 @@ pub struct Route {
     pub socks_username: Option<String>,
 }
 
+impl fmt::Debug for Route {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Route")
+            .field("port", &self.port)
+            .field("tls", &self.tls)
+            .field("proxied", &self.socks5_proxy.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 /// One connection the client keeps open: its `id`, its route and its
-/// channels (R10).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// channels (R10); its `Debug` shows each `channel_id`'s prefix (AGENTS 19).
+#[derive(Clone, PartialEq, Eq)]
 pub struct ConnectionPlan {
     /// An identifier this device never gave another plan.
     pub id: u64,
@@ -46,6 +60,17 @@ pub struct ConnectionPlan {
     pub route: Route,
     /// The channels it carries, at most 16, one behind a proxy.
     pub channels: Vec<[u8; 16]>,
+}
+
+impl fmt::Debug for ConnectionPlan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let channels: Vec<String> = self.channels.iter().map(|id| key_prefix(id)).collect();
+        f.debug_struct("ConnectionPlan")
+            .field("id", &self.id)
+            .field("route", &self.route)
+            .field("channels", &channels)
+            .finish()
+    }
 }
 
 impl Route {

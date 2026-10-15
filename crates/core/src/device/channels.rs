@@ -2,16 +2,19 @@
 //! importing, exporting, listing, renaming and leaving them, and the
 //! recovery of a first commit that poisoned its store.
 
+use std::fmt;
+
 use super::{Broken, BrokenChannel, Device, plan};
 use crate::error::Error;
 use crate::proto::config::Config;
-use crate::session::channel::{Channel, ChannelStatus};
+use crate::session::channel::{Channel, ChannelStatus, key_prefix};
 use crate::session::connection::Event;
 use crate::session::names::shown_name;
 use crate::storage::StoreError;
 
-/// What the client shows about one open channel (R7).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// What the client shows about one open channel (R7); its `Debug` shows
+/// the `channel_id`'s prefix and no name or URL (AGENTS 19).
+#[derive(Clone, PartialEq, Eq)]
 pub struct ChannelInfo {
     /// The `channel_id`.
     pub id: [u8; 16],
@@ -31,6 +34,18 @@ pub struct ChannelInfo {
     pub write_failed: bool,
     /// It needs a SOCKS5 proxy running on this device (R10).
     pub needs_proxy: bool,
+}
+
+impl fmt::Debug for ChannelInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ChannelInfo")
+            .field("id", &key_prefix(&self.id))
+            .field("ttl_seconds", &self.ttl_seconds)
+            .field("status", &self.status)
+            .field("write_failed", &self.write_failed)
+            .field("needs_proxy", &self.needs_proxy)
+            .finish_non_exhaustive()
+    }
 }
 
 /// An imported channel, and whether it is new on this device (R5).

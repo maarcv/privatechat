@@ -48,8 +48,8 @@ pub use device::{
 pub use error::Error;
 pub use proto::fingerprint::Fingerprint;
 pub use session::channel::{
-    AckOutcome, ChannelStatus, ClientRef, Delivery, Gap, Message, MessageContent, OldKey, Peer,
-    PeerId, Received, Sender, Stranger,
+    ChannelStatus, ClientRef, Delivery, Gap, Message, MessageContent, OldKey, Peer, PeerId,
+    Received, Sender, Stranger,
 };
 pub use session::connection::Event;
 pub use session::frames::Frame;

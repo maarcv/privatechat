@@ -7,12 +7,15 @@
 //! version rule of R2 is [`is_supported`]: a `hello` that breaks it decodes,
 //! and the session, not the codec, refuses it.
 
+use std::fmt;
+
 use crate::Error;
 use crate::proto::config::VERSION as PROTO_VERSION;
 use crate::proto::envelope::MAX_BLOB;
 use crate::proto::record::{
     Reader, RecordError, U8_LEN, U32_LEN, U64_LEN, UnknownKeys, Writer, list_len, record_len,
 };
+use crate::session::channel::key_prefix;
 
 #[cfg(test)]
 mod tests;
@@ -56,8 +59,9 @@ const KEY_TYPE: u8 = 0;
 const VERSION_ITEM_LEN: usize = 1;
 
 /// One frame of the protocol, with the fields of the table "Frames". It
-/// derives no `PartialEq`: the tests compare encodings.
-#[derive(Debug)]
+/// derives no `PartialEq`: the tests compare encodings. Its `Debug` shows
+/// the kind and the prefix of each id and key, no signature, blob or free
+/// text (AGENTS 19).
 pub enum Frame {
     /// Server → client, first on every connection.
     Hello {
@@ -122,6 +126,76 @@ pub enum Frame {
         /// The `publish` it answers.
         client_ref: Option<[u8; 16]>,
     },
+}
+
+impl fmt::Debug for Frame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let prefix = |id: &Option<[u8; 16]>| id.as_ref().map(|id| key_prefix(id));
+        match self {
+            Frame::Hello { proto_versions, .. } => f
+                .debug_struct("Hello")
+                .field("proto_versions", proto_versions)
+                .finish_non_exhaustive(),
+            Frame::Subscribe {
+                pk_ch,
+                ttl_seconds,
+                since,
+                ..
+            } => f
+                .debug_struct("Subscribe")
+                .field("pk_ch", &key_prefix(pk_ch))
+                .field("ttl_seconds", ttl_seconds)
+                .field("since", since)
+                .finish_non_exhaustive(),
+            Frame::Ok { channel_id } => f
+                .debug_struct("Ok")
+                .field("channel_id", &key_prefix(channel_id))
+                .finish(),
+            Frame::Publish {
+                channel_id,
+                client_ref,
+                blob,
+            } => f
+                .debug_struct("Publish")
+                .field("channel_id", &key_prefix(channel_id))
+                .field("client_ref", &key_prefix(client_ref))
+                .field("blob_len", &blob.len())
+                .finish(),
+            Frame::Ack {
+                client_ref,
+                server_id,
+                received_at,
+            } => f
+                .debug_struct("Ack")
+                .field("client_ref", &key_prefix(client_ref))
+                .field("server_id", &key_prefix(server_id))
+                .field("received_at", received_at)
+                .finish(),
+            Frame::Push {
+                channel_id,
+                server_id,
+                received_at,
+                blob,
+            } => f
+                .debug_struct("Push")
+                .field("channel_id", &key_prefix(channel_id))
+                .field("server_id", &key_prefix(server_id))
+                .field("received_at", received_at)
+                .field("blob_len", &blob.len())
+                .finish(),
+            Frame::Error {
+                code,
+                channel_id,
+                client_ref,
+                ..
+            } => f
+                .debug_struct("Error")
+                .field("code", code)
+                .field("channel_id", &prefix(channel_id))
+                .field("client_ref", &prefix(client_ref))
+                .finish_non_exhaustive(),
+        }
+    }
 }
 
 impl Frame {

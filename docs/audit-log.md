@@ -2,6 +2,130 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit AZ
+
+**2026-10-15 — Audit AZ, the second reading of spec 027-core-api: its Interface read next to specs 040-uniffi and 041-desktop-bridge, every type checked to cross (branch `027-second-reading`).** The acceptance criterion of spec 027 asks a second person for this reading; the human reviewer chose to have it done by an audit, as for spec 021. Audit Z's findings already took AZ1–AZ24, so this audit's are numbered from AZ25. Round 1 had three passes (A: conformance; B: the adversary; C: a scratch crate outside the repository that mirrored every record and enum with uniffi 0.32.2, generated Kotlin and Swift, and type-checked the Swift). The three verdicts: every type crosses, and none crosses with a privacy or security defect. Pass C ran 4 mutants of the core code that decides what crosses: all killed.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ25 | The derived `Debug` of `ChannelInfo`, `BrokenChannel`, `ConnectionPlan`, `Route` and `Frame` printed full `channel_id`s, keys, names, URLs, the SOCKS username, signatures and the server's free text, against AGENTS 19, which the core's other types follow (B) | Low | Manual `Debug` with the 4-byte prefix and none of the rest; R20 says so; `s027_t20_r20_debug_redacted` |
+| AZ26 | `AckOutcome` was `pub` though no `pub` signature reaches it (C) | Low | `pub(crate)`, out of `lib.rs`, of 027's list and of 040 R2's exceptions; spec 021's Interface amended |
+| AZ27 | 040 R2's exceptions left out `Sent`, which spec 042's `SentView` replaces (A, C) | Low | Excepted |
+| AZ28 | 027 still said the bindings wrap `Mutex<Device>` and credited `DataDir::open` to the bindings and `StorageKey::from_bytes` to `store` alone (A) | Low | The host wraps `Mutex<Option<Device>>`; `DataDir::open` is the host's; `from_bytes` also the host's and the bindings' |
+| AZ29 | 040 R3 called the QR bytes fixed-size, so a binding would answer a wrong-length verification QR with `BadLength` instead of the core's `BadPayload` (A) | Low | The QR bytes cross unchecked |
+| AZ30 | 041 R5 did not say how `verify_scanned`'s `qr` crosses, nor how `Fingerprint.qr`, bytes, becomes a string in a `From` (A, B, C) | Low | Both as the ASCII string, `from_utf8_lossy` |
+| AZ31 | 040 R3 and 041 R5 caught a new enum variant but not a new record field (C) | Low | Each conversion destructures its source with no `..` |
+| AZ32 | 041's unzeroed copies left out the `qrcode` crate's buffers, the SVG response body and the password response (B) | Low | Named in Security; R6 moves the renderer's `String` into `Zeroizing` at once |
+| AZ33 | The generated `Ffi*` records print their text fields in `toString` and reflection (A, B, C) | Low | 040 Security says so and that the guarantee rests on spec 053 R22 |
+| AZ34 | 040 R3 named no translation for `bool` and `Vec<T>` (C) | Far-fetched | Named anyway, one clause |
+| AZ35 | `DirName`'s public field was not in the Interface (B) | Far-fetched | Named in 027's list |
+
+**Round 2**, on the change above. Pass C ran 30 mutants of the new `Debug` impls against the test: 19 survived the first test; the rewritten test kills every one but a third spelling of bytes (`{:02x?}`), far-fetched. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ36 | The redaction test looked only for hex: a derived `Debug` prints bytes as a decimal list, so putting back any derived field passed; four `Frame` variants, the display name, the proxy and `client_ref` were never checked, nor that a prefix is shown (A, B, C) | Medium | Every record built by hand with distinct bytes, every `Frame` variant; bytes 4–8 of each id and key refused in hex and in decimal; every name, URL, proxy, blob and free text refused; the records that name a channel must show its prefix |
+| AZ37 | `ClientRef` printed its 16 bytes, and through it `Sent` and `Message`; `Message` and `Received` printed the full `server_id`, which `Frame` shortens (B, C) | Low | Manual `Debug` for `ClientRef`, `Message` and `Received`, with prefixes; named in R20 |
+| AZ38 | `SettingsView` printed the server URL and the proxy that `Route` and `ChannelInfo` hide (A, B, C) | Low | Manual `Debug`: the lock timeout and whether a proxy is set; named in R20 |
+| AZ39 | 040 Security's list of what the generated records print left out URLs and the proxy, and said spec 053 R22 checks what its lint checks only for log calls (B) | Low | Both stated |
+| AZ40 | 027's History left out R23's rewording (AY37) and the Context and Interface changes (A) | Low | History completed |
+| AZ41 | 027 said the host calls `StorageKey::from_bytes`; spec 042's host takes a built `StorageKey` (A) | Low | The bindings crates only |
+| AZ42 | Phase 2's close was not recorded (A) | Low | Its entry is written with the change that marks 027 `implemented` (AZ57) |
+| AZ43 | `Frame::Error`'s `Debug` prints the `code`, up to 32 bytes the server chooses (A, C) | Far-fetched | None: the server's own text, no user data, escaped by `Debug` |
+| AZ44 | Spec 028's Interface did not mention `Frame`'s redacted `Debug` (A) | Far-fetched | Named anyway |
+| AZ45 | The SVG renderer's intermediate buffers and each `qr://` response body are further unzeroed copies (B) | Far-fetched | None: a memory read of the device is outside the model; §8 promises non-retention |
+| AZ46 | `Route`'s `Debug` prints the port (B) | Far-fetched | None: no rule asks to hide it, and a port names no server |
+
+**Round 3**, on the whole change. Pass C ran 18 mutants of the new impls and of the test's oracle: 13 killed, 4 survived (AZ51–AZ53), 1 far-fetched (a `ClientRef` printing its last bytes reversed, a reordered spelling like AZ36's `{:02x?}`). No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ47 | R20 said "no name" while `BrokenChannel`'s `Debug` shows its directory name in full (A, B) | Low | R20 and the doc comment: no channel or display name; the directory's keyed-hash name shown |
+| AZ48 | 027's Context cited the host's mutex without ADR 0041, which moved it there; ADR 0037 still says the bindings wrap it (A) | Low | ADR 0041 in the header and the Context |
+| AZ49 | 041 R5 carries the verification QR as a string, citing spec 014 R3, which says it never crosses as one (A, B) | Low | 014 R3 speaks of the core boundary; past it a binding may carry this public text as a string |
+| AZ50 | 040 R3 credited only spec 014 with rejecting a bad QR; the invitation's is spec 011's (A) | Low | Both cited |
+| AZ51 | `s028_t17_r17_outgoing_drains` compared `client_ref`s through their `Debug`, now 4 bytes: a publish with the right prefix and a wrong tail passed (B) | Low | The values compared |
+| AZ52 | `Message`'s `stranger` was never set in the test, so a full `claims_name_of` or the 4 words passed (C) | Low | Set, its key and words refused |
+| AZ53 | The oracle refused bytes 4–8 only; bytes 8–12 of a `server_id` passed (C) | Low | Every 4-byte window past the prefix refused, in hex and in decimal |
+| AZ54 | The `proxied` flag's value was never checked (C) | Far-fetched | Asserted anyway |
+| AZ55 | The prefix check chose its records by position (C) | Far-fetched | Named records |
+
+**Round 4**, on the whole change. Pass C ran 13 mutants: 9 killed, 3 survived and were killed after AZ58, 1 far-fetched. No production defect.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ56 | §9, AGENTS 20 and the rust skill still said the bindings wrap the `Device`; R22 asks them to follow this spec (A) | Low | The connection host holds it (ADR 0041) and the bindings reach it |
+| AZ57 | Three accepted specs owed amendments "in the pull request that marks this spec accepted", never applied: spec 054 R17 (`preview_qr`, `preview_file` and `ConfigPreview` in 027, their twins in 040, `import_qr` dropped and `preview_file` added in 041, the QR built from one byte segment, the skills' zeroing wording), spec 055 R20 (`verify_scanned` dropped from 041, which round 1 had just given a crossing form) and spec 053 (§10 and 027's Context allow the preview). An import could join before the user confirms, and the desktop kept a way to paste a peer's verification text (B) | Medium | Asked of three advisors, who agreed: the amendments are accepted text and are applied here as written; the preview is implemented in core as one more slice of 027 before 027 is marked `implemented` and phase 2 closes, so 027 goes back to `accepted` in this change (decision taken without the human) |
+| AZ58 | The oracle let a signature, a nonce or a blob show a 4-byte prefix, which R20 says to show none of (C) | Low | Those arrays allow no window at all |
+| AZ59 | `Route`'s `proxied` flag could be a constant (C) | Far-fetched | None |
+| AZ60 | A truncated name passes the test (C) | Far-fetched | None: no idiom of the code prints part of a name |
+| AZ61 | `DirName` derives `Debug` and prints its 16 bytes (B) | Far-fetched | None: the keyed-hash directory name, already on disk and shown by `BrokenChannel::name` |
+
+**Round 5**, on the owed amendments of AZ57. Every amendment its source asks for is there and none is invented (A); the preview leaks and commits nothing before the user confirms, and `import_qr` and `verify_scanned` are gone from every desktop path (B); pass C re-ran 3 mutants on the redaction impls, all killed.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ62 | T25 did not check `ConfigMismatch`, the one error of R5 before the store that is not a parse error (A, C) | Medium | Named in R25; T25 holds the channel with another server |
+| AZ63 | T25 did not check that the suggested name is cleaned, which the confirmation of spec 054 R15 relies on (A) | Medium | T25: a U+202E name shown without it, a U+200B one as `""` |
+| AZ64 | `name_collides` dropped "non-empty" from spec 022 R4 (A, C) | Low | R25 and 054 R17 cite 022 R4; T25 has an empty-key pair |
+| AZ65 | `needs_proxy` read "in no plan", which R2 makes true of every channel while the settings are reset (A, C) | Low | As `ChannelInfo::needs_proxy` would show it under the current proxy (R10); T25 checks it with the settings reset and against `config_onion_ws` |
+| AZ66 | 054 T17 asked for a second core test of the same behaviour, with "no vault call" against R25's `dir_name` and a UI clause (A, C) | Low | Its core clauses are 027 T25; it keeps the confirmation texts as a platform test |
+| AZ67 | T25's "a `FailingVault` sees no call" could not be observed, `FailingVault` counting no calls (A, C) | Low | Every vault fault armed, the same preview, no commit and no plan change |
+| AZ68 | T25's three flags shared one fixture, so a swapped flag passed; it named "collision vectors" that spec 022 does not have (C) | Low | One device per flag; a pair of 022 T04's table |
+| AZ69 | Slice (g) did not name R20's `ConfigPreview` or T20 (A, B, C) | Low | Named; T20 builds a `ConfigPreview` |
+| AZ70 | 040 Security counted six places where secrets cross; there are eight (A, C) | Low | Eight |
+| AZ71 | The architecture skill's new wording also let a client keep the storage key across calls (B) | Low | Split: the key passed once to `open` and zeroed; the password and the scanned text a fresh copy per call |
+| AZ72 | On the desktop the pending `.chatcfg` outlived a cancelled or failed choice, so the next import could use the rejected file (B) | Low | `choose_chatcfg` drops it before its dialog; 054 R15 says the bridge holds the bytes until then |
+| AZ73 | 041 R5 handed every peer's verification text to the web view, which needs none (B) | Far-fetched | Dropped from the mirror anyway; 014 R3 back to bytes, never a string, which reverses AZ30 and AZ49 |
+| AZ74 | On the desktop the confirmation of 054 R15 is enforced by the page only (B) | Far-fetched | Named in 041 Security as a residual of the UI's power |
+| AZ75 | `Vault::dir_name` can fail if libsodium does (A) | Far-fetched | R25 returns it as the import does |
+
+**Round 6**, on the whole change. No production defect, and no path where an invitation joins before the confirmation (B); pass C ran 4 mutants on `Frame`'s `Debug`, all killed. Spec 014 is back to its text on `mvp`: R3's bytes hold at every boundary, no binding carrying the verification QR as a string (AZ73).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ76 | T25 planted the `Corrupt` entry with `plant_corrupt`, whose directory is no channel's, so the clause could not be built (A, C) | Low | A corrupt state put at `Vault::dir_name` of that `channel_id`, as T05 does; the newer and `Io` cases preview `config(k)` |
+| AZ77 | A preview that ran R5's `Io` retry passed T25 (C) | Low | After the preview, `broken` (its `channel_id` still `None`), `channels()` and `connections()` unchanged |
+| AZ78 | T25's "every fault" left out compaction and removal, and its no-commit check was vacuous with commits failing (A, C) | Low | Nine faults armed, the same preview; with none armed, no commit and no plan change |
+| AZ79 | R25 called `ConfigMismatch` the one error that is not the parse's, then named a second (C) | Low | The three kinds of error listed |
+| AZ80 | 054 R17 restated R25's contract, and the two copies already differed (C) | Low | R17 points to 027 R25 |
+| AZ81 | 054 R15 and T15 had the UI compute "new server" from `channels()`, beside the core's `server_known` (A) | Low | The mark shows when `server_known` is false |
+| AZ82 | 054 T15 tested the `broken_reason` texts again, and said "Cancel" zeroes what the desktop's bridge keeps (C) | Low | T17 is their one test; the desktop's pending file stays until R15's events |
+| AZ83 | The skills' "kept copy zeroed on every exit, in a `finally`" read as zeroing it after each call, so "Join" would send zeros (C) | Low | A fresh copy per call, zeroed after it; the kept copy zeroed on close, after the last import and on lock |
+| AZ84 | The skill and 053 Security said the platform holds the storage key "for one call", while 053 R5 and R7 use it to check and re-wrap; a re-wrap after `open` would wrap zeros (B) | Low | Held from its unwrap until `open`, or in R7's re-wrap array, zeroed on every exit |
+| AZ85 | 054 R17's last bullet still asked for the wording AZ71 split (A, B) | Low | Reworded to the split |
+| AZ86 | §9's "Mobile bindings" row said secrets do not cross by value; 040 counts eight places (B) | Low | Only as byte arrays, each side zeroing what it is given (AZ99) |
+| AZ87 | 054 R13 cited 041 R6 for a scanned text on the desktop, which takes none (B) | Low | Removed |
+| AZ88 | 022 R6's list of names the core cleans did not name `ConfigPreview::suggested_name` (A) | Low | Named |
+| AZ89 | 041 R6 kept "another `choose_chatcfg` replaces it", which a dismissed choice does not do (A) | Low | "the next `choose_chatcfg` drops it" |
+| AZ90 | AZ57 called 053's bullet owed at acceptance; 053 R20 asks for it at implementation (A) | Low | 053's History says it was applied ahead |
+| AZ91 | History lines of 027, 040 and 054 left out changes, and loose references in 054's slices and a 040 comment (A, C) | Low | Completed |
+| AZ92 | On the desktop the pending file outlives a "Cancel" on the confirmation (B) | Far-fetched | Named in 041's Security residual: picked, or seen and cancelled |
+
+**Round 7**, on the whole change. No production defect and no join before the confirmation (B); pass C compiled a `&self` preview that calls `Vault::create`: it does not build (E0596).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ93 | T25's fault, commit and no-retry clauses tested what `&self` already forbids, so no mutant that compiles could fail them (C) | Low | R25 says the functions take `&self` and `api_surface.rs` pins the receiver; the vacuous clauses dropped, the three `broken_reason` cases kept |
+| AZ94 | The desktop skill listed a page-side replace retry, which 041 R6 leaves to the bridge after the native confirmation (A, B) | Low | The page invokes preview and import; the bridge retries from its own copy |
+| AZ95 | The kept invitation copy was zeroed after any failed import, so a second "Join" after a retry text would send zeros (B) | Low | Zeroed on close, lock and background, and after `Ok` or an error R16 gives no retry; 054 T15 checks it whole after `BadPassword` |
+| AZ96 | The storage key's window left out its creation by `generate_storage_key` (A, B) | Low | From its creation or its unwrap until `open`, or in R7's re-wrap array (053 Security, the skill) |
+| AZ97 | 054 R16 said the preview never returns `Store(Corrupt)`; a failed `Vault::dir_name` does (A) | Low | Only then, shown with the save-error text, never the replace confirmation |
+| AZ98 | 054 R17's skills bullet still asked for the wording AZ83 replaced (A, C) | Low | The skills' wording |
+| AZ99 | §9's bindings row promised secrets zeroed on both sides, against 040 Security and §8; AZ86 placed the row in §11 (A, B) | Low | Each side zeroes what it is given, the other copies residuals of §8; §9 |
+
+**Round 8**, on the whole change. No production defect, no join before the confirmation, no secret lost (B); the core suite passes, 564 tests (C).
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| AZ100 | After an outcome with no retry the screen stayed with "Join", so a second tap sent zeroed bytes and showed "not a valid invitation" (B) | Low | 054 R15: that outcome's text with no "Join", or the screen closes; T15 checks no core call follows |
+| AZ101 | A preview's final error, and a `preview_file` that returns `BadPassword`, had no zeroing point; T15 used import outcomes a successful preview makes unreachable (B, C) | Low | Zeroed after a preview or an import with no retry; the password alone after a `BadPassword` preview; `InviteExpired` the example |
+| AZ102 | 054 T15 asked the desktop page for a replace retry it never makes (A) | Low | Android and iOS only; 041 T06 covers the bridge's; the architecture skill scoped likewise |
+| AZ103 | 053 Security's creation path left out the desktop's first run (041 R16) (A) | Low | Named |
+| AZ104 | R25 said `&self` refuses every store call but `Vault::dir_name`; `Store::name` and `Store::log_len` read memory through `&self` (A, C) | Far-fetched | Reworded anyway: any store call that reads or writes a file |
+
+The audit ends with round 8: its findings, and those of rounds 5 to 7, are wording of spec 054 and the skills, which describe phase 5 clients with no code yet, and none is a production defect; spec 054's own audit reads them again when it is implemented. The local CI is clean. The preview of R25 is implemented, with T25 and T20's `ConfigPreview` clause, in slice (g), whose audit also reads the preview's Interface against specs 040 and 041.
+
 ## Audit AY
 
 **2026-10-14 — Audit AY, the code audit of slice (f) of spec 027-core-api (branch `027-exit`): the phase 2 exit test (R23); round 1 of three passes (A: conformance; B: the adversary; C: quality, tests and hand mutants).** Audit Y's findings already took AY1–AY18, so this audit's are numbered from AY19. No production defect; the test was weaker than R23's wording. Pass C ran 20 mutants, of the production code the test guards and of the test: 11 killed, 5 equivalent here, 4 survived, each killed below.

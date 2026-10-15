@@ -11,10 +11,11 @@
 //! `tick.rs` the tick, the probes and `flush` (R12, R24).
 
 use std::collections::BTreeMap;
+use std::fmt;
 
 use crate::crypto;
 use crate::error::Error;
-use crate::session::channel::Channel;
+use crate::session::channel::{Channel, key_prefix};
 use crate::session::connection::Event;
 use crate::storage::{DirName, StoreError, Vault};
 
@@ -50,8 +51,10 @@ pub struct DeviceStatus {
     pub broken: Vec<BrokenChannel>,
 }
 
-/// A channel directory that could not be opened (R1, R3).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A channel directory that could not be opened (R1, R3); its `Debug`
+/// shows the `channel_id`'s prefix and no channel name, and the directory's
+/// name in full, a keyed hash already on disk (AGENTS 19).
+#[derive(Clone, PartialEq, Eq)]
 pub struct BrokenChannel {
     /// The directory name, 32 lowercase hex characters.
     pub name: String,
@@ -61,6 +64,19 @@ pub struct BrokenChannel {
     pub channel_id: Option<[u8; 16]>,
     /// The channel's name, when this device knew it before it broke.
     pub channel_name: Option<String>,
+}
+
+impl fmt::Debug for BrokenChannel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BrokenChannel")
+            .field("name", &self.name)
+            .field("reason", &self.reason)
+            .field(
+                "channel_id",
+                &self.channel_id.as_ref().map(|id| key_prefix(id)),
+            )
+            .finish_non_exhaustive()
+    }
 }
 
 /// A broken channel and the directory `remove_broken` removes.

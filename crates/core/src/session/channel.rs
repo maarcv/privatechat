@@ -46,8 +46,9 @@ const ACK_GRACE_MS: u64 = 60_000;
 pub type PeerId = [u8; 32];
 
 /// The identifier of one `outbox` entry, used for every publish of it
-/// (R8): public, compared as a map key (AGENTS 22).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// (R8): public, compared as a map key (AGENTS 22); its `Debug` shows the
+/// 4-byte prefix (AGENTS 19).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ClientRef {
     /// 16 bytes from `random_bytes`.
     pub bytes: [u8; 16],
@@ -89,8 +90,8 @@ pub enum MessageContent {
 }
 
 /// A message `decrypt` consumed and listed (R12); its `Debug` hides the
-/// content.
-#[derive(Debug, PartialEq, Eq)]
+/// content and shows the `server_id`'s prefix.
+#[derive(PartialEq, Eq)]
 pub struct Received {
     /// The server's identifier.
     pub server_id: [u8; 16],
@@ -104,6 +105,27 @@ pub struct Received {
     pub expires_at: u64,
     /// What it holds.
     pub content: MessageContent,
+}
+
+impl fmt::Debug for ClientRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ClientRef")
+            .field(&key_prefix(&self.bytes))
+            .finish()
+    }
+}
+
+impl fmt::Debug for Received {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Received")
+            .field("server_id", &key_prefix(&self.server_id))
+            .field("sender", &self.sender)
+            .field("received_at", &self.received_at)
+            .field("sent_at", &self.sent_at)
+            .field("expires_at", &self.expires_at)
+            .field("content", &self.content)
+            .finish()
+    }
 }
 
 impl fmt::Debug for Gap {
@@ -158,7 +180,7 @@ impl fmt::Debug for MessageContent {
 
 /// What became of a message this device sent (R16, R17, R22).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AckOutcome {
+pub(crate) enum AckOutcome {
     /// The server stored it in time for receivers to show it.
     Delivered,
     /// It was not stored, or not in time: it failed.

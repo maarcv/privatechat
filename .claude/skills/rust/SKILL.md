@@ -118,8 +118,8 @@ AGENTS 12 fixes where `unsafe` may appear. Inside that one file:
 
 `core` and `store` are single-threaded by design: no `tokio`, no threads. The
 one `Send` bound is on `Store` and `Vault`, so that the `Device` of spec
-027-core-api can live behind a `Mutex` in the bindings (spec 020-store-files
-R28). `server` uses `tokio`:
+027-core-api can live behind the `Mutex` of the connection host (spec
+042-connection-host R4, ADR 0041; spec 020-store-files R28). `server` uses `tokio`:
 
 - Bounded channels only (`mpsc::channel(N)`), never `unbounded_channel`. When a
   channel is full, the spec says what happens (`rate_limited`); an unbounded
