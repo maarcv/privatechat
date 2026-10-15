@@ -79,6 +79,15 @@ fn s027_t25_r25_preview() {
         )
         .unwrap();
     assert_eq!(from_file, shown);
+    // The file's `now` reaches the parse: past its expiry, it is refused.
+    assert_eq!(
+        device.preview_file(
+            file.expected("file").bytes(),
+            file.input("password").bytes(),
+            u64::MAX,
+        ),
+        Err(Error::InviteExpired)
+    );
 
     // Each error vector: the preview's error is the import's.
     for vector in vectors::all("011") {
@@ -189,6 +198,8 @@ fn s027_t25_r25_preview() {
         let shown = preview(&device, &config(1));
         assert_eq!(shown.broken_reason, Some(reason));
         assert!(!shown.is_open);
+        // Another channel's preview does not take that entry's reason.
+        assert_eq!(preview(&device, &config(2)).broken_reason, None);
         assert_eq!(device.status().broken.len(), 1);
         assert_eq!(device.status().broken[0].channel_id, None);
         assert!(device.channels().is_empty());

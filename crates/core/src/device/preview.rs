@@ -76,14 +76,22 @@ impl Device {
     /// call, and what the confirmation shows.
     fn preview(&self, config: &Config) -> Result<ConfigPreview, Error> {
         let id = config.channel_id();
-        let open = self
-            .channels
-            .iter()
-            .find(|channel| channel.config().channel_id() == id);
+        let open = self.channel(id).ok();
         if open.is_some_and(|channel| channel.config().server_url() != config.server_url()) {
             return Err(Error::ConfigMismatch);
         }
-        let dir = self.vault.dir_name(&id)?;
+        // As the import, which names the directory only for a channel that
+        // is not open (R5).
+        let broken_reason = match open {
+            Some(_) => None,
+            None => {
+                let dir = self.vault.dir_name(&id)?;
+                self.broken
+                    .iter()
+                    .find(|broken| broken.dir == dir)
+                    .map(|broken| broken.info.reason)
+            }
+        };
         let suggested_name = shown_name(config.suggested_name()).unwrap_or_default();
         let name_collides = self.channels.iter().any(|channel| {
             let names = [
@@ -109,11 +117,7 @@ impl Device {
                 config.server_url(),
                 self.settings.current().socks5_proxy.as_deref(),
             ),
-            broken_reason: self
-                .broken
-                .iter()
-                .find(|broken| broken.dir == dir)
-                .map(|broken| broken.info.reason),
+            broken_reason,
         })
     }
 }
