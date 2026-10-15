@@ -18,6 +18,7 @@ use crate::Error;
 use crate::crypto;
 use crate::proto::auth::auth_message;
 use crate::proto::envelope::ttl_ms;
+use crate::proto::payload::{MINUTE_MS, minute_of};
 use crate::storage::StoreError;
 use outcomes::{Flight, Hold};
 use sync::Truncation;
@@ -44,9 +45,6 @@ const NONCE_WINDOW_MS: u64 = 50_000;
 /// How long the session waits for a `hello` after `on_connect` or
 /// `error{nonce_expired}` (R7).
 const HELLO_WAIT_MS: u64 = 50_000;
-
-/// `since` is the cursor rounded down to the minute (R6).
-const MINUTE_MS: u64 = 60_000;
 
 /// The `Device`'s open channels, found by `channel_id`.
 pub(crate) type Channels = Vec<Channel>;
@@ -495,9 +493,7 @@ fn subscribe(channel: &Channel, server_nonce: &[u8; 32]) -> Result<Vec<u8>, Erro
     // Always present, 0 with no cursor (the server reads it as everything),
     // so that every `subscribe` has one size and a network observer cannot
     // tell a new channel from an old one (R6).
-    let since = channel
-        .cursor()
-        .map_or(0, |cursor| cursor.saturating_sub(cursor % MINUTE_MS));
+    let since = channel.cursor().map_or(0, minute_of);
     Frame::Subscribe {
         pk_ch: pk_ch.0,
         ttl_seconds: config.ttl_seconds(),
