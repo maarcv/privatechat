@@ -9,9 +9,9 @@ use axum::Router;
 use axum::extract::State;
 use axum::extract::ws::{WebSocketUpgrade, rejection::WebSocketUpgradeRejection};
 use axum::http::header::ORIGIN;
-use axum::http::{HeaderMap, Method, StatusCode};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::any;
+use axum::routing::get;
 use tokio::sync::broadcast;
 
 use crate::clock::Clock;
@@ -33,20 +33,16 @@ pub(crate) struct Shared {
 /// The router of `Shared`.
 pub(crate) fn router(shared: Arc<Shared>) -> Router {
     Router::new()
-        .route("/", any(upgrade))
+        .route("/", get(upgrade).fallback(not_found))
         .fallback(not_found)
         .with_state(shared)
 }
 
 async fn upgrade(
     State(shared): State<Arc<Shared>>,
-    method: Method,
     headers: HeaderMap,
     upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Response {
-    if method != Method::GET {
-        return not_found().await;
-    }
     // No browser client in v1 (ADR 0017): a page of another origin gets
     // nothing, not even the upgrade.
     if headers.contains_key(ORIGIN) {

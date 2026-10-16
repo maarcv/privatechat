@@ -19,6 +19,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use crate::clock::ManualClock;
 use crate::connection::spawn_deadline_task;
+use crate::frames::{self, ErrorCode};
 use crate::http::{MAX_MESSAGE, Shared, router};
 
 type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -135,6 +136,35 @@ async fn raw(address: SocketAddr, request: &str) -> String {
     String::from_utf8_lossy(&answer).to_lowercase()
 }
 
+/// A raw socket upgraded on `/`, its `hello` read past.
+async fn upgraded(address: SocketAddr) -> TcpStream {
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let request = format!("GET / HTTP/1.1\r\nhost: h\r\n{UPGRADE}\r\n");
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut answer = Vec::new();
+    let mut byte = [0u8; 1];
+    while !answer.ends_with(b"\r\n\r\n") {
+        stream.read_exact(&mut byte).await.unwrap();
+        answer.push(byte[0]);
+    }
+    // The hello: a short binary frame, its length in one byte.
+    let mut head = [0u8; 2];
+    stream.read_exact(&mut head).await.unwrap();
+    let mut hello = vec![0u8; usize::from(head[1] & 0x7f)];
+    stream.read_exact(&mut hello).await.unwrap();
+    stream
+}
+
+/// The code of the close frame the server writes next on a raw socket.
+async fn close_code(stream: &mut TcpStream) -> Option<u16> {
+    let mut head = [0u8; 4];
+    tokio::time::timeout(Duration::from_secs(10), stream.read_exact(&mut head))
+        .await
+        .ok()?
+        .ok()?;
+    (head[0] == 0x88).then(|| u16::from_be_bytes([head[2], head[3]]))
+}
+
 const UPGRADE: &str = "upgrade: websocket\r\nconnection: upgrade\r\nsec-websocket-version: 13\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\n";
 
 #[tokio::test(flavor = "multi_thread")]
@@ -197,6 +227,21 @@ async fn s030_t04_r04_message_size() {
         .await
         .unwrap();
     assert!(matches!(receive(&mut client).await, Received::Close(1009)));
+    // Nor in two fragments of a message.
+    let mut client = connect(address).await;
+    hello(&mut client).await;
+    let first = RawFrame::message(vec![0; 40_000], OpCode::Data(Data::Binary), false);
+    let rest = RawFrame::message(vec![0; 30_001], OpCode::Data(Data::Continue), true);
+    client.send(Message::Frame(first)).await.unwrap();
+    client.send(Message::Frame(rest)).await.unwrap();
+    assert!(matches!(receive(&mut client).await, Received::Close(1009)));
+    // A frame that announces more is refused from its header alone.
+    let mut stream = upgraded(address).await;
+    let mut header = vec![0x82, 0x80 | 127];
+    header.extend_from_slice(&(u64::try_from(MAX_MESSAGE).unwrap() + 1).to_be_bytes());
+    header.extend_from_slice(&[1, 2, 3, 4]);
+    stream.write_all(&header).await.unwrap();
+    assert_eq!(close_code(&mut stream).await, Some(1009));
     // Text is not spoken here.
     let mut client = connect(address).await;
     hello(&mut client).await;
@@ -231,11 +276,24 @@ async fn s030_t06_r06_bad_frames_close() {
     let ok = Frame::Ok {
         channel_id: [1; 16],
     };
+    let server_hello = Frame::Hello {
+        server_nonce: [1; 32],
+        proto_versions: vec![1],
+    };
+    let ack = Frame::Ack {
+        client_ref: [1; 16],
+        server_id: [2; 16],
+        received_at: 3,
+    };
+    let error = frames::error(ErrorCode::BadAuth, Some([1; 16]), None);
     let random = Message::Binary(vec![0xa5; 40].into());
     for message in [
         random,
         Message::Binary(push.encode().unwrap().into()),
         Message::Binary(ok.encode().unwrap().into()),
+        Message::Binary(server_hello.encode().unwrap().into()),
+        Message::Binary(ack.encode().unwrap().into()),
+        Message::Binary(error.encode().unwrap().into()),
     ] {
         let mut client = connect(address).await;
         hello(&mut client).await;
@@ -282,5 +340,95 @@ async fn s030_t06_r06_bad_frames_close() {
         ));
     }
     clock.advance(1);
-    assert!(matches!(receive(&mut client).await, Received::Close(1008)));
+    // At the next tick, within 100 ms of real time and not the 10 s of `receive`.
+    assert!(matches!(
+        receive_within(&mut client, 500).await,
+        Received::Close(1008)
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s030_t06_r06_verdicts_on_the_wire() {
+    let clock = Arc::new(ManualClock::new(0));
+    let address = start(&clock).await;
+
+    // A ping is answered, and the connection goes on.
+    let mut client = connect(address).await;
+    let nonce = hello(&mut client).await;
+    client.send(Message::Ping(vec![7].into())).await.unwrap();
+    let pong = tokio::time::timeout(Duration::from_secs(10), client.next()).await;
+    assert!(matches!(pong, Ok(Some(Ok(Message::Pong(_))))), "{pong:?}");
+    // A TTL out of range: `bad_ttl` naming the channel the client sent.
+    let (pk_ch, sig) = subscribe_credential(K_CH, 60, &nonce, HOST).unwrap();
+    let bad_ttl = Frame::Subscribe {
+        pk_ch,
+        ttl_seconds: 59,
+        sig,
+        since: Some(0),
+    };
+    send(&mut client, &bad_ttl).await;
+    let expected = relay::channel_id(&pk_ch, 59).unwrap();
+    let received = receive(&mut client).await;
+    assert!(
+        matches!(&received, Received::Frame(Frame::Error { code, message, channel_id, client_ref: None })
+            if code == "bad_ttl" && message == "ttl out of range" && *channel_id == Some(expected)),
+        "{received:?}"
+    );
+    // Its nonce accepted up to 60 000 ms, before its first-subscribe deadline.
+    clock.advance(60_000);
+    send(&mut client, &subscribe(&nonce, HOST)).await;
+    let received = receive(&mut client).await;
+    assert!(
+        matches!(&received, Received::Frame(Frame::Ok { .. })),
+        "{received:?}"
+    );
+
+    // Past 60 000 ms an accepted connection's nonce expires: the `error`,
+    // then a `hello` with a new nonce, which then opens the channel.
+    clock.advance(1);
+    send(&mut client, &subscribe(&nonce, HOST)).await;
+    let received = receive(&mut client).await;
+    assert!(
+        matches!(&received, Received::Frame(Frame::Error { code, message, channel_id, .. })
+            if code == "nonce_expired" && message == "server nonce expired" && *channel_id == Some(channel())),
+        "{received:?}"
+    );
+    let fresh = hello(&mut client).await;
+    assert_ne!(fresh, nonce);
+    send(&mut client, &subscribe(&fresh, HOST)).await;
+    let received = receive(&mut client).await;
+    assert!(
+        matches!(&received, Received::Frame(Frame::Ok { .. })),
+        "{received:?}"
+    );
+}
+
+#[test]
+fn s030_t13_r13_error_texts() {
+    let table = [
+        (
+            ErrorCode::BadAuth,
+            "bad_auth",
+            "subscription signature rejected",
+        ),
+        (
+            ErrorCode::NonceExpired,
+            "nonce_expired",
+            "server nonce expired",
+        ),
+        (ErrorCode::BadTtl, "bad_ttl", "ttl out of range"),
+        (
+            ErrorCode::NotSubscribed,
+            "not_subscribed",
+            "channel not subscribed on this connection",
+        ),
+        (ErrorCode::BadBlob, "bad_blob", "blob rejected"),
+        (ErrorCode::RateLimited, "rate_limited", "rate limited"),
+        (ErrorCode::ChannelQuota, "channel_quota", "channel full"),
+        (ErrorCode::ServerFull, "server_full", "server full"),
+    ];
+    for (code, name, text) in table {
+        assert_eq!((code.code(), code.message()), (name, text));
+        assert!(text.is_ascii() && text.len() <= 256);
+    }
 }
