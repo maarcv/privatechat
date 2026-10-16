@@ -133,10 +133,12 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
         Flow::Continue => connection.serve(&mut ticks).await,
         stopped => stopped,
     };
-    // Forgotten at once, not after the close frame has been sent (R15).
+    // Forgotten at once, not after the close frame has been sent (R15):
+    // the hub's registration, and the nonce, the queue and the catch-ups.
     drop(_registration);
+    let Connection { mut socket, .. } = connection;
     if let Flow::Close(code) = flow {
-        close(&mut connection.socket, code).await;
+        close(&mut socket, code).await;
     }
 }
 
@@ -153,7 +155,7 @@ impl Connection {
                     Some(Err(error)) => read_error(error).map_or(Flow::Gone, Flow::Close),
                 },
                 frame = self.queue.recv() => match frame {
-                    Some(frame) => self.write(frame).await,
+                    Some(frame) => self.write_queued(frame).await,
                     None => Flow::Gone,
                 },
                 tick = ticks.recv() => match tick {
@@ -217,20 +219,22 @@ impl Connection {
                 Verdict::Accept { channel_id } => self.accept(channel_id, ttl_seconds, since),
                 Verdict::NonceExpired { channel_id, hello } => {
                     let error = frames::error(ErrorCode::NonceExpired, Some(channel_id), None);
-                    match self.send(&error).await {
-                        Flow::Continue => self.send(&hello).await,
+                    match self.enqueue(&error) {
+                        Flow::Continue => self.enqueue(&hello),
                         stopped => stopped,
                     }
                 }
                 Verdict::BadTtl { channel_id } => {
-                    let error = frames::error(ErrorCode::BadTtl, Some(channel_id), None);
-                    self.send(&error).await
+                    self.enqueue(&frames::error(ErrorCode::BadTtl, Some(channel_id), None))
                 }
                 Verdict::BadAuth { channel_id } => {
-                    let error = frames::error(ErrorCode::BadAuth, Some(channel_id), None);
-                    self.send(&error).await
+                    self.enqueue(&frames::error(ErrorCode::BadAuth, Some(channel_id), None))
                 }
-                Verdict::Close => Flow::Close(POLICY_VIOLATION),
+                // The frames queued before it go out first (spec 031 R6).
+                Verdict::Close => match self.flush().await {
+                    Flow::Continue => Flow::Close(POLICY_VIOLATION),
+                    stopped => stopped,
+                },
             };
             if !matches!(flow, Flow::Continue) {
                 return flow;
@@ -265,11 +269,9 @@ impl Connection {
     /// written first, then one backlog page, or once the backlog is done its
     /// held pushes, or its `ok` (R7, R8).
     async fn catch_up(&mut self) -> Flow {
-        while let Ok(frame) = self.queue.try_recv() {
-            let flow = self.write(frame).await;
-            if !matches!(flow, Flow::Continue) {
-                return flow;
-            }
+        let flow = self.flush().await;
+        if !matches!(flow, Flow::Continue) {
+            return flow;
         }
         let Some(mut step) = self.catching.pop_front() else {
             return Flow::Continue;
@@ -361,6 +363,39 @@ impl Connection {
             }
         }
         Flow::Continue
+    }
+
+    /// Writes every frame of the queue.
+    async fn flush(&mut self) -> Flow {
+        while let Ok(frame) = self.queue.try_recv() {
+            let flow = self.write_queued(frame).await;
+            if !matches!(flow, Flow::Continue) {
+                return flow;
+            }
+        }
+        Flow::Continue
+    }
+
+    /// Writes a frame of the queue, unless the queue overflowed: then the
+    /// connection closes and nothing more of the queue is written (spec
+    /// 033-rate-limit-quotas R5).
+    async fn write_queued(&mut self, frame: Encoded) -> Flow {
+        if self.overflowed.load(Ordering::SeqCst) {
+            return Flow::Close(TRY_AGAIN_LATER);
+        }
+        self.write(frame).await
+    }
+
+    /// Encodes `frame` into the connection's queue, where it counts toward
+    /// the bound (R10) and keeps its place after the frames queued before.
+    fn enqueue(&self, frame: &Frame) -> Flow {
+        match frame.encode() {
+            Ok(bytes) => {
+                self.shared.hub().enqueue(self.id, bytes.into());
+                Flow::Continue
+            }
+            Err(_) => Flow::Close(INTERNAL_ERROR),
+        }
     }
 
     /// Encodes and writes `frame`.

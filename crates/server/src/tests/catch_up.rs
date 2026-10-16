@@ -580,10 +580,10 @@ async fn s030_t10_r10_overflow_closes_1013() {
     server.shared.hooks.pause_writes(true);
     store_many(&server, channel(), 300, 1_185).await;
     server.shared.hooks.pause_writes(false);
-    let mut pushes = 0;
+    let mut times = Vec::new();
     let code = loop {
         match receive(&mut client).await {
-            Received::Frame(Frame::Push { .. }) => pushes += 1,
+            Received::Frame(Frame::Push { received_at, .. }) => times.push(received_at),
             Received::Close(code) => break Some(code),
             other => {
                 let unexpected = Some(other);
@@ -593,7 +593,42 @@ async fn s030_t10_r10_overflow_closes_1013() {
         }
     };
     assert_eq!(code, Some(1013));
-    assert!(pushes < 300, "{pushes} pushes, none dropped");
+    // What came is the start of the stream, with no hole: nothing past the
+    // dropped frame was written.
+    let first = times.first().copied().unwrap_or(T0);
+    let expected: Vec<u64> = (first..).take(times.len()).collect();
+    assert_eq!(times, expected);
+    assert!(times.len() < 300, "{} pushes, none dropped", times.len());
+}
+
+#[test]
+fn s030_t10_r10_nothing_queued_past_a_drop() {
+    // A queue of one: the `ok` fills it, the next push is dropped, and a
+    // push after the slot frees up stays out too.
+    let mut hub = Hub::default();
+    let (sender, mut queue) = mpsc::channel(1);
+    let overflowed = Arc::new(AtomicBool::new(false));
+    hub.connect(1, sender, overflowed.clone());
+    let subscription = generation(hub.subscribe(1, channel(), DAY));
+    assert!(
+        hub.after_backlog(1, channel(), subscription, None)
+            .is_empty()
+    );
+    let push = |k: u64| WriteOutcome {
+        connection: 9,
+        client_ref: [0; 16],
+        channel_id: channel(),
+        result: Ok(Row {
+            server_id: [u8::try_from(k).unwrap(); 16],
+            received_at: T0 + k,
+            blob: vec![1; 1_185],
+        }),
+    };
+    hub.on_commit(vec![push(0)]);
+    assert!(overflowed.load(Ordering::SeqCst));
+    assert!(queue.try_recv().is_ok(), "the ok");
+    hub.on_commit(vec![push(1)]);
+    assert!(queue.try_recv().is_err(), "a push past the dropped one");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -700,6 +735,25 @@ async fn s030_t08_r08_held_before_ok() {
             );
         }
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s030_t08_r08_held_after_a_backlog() {
+    // A backlog read to its end, then blobs committed before the `ok`: they
+    // come after the backlog, in order, once each.
+    let clock = Arc::new(ManualClock::new(T0));
+    let server = start(&clock).await;
+    plant(&server, channel(), 20, 1_185, T0 - 100, T0 + 3_600_000);
+    let mut client = connect(server.address).await;
+    let nonce = hello(&mut client).await;
+    server.shared.hooks.catch_up_paused.send_replace(true);
+    send(&mut client, &subscribe_since(&nonce, None)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    store_many(&server, channel(), 10, 1_185).await;
+    server.shared.hooks.catch_up_paused.send_replace(false);
+    let times = backlog(&mut client, channel()).await;
+    let expected: Vec<u64> = (T0 - 100..T0 - 80).chain(T0..T0 + 10).collect();
+    assert_eq!(times, expected);
 }
 
 /// The generation of a new subscription; `None` fails the test.

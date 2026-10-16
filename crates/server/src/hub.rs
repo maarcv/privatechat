@@ -103,6 +103,14 @@ impl Hub {
         }
     }
 
+    /// A frame of the connection itself, an answer to its `subscribe`, put
+    /// in its queue (R10).
+    pub(crate) fn enqueue(&self, id: u64, frame: Encoded) {
+        if let Some(connection) = self.connections.get(&id) {
+            queue(connection, frame);
+        }
+    }
+
     /// Registers an accepted subscription as catching up, before any stored
     /// blob is read (R7), and returns its generation; `None` when the channel
     /// is already here (R9), or the connection is not.
@@ -356,8 +364,13 @@ impl Hub {
 }
 
 /// Puts `frame` in the connection's queue; a full queue marks it for closing
-/// (spec 033-rate-limit-quotas R5) and drops the frame.
+/// (spec 033-rate-limit-quotas R5) and drops the frame, and every frame after
+/// it: none may reach the client past a dropped one, whose cursor would skip
+/// it.
 fn queue(connection: &Connection, frame: Encoded) {
+    if connection.overflowed.load(Ordering::SeqCst) {
+        return;
+    }
     if connection.queue.try_send(frame).is_err() {
         connection.overflowed.store(true, Ordering::SeqCst);
     }
