@@ -8,6 +8,7 @@
 
 mod auth;
 mod store;
+mod ws;
 
 use std::path::{Path, PathBuf};
 
