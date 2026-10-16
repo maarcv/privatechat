@@ -11,11 +11,11 @@ use std::time::Duration;
 use rusqlite::Connection;
 
 use super::super::TestDir;
-use super::writer::{Harness, NO_QUOTA, T0, count, received_at, request};
+use super::writer::{Harness, T0, count, received_at, request};
 use crate::clock::ManualClock;
 use crate::store::writer::Refusal;
 use crate::store::writer::purge::{Counters, PURGE_INTERVAL_MS, count_all};
-use crate::store::writer::test::{Hooks, StepHook};
+use crate::store::writer::test::{Hooks, Pause, StepHook};
 
 /// Waits up to 5 s of real time for `done`.
 fn wait_for(mut done: impl FnMut() -> bool) -> bool {
@@ -93,6 +93,8 @@ fn s032_t10_r10_purge() {
     drop(Harness::new(&dir.db(), &clock, Hooks::default()));
     plant(&dir.db(), 1, 2_500, 1_185, T0 - 1, 0);
     plant(&dir.db(), 1, 10, 1_185, T0 + 3_600_000, 2_500);
+    // `expires_at = now` is not yet past: the purge keeps it (R10).
+    plant(&dir.db(), 1, 1, 1_185, T0, 2_510);
     let pages = pragma(&dir.db(), "page_count");
 
     let rounds = Arc::new(Mutex::new(Vec::new()));
@@ -103,7 +105,7 @@ fn s032_t10_r10_purge() {
     let harness = Harness::new(&dir.db(), &clock, hooks);
     // Purged before `spawn` returned.
     assert_eq!(*rounds.lock().unwrap(), [1_000, 1_000, 500]);
-    assert_eq!(count(&dir.db()), 10);
+    assert_eq!(count(&dir.db()), 11);
     assert_eq!(pragma(&dir.db(), "freelist_count"), 0);
     assert!(pragma(&dir.db(), "page_count") < pages);
     assert_eq!(wal_len(&dir.db()), 0);
@@ -112,8 +114,9 @@ fn s032_t10_r10_purge() {
     plant(&dir.db(), 2, 5, 1_185, T0 - 1, 3_000);
     clock.advance_mono(PURGE_INTERVAL_MS);
     assert!(wait_for(|| rounds.lock().unwrap().len() == 4));
+    // The wall clock has not moved: the row at `T0` is still not past.
     assert_eq!(rounds.lock().unwrap()[3], 5);
-    assert_eq!(count(&dir.db()), 10);
+    assert_eq!(count(&dir.db()), 11);
     drop(harness);
 }
 
@@ -137,10 +140,17 @@ fn s032_t14_r14_purge_on_the_monotonic_clock() {
     assert_eq!(rounds.lock().unwrap().len(), 1);
     assert_eq!(count(&dir.db()), 3);
 
-    // The monotonic clock alone starts it, at the next wake.
-    clock.advance_mono(PURGE_INTERVAL_MS);
+    // The monotonic clock alone starts it, 60 000 ms after the last, at the
+    // next wake, and once.
+    assert_eq!(PURGE_INTERVAL_MS, 60_000);
+    clock.advance_mono(59_999);
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(rounds.lock().unwrap().len(), 1);
+    clock.advance_mono(1);
     assert!(wait_for(|| rounds.lock().unwrap().len() == 2));
     assert_eq!(count(&dir.db()), 0);
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(rounds.lock().unwrap().len(), 2);
 }
 
 #[test]
@@ -197,10 +207,16 @@ fn s032_t07_r07_a_failed_batch_leaves_the_counters() {
     let dir = TestDir::new("s032_t07_counters");
     let clock = Arc::new(ManualClock::new(T0));
     let (after_step, steps) = steps_hook();
-    let busy = Arc::new(AtomicBool::new(false));
-    let busy_hook = busy.clone();
+    let (busy, full) = (
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let (busy_hook, full_hook) = (busy.clone(), full.clone());
+    let pause = Pause::paused();
+    pause.release();
     let hooks = Hooks {
         after_step,
+        pause: Some(pause.clone()),
         before_transaction: Some(Box::new(move |connection| {
             let wait = if busy_hook.load(Ordering::SeqCst) {
                 0
@@ -210,6 +226,17 @@ fn s032_t07_r07_a_failed_batch_leaves_the_counters() {
             connection
                 .busy_timeout(Duration::from_millis(wait))
                 .unwrap();
+            let pages: i64 = connection
+                .pragma_query_value(None, "page_count", |row| row.get(0))
+                .unwrap();
+            let limit = if full_hook.load(Ordering::SeqCst) {
+                pages
+            } else {
+                1 << 30
+            };
+            connection
+                .pragma_update(None, "max_page_count", limit)
+                .unwrap();
         })),
         ..Hooks::default()
     };
@@ -218,6 +245,7 @@ fn s032_t07_r07_a_failed_batch_leaves_the_counters() {
     harness.store(request(0, 1, 60));
     let before = next_step(&steps);
 
+    // A lock held elsewhere: the batch fails before it inserts.
     let other = Connection::open(dir.db()).unwrap();
     other.execute_batch("BEGIN IMMEDIATE").unwrap();
     busy.store(true, Ordering::SeqCst);
@@ -228,6 +256,23 @@ fn s032_t07_r07_a_failed_batch_leaves_the_counters() {
     assert_eq!(next_step(&steps), before);
     other.execute_batch("COMMIT").unwrap();
     busy.store(false, Ordering::SeqCst);
+
+    // A full disk: the batch inserts a blob, then fails on the next one.
+    pause.hold();
+    let mut big = request(3, 1, 60);
+    big.blob = vec![1; 64 * 1024];
+    for submitted in [request(2, 1, 60), big] {
+        harness.writer.submit(submitted).unwrap();
+    }
+    full.store(true, Ordering::SeqCst);
+    pause.release();
+    let refused = harness.next();
+    assert!(
+        refused
+            .iter()
+            .all(|outcome| outcome.result == Err(Refusal::ServerFull))
+    );
+    assert_eq!(next_step(&steps), before);
 }
 
 #[test]
@@ -253,15 +298,19 @@ fn s032_t08_r08_space_freed_by_a_purge() {
     let clock = Arc::new(ManualClock::new(T0));
     drop(Harness::new(&dir.db(), &clock, Hooks::default()));
     plant(&dir.db(), 1, 200, 64 * 1024, T0 + 1_000, 0);
-    let live =
-        u64::try_from(pragma(&dir.db(), "page_count") * pragma(&dir.db(), "page_size")).unwrap();
+    let page_size = pragma(&dir.db(), "page_size");
+    let pages = pragma(&dir.db(), "page_count");
+    // Between what the file will still hold after the purge's vacuum, which
+    // gives back 1 000 pages, and what it holds now: only a quota that counts
+    // live pages alone stores again after the purge.
+    let quota = u64::try_from((pages - 1_010) * page_size).unwrap();
 
     let rounds = Arc::new(Mutex::new(Vec::new()));
     let hooks = Hooks {
         purge_round: rounds_hook(&rounds),
         ..Hooks::default()
     };
-    let harness = Harness::with_quota(&dir.db(), &clock, hooks, live);
+    let harness = Harness::with_quota(&dir.db(), &clock, hooks, quota);
     assert_eq!(
         harness.store(request(0, 2, 60)).result,
         Err(Refusal::ServerFull)
@@ -269,15 +318,18 @@ fn s032_t08_r08_space_freed_by_a_purge() {
 
     clock.advance(2_000);
     clock.advance_mono(PURGE_INTERVAL_MS);
-    assert!(wait_for(|| rounds.lock().unwrap().len() == 2));
-    // The file is still as large: only its free pages beyond the vacuum's
-    // 1 000 went back, and the quota counts live pages alone.
-    let file = std::fs::metadata(dir.db()).unwrap().len();
-    assert!(file >= live / 2, "{file} of {live}");
+    // The vacuum, after the rounds, gives back 1 000 free pages and no more
+    // (and the pointer-map pages that tracked them).
+    assert!(wait_for(|| pragma(&dir.db(), "page_count") <= pages - 1_000));
+    assert!(pragma(&dir.db(), "page_count") >= pages - 1_010);
+    let file = u64::try_from(pragma(&dir.db(), "page_count") * page_size).unwrap();
+    assert!(
+        file >= quota,
+        "the file is still as large: {file} of {quota}"
+    );
     assert!(harness.store(request(1, 2, 60)).result.is_ok());
     drop(harness);
     assert_eq!(count(&dir.db()), 1);
-    let _ = NO_QUOTA;
 }
 
 /// A pseudo-random blob of `len` bytes for `seed`, a pattern no page of the
@@ -337,4 +389,29 @@ fn s032_t13_r13_nothing_left_behind() {
         }
     }
     drop(harness);
+}
+
+#[test]
+fn s032_t07_r07_a_failed_commit_leaves_the_counters() {
+    let dir = TestDir::new("s032_t07_commit_counters");
+    let clock = Arc::new(ManualClock::new(T0));
+    let (after_step, steps) = steps_hook();
+    let fail = Arc::new(AtomicBool::new(false));
+    let fail_hook = fail.clone();
+    let hooks = Hooks {
+        after_step,
+        before_commit: Some(Box::new(move |connection| {
+            if fail_hook.load(Ordering::SeqCst) {
+                connection.execute_batch("ROLLBACK").unwrap();
+            }
+        })),
+        ..Hooks::default()
+    };
+    let harness = Harness::new(&dir.db(), &clock, hooks);
+    next_step(&steps);
+    harness.store(request(0, 1, 60));
+    let before = next_step(&steps);
+    fail.store(true, Ordering::SeqCst);
+    assert!(harness.store(request(1, 1, 60)).result.is_err());
+    assert_eq!(next_step(&steps), before);
 }

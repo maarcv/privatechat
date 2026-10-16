@@ -4,6 +4,10 @@
 //! It is the one place where blobs are ordered, so `received_at` is given
 //! here and nowhere else.
 
+pub(crate) mod purge;
+#[cfg(test)]
+pub(crate) mod test;
+
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
@@ -116,7 +120,9 @@ impl Writer {
             hooks,
         };
         // The first purge, then the counters of what it left (R10, R11).
-        thread.purge().map_err(|_| refused(DbCause::Open))?;
+        // A failing purge leaves its rows to the next one, as every purge
+        // does; the counters below count what stands.
+        let _ = thread.purge();
         thread.counters =
             purge::count_all(&thread.connection).map_err(|_| refused(DbCause::Open))?;
         thread
@@ -438,8 +444,3 @@ impl Hooks {
 
     fn after_step(&mut self, _: &Connection, _: &Counters) {}
 }
-
-pub(crate) mod purge;
-
-#[cfg(test)]
-pub(crate) mod test;

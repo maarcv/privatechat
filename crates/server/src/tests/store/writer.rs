@@ -17,7 +17,7 @@ use crate::store::writer::{MAX_BATCH, QUEUE_LEN, Refusal, WriteOutcome, WriteReq
 use crate::{DbCause, StartError, StartReason};
 
 /// Far above any test database.
-pub(super) const NO_QUOTA: u64 = 1 << 40;
+const NO_QUOTA: u64 = 1 << 40;
 
 pub(super) const T0: u64 = 1_800_000_000_000;
 
@@ -600,14 +600,19 @@ fn writer_finish_stores_the_queue_and_empties_the_wal() {
     for n in 0..10 {
         harness.writer.submit(request(n, 1, 60)).unwrap();
     }
+    // A reader that has read keeps the WAL open, as the server's pool does,
+    // so only the writer's own checkpoint empties it.
+    let pool = crate::store::reader::ReadPool::open(&dir.db()).unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    runtime
+        .block_on(crate::store::reader::read_page(&pool, [1; 16], 0, T0))
+        .unwrap();
     let Harness { writer, outcomes } = harness;
     let finished = writer.finish();
     pause.release();
-    tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap()
-        .block_on(finished)
-        .unwrap();
+    runtime.block_on(finished).unwrap();
     let stored: usize = outcomes.try_iter().map(|batch| batch.len()).sum();
     assert_eq!(stored, 10);
     assert_eq!(count(&dir.db()), 10);

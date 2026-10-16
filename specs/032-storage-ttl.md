@@ -67,9 +67,10 @@ This spec is that storage, implemented first in phase 3 (see the order in spec 0
 crates/core/src/relay.rs             new_server_id (R15); specs 030 and 031 add their items
 crates/server/src/clock.rs           Clock, SystemClock, ManualClock (R14)
 crates/server/src/store.rs           open, pragmas, schema and the start-up checks (R1–R3)
-crates/server/src/store/writer.rs    the writer thread, batches, received_at, purge, counters (R4–R8, R10, R11)
+crates/server/src/store/writer.rs    the writer thread, batches, received_at (R4–R8)
+crates/server/src/store/writer/purge.rs   the purge and the counters, run by the writer (R10, R11)
 crates/server/src/store/reader.rs    read_page and the read pool (R9)
-crates/server/src/tests/store.rs     s032_* tests, with ManualClock and a temporary directory, no socket
+crates/server/src/tests/store.rs     s032_* tests, with ManualClock and a temporary directory, no socket; store/writer.rs, store/purge.rs and store/reader.rs beside it
 ```
 
 ```rust
@@ -95,6 +96,7 @@ impl Writer {
     pub(crate) fn submit(&self, request: WriteRequest) -> Result<(), Refusal>;   // try_send: RateLimited when full
     pub(crate) fn finish(self) -> oneshot::Receiver<()>;   // spec 035 R7: answer what is queued, checkpoint, close
 }
+impl Drop for Writer { /* closes the queue and waits for the thread: the tests' teardown; the server awaits finish */ }
 pub(crate) struct StoreError(rusqlite::Error);   // a failed read; spec 030 R7 closes the connection with 1011
 pub(crate) async fn read_page(pool: &ReadPool, channel_id: [u8; 16], from: u64, now: u64) -> Result<Vec<Row>, StoreError>;
 ```
@@ -167,4 +169,5 @@ None.
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): a later server upgrades `user_version` in place in one transaction; the power-failure loss worded as a documented residual
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-10-16 T09 amended in slice (c), after the advisor (audit BE): its clause of 500 rows uses rows of 500 bytes, since 500 rows of 1 185 bytes pass R9's 256 KiB, which 1 185-byte rows reach at 221; a clause with rows of 1 185 bytes added
+- 2026-10-16 Interface, after audits BD and BE: the purge and the counters in `store/writer/purge.rs`; `Writer`'s `Drop`
 - 2026-10-16 implemented (audits BC, BD and BE, `docs/audit-log.md`)

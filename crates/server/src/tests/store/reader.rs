@@ -70,6 +70,10 @@ fn s032_t09_r09_read_page() {
     plant(&dir.db(), 4, 40, 64_673, alive, 4_000);
     assert_eq!(page_sizes(&dir.db(), 4, T0), [4; 10]);
 
+    // A page of exactly 256 KiB: 64 rows of 4 096 bytes.
+    plant(&dir.db(), 7, 128, 4_096, alive, 7_000);
+    assert_eq!(page_sizes(&dir.db(), 7, T0), [64, 64]);
+
     // A row larger than a page still comes, alone.
     plant(&dir.db(), 5, 2, 300 * 1024, alive, 5_000);
     assert_eq!(page_sizes(&dir.db(), 5, T0), [1, 1]);
