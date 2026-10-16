@@ -2,11 +2,16 @@
 //! limits of one connection.
 
 use std::sync::Arc;
+use std::time::Duration;
+
+use futures_util::StreamExt;
+use tokio::net::TcpSocket;
+use tokio_tungstenite::tungstenite::Message;
 
 use privatechat_core::testing::subscribe_credential;
 use privatechat_core::{Frame, relay};
 
-use super::catch_up::{T0, backlog, subscribe_since};
+use super::catch_up::{T0, backlog, plant, store_many, subscribe_since};
 use super::publish::{blob_of, client_ref, fill_writer, hold_writer, publish, refused};
 use super::ws::{
     Client, DAY, HOST, Received, channel, connect, hello, receive, receive_within, send, start,
@@ -14,8 +19,10 @@ use super::ws::{
 };
 use crate::clock::ManualClock;
 use crate::limits::{
-    CONN_PUBLISH_MAX, CONN_PUBLISH_WINDOW_MS, MAX_SUBSCRIPTIONS, SUBSCRIBE_GAP_MS,
+    CONN_PUBLISH_MAX, CONN_PUBLISH_WINDOW_MS, MAX_SUBSCRIPTIONS, PING_INTERVAL_MS, PONG_TIMEOUT_MS,
+    SEND_QUEUE_BYTES, SEND_QUEUE_FRAMES, SUBSCRIBE_GAP_MS, WRITE_TIMEOUT_MS, pong_overdue,
 };
+use crate::store::writer::Row;
 
 /// A `publish` of a blob of the smallest size on the test channel.
 fn on_channel(n: u16) -> Frame {
@@ -234,4 +241,189 @@ async fn s033_t03_r03_sixteen_channels() {
     send(&mut client, &frame).await;
     refused(&mut client, "rate_limited", channel_id, None).await;
     assert!(matches!(receive(&mut client).await, Received::Close(1008)));
+}
+
+/// A client subscribed to the test channel on a new server, its empty
+/// backlog read; the server's first connection, of id 0.
+async fn subscriber(clock: &Arc<ManualClock>) -> (super::ws::Server, Client) {
+    let server = start(clock).await;
+    let mut client = connect(server.address).await;
+    let nonce = hello(&mut client).await;
+    send(&mut client, &subscribe_since(&nonce, None)).await;
+    assert!(backlog(&mut client, channel()).await.is_empty());
+    (server, client)
+}
+
+/// The next message of `client`, whatever it is, within 10 s.
+async fn next_message(client: &mut Client) -> Option<Message> {
+    tokio::time::timeout(Duration::from_secs(10), client.next())
+        .await
+        .ok()
+        .flatten()
+        .and_then(Result::ok)
+}
+
+/// Some ticks of the deadline task, in real time.
+async fn ticks() {
+    tokio::time::sleep(Duration::from_millis(300)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s033_t04_r04_ping_pong() {
+    // The rule at its edges: a ping due at 30 000, the last other write
+    // completed before it, or after it.
+    let due = Some(30_000);
+    assert!(!pong_overdue(59_999, due, 29_999));
+    assert!(pong_overdue(60_000, due, 29_999));
+    assert!(
+        !pong_overdue(60_000, due, 30_000),
+        "a write completed since"
+    );
+    assert!(!pong_overdue(90_000, None, 0), "the pong came");
+
+    // A ping every 30 000 ms; answered, the connection goes on.
+    let clock = Arc::new(ManualClock::new(T0));
+    let (_server, mut client) = subscriber(&clock).await;
+    for _ in 0..2 {
+        clock.advance_mono(PING_INTERVAL_MS);
+        let ping = next_message(&mut client).await;
+        assert!(matches!(ping, Some(Message::Ping(_))), "{ping:?}");
+        // Reading again sends the pong.
+        assert!(matches!(
+            receive_within(&mut client, 300).await,
+            Received::Nothing
+        ));
+    }
+
+    // A client that stops reading and answering: closed with 1001
+    // `PONG_TIMEOUT_MS` after the ping was due, not a millisecond before.
+    let clock = Arc::new(ManualClock::new(T0));
+    let (server, mut client) = subscriber(&clock).await;
+    clock.advance_mono(PING_INTERVAL_MS);
+    ticks().await;
+    clock.advance_mono(PONG_TIMEOUT_MS - 1);
+    ticks().await;
+    assert_eq!(server.shared.hub().subscriptions(0), 1, "closed early");
+    clock.advance_mono(1);
+    ticks().await;
+    assert_eq!(server.shared.hub().subscriptions(0), 0, "not closed");
+    let ping = next_message(&mut client).await;
+    assert!(matches!(ping, Some(Message::Ping(_))), "{ping:?}");
+    assert!(matches!(receive(&mut client).await, Received::Close(1001)));
+
+    // A client reading steadily but slowly behind a large backlog, its pongs
+    // late behind it: the writes go on, and it is not closed.
+    let clock = Arc::new(ManualClock::new(T0));
+    let server = start(&clock).await;
+    plant(&server, channel(), 40, 64_673, T0 - 300, T0 + 3_600_000);
+    let socket = TcpSocket::new_v4().unwrap();
+    socket.set_recv_buffer_size(65_536).unwrap();
+    let stream = socket.connect(server.address).await.unwrap();
+    let stream = tokio_tungstenite::MaybeTlsStream::Plain(stream);
+    let (mut client, _) =
+        tokio_tungstenite::client_async(format!("ws://{}/", server.address), stream)
+            .await
+            .unwrap();
+    let nonce = hello(&mut client).await;
+    send(&mut client, &subscribe_since(&nonce, None)).await;
+    let mut pushes = 0;
+    loop {
+        match receive(&mut client).await {
+            Received::Frame(Frame::Push { .. }) => {
+                // 2 000 ms of the clock a push: two pings come due behind
+                // the pushes, while every push read lets another write
+                // complete.
+                pushes += 1;
+                clock.advance_mono(2_000);
+                ticks().await;
+            }
+            Received::Frame(Frame::Ok { .. }) => break,
+            other => {
+                let unexpected = Some(other);
+                assert!(
+                    unexpected.is_none(),
+                    "unexpected {unexpected:?} after {pushes}"
+                );
+                break;
+            }
+        }
+    }
+    assert_eq!(pushes, 40);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s033_t05_r05_send_queue_and_write_deadline() {
+    // A subscriber whose writes are paused: 256 frames waiting, the one
+    // being written included, fit; the 257th closes it with 1013.
+    let frames = u16::try_from(SEND_QUEUE_FRAMES).unwrap();
+    for (count, closed) in [(frames, false), (frames + 1, true)] {
+        let clock = Arc::new(ManualClock::new(T0));
+        let (server, mut client) = subscriber(&clock).await;
+        server.shared.hooks.pause_writes(true);
+        store_many(&server, channel(), count, 1_185).await;
+        server.shared.hooks.pause_writes(false);
+        let mut pushes = 0;
+        let end = loop {
+            match receive_within(&mut client, 500).await {
+                Received::Frame(Frame::Push { .. }) => pushes += 1,
+                other => break other,
+            }
+        };
+        if closed {
+            assert!(matches!(end, Received::Close(1013)), "{end:?}");
+            assert!(pushes <= 1, "{pushes} pushes past the drop");
+        } else {
+            assert!(matches!(end, Received::Nothing), "{end:?}");
+            assert_eq!(pushes, usize::from(count));
+        }
+    }
+
+    // Blobs of 64 673 bytes: 64 frames fit in 4 MiB, the 65th does not.
+    let row = Row {
+        server_id: [0; 16],
+        received_at: T0,
+        blob: vec![1; 64_673],
+    };
+    let frame = crate::frames::push(channel(), row).encode().unwrap().len();
+    assert!(64 * frame <= SEND_QUEUE_BYTES && 65 * frame > SEND_QUEUE_BYTES);
+    for (count, closed) in [(64u16, false), (65, true)] {
+        let clock = Arc::new(ManualClock::new(T0));
+        let (server, mut client) = subscriber(&clock).await;
+        server.shared.hooks.pause_writes(true);
+        store_many(&server, channel(), count, 64_673).await;
+        server.shared.hooks.pause_writes(false);
+        let mut pushes = 0;
+        let end = loop {
+            match receive_within(&mut client, 500).await {
+                Received::Frame(Frame::Push { .. }) => pushes += 1,
+                other => break other,
+            }
+        };
+        if closed {
+            assert!(matches!(end, Received::Close(1013)), "{end:?}");
+        } else {
+            assert!(matches!(end, Received::Nothing), "{end:?}");
+            assert_eq!(pushes, usize::from(count));
+        }
+    }
+
+    // A write paused mid-frame: the TCP connection dropped, with no close
+    // frame, `WRITE_TIMEOUT_MS` of the monotonic clock after it began.
+    let clock = Arc::new(ManualClock::new(T0));
+    let (server, mut client) = subscriber(&clock).await;
+    server.shared.hooks.pause_writes(true);
+    store_many(&server, channel(), 1, 1_185).await;
+    ticks().await;
+    clock.advance_mono(WRITE_TIMEOUT_MS - 1);
+    ticks().await;
+    assert_eq!(server.shared.hub().subscriptions(0), 1, "dropped early");
+    clock.advance_mono(1);
+    ticks().await;
+    assert_eq!(server.shared.hub().subscriptions(0), 0, "not dropped");
+    server.shared.hooks.pause_writes(false);
+    let last = next_message(&mut client).await;
+    assert!(
+        !matches!(last, Some(Message::Close(_) | Message::Binary(_))),
+        "{last:?}"
+    );
 }

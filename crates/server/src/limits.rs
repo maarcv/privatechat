@@ -20,6 +20,31 @@ pub(crate) const SUBSCRIBE_GAP_MS: u64 = 1_000;
 /// The most subscriptions of one connection (R3).
 pub(crate) const MAX_SUBSCRIPTIONS: usize = 16;
 
+/// How often the server pings a connection, on the monotonic clock (R4).
+pub(crate) const PING_INTERVAL_MS: u64 = 30_000;
+
+/// How long a ping may wait, from when it was due, with no pong and no other
+/// write completing, before the connection closes with 1001 (R4).
+pub(crate) const PONG_TIMEOUT_MS: u64 = 30_000;
+
+/// How long one write or flush may stay pending before the TCP connection is
+/// dropped with no close frame (R5).
+pub(crate) const WRITE_TIMEOUT_MS: u64 = 30_000;
+
+/// The most frames of one connection's queue not yet written (R5).
+pub(crate) const SEND_QUEUE_FRAMES: usize = 256;
+
+/// The most bytes of those frames (R5).
+pub(crate) const SEND_QUEUE_BYTES: usize = 4 * 1024 * 1024;
+
+/// Whether the ping that was due at `due` has waited `PONG_TIMEOUT_MS` at
+/// `now` with no pong and no other write completing since it was due, the
+/// last one having completed at `progress`: the peer is gone (R4). A slow
+/// link still taking frames is not.
+pub(crate) fn pong_overdue(now: u64, due: Option<u64>, progress: u64) -> bool {
+    due.is_some_and(|due| now.saturating_sub(due) >= PONG_TIMEOUT_MS && progress < due)
+}
+
 /// The `publish`es of one connection handed to the writer within the
 /// window of R1, by the monotonic time they were handed.
 #[derive(Debug, Default)]

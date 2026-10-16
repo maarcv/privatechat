@@ -3,7 +3,7 @@
 //! queue bound, the disconnect and the internal errors.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -18,12 +18,11 @@ use super::ws::{
     start, subscribe,
 };
 use crate::clock::ManualClock;
-use crate::limits::SUBSCRIBE_GAP_MS;
+use crate::limits::{SEND_QUEUE_BYTES, SEND_QUEUE_FRAMES, SUBSCRIBE_GAP_MS};
 
 use tokio::sync::mpsc;
 
-use crate::connection::QUEUE_FRAMES;
-use crate::hub::{Encoded, HOLD_FRAMES, Hub};
+use crate::hub::{Encoded, HOLD_FRAMES, Hub, Pending};
 use crate::store::writer::{Row, WriteOutcome, WriteRequest};
 
 /// A wall clock of this century, which every planted blob outlives.
@@ -529,8 +528,8 @@ fn s030_t08_r08_hold_bound_ends_the_largest_only() {
     // Two subscriptions catching up on one connection: past the frame bound,
     // the one holding the most pushes ends, alone.
     let mut hub = Hub::default();
-    let (sender, mut queue) = mpsc::channel(QUEUE_FRAMES);
-    hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
+    let (sender, mut queue) = mpsc::unbounded_channel();
+    hub.connect(1, sender, Arc::new(Pending::default()));
     let large = generation(hub.subscribe(1, channel(), DAY));
     let small = generation(hub.subscribe(1, other_channel(), DAY));
     let mut outcomes: Vec<WriteOutcome> = (0..57)
@@ -634,39 +633,75 @@ async fn s030_t10_r10_overflow_closes_1013() {
 
 #[test]
 fn s030_t10_r10_nothing_queued_past_a_drop() {
-    // A queue of one: the `ok` fills it, the next push is dropped, and a
-    // push after the slot frees up stays out too.
+    // The `ok` and 255 pushes fill the queue; the 257th frame is dropped, and
+    // a push after a frame was written stays out too.
     let mut hub = Hub::default();
-    let (sender, mut queue) = mpsc::channel(1);
-    let overflowed = Arc::new(AtomicBool::new(false));
-    hub.connect(1, sender, overflowed.clone());
+    let (sender, mut queue) = mpsc::unbounded_channel();
+    let pending = Arc::new(Pending::default());
+    hub.connect(1, sender, pending.clone());
     let subscription = generation(hub.subscribe(1, channel(), DAY));
     assert!(
         hub.after_backlog(1, channel(), subscription, None)
             .is_empty()
     );
-    hub.on_commit(vec![committed(channel(), 0, 1_185)]);
-    assert!(overflowed.load(Ordering::SeqCst));
-    assert!(queue.try_recv().is_ok(), "the ok");
-    hub.on_commit(vec![committed(channel(), 1, 1_185)]);
-    assert!(queue.try_recv().is_err(), "a push past the dropped one");
+    let full = u64::try_from(SEND_QUEUE_FRAMES).unwrap();
+    hub.on_commit((1..full).map(|k| committed(channel(), k, 1_185)).collect());
+    assert!(!pending.overflowed());
+    hub.on_commit(vec![committed(channel(), full, 1_185)]);
+    assert!(pending.overflowed());
+    let first = queue.try_recv().map(|frame| frame.len());
+    assert!(first.is_ok(), "the ok");
+    pending.written(first.unwrap_or_default());
+    hub.on_commit(vec![committed(channel(), full + 1, 1_185)]);
+    let mut queued = 1;
+    while queue.try_recv().is_ok() {
+        queued += 1;
+    }
+    assert_eq!(queued, SEND_QUEUE_FRAMES, "a push past the dropped one");
 }
 
 #[test]
 fn s030_t10_r10_an_answer_counts() {
-    // An answer to a `subscribe` that finds the queue full overflows it,
-    // and nothing is queued after it.
+    // An answer to a `subscribe` counts like a push: the 257th waiting frame
+    // overflows the queue, and nothing is queued after it.
     let mut hub = Hub::default();
-    let (sender, mut queue) = mpsc::channel(1);
-    let overflowed = Arc::new(AtomicBool::new(false));
-    hub.connect(1, sender, overflowed.clone());
-    hub.enqueue(1, Encoded::from_static(b"first"));
-    assert!(!overflowed.load(Ordering::SeqCst));
-    hub.enqueue(1, Encoded::from_static(b"second"));
-    assert!(overflowed.load(Ordering::SeqCst));
-    assert!(queue.try_recv().is_ok(), "the first");
-    hub.enqueue(1, Encoded::from_static(b"third"));
-    assert!(queue.try_recv().is_err(), "an answer past the dropped one");
+    let (sender, mut queue) = mpsc::unbounded_channel();
+    let pending = Arc::new(Pending::default());
+    hub.connect(1, sender, pending.clone());
+    for _ in 0..SEND_QUEUE_FRAMES {
+        hub.enqueue(1, Encoded::from_static(b"answer"));
+    }
+    assert!(!pending.overflowed());
+    hub.enqueue(1, Encoded::from_static(b"one too many"));
+    assert!(pending.overflowed());
+    assert!(queue.try_recv().is_ok());
+    pending.written(6);
+    hub.enqueue(1, Encoded::from_static(b"past the drop"));
+    let mut queued = 1;
+    while queue.try_recv().is_ok() {
+        queued += 1;
+    }
+    assert_eq!(queued, SEND_QUEUE_FRAMES);
+}
+
+#[test]
+fn s033_t05_r05_queue_bytes() {
+    // 4 MiB of frames waiting, exactly, fit; one byte more overflows; a frame
+    // written makes room again (spec 033-rate-limit-quotas R5).
+    let mut hub = Hub::default();
+    let (sender, _queue) = mpsc::unbounded_channel();
+    let pending = Arc::new(Pending::default());
+    hub.connect(1, sender, pending.clone());
+    let frame = Encoded::from(vec![0; SEND_QUEUE_BYTES / 64]);
+    for _ in 0..64 {
+        hub.enqueue(1, frame.clone());
+    }
+    assert!(!pending.overflowed(), "4 MiB fit");
+    pending.written(frame.len());
+    hub.enqueue(1, frame.clone());
+    assert!(!pending.overflowed(), "a frame written made room");
+    hub.enqueue(1, Encoded::from_static(b"x"));
+    assert!(pending.overflowed(), "one byte past 4 MiB");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -808,8 +843,8 @@ fn s030_t08_r08_the_bound_passed_chooses() {
     // channels ends, not the third, which holds the most bytes.
     let third = [0x33; 16];
     let mut hub = Hub::default();
-    let (sender, _queue) = mpsc::channel(QUEUE_FRAMES);
-    hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
+    let (sender, _queue) = mpsc::unbounded_channel();
+    hub.connect(1, sender, Arc::new(Pending::default()));
     let first = generation(hub.subscribe(1, channel(), DAY));
     let second = generation(hub.subscribe(1, other_channel(), DAY));
     let large = generation(hub.subscribe(1, third, DAY));
@@ -831,8 +866,8 @@ fn s030_t08_r08_bytes_passed_first() {
     // another holds more pushes but fewer bytes: the one holding the most
     // bytes ends.
     let mut hub = Hub::default();
-    let (sender, _queue) = mpsc::channel(QUEUE_FRAMES);
-    hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
+    let (sender, _queue) = mpsc::unbounded_channel();
+    hub.connect(1, sender, Arc::new(Pending::default()));
     let large = generation(hub.subscribe(1, channel(), DAY));
     let many = generation(hub.subscribe(1, other_channel(), DAY));
     let mut outcomes: Vec<WriteOutcome> = (0..100)
@@ -856,8 +891,8 @@ fn s030_t08_r08_both_bounds_bytes_first() {
     // frames and 4 176 128 bytes; one more large push passes both bounds,
     // and the channel holding the most bytes ends.
     let mut hub = Hub::default();
-    let (sender, mut queue) = mpsc::channel(QUEUE_FRAMES);
-    hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
+    let (sender, mut queue) = mpsc::unbounded_channel();
+    hub.connect(1, sender, Arc::new(Pending::default()));
     let large = generation(hub.subscribe(1, channel(), DAY));
     let small = generation(hub.subscribe(1, other_channel(), DAY));
     let mut outcomes: Vec<WriteOutcome> =
@@ -888,8 +923,8 @@ fn s030_t08_r08_every_subscriber() {
     let mut queues = Vec::new();
     let mut generations = Vec::new();
     for id in [1, 2] {
-        let (sender, queue) = mpsc::channel(QUEUE_FRAMES);
-        hub.connect(id, sender, Arc::new(AtomicBool::new(false)));
+        let (sender, queue) = mpsc::unbounded_channel();
+        hub.connect(id, sender, Arc::new(Pending::default()));
         generations.push(generation(hub.subscribe(id, channel(), DAY)));
         queues.push(queue);
     }
@@ -922,8 +957,8 @@ fn s030_t08_r08_a_stale_step_does_not_act() {
     // still waiting its turn finds the generation changed, and the second
     // streams its own backlog.
     let mut hub = Hub::default();
-    let (sender, _queue) = mpsc::channel(QUEUE_FRAMES);
-    hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
+    let (sender, _queue) = mpsc::unbounded_channel();
+    hub.connect(1, sender, Arc::new(Pending::default()));
     let first = generation(hub.subscribe(1, channel(), DAY));
     let flood: Vec<WriteOutcome> = (0..=u64::try_from(HOLD_FRAMES).unwrap())
         .map(|k| committed(channel(), k, 1_185))
@@ -954,8 +989,8 @@ fn s030_t08_r08_floor_after_ok() {
     // The last backlog push reaches the hub after `ok`: dropped; the next
     // one goes to the queue.
     let mut hub = Hub::default();
-    let (sender, mut queue) = mpsc::channel(QUEUE_FRAMES);
-    hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
+    let (sender, mut queue) = mpsc::unbounded_channel();
+    hub.connect(1, sender, Arc::new(Pending::default()));
     let first = generation(hub.subscribe(1, channel(), DAY));
     assert!(
         hub.after_backlog(1, channel(), first, Some(T0 + 5))
@@ -979,8 +1014,8 @@ fn s030_t08_r08_floor_after_ok() {
 fn s030_t08_r08_held_in_chunks() {
     // 40 held pushes of 16 KiB: chunks of at most 256 KiB, then `ok`.
     let mut hub = Hub::default();
-    let (sender, mut queue) = mpsc::channel(QUEUE_FRAMES);
-    hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
+    let (sender, mut queue) = mpsc::unbounded_channel();
+    hub.connect(1, sender, Arc::new(Pending::default()));
     let first = generation(hub.subscribe(1, channel(), DAY));
     hub.on_commit((0..40).map(|k| committed(channel(), k, 16_384)).collect());
     for expected in [16, 16, 8] {
@@ -998,8 +1033,8 @@ fn s030_t08_r08_handed_out_bytes_leave_the_bound() {
     // 200 held pushes of 16 KiB, one chunk handed out, 60 more: 244 held,
     // 3 997 696 bytes, within the bound.
     let mut hub = Hub::default();
-    let (sender, _queue) = mpsc::channel(QUEUE_FRAMES);
-    hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
+    let (sender, _queue) = mpsc::unbounded_channel();
+    hub.connect(1, sender, Arc::new(Pending::default()));
     let first = generation(hub.subscribe(1, channel(), DAY));
     hub.on_commit((0..200).map(|k| committed(channel(), k, 16_384)).collect());
     assert_eq!(hub.after_backlog(1, channel(), first, None).len(), 16);
