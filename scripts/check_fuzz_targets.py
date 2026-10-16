@@ -29,7 +29,7 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 TARGETS = ("record_decode", "config_parse", "config_parse_qr", "payload_decode", "receive",
            "receive_signed", "verify_qr_parse", "state_decode", "log_record_decode",
            "settings_decode", "channel_decrypt", "frame_decode", "session_on_frame",
-           "relay_verify_subscribe")
+           "relay_verify_subscribe", "relay_check_blob")
 # R7 and the Interface: every target is this file, with its name.
 TEMPLATE = """#![no_main]
 

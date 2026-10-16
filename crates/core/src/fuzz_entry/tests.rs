@@ -7,8 +7,9 @@ use proptest::prelude::{ProptestConfig, any, proptest};
 use super::{
     QR_CHANNEL, config_parse_qr_verdict, config_parse_verdict, frame_decode_verdict,
     log_record_decode_verdict, payload_decode_verdict, receive_signed_verdict, receive_verdict,
-    record_decode_verdict, relay_verify_subscribe_verdict, session_on_frame_verdict,
-    settings_decode_verdict, state_decode_verdict, verify_qr_parse_verdict,
+    record_decode_verdict, relay_check_blob_verdict, relay_verify_subscribe_verdict,
+    session_on_frame_verdict, settings_decode_verdict, state_decode_verdict,
+    verify_qr_parse_verdict,
 };
 use crate::Error;
 use crate::crypto::{self, Nonce, PublicKey, Secret};
@@ -25,9 +26,9 @@ const FUZZ_MANIFEST: &str = include_str!("../../fuzz/Cargo.toml");
 const FUZZ_WORKFLOW: &str = include_str!("../../../../.github/workflows/fuzz.yml");
 
 /// The targets of R2: three added by spec 020-store-files, one by spec
-/// 021-channel-session, two by spec 028-session-sans-io and the last by spec
-/// 031-auth-channel-signature.
-const TARGETS: [&str; 14] = [
+/// 021-channel-session, two by spec 028-session-sans-io, one by spec
+/// 031-auth-channel-signature and the last by spec 030-ws-protocol.
+const TARGETS: [&str; 15] = [
     "record_decode",
     "config_parse",
     "config_parse_qr",
@@ -42,6 +43,7 @@ const TARGETS: [&str; 14] = [
     "frame_decode",
     "session_on_frame",
     "relay_verify_subscribe",
+    "relay_check_blob",
 ];
 
 /// The config of `text_k1`, built here apart from `fuzz_entry`, so that an
@@ -597,4 +599,21 @@ fn s031_t11_r11_seed_reaches_verify() {
         relay_verify_subscribe_verdict(&layout(&sig, b"not-the-host")),
         channel_id
     );
+}
+
+/// Spec 030, R2: the target's layout, `channel_id` ‖ blob, reaches
+/// `check_blob`: a 013 blob passes in its channel and fails in another, and an
+/// input shorter than a `channel_id` stops before it.
+#[test]
+fn s030_t02_r02_seed_reaches_check_blob() {
+    let blob = text_k1_blob();
+    let channel = text_k1_config().channel_id();
+    let seed = [&channel[..], &blob].concat();
+    assert_eq!(relay_check_blob_verdict(&seed), Some(Ok(())));
+    let other = [&[0u8; 16][..], &blob].concat();
+    assert_eq!(
+        relay_check_blob_verdict(&other),
+        Some(Err(Error::WrongChannel))
+    );
+    assert_eq!(relay_check_blob_verdict(&seed[..15]), None);
 }

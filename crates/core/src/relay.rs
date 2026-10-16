@@ -8,6 +8,10 @@ use crate::Error;
 use crate::crypto::{self, CryptoError, PublicKey, Signature};
 use crate::proto::auth::auth_message;
 use crate::proto::config::{ChannelId, TTL_SECONDS, url};
+use crate::proto::envelope;
+
+#[cfg(test)]
+mod tests;
 
 /// The most configured hosts a `subscribe` is checked against (spec 031 R4).
 const MAX_HOSTS: usize = 8;
@@ -85,4 +89,17 @@ pub fn verify_subscribe(
 /// `Error::BadConfig` for a URL outside the grammar.
 pub fn url_host(server_url: &str) -> Result<String, Error> {
     Ok(url::parse(server_url)?.to_owned())
+}
+
+/// Checks the shape of a `publish`'s blob, and nothing else: its length, its
+/// version byte and its `channel_id`, through the step `verify` starts with
+/// (spec 030-ws-protocol R2, spec 013-wire-message R2). It verifies no
+/// signature and decrypts nothing.
+///
+/// # Errors
+///
+/// `Error::BadLength`, `Error::UnsupportedVersion` or `Error::WrongChannel`,
+/// the first that applies.
+pub fn check_blob(blob: &[u8], channel_id: &[u8; 16]) -> Result<(), Error> {
+    envelope::check_shape(blob, &ChannelId(*channel_id))
 }

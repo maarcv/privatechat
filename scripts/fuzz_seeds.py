@@ -85,6 +85,7 @@ TARGETS: dict[str, tuple[str, Callable[[dict], bool], Seed]] = {
     "frame_decode": ("028", lambda v: True, lambda v: field(v, "frame")),
     "session_on_frame": ("028 013", lambda v: True, lambda v: framed(session_frame(v))),
     "relay_verify_subscribe": ("031", lambda v: True, lambda v: subscribe_seed(v)),
+    "relay_check_blob": ("013", lambda v: True, lambda v: field(v, "channel_id") + field(v, "blob")),
 }
 
 
@@ -170,6 +171,8 @@ def read_back(target: str, seed: bytes) -> dict[str, bytes]:
     if target == "receive_signed":
         return {"counter": seed[:8], "nonce": seed[8:32], "received_at": seed[32:40],
                 "now": seed[40:48], "padded": seed[48:]}
+    if target == "relay_check_blob":
+        return {"channel_id": seed[:16], "blob": seed[16:]}
     if target == "relay_verify_subscribe":
         return {"pk_ch": seed[:32], "ttl_seconds": seed[32:36], "sig": seed[36:100],
                 "server_nonce": seed[100:132], "host": seed[132:]}
@@ -203,6 +206,8 @@ def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
         return {"counter": field(v, "counter"), "nonce": field(v, "nonce"),
                 "received_at": field(v, "received_at"), "now": field(v, "now"),
                 "padded": field(v, "padded")}
+    if target == "relay_check_blob":
+        return {"channel_id": field(v, "channel_id"), "blob": field(v, "blob")}
     if target == "relay_verify_subscribe":
         # Written out apart from `subscribe_seed`: the host is the URL's after its scheme.
         url = field(v, "server_url").decode("ascii")
@@ -222,7 +227,7 @@ SEED_COUNTS = {"record_decode": 31, "config_parse": 27, "config_parse_qr": 32,
                "payload_decode": 17, "receive": 30, "receive_signed": 18, "verify_qr_parse": 6,
                "state_decode": 2, "log_record_decode": 4, "settings_decode": 2,
                "channel_decrypt": 30, "frame_decode": 14, "session_on_frame": 44,
-               "relay_verify_subscribe": 11}
+               "relay_verify_subscribe": 11, "relay_check_blob": 30}
 
 
 def check_s016_t08_r08_corpus_is_seeded() -> None:

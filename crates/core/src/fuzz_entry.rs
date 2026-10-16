@@ -118,6 +118,12 @@ pub fn session_on_frame(data: &[u8]) {
     let _ = session_on_frame_verdict(data);
 }
 
+/// `relay_check_blob`: `channel_id` (16) ‖ blob, the shape check the server
+/// runs on a `publish` (spec 030-ws-protocol R2).
+pub fn relay_check_blob(data: &[u8]) {
+    let _ = relay_check_blob_verdict(data);
+}
+
 /// `relay_verify_subscribe`: a `subscribe` as the server checks it, `pk_ch`
 /// (32) ‖ BE32(`ttl_seconds`) ‖ `sig` (64) ‖ `server_nonce` (32) ‖ host,
 /// against that host and `example.org` (spec 031-auth-channel-signature R11).
@@ -255,6 +261,13 @@ pub(crate) fn session_on_frame_verdict(data: &[u8]) -> Result<(Vec<Event>, Optio
     }
     let cursor = channels.first().and_then(Channel::cursor);
     Ok((events, cursor))
+}
+
+/// The verdict of `relay_check_blob`, or `None` for an input shorter than
+/// its `channel_id`.
+pub(crate) fn relay_check_blob_verdict(data: &[u8]) -> Option<Result<(), Error>> {
+    let (channel_id, blob) = data.split_first_chunk::<16>()?;
+    Some(relay::check_blob(blob, channel_id))
 }
 
 /// The most host bytes `relay_verify_subscribe` reads: the URL grammar of

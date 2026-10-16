@@ -224,7 +224,11 @@ pub(crate) mod tests {
         }
         // The wrapped bans, each with exactly the wrappers AGENTS 2 and 24 allow.
         for (crate_name, wrappers) in [
-            ("rand", r#"["proptest", "rand_chacha", "rand_xorshift"]"#),
+            (
+                "rand",
+                r#"["proptest", "rand_chacha", "rand_xorshift", "tungstenite"]"#,
+            ),
+            ("sha1", r#"["axum", "tungstenite"]"#),
             ("rand_chacha", r#"["proptest", "rand"]"#),
             ("rand_xorshift", r#"["proptest"]"#),
             (
@@ -265,7 +269,7 @@ pub(crate) mod tests {
             ]
         );
         let wrapped = bans.iter().filter(|line| line.contains("wrappers")).count();
-        assert_eq!(wrapped, 15, "a ban gained wrappers the test does not name");
+        assert_eq!(wrapped, 16, "a ban gained wrappers the test does not name");
         // Whole sections, so that an added exception or source fails too.
         assert_eq!(
             section(deny, "[licenses]"),

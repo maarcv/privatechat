@@ -110,6 +110,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "relay_check_blob"
+path = "fuzz_targets/relay_check_blob.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "relay_verify_subscribe"
 path = "fuzz_targets/relay_verify_subscribe.rs"
 test = false
