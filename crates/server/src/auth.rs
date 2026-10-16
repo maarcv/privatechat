@@ -48,7 +48,9 @@ pub(crate) struct AuthState {
     previous: Option<[u8; 32]>,
     /// When the first `hello` of the latest nonce was queued.
     hello_at: u64,
-    /// When the connection's first `hello` was queued (R7).
+    /// When the connection's first `hello` was queued (R7). It equals
+    /// `hello_at` until an accept, since both windows are 60 000 ms; kept
+    /// apart so that R1 and R7 stay independent if one of them changes.
     first_hello_at: u64,
     failed: u8,
     accepted_any: bool,

@@ -349,12 +349,19 @@ fn s031_t09_r09_nothing_kept() {
         &check(&mut state, &subscribe, &hosts(), 1),
         channel(DAY)
     ));
+    // A nonce expired too, so that the state holds a previous one.
+    let latest = expired_hello(&check(&mut state, &subscribe, &hosts(), 60_001)).unwrap();
     let shown = format!("{state:?}");
     assert!(
         !shown.contains("nonce") && !shown.contains("previous"),
         "{shown}"
     );
-    for bytes in [&subscribe.pk_ch[..], &subscribe.sig[..], &nonce[..]] {
+    for bytes in [
+        &subscribe.pk_ch[..],
+        &subscribe.sig[..],
+        &nonce[..],
+        &latest[..],
+    ] {
         let as_hex: String = bytes[..4]
             .iter()
             .map(|byte| format!("{byte:02x}"))
