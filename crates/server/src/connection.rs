@@ -211,8 +211,8 @@ impl Connection {
     }
 
     async fn on_tick(&mut self) -> Flow {
-        // `write_queued` closes first, unless a client that keeps its socket
-        // busy keeps the queue from being polled: the tick comes before it.
+        // At every tick and before every write: once a frame was dropped,
+        // nothing more is written (spec 033 R5).
         if self.pending.overflowed() {
             return Flow::Close(TRY_AGAIN_LATER);
         }
@@ -500,13 +500,10 @@ impl Connection {
         Flow::Continue
     }
 
-    /// Writes a frame of the queue, unless the queue overflowed: then the
-    /// connection closes and nothing more of the queue is written (spec
-    /// 033-rate-limit-quotas R5).
+    /// Writes a frame of the queue, then takes it off what waits; `write`
+    /// closes instead once the queue overflowed (spec 033-rate-limit-quotas
+    /// R5).
     async fn write_queued(&mut self, frame: Encoded) -> Flow {
-        if self.pending.overflowed() {
-            return Flow::Close(TRY_AGAIN_LATER);
-        }
         let bytes = frame.len();
         let flow = self.write(frame).await;
         // Written, or the connection is gone: either way no longer waiting.

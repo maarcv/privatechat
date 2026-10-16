@@ -213,10 +213,7 @@ async fn s030_t07_r07_backlog_then_ok() {
         blob: vec![1; 1_185],
     };
     server.shared.writer.submit(short).unwrap();
-    for _ in 0..500 {
-        if count(&server, channel()) == 1_201 {
-            break;
-        }
+    while server.shared.hub().committed(&channel()) < 1_201 {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     // Exactly to its `expires_at`: `expires_at > now` no longer holds.
@@ -450,12 +447,11 @@ async fn s030_t08_r08_hold_bound_ends_one_subscription() {
         clock.advance_mono(SUBSCRIBE_GAP_MS);
         server.shared.hooks.pause_writes(true);
         send(&mut client, &subscribe_since(&nonce, None)).await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        for n in 0..count {
-            store(&server, channel(), n, bytes);
+        while server.shared.hub().subscriptions(0) < 2 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        store(&server, other_channel(), 999, 1_185);
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        store_many(&server, channel(), count, bytes).await;
+        store_many(&server, other_channel(), 1, 1_185).await;
         server.shared.hooks.pause_writes(false);
 
         let mut ended = false;

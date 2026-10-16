@@ -256,6 +256,19 @@ async fn subscriber(clock: &Arc<ManualClock>) -> (super::ws::Server, Client) {
     (server, client)
 }
 
+/// A client of `server` with a 65 536-byte receive buffer, so that what it
+/// does not read soon stalls the server's writes.
+async fn slow_client(server: &super::ws::Server) -> Client {
+    let socket = TcpSocket::new_v4().unwrap();
+    socket.set_recv_buffer_size(65_536).unwrap();
+    let stream = socket.connect(server.address).await.unwrap();
+    let stream = tokio_tungstenite::MaybeTlsStream::Plain(stream);
+    let (client, _) = tokio_tungstenite::client_async(format!("ws://{}/", server.address), stream)
+        .await
+        .unwrap();
+    client
+}
+
 /// The next message of `client`, whatever it is, within 10 s.
 async fn next_message(client: &mut Client) -> Option<Message> {
     tokio::time::timeout(Duration::from_secs(10), client.next())
@@ -314,16 +327,14 @@ async fn s033_t04_r04_ping_pong() {
         receive_within(&mut client, 300).await,
         Received::Nothing
     ));
-    for _ in 0..1 {
-        clock.advance_mono(PING_INTERVAL_MS);
-        let ping = next_message(&mut client).await;
-        assert!(matches!(ping, Some(Message::Ping(_))), "{ping:?}");
-        // Reading again sends the pong.
-        assert!(matches!(
-            receive_within(&mut client, 300).await,
-            Received::Nothing
-        ));
-    }
+    clock.advance_mono(PING_INTERVAL_MS);
+    let ping = next_message(&mut client).await;
+    assert!(matches!(ping, Some(Message::Ping(_))), "{ping:?}");
+    // Reading again sends the pong.
+    assert!(matches!(
+        receive_within(&mut client, 300).await,
+        Received::Nothing
+    ));
 
     // A client that stops reading and answering: closed with 1001
     // `PONG_TIMEOUT_MS` after the ping was due, not a millisecond before.
@@ -355,14 +366,7 @@ async fn s033_t04_r04_ping_pong() {
     let clock = Arc::new(ManualClock::new(T0));
     let server = start(&clock).await;
     plant(&server, channel(), 40, 64_673, T0 - 300, T0 + 3_600_000);
-    let socket = TcpSocket::new_v4().unwrap();
-    socket.set_recv_buffer_size(65_536).unwrap();
-    let stream = socket.connect(server.address).await.unwrap();
-    let stream = tokio_tungstenite::MaybeTlsStream::Plain(stream);
-    let (mut client, _) =
-        tokio_tungstenite::client_async(format!("ws://{}/", server.address), stream)
-            .await
-            .unwrap();
+    let mut client = slow_client(&server).await;
     let nonce = hello(&mut client).await;
     send(&mut client, &subscribe_since(&nonce, None)).await;
     let (mut pushes, mut pings) = (0, 0);
@@ -505,14 +509,7 @@ async fn s033_t05_r05_send_queue_and_write_deadline() {
     let clock = Arc::new(ManualClock::new(T0));
     let server = start(&clock).await;
     plant(&server, channel(), 40, 64_673, T0 - 300, T0 + 3_600_000);
-    let socket = TcpSocket::new_v4().unwrap();
-    socket.set_recv_buffer_size(65_536).unwrap();
-    let stream = socket.connect(server.address).await.unwrap();
-    let stream = tokio_tungstenite::MaybeTlsStream::Plain(stream);
-    let (mut client, _) =
-        tokio_tungstenite::client_async(format!("ws://{}/", server.address), stream)
-            .await
-            .unwrap();
+    let mut client = slow_client(&server).await;
     let nonce = hello(&mut client).await;
     send(&mut client, &subscribe_since(&nonce, None)).await;
     tokio::time::sleep(Duration::from_millis(500)).await;

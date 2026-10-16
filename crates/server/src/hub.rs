@@ -420,17 +420,19 @@ fn queue(connection: &Connection, frame: Encoded) {
         pending.overflowed.store(true, Ordering::SeqCst);
         return;
     }
+    // Counted before it is sent, so that the connection never takes off a
+    // frame not yet counted.
     let bytes = frame.len();
+    pending.frames.fetch_add(1, Ordering::SeqCst);
+    pending.bytes.fetch_add(bytes, Ordering::SeqCst);
     match connection.queue.try_send(frame) {
-        Ok(()) => {
-            pending.frames.fetch_add(1, Ordering::SeqCst);
-            pending.bytes.fetch_add(bytes, Ordering::SeqCst);
-        }
+        Ok(()) => {}
         // Never while `Pending` holds the bound, the channel's being the same.
         Err(mpsc::error::TrySendError::Full(_)) => {
+            pending.written(bytes);
             pending.overflowed.store(true, Ordering::SeqCst);
         }
         // A connection gone has dropped its receiver; it hears nothing more.
-        Err(mpsc::error::TrySendError::Closed(_)) => {}
+        Err(mpsc::error::TrySendError::Closed(_)) => pending.written(bytes),
     }
 }
