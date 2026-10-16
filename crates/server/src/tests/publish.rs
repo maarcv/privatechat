@@ -137,6 +137,11 @@ async fn s030_t11_r11_publish_refusals() {
     short.pop();
     send(&mut client, &publish(other_channel(), 6, short)).await;
     refused(&mut client, "not_subscribed", other_channel(), 6).await;
+    // A channel subscribed on another connection only: `not_subscribed`.
+    let mut stranger = connect(server.address).await;
+    hello(&mut stranger).await;
+    send(&mut stranger, &publish(channel(), 7, blob_of(channel(), 7))).await;
+    refused(&mut stranger, "not_subscribed", channel(), 7).await;
 
     let mut short = blob_of(channel(), 2);
     short.pop();
@@ -209,8 +214,8 @@ async fn s030_t11_r11_publish_takes_the_ttl() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s030_t11_r11_publish_while_catching_up() {
-    // A channel still catching up takes a publish: its `ack`, then the
-    // backlog with its own blob in it, then `ok`.
+    // A channel still catching up takes a publish: an `ack`, and 41 pushes
+    // in all, its own blob among them, then `ok`.
     let clock = Arc::new(ManualClock::new(T0));
     let server = start(&clock).await;
     plant(&server, channel(), 40, 64_673, T0 - 100, T0 + 3_600_000);
