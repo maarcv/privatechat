@@ -168,7 +168,8 @@ fn s032_t05_r05_batches() {
     );
 
     // An idle writer, which has woken a few times with nothing to do,
-    // stores a lone request at once.
+    // stores a lone request at once. The wake is real time (R14), so this one
+    // wait is real time too.
     std::thread::sleep(Duration::from_millis(350));
     let lone = harness.store(request(300, 1, 60));
     assert!(lone.result.is_ok());
@@ -489,4 +490,56 @@ fn s032_t07_r07_failed_commit_keeps_last() {
     assert_eq!(received_at(&harness.store(request(3, 1, 60))), T0 + 1);
     drop(harness);
     assert_eq!(count(&dir.db()), 2);
+}
+
+#[test]
+fn s032_t07_r07_the_stored_row_is_the_reported_one() {
+    let dir = TestDir::new("s032_t07_row");
+    let clock = Arc::new(ManualClock::new(T0));
+    let harness = Harness::new(&dir.db(), &clock, Hooks::default());
+    let mut submitted = request(1, 3, 60);
+    submitted.blob = (0..=255).collect();
+    let outcome = harness.store(submitted.clone());
+    let row = outcome.result.unwrap();
+    assert_eq!(row.blob, submitted.blob);
+    drop(harness);
+    let stored: (Vec<u8>, Vec<u8>, i64, i64, Vec<u8>) = Connection::open(dir.db())
+        .unwrap()
+        .query_row(
+            "SELECT server_id, channel_id, received_at, expires_at, blob FROM messages",
+            [],
+            |found| {
+                Ok((
+                    found.get(0)?,
+                    found.get(1)?,
+                    found.get(2)?,
+                    found.get(3)?,
+                    found.get(4)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(stored.0, row.server_id);
+    assert_eq!(stored.1, submitted.channel_id);
+    assert_eq!(u64::try_from(stored.2).unwrap(), row.received_at);
+    assert_eq!(u64::try_from(stored.3).unwrap(), T0 + 60_000);
+    assert_eq!(stored.4, submitted.blob);
+}
+
+#[test]
+fn s032_t04_r04_dropping_the_writer_stores_what_is_queued() {
+    let dir = TestDir::new("s032_t04_drop");
+    let clock = Arc::new(ManualClock::new(T0));
+    let pause = Pause::paused();
+    let hooks = Hooks {
+        pause: Some(pause.clone()),
+        ..Hooks::default()
+    };
+    let harness = Harness::new(&dir.db(), &clock, hooks);
+    for n in 0..300 {
+        harness.writer.submit(request(n, 1, 60)).unwrap();
+    }
+    pause.release();
+    drop(harness);
+    assert_eq!(count(&dir.db()), 300);
 }

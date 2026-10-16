@@ -143,6 +143,19 @@ impl Drop for Writer {
     }
 }
 
+/// `(page_count − freelist_count) × page_size` (R8).
+fn live_bytes(connection: &Connection) -> Result<u64, rusqlite::Error> {
+    let pages = pragma_u64(connection, "page_count")?
+        .saturating_sub(pragma_u64(connection, "freelist_count")?);
+    Ok(pages.saturating_mul(pragma_u64(connection, "page_size")?))
+}
+
+/// A pragma that reads a count, never negative.
+fn pragma_u64(connection: &Connection, name: &str) -> Result<u64, rusqlite::Error> {
+    let value: i64 = connection.pragma_query_value(None, name, |row| row.get(0))?;
+    u64::try_from(value).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, value))
+}
+
 /// `last_received_at` as stored (R6).
 fn read_last(connection: &Connection) -> Result<u64, rusqlite::Error> {
     let last: i64 = connection.query_row(
@@ -218,17 +231,7 @@ impl WriterThread {
     /// Whether the live pages reach `max_db_bytes` (R8). A size that cannot
     /// be read counts as full.
     fn is_full(&self) -> bool {
-        let live = || -> Result<u64, rusqlite::Error> {
-            let read = |name: &str| -> Result<u64, rusqlite::Error> {
-                let value: i64 = self
-                    .connection
-                    .pragma_query_value(None, name, |row| row.get(0))?;
-                u64::try_from(value).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, value))
-            };
-            let pages = read("page_count")?.saturating_sub(read("freelist_count")?);
-            Ok(pages.saturating_mul(read("page_size")?))
-        };
-        live().map_or(true, |bytes| bytes >= self.max_db_bytes)
+        live_bytes(&self.connection).map_or(true, |bytes| bytes >= self.max_db_bytes)
     }
 
     /// Inserts every request of the batch in one transaction, with a working

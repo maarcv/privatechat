@@ -41,9 +41,15 @@ impl Pause {
     pub(crate) fn hold(&self) {
         let mut state = self.state.lock().unwrap();
         state.paused = true;
-        while !state.parked {
-            state = self.changed.wait(state).unwrap();
-        }
+        // Bounded, so that a writer that stopped fails the test, not hangs it.
+        let (state, waited) = self
+            .changed
+            .wait_timeout_while(state, std::time::Duration::from_secs(30), |state| {
+                !state.parked
+            })
+            .unwrap();
+        assert!(!waited.timed_out(), "the writer never reached the pause");
+        drop(state);
     }
 }
 
