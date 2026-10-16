@@ -117,11 +117,11 @@ fn s032_t04_r04_queue_full() {
             .submit(request(u16::try_from(n).unwrap(), 1, 60))
             .unwrap();
     }
-    assert_eq!(
-        harness.writer.submit(request(9_999, 1, 60)),
-        Err(Refusal::RateLimited)
-    );
+    // Released before the assertion, so that a failure ends the test
+    // instead of leaving the writer paused while the harness drops.
+    let refused = harness.writer.submit(request(9_999, 1, 60));
     pause.release();
+    assert_eq!(refused, Err(Refusal::RateLimited));
     let mut stored = 0;
     while stored < QUEUE_LEN {
         let batch = harness.next();
@@ -167,7 +167,9 @@ fn s032_t05_r05_batches() {
             .all(|pair| received_at(&pair[0]) < received_at(&pair[1]))
     );
 
-    // An idle writer stores a lone request at once.
+    // An idle writer, which has woken a few times with nothing to do,
+    // stores a lone request at once.
+    std::thread::sleep(Duration::from_millis(350));
     let lone = harness.store(request(300, 1, 60));
     assert!(lone.result.is_ok());
 }
@@ -409,4 +411,68 @@ fn s032_t14_r14_received_at_follows_the_wall_clock() {
     // The monotonic reading alone moves no `received_at`.
     clock.advance_mono(60_000);
     assert_eq!(received_at(&harness.store(request(3, 1, 60))), T0 + 5_001);
+}
+
+/// The live bytes of the database, as R8 counts them.
+fn live_bytes(db: &Path) -> u64 {
+    let connection = Connection::open(db).unwrap();
+    let read = |name: &str| -> u64 {
+        let value: i64 = connection
+            .pragma_query_value(None, name, |row| row.get(0))
+            .unwrap();
+        u64::try_from(value).unwrap()
+    };
+    (read("page_count") - read("freelist_count")) * read("page_size")
+}
+
+#[test]
+fn s032_t08_r08_free_pages_do_not_count() {
+    let dir = TestDir::new("s032_t08_free");
+    let clock = Arc::new(ManualClock::new(T0));
+    let harness = Harness::new(&dir.db(), &clock, Hooks::default());
+    let mut big = request(1, 1, 60);
+    big.blob = vec![1; 64 * 1024];
+    assert!(harness.store(big).result.is_ok());
+    drop(harness);
+    let live = live_bytes(&dir.db());
+    let harness = Harness::with_quota(&dir.db(), &clock, Hooks::default(), live);
+    assert_eq!(
+        harness.store(request(2, 1, 60)).result,
+        Err(Refusal::ServerFull)
+    );
+    drop(harness);
+    // Rows deleted, the file as large: its free pages do not count.
+    let connection = Connection::open(dir.db()).unwrap();
+    connection.execute("DELETE FROM messages", []).unwrap();
+    drop(connection);
+    assert!(live_bytes(&dir.db()) < live);
+    let harness = Harness::with_quota(&dir.db(), &clock, Hooks::default(), live);
+    assert!(harness.store(request(3, 1, 60)).result.is_ok());
+}
+
+#[test]
+fn s032_t07_r07_failed_commit_keeps_last() {
+    let dir = TestDir::new("s032_t07_commit");
+    let clock = Arc::new(ManualClock::new(T0));
+    let fail = Arc::new(AtomicBool::new(false));
+    let fail_hook = fail.clone();
+    let hooks = Hooks {
+        before_commit: Some(Box::new(move |connection| {
+            if fail_hook.load(Ordering::SeqCst) {
+                connection.execute_batch("ROLLBACK").unwrap();
+            }
+        })),
+        ..Hooks::default()
+    };
+    let harness = Harness::new(&dir.db(), &clock, hooks);
+    assert_eq!(received_at(&harness.store(request(1, 1, 60))), T0);
+    fail.store(true, Ordering::SeqCst);
+    assert_eq!(
+        harness.store(request(2, 1, 60)).result,
+        Err(Refusal::RateLimited)
+    );
+    fail.store(false, Ordering::SeqCst);
+    assert_eq!(received_at(&harness.store(request(3, 1, 60))), T0 + 1);
+    drop(harness);
+    assert_eq!(count(&dir.db()), 2);
 }
