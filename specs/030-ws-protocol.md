@@ -1,6 +1,6 @@
 # 030 — WebSocket protocol: the server's connections, subscriptions, order and fan-out
 
-Status: accepted
+Status: implemented
 Phase: 3
 Related ADRs: 0010, 0014, 0017, 0020, 0022, 0023, 0038
 Depends on: 013-wire-message, 016-fuzz-harness, 027-core-api, 028-session-sans-io, 031-auth-channel-signature, 032-storage-ttl
@@ -73,13 +73,14 @@ crates/core/src/relay.rs                          check_blob (R2); specs 031 and
 crates/core/src/relay/tests.rs                    s030_* core tests
 crates/core/fuzz/fuzz_targets/relay_check_blob.rs
 crates/server/src/main.rs                         wiring only; spec 035 owns start-up and shutdown
-crates/server/src/http.rs                         the route, the Origin and path checks, the upgrade (R3, R4); `Shared` and its `cfg(test)` hooks, used by the tests of specs 030, 033 and 035: a pause of the socket writes, a pause before a catch-up's `ok`, a count of the backlog reads, a failing read and failing `relay` calls
+crates/server/src/http.rs                         the route, the Origin and path checks, the upgrade (R3, R4); `Shared` and its `cfg(test)` hooks, used by the tests of specs 030, 033 and 035: a pause of the socket writes, a pause before a catch-up's `ok`, a count of the backlog reads, a failing read and failing `relay` calls, a pause of the writer and a `server_id` it refuses
 crates/server/src/connection.rs                   one task per socket: frames in, frames out, catch-up (R5–R11, R15, R16)
 crates/server/src/hub.rs                          subscriptions per channel, held pushes, fan-out in order (R8, R12)
-crates/server/src/frames.rs                       the fixed error texts (R13)
+crates/server/src/frames.rs                       the frames the server builds: `ok`, `ack`, `push`, `error` with its fixed text (R13, R14)
 crates/server/src/tests/ws.rs                     s030_* server tests of the route, the handshake and the frames, over a real socket
 crates/server/src/tests/catch_up.rs               s030_* server tests of the subscriptions, the catch-up and the disconnect, over a real socket and over the hub
 crates/server/src/tests/auth.rs                   also `s030_t16_r16_relay_failures`, each `relay` call of `AuthState` made to fail (R16)
+crates/server/src/tests/publish.rs                s030_* server tests of the publish, the ack and the fan-out, the frames sent and their bytes, over a real socket (R11–R14, and the publish clauses of T07 and T15)
 ```
 
 ```rust
@@ -168,3 +169,4 @@ None.
 - 2026-10-16 R3 worded after audit BI: the path and the method are checked before the `Origin`, the `Origin` before the upgrade, and a `GET /` that is not an upgrade gets the empty 404; T03 checks the non-upgrade `GET /` and `HEAD /`, T04 a text frame that is not UTF-8
 - 2026-10-16 Interface after audit BJ: the tests of the catch-up in `tests/catch_up.rs`, the test hooks in `http.rs`, T16's `relay` failures in `tests/auth.rs`
 - 2026-10-16 R8 amended after audit BJ (`docs/audit-log.md`, BJ-D-1, the human's decision): the bound passed chooses the subscription ended, the most bytes past 4 MiB, else the most pushes past 256; the Limits row, Security and T08 with it
+- 2026-10-16 Interface after slice (d): the publish tests in `tests/publish.rs`, the frame builders in `frames.rs`, the writer's test hooks in `http.rs`

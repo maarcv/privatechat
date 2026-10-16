@@ -29,8 +29,8 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 026 | 026-peer-limits | 2 | implemented |
 | 027 | 027-core-api | 2 | implemented |
 | 028 | 028-session-sans-io | 2 | implemented |
-| 030 | 030-ws-protocol | 3 | accepted |
-| 031 | 031-auth-channel-signature | 3 | accepted |
+| 030 | 030-ws-protocol | 3 | implemented |
+| 031 | 031-auth-channel-signature | 3 | implemented |
 | 032 | 032-storage-ttl | 3 | implemented |
 | 033 | 033-rate-limit-quotas | 3 | accepted |
 | 034 | 034-docker | 3 | accepted |

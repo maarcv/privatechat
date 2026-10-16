@@ -26,11 +26,18 @@ use crate::hub::{Encoded, HOLD_FRAMES, Hub};
 use crate::store::writer::{Row, WriteOutcome, WriteRequest};
 
 /// A wall clock of this century, which every planted blob outlives.
-const T0: u64 = 1_800_000_000_000;
+pub(super) const T0: u64 = 1_800_000_000_000;
 
 /// Inserts `n` blobs of `bytes` bytes into `channel_id`, by hand, with
 /// `received_at` from `first` on and the given `expires_at`.
-fn plant(server: &Server, channel_id: [u8; 16], n: u64, bytes: usize, first: u64, expires_at: u64) {
+pub(super) fn plant(
+    server: &Server,
+    channel_id: [u8; 16],
+    n: u64,
+    bytes: usize,
+    first: u64,
+    expires_at: u64,
+) {
     let db = server.shared.db_path();
     let mut connection = Connection::open(db).unwrap();
     let transaction = connection.transaction().unwrap();
@@ -55,7 +62,7 @@ fn plant(server: &Server, channel_id: [u8; 16], n: u64, bytes: usize, first: u64
 }
 
 /// A blob stored through the writer, as a `publish` of another connection.
-fn store(server: &Server, channel_id: [u8; 16], n: u16, bytes: usize) {
+pub(super) fn store(server: &Server, channel_id: [u8; 16], n: u16, bytes: usize) {
     let mut client_ref = [0; 16];
     client_ref[..2].copy_from_slice(&n.to_be_bytes());
     server
@@ -73,7 +80,7 @@ fn store(server: &Server, channel_id: [u8; 16], n: u16, bytes: usize) {
 
 /// `n` blobs of `bytes` bytes stored through the writer, in order, and
 /// waited for: their `received_at` run from the clock's wall reading on.
-async fn store_many(server: &Server, channel_id: [u8; 16], n: u16, bytes: usize) {
+pub(super) async fn store_many(server: &Server, channel_id: [u8; 16], n: u16, bytes: usize) {
     // Waits for the hub, not the database: the writer hands a transaction
     // to the hub after it commits.
     let before = server.shared.hub().committed(&channel_id);
@@ -105,7 +112,7 @@ async fn store_many(server: &Server, channel_id: [u8; 16], n: u16, bytes: usize)
 }
 
 /// The rows of `channel_id` in the database.
-fn count(server: &Server, channel_id: [u8; 16]) -> u64 {
+pub(super) fn count(server: &Server, channel_id: [u8; 16]) -> u64 {
     let connection = Connection::open(server.shared.db_path()).unwrap();
     let rows: i64 = connection
         .query_row(
@@ -132,9 +139,9 @@ fn committed(channel_id: [u8; 16], k: u64, bytes: usize) -> WriteOutcome {
 }
 
 /// A second channel, of another key.
-const K_OTHER: [u8; 32] = [0x41; 32];
+pub(super) const K_OTHER: [u8; 32] = [0x41; 32];
 
-fn subscribe_other(nonce: &[u8; 32]) -> Frame {
+pub(super) fn subscribe_other(nonce: &[u8; 32]) -> Frame {
     let (pk_ch, sig) = subscribe_credential(K_OTHER, DAY, nonce, HOST).unwrap();
     Frame::Subscribe {
         pk_ch,
@@ -144,12 +151,12 @@ fn subscribe_other(nonce: &[u8; 32]) -> Frame {
     }
 }
 
-fn other_channel() -> [u8; 16] {
+pub(super) fn other_channel() -> [u8; 16] {
     let (pk_ch, _) = subscribe_credential(K_OTHER, DAY, &[0; 32], HOST).unwrap();
     relay::channel_id(&pk_ch, DAY).unwrap()
 }
 
-fn subscribe_since(nonce: &[u8; 32], since: Option<u64>) -> Frame {
+pub(super) fn subscribe_since(nonce: &[u8; 32], since: Option<u64>) -> Frame {
     match subscribe(nonce, HOST) {
         Frame::Subscribe {
             pk_ch,
@@ -168,7 +175,7 @@ fn subscribe_since(nonce: &[u8; 32], since: Option<u64>) -> Frame {
 
 /// The `received_at` of every push the client receives until the `ok` of
 /// `channel_id`, which must come; any other frame fails.
-async fn backlog(client: &mut Client, channel_id: [u8; 16]) -> Vec<u64> {
+pub(super) async fn backlog(client: &mut Client, channel_id: [u8; 16]) -> Vec<u64> {
     let mut times = Vec::new();
     loop {
         match receive(client).await {
