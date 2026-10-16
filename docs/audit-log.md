@@ -2,6 +2,24 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BM
+
+**2026-10-16 — Audit BM, the code audit of the second half of slice (a) of spec 033-rate-limit-quotas (branch `033-a2-deadlines`): R4 and R5, a ping every 30 000 ms of the monotonic clock and a close with 1001 when it waits with no pong and no write completing, the queue of a connection bounded at 256 frames and 4 MiB not yet written, the frame being written included, and a write still pending 30 000 ms after it began dropping the connection with no close frame. Three rounds of three passes.** One High (the pings starved during a catch-up), one memory bound that tungstenite's pongs went around, and tests.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BM1 | A write waiting on a slow link took every tick of its connection, and a catch-up writes page after page without coming back to `serve`: no ping and no tick check for most of a catch-up (A) | High | The checks of a tick run before every write, and each write hears the ticks on a receiver of its own |
+| BM2 | tungstenite queued a pong for every ping of a client that never reads, in a write buffer with no byte bound, until R4 or R5 dropped it (B) | Medium | The socket's write buffer capped at one frame past 128 KiB; a pong that does not fit waits alone, a newer one replacing it |
+| BM3 | The slow reader's pong never came late enough to depend on `progress`; the 1001 close, a stalled ping, a stalled close frame, the due time, the first ping and a client's own ping were untested; T05's stuck write was paused before it began (A, C) | Medium | A test each: raw reads at 6 000 ms a push with a ping among the pushes and the connection open after `ok`; a small-buffer client that stops reading mid-frame; `pong_overdue` as a pure function with its edges |
+| BM4 | Two spec 030 tests waited on real time and failed under heavy load, one on the base already (C) | Low | They wait on the hub |
+| BM5 | The queue's frames were counted after they were sent, a frame written and taken off first wrapping the count for a moment; a second overflow check; the queue unbounded as a channel against the rust skill (C) | Low | Counted before `try_send` and taken off on `Full` or `Closed`; one check, in `on_tick`; a bounded channel as a backstop of `Pending` |
+| BM6 | T05 named nine and three publishers, while the hook that pauses the subscriber's writes pauses theirs too; the byte test and the task count outside the files the Interfaces name (A) | Low | T05 worded to the blobs committed through `Writer::submit`; the test in `tests/limits.rs`; the task count in spec 030's Interface |
+| BM7 | An honest slow client is closed with 1001 when the kernel already holds megabytes of its frames and its pong comes behind them (B) | Far-fetched | None: the spec's floor counts one frame in flight, and the client resumes from its cursor |
+| BM8 | A ping sent late after a stall of about 30 s is overdue one tick later, R4 counting from when it was due; a pong the server writes is no progress (A, B) | Far-fetched | None: R4's letter, a stall outside the model, and a client that does not answer a ping breaks RFC 6455 |
+| BM9 | Mutants with no test that can see them: the write-buffer cap, which bounds memory only, and the count after the send, which only a thread interleaving reaches (C) | Far-fetched | None: accepted as equivalent at the socket |
+
+The pull request is about 510 net lines, 340 of them tests.
+
 ## Audit BL
 
 **2026-10-16 — Audit BL, the code audit of the first half of slice (a) of spec 033-rate-limit-quotas (branch `033-a1-rates`): R1–R3, the publishes of one connection per 57 000 ms, one `subscribe` per 1 000 ms before the checks of spec 031, and sixteen channels then a close, with the tests of spec 030 spacing their `subscribe`s. Two rounds of three passes.** No defect a client can use; the findings were two edges where two rules meet, the wording of R2 and R3, and tests.
