@@ -7,8 +7,8 @@ use proptest::prelude::{ProptestConfig, any, proptest};
 use super::{
     QR_CHANNEL, config_parse_qr_verdict, config_parse_verdict, frame_decode_verdict,
     log_record_decode_verdict, payload_decode_verdict, receive_signed_verdict, receive_verdict,
-    record_decode_verdict, session_on_frame_verdict, settings_decode_verdict, state_decode_verdict,
-    verify_qr_parse_verdict,
+    record_decode_verdict, relay_verify_subscribe_verdict, session_on_frame_verdict,
+    settings_decode_verdict, state_decode_verdict, verify_qr_parse_verdict,
 };
 use crate::Error;
 use crate::crypto::{self, Nonce, PublicKey, Secret};
@@ -25,8 +25,9 @@ const FUZZ_MANIFEST: &str = include_str!("../../fuzz/Cargo.toml");
 const FUZZ_WORKFLOW: &str = include_str!("../../../../.github/workflows/fuzz.yml");
 
 /// The targets of R2: three added by spec 020-store-files, one by spec
-/// 021-channel-session, the last two by spec 028-session-sans-io.
-const TARGETS: [&str; 13] = [
+/// 021-channel-session, two by spec 028-session-sans-io and the last by spec
+/// 031-auth-channel-signature.
+const TARGETS: [&str; 14] = [
     "record_decode",
     "config_parse",
     "config_parse_qr",
@@ -40,6 +41,7 @@ const TARGETS: [&str; 13] = [
     "channel_decrypt",
     "frame_decode",
     "session_on_frame",
+    "relay_verify_subscribe",
 ];
 
 /// The config of `text_k1`, built here apart from `fuzz_entry`, so that an
@@ -523,5 +525,76 @@ fn s028_t03_r03_session_on_frame_reads_frames() {
     assert_eq!(
         session_on_frame_verdict(&framed(&push)).unwrap().1,
         Some(received_at)
+    );
+}
+
+/// Spec 031, R11: the seed of `auth_reference`, in the target's layout,
+/// reaches `verify_detached` and opens the vector's channel; a flipped
+/// signature reaches it and fails there; a short input stops before.
+#[test]
+fn s031_t11_r11_seed_reaches_verify() {
+    let vector = crate::vectors::load("031", "auth_reference");
+    let seed = [
+        vector.input("pk_ch").bytes(),
+        &vector.input("ttl_seconds").number().to_be_bytes(),
+        vector.input("sig").bytes(),
+        vector.input("server_nonce").bytes(),
+        vector.expected("host").bytes(),
+    ]
+    .concat();
+    assert_eq!(
+        relay_verify_subscribe_verdict(&seed),
+        Some(Ok(vector.expected("channel_id").array()))
+    );
+    let mut flipped = seed.clone();
+    flipped[36] ^= 0x01;
+    assert_eq!(
+        relay_verify_subscribe_verdict(&flipped),
+        Some(Err(Error::BadSignature))
+    );
+    assert_eq!(relay_verify_subscribe_verdict(&seed[..131]), None);
+
+    // The host is cut at 250 bytes, and `example.org` is tried after it.
+    let k_ch = vector.input("k_ch").array();
+    let ttl_seconds = vector.input("ttl_seconds").number();
+    let config =
+        Config::from_parts(Secret::from_bytes(k_ch), "wss://h", ttl_seconds, "room", 0).unwrap();
+    let (_, sk_ch) = config.channel_keypair().unwrap();
+    let nonce: [u8; 32] = vector.input("server_nonce").array();
+    let signed_for = |host: &str| {
+        let message = crate::proto::auth::auth_message(&nonce, config.id(), ttl_seconds, host);
+        crypto::sign_detached(&sk_ch, &message).unwrap().0
+    };
+    let channel_id = Some(Ok(vector.expected("channel_id").array()));
+    let layout = |sig: &[u8; 64], host: &[u8]| {
+        [
+            vector.input("pk_ch").bytes(),
+            &ttl_seconds.to_be_bytes(),
+            sig,
+            &nonce,
+            host,
+        ]
+        .concat()
+    };
+    let long = "h".repeat(250);
+    let sig = signed_for(&long);
+    assert_eq!(
+        relay_verify_subscribe_verdict(&layout(&sig, format!("{long}x").as_bytes())),
+        channel_id
+    );
+    assert_eq!(
+        relay_verify_subscribe_verdict(&layout(&sig, &long.as_bytes()[..249])),
+        Some(Err(Error::BadSignature))
+    );
+    // A short host is the input's own.
+    let sig = signed_for("h");
+    assert_eq!(
+        relay_verify_subscribe_verdict(&layout(&sig, b"h")),
+        channel_id
+    );
+    let sig = signed_for("example.org");
+    assert_eq!(
+        relay_verify_subscribe_verdict(&layout(&sig, b"not-the-host")),
+        channel_id
     );
 }

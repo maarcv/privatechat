@@ -108,3 +108,10 @@ path = "fuzz_targets/session_on_frame.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "relay_verify_subscribe"
+path = "fuzz_targets/relay_verify_subscribe.rs"
+test = false
+doc = false
+bench = false

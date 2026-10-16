@@ -5,6 +5,9 @@
 
 use super::config::ChannelId;
 
+#[cfg(test)]
+mod tests;
+
 /// The domain tag of the subscription signature (`docs/spec.md` §4).
 pub(crate) const AUTH_TAG: &[u8; 19] = b"privatechat/auth/v1";
 

@@ -1,0 +1,203 @@
+{
+  "spec": "031",
+  "proto_version": 1,
+  "vectors": [
+    {
+      "name": "auth_reference",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 031: the reference subscribe",
+      "inputs": {
+        "k_ch": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "pk_ch": "0a6c289b8a8f670bd999f12566391866c6687a0c527cb8b2f63ee3a41b9fcee4",
+        "server_nonce": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+        "server_url": "7773733a2f2f636861742e6578616d706c652e6f7267",
+        "sig": "6aa4325181976f8886e81ac4cfc01b3956a801e71a20a7f47001760ee668909a8ef45bac9c1ea21264a18b8bb3ceb7e5b2b3656f743400a071279fa5c00d730b",
+        "ttl_seconds": 86400
+      },
+      "expected": {
+        "channel_id": "26b06631aa61cb8f91c3498b1c59c2c7",
+        "host": "636861742e6578616d706c652e6f7267",
+        "message": "70726976617465636861742f617574682f7631a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf26b06631aa61cb8f91c3498b1c59c2c700015180636861742e6578616d706c652e6f7267"
+      }
+    },
+    {
+      "name": "auth_url_with_port",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 031: the same channel with a port",
+      "inputs": {
+        "k_ch": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "pk_ch": "0a6c289b8a8f670bd999f12566391866c6687a0c527cb8b2f63ee3a41b9fcee4",
+        "server_nonce": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+        "server_url": "7773733a2f2f636861742e6578616d706c652e6f72673a39303031",
+        "sig": "6aa4325181976f8886e81ac4cfc01b3956a801e71a20a7f47001760ee668909a8ef45bac9c1ea21264a18b8bb3ceb7e5b2b3656f743400a071279fa5c00d730b",
+        "ttl_seconds": 86400
+      },
+      "expected": {
+        "channel_id": "26b06631aa61cb8f91c3498b1c59c2c7",
+        "host": "636861742e6578616d706c652e6f7267",
+        "message": "70726976617465636861742f617574682f7631a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf26b06631aa61cb8f91c3498b1c59c2c700015180636861742e6578616d706c652e6f7267"
+      }
+    },
+    {
+      "name": "auth_onion_ws",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 031: a ws:// onion URL (ADR 0038)",
+      "inputs": {
+        "k_ch": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "pk_ch": "0a6c289b8a8f670bd999f12566391866c6687a0c527cb8b2f63ee3a41b9fcee4",
+        "server_nonce": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+        "server_url": "77733a2f2f6162636465666768696a6b6c6d6e6f707172737475767778797a3233343536376162636465666768696a6b6c6d6e6f7071727374757677782e6f6e696f6e",
+        "sig": "268672061564584d94d8d825fac36e769cb38a6ae408fca810391dbbeac46e6ae4e5ea53810a32388a86391fae2c9770fc561448109511af5edfcbc705bf6b05",
+        "ttl_seconds": 86400
+      },
+      "expected": {
+        "channel_id": "26b06631aa61cb8f91c3498b1c59c2c7",
+        "host": "6162636465666768696a6b6c6d6e6f707172737475767778797a3233343536376162636465666768696a6b6c6d6e6f7071727374757677782e6f6e696f6e",
+        "message": "70726976617465636861742f617574682f7631a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf26b06631aa61cb8f91c3498b1c59c2c7000151806162636465666768696a6b6c6d6e6f707172737475767778797a3233343536376162636465666768696a6b6c6d6e6f7071727374757677782e6f6e696f6e"
+      }
+    },
+    {
+      "name": "auth_ttl_60",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 031: the shortest TTL",
+      "inputs": {
+        "k_ch": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "pk_ch": "0a6c289b8a8f670bd999f12566391866c6687a0c527cb8b2f63ee3a41b9fcee4",
+        "server_nonce": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+        "server_url": "7773733a2f2f636861742e6578616d706c652e6f7267",
+        "sig": "554b4961a8b067a58b6db991a7765cb7741ad7f62af60910fe1aea428124420617814344ecef200bb056bf09e64654736ecfa7239e785d15e694b809fb0e6c05",
+        "ttl_seconds": 60
+      },
+      "expected": {
+        "channel_id": "04747a84c5da983b0d870f2ceafcef3f",
+        "host": "636861742e6578616d706c652e6f7267",
+        "message": "70726976617465636861742f617574682f7631a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf04747a84c5da983b0d870f2ceafcef3f0000003c636861742e6578616d706c652e6f7267"
+      }
+    },
+    {
+      "name": "auth_ttl_2592000",
+      "kind": "positive",
+      "source": "derived",
+      "origin": "spec 031: the longest TTL",
+      "inputs": {
+        "k_ch": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "pk_ch": "0a6c289b8a8f670bd999f12566391866c6687a0c527cb8b2f63ee3a41b9fcee4",
+        "server_nonce": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+        "server_url": "7773733a2f2f636861742e6578616d706c652e6f7267",
+        "sig": "13d85891efeb8c1304931b9e6f5ec9ec6e2dfc9bb4c32d7ce3a422544df02fbed40186a81d32b3032eaaaf00f55aab45268f984adc6347d1a0a2c4dae4e3710f",
+        "ttl_seconds": 2592000
+      },
+      "expected": {
+        "channel_id": "75d41cf0d1648d747b30d676a88e4495",
+        "host": "636861742e6578616d706c652e6f7267",
+        "message": "70726976617465636861742f617574682f7631a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf75d41cf0d1648d747b30d676a88e449500278d00636861742e6578616d706c652e6f7267"
+      }
+    },
+    {
+      "name": "auth_wrong_host",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 031: signed for chat.example.org, checked for another host",
+      "inputs": {
+        "pk_ch": "0a6c289b8a8f670bd999f12566391866c6687a0c527cb8b2f63ee3a41b9fcee4",
+        "server_nonce": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+        "server_url": "7773733a2f2f6f746865722e6578616d706c652e6f7267",
+        "sig": "6aa4325181976f8886e81ac4cfc01b3956a801e71a20a7f47001760ee668909a8ef45bac9c1ea21264a18b8bb3ceb7e5b2b3656f743400a071279fa5c00d730b",
+        "ttl_seconds": 86400
+      },
+      "expected": {
+        "channel_id": "26b06631aa61cb8f91c3498b1c59c2c7",
+        "error": "BadSignature"
+      }
+    },
+    {
+      "name": "auth_wrong_nonce",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 031: signed under another nonce",
+      "inputs": {
+        "pk_ch": "0a6c289b8a8f670bd999f12566391866c6687a0c527cb8b2f63ee3a41b9fcee4",
+        "server_nonce": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+        "server_url": "7773733a2f2f636861742e6578616d706c652e6f7267",
+        "sig": "6aa4325181976f8886e81ac4cfc01b3956a801e71a20a7f47001760ee668909a8ef45bac9c1ea21264a18b8bb3ceb7e5b2b3656f743400a071279fa5c00d730b",
+        "ttl_seconds": 86400
+      },
+      "expected": {
+        "channel_id": "26b06631aa61cb8f91c3498b1c59c2c7",
+        "error": "BadSignature"
+      }
+    },
+    {
+      "name": "auth_flipped_sig",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 031: auth_reference with the first bit of sig flipped",
+      "inputs": {
+        "pk_ch": "0a6c289b8a8f670bd999f12566391866c6687a0c527cb8b2f63ee3a41b9fcee4",
+        "server_nonce": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+        "server_url": "7773733a2f2f636861742e6578616d706c652e6f7267",
+        "sig": "6ba4325181976f8886e81ac4cfc01b3956a801e71a20a7f47001760ee668909a8ef45bac9c1ea21264a18b8bb3ceb7e5b2b3656f743400a071279fa5c00d730b",
+        "ttl_seconds": 86400
+      },
+      "expected": {
+        "channel_id": "26b06631aa61cb8f91c3498b1c59c2c7",
+        "error": "BadSignature"
+      }
+    },
+    {
+      "name": "auth_other_ttl",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 031: signed for TTL 60, sent with TTL 61",
+      "inputs": {
+        "pk_ch": "0a6c289b8a8f670bd999f12566391866c6687a0c527cb8b2f63ee3a41b9fcee4",
+        "server_nonce": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+        "server_url": "7773733a2f2f636861742e6578616d706c652e6f7267",
+        "sig": "554b4961a8b067a58b6db991a7765cb7741ad7f62af60910fe1aea428124420617814344ecef200bb056bf09e64654736ecfa7239e785d15e694b809fb0e6c05",
+        "ttl_seconds": 61
+      },
+      "expected": {
+        "channel_id": "4ac6c31233436edf6de9fffbfcbe7d21",
+        "error": "BadSignature"
+      }
+    },
+    {
+      "name": "auth_ttl_59",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 031: a TTL under the range",
+      "inputs": {
+        "pk_ch": "0a6c289b8a8f670bd999f12566391866c6687a0c527cb8b2f63ee3a41b9fcee4",
+        "server_nonce": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+        "server_url": "7773733a2f2f636861742e6578616d706c652e6f7267",
+        "sig": "d74e70627478a1a303b47f9792172fcb58b7866f19d6ece5fce63fc515e0e6cd4a6efd18b069fc50c2ec70baf833bd4e7dd27c96626370db9c5a162cc0c6700b",
+        "ttl_seconds": 59
+      },
+      "expected": {
+        "channel_id": "e93632b750ca851fca0c01612b2a6c00",
+        "error": "BadConfig"
+      }
+    },
+    {
+      "name": "auth_ttl_2592001",
+      "kind": "negative",
+      "source": "derived",
+      "origin": "spec 031: a TTL over the range",
+      "inputs": {
+        "pk_ch": "0a6c289b8a8f670bd999f12566391866c6687a0c527cb8b2f63ee3a41b9fcee4",
+        "server_nonce": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+        "server_url": "7773733a2f2f636861742e6578616d706c652e6f7267",
+        "sig": "9668a6c9853427409345a6d8b4822ce13352a51a9d598b09d4448efd67989dc46cc38655364b8a0419ad08543778137e123faea9cdd97624eac9d17ad7e16405",
+        "ttl_seconds": 2592001
+      },
+      "expected": {
+        "channel_id": "6c076b4cd9d28075a8a65ce45fbb007d",
+        "error": "BadConfig"
+      }
+    }
+  ]
+}
