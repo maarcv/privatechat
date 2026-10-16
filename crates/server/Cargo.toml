@@ -24,10 +24,17 @@ privatechat-core = { path = "../core", version = "0.0.0" }
 # compiles the SQLite the crate ships, so every host runs the same engine; the
 # default features (a statement cache and a WebAssembly build) are not needed.
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
-# The backlog reads run on the blocking pool, off the async threads (spec
-# 032-storage-ttl R9), and `Writer::finish` answers on a oneshot; spec
-# 030-ws-protocol adds the features of the network.
-tokio = { version = "1.53.1", default-features = false, features = ["rt", "sync"] }
+# One task per connection, the deadline task and the listeners (spec
+# 030-ws-protocol), the backlog reads on the blocking pool (spec 032-storage-ttl
+# R9) and `Writer::finish`'s oneshot.
+tokio = { version = "1.53.1", default-features = false, features = ["rt", "rt-multi-thread", "macros", "net", "time", "sync"] }
+# The HTTP route and the WebSocket upgrade (spec 030 R3); HTTP/1 only, no
+# default feature (no tracing, no JSON, no form).
+axum = { version = "0.8.9", default-features = false, features = ["ws", "http1", "tokio"] }
+# Only to recognise `Error::Capacity` and `Error::Utf8` behind `axum::Error`
+# and close with 1009 or 1003 (spec 030 R4), at the version axum pins: 0.30 would bring `rand` 0.10, and
+# with it the banned `chacha20`.
+tungstenite = { version = "0.29.0", default-features = false }
 
 [features]
 # `ManualClock` and the test hooks, for the integration tests of spec
@@ -35,6 +42,10 @@ tokio = { version = "1.53.1", default-features = false, features = ["rt", "sync"
 test-support = []
 
 [dev-dependencies]
+# The test client over a real socket (spec 030), at the version axum pins.
+tokio-tungstenite = { version = "0.29.0", default-features = false, features = ["connect"] }
+# `SinkExt` and `StreamExt` for that client.
+futures-util = { version = "0.3.31", default-features = false, features = ["sink", "std"] }
 # `testing::subscribe_credential`, so that the tests sign what a client signs
 # (spec 031-auth-channel-signature); the server itself holds no key.
 privatechat-core = { path = "../core", version = "0.0.0", features = ["test-support"] }
