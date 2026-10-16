@@ -375,17 +375,20 @@ async fn s030_t07_r07_one_page_at_a_time() {
             .unwrap();
     let nonce = match client.next().await {
         Some(Ok(Message::Binary(bytes))) => match Frame::decode(&bytes).unwrap() {
-            Frame::Hello { server_nonce, .. } => server_nonce,
-            _ => [0; 32],
+            Frame::Hello { server_nonce, .. } => Some(server_nonce),
+            _ => None,
         },
-        _ => [0; 32],
+        _ => None,
     };
+    assert!(nonce.is_some(), "no hello first");
+    let nonce = nonce.unwrap_or_default();
     let frame = subscribe_since(&nonce, None).encode().unwrap();
     futures_util::SinkExt::send(&mut client, Message::Binary(frame.into()))
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
     let reads = server.shared.hooks.reads();
+    assert!(reads >= 1, "the catch-up never started");
     assert!(
         reads < 75,
         "{reads} pages read for a client that reads nothing"
@@ -855,6 +858,36 @@ fn s030_t08_r08_both_bounds_bytes_first() {
         matches!(&error, Ok(Ok(Frame::Error { code, channel_id, .. })) if code == "rate_limited" && *channel_id == Some(channel())),
         "{error:?}"
     );
+}
+
+#[test]
+fn s030_t08_r08_every_subscriber() {
+    // Two connections on one channel: a blob committed while both catch up
+    // is held for each, and the next one reaches each queue after its `ok`.
+    let mut hub = Hub::default();
+    let mut queues = Vec::new();
+    let mut generations = Vec::new();
+    for id in [1, 2] {
+        let (sender, queue) = mpsc::channel(QUEUE_FRAMES);
+        hub.connect(id, sender, Arc::new(AtomicBool::new(false)));
+        generations.push(generation(hub.subscribe(id, channel())));
+        queues.push(queue);
+    }
+    hub.on_commit(vec![committed(channel(), 0, 1_185)]);
+    for (id, generation) in [1, 2].into_iter().zip(&generations) {
+        assert_eq!(hub.after_backlog(id, channel(), *generation, None).len(), 1);
+        assert!(
+            hub.after_backlog(id, channel(), *generation, None)
+                .is_empty()
+        );
+    }
+    hub.on_commit(vec![committed(channel(), 1, 1_185)]);
+    for queue in &mut queues {
+        let ok = queue.try_recv().map(|bytes| Frame::decode(&bytes));
+        assert!(matches!(ok, Ok(Ok(Frame::Ok { .. }))), "{ok:?}");
+        let push = queue.try_recv().map(|bytes| Frame::decode(&bytes));
+        assert!(matches!(push, Ok(Ok(Frame::Push { .. }))), "{push:?}");
+    }
 }
 
 /// The generation of a new subscription; `None` fails the test.
