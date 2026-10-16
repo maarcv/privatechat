@@ -83,7 +83,7 @@ impl Pending {
 
 /// What the hub keeps of a connection: its queue and what the queue holds.
 struct Connection {
-    queue: mpsc::UnboundedSender<Encoded>,
+    queue: mpsc::Sender<Encoded>,
     pending: Arc<Pending>,
     subscriptions: HashMap<[u8; 16], Subscription>,
 }
@@ -102,12 +102,7 @@ pub(crate) struct Hub {
 
 impl Hub {
     /// A connection and its queue.
-    pub(crate) fn connect(
-        &mut self,
-        id: u64,
-        queue: mpsc::UnboundedSender<Encoded>,
-        pending: Arc<Pending>,
-    ) {
+    pub(crate) fn connect(&mut self, id: u64, queue: mpsc::Sender<Encoded>, pending: Arc<Pending>) {
         self.connections.insert(
             id,
             Connection {
@@ -425,8 +420,17 @@ fn queue(connection: &Connection, frame: Encoded) {
         pending.overflowed.store(true, Ordering::SeqCst);
         return;
     }
-    pending.frames.fetch_add(1, Ordering::SeqCst);
-    pending.bytes.fetch_add(frame.len(), Ordering::SeqCst);
-    // A connection gone has dropped its receiver; it hears nothing more.
-    let _ = connection.queue.send(frame);
+    let bytes = frame.len();
+    match connection.queue.try_send(frame) {
+        Ok(()) => {
+            pending.frames.fetch_add(1, Ordering::SeqCst);
+            pending.bytes.fetch_add(bytes, Ordering::SeqCst);
+        }
+        // Never while `Pending` holds the bound, the channel's being the same.
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            pending.overflowed.store(true, Ordering::SeqCst);
+        }
+        // A connection gone has dropped its receiver; it hears nothing more.
+        Err(mpsc::error::TrySendError::Closed(_)) => {}
+    }
 }

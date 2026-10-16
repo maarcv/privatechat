@@ -281,10 +281,38 @@ async fn s033_t04_r04_ping_pong() {
     );
     assert!(!pong_overdue(90_000, None, 0), "the pong came");
 
-    // A ping every 30 000 ms; answered, the connection goes on.
+    // A ping every 30 000 ms, the first a whole interval after the connect;
+    // answered, the connection goes on.
     let clock = Arc::new(ManualClock::new(T0));
-    let (_server, mut client) = subscriber(&clock).await;
-    for _ in 0..2 {
+    let server = start(&clock).await;
+    let mut client = connect(server.address).await;
+    let first = next_message(&mut client).await;
+    let nonce = match &first {
+        Some(Message::Binary(bytes)) => match Frame::decode(bytes) {
+            Ok(Frame::Hello { server_nonce, .. }) => Some(server_nonce),
+            _ => None,
+        },
+        _ => None,
+    };
+    assert!(nonce.is_some(), "not the hello first: {first:?}");
+    send(
+        &mut client,
+        &subscribe_since(&nonce.unwrap_or_default(), None),
+    )
+    .await;
+    assert!(backlog(&mut client, channel()).await.is_empty());
+    clock.advance_mono(PING_INTERVAL_MS - 1);
+    ticks().await;
+    let early = tokio::time::timeout(Duration::from_millis(100), client.next()).await;
+    assert!(early.is_err(), "a ping before its interval: {early:?}");
+    clock.advance_mono(1);
+    let ping = next_message(&mut client).await;
+    assert!(matches!(ping, Some(Message::Ping(_))), "{ping:?}");
+    assert!(matches!(
+        receive_within(&mut client, 300).await,
+        Received::Nothing
+    ));
+    for _ in 0..1 {
         clock.advance_mono(PING_INTERVAL_MS);
         let ping = next_message(&mut client).await;
         assert!(matches!(ping, Some(Message::Ping(_))), "{ping:?}");
@@ -310,6 +338,15 @@ async fn s033_t04_r04_ping_pong() {
     let ping = next_message(&mut client).await;
     assert!(matches!(ping, Some(Message::Ping(_))), "{ping:?}");
     assert!(matches!(receive(&mut client).await, Received::Close(1001)));
+
+    // A ping sent late, its 30 000 ms counted from when it was due.
+    let clock = Arc::new(ManualClock::new(T0));
+    let (server, _client) = subscriber(&clock).await;
+    clock.advance_mono(PING_INTERVAL_MS + 1_000);
+    ticks().await;
+    clock.advance_mono(PONG_TIMEOUT_MS - 1_000);
+    ticks().await;
+    assert_eq!(server.shared.hub().subscriptions(0), 0, "not closed");
 
     // A client reading steadily but slowly behind a large backlog, its pongs
     // late behind it: the writes go on, and it is not closed.
@@ -427,6 +464,38 @@ async fn s033_t05_r05_send_queue_and_write_deadline() {
             assert_eq!(pushes, usize::from(count));
         }
     }
+
+    // A ping whose write stalls: dropped with no close frame, like any write.
+    let clock = Arc::new(ManualClock::new(T0));
+    let (server, mut client) = subscriber(&clock).await;
+    server.shared.hooks.pause_writes(true);
+    clock.advance_mono(PING_INTERVAL_MS);
+    ticks().await;
+    clock.advance_mono(WRITE_TIMEOUT_MS);
+    ticks().await;
+    assert_eq!(server.shared.hub().subscriptions(0), 0, "not dropped");
+    server.shared.hooks.pause_writes(false);
+    let last = next_message(&mut client).await;
+    assert!(!matches!(last, Some(Message::Close(_))), "{last:?}");
+
+    // A close frame whose write stalls: dropped at the same deadline, not
+    // before it, and the client never gets the close.
+    let clock = Arc::new(ManualClock::new(T0));
+    let (server, mut client) = subscriber(&clock).await;
+    server.shared.hooks.pause_writes(true);
+    futures_util::SinkExt::send(&mut client, Message::Text("x".into()))
+        .await
+        .unwrap();
+    ticks().await;
+    clock.advance_mono(WRITE_TIMEOUT_MS - 1);
+    ticks().await;
+    assert_eq!(server.shared.hooks.tasks(), 1, "the close dropped early");
+    clock.advance_mono(1);
+    ticks().await;
+    assert_eq!(server.shared.hooks.tasks(), 0, "the close never dropped");
+    server.shared.hooks.pause_writes(false);
+    let last = next_message(&mut client).await;
+    assert!(!matches!(last, Some(Message::Close(_))), "{last:?}");
 
     // A client that stops reading with a small receive buffer: a write stuck
     // mid-frame, part of it taken; the TCP connection dropped with no close

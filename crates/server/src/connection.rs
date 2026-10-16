@@ -21,8 +21,8 @@ use crate::frames::{self, ErrorCode};
 use crate::http::Shared;
 use crate::hub::{Encoded, Pending};
 use crate::limits::{
-    MAX_SUBSCRIPTIONS, PING_INTERVAL_MS, PublishWindow, SUBSCRIBE_GAP_MS, WRITE_TIMEOUT_MS,
-    pong_overdue,
+    MAX_SUBSCRIPTIONS, PING_INTERVAL_MS, PublishWindow, SEND_QUEUE_FRAMES, SUBSCRIBE_GAP_MS,
+    WRITE_TIMEOUT_MS, pong_overdue,
 };
 use crate::store::reader::read_page;
 use crate::store::writer::WriteRequest;
@@ -78,7 +78,7 @@ struct Connection {
     socket: WebSocket,
     shared: Arc<Shared>,
     auth: AuthState,
-    queue: mpsc::UnboundedReceiver<Encoded>,
+    queue: mpsc::Receiver<Encoded>,
     /// What the queue holds not yet written (spec 033-rate-limit-quotas R5).
     pending: Arc<Pending>,
     /// The ticks of the deadline task (spec 032-storage-ttl R14).
@@ -111,6 +111,8 @@ impl Drop for Registration {
 
 /// The connection of `socket`, until either side closes it.
 pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
+    #[cfg(test)]
+    let _task = shared.hooks.task();
     let ticks = shared.ticks.subscribe();
     let now = shared.clock.mono_ms();
     let Ok((auth, hello)) = AuthState::new(now) else {
@@ -125,9 +127,9 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
         auth
     };
     let id = shared.next_connection();
-    // Unbounded as a channel, bounded by `Pending`: the hub queues nothing
-    // past 256 frames or 4 MiB not yet written (spec 033 R5).
-    let (sender, queue) = mpsc::unbounded_channel();
+    // `Pending` holds the bound of spec 033 R5, the frame being written
+    // included; the channel's own bound is the same, a backstop.
+    let (sender, queue) = mpsc::channel(SEND_QUEUE_FRAMES);
     let pending = Arc::new(Pending::default());
     shared.hub().connect(id, sender, pending.clone());
     let registration = Registration {
