@@ -177,6 +177,15 @@ async fn s030_t03_r03_route_and_origin() {
     )
     .await;
     assert!(head.starts_with("http/1.1 404"), "{head}");
+    let origin_only = raw(
+        address,
+        "GET / HTTP/1.1\r\nhost: h\r\norigin: https://example.org\r\n\r\n",
+    )
+    .await;
+    assert!(
+        origin_only.starts_with("http/1.1 403") && origin_only.contains(empty),
+        "{origin_only}"
+    );
     let plain = raw(address, "GET / HTTP/1.1\r\nhost: h\r\n\r\n").await;
     assert!(
         plain.starts_with("http/1.1 404") && plain.contains(empty),
@@ -354,7 +363,7 @@ async fn s030_t06_r06_bad_frames_close() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn s030_t06_r06_verdicts_on_the_wire() {
+async fn spec_031_verdicts_on_the_wire() {
     let clock = Arc::new(ManualClock::new(0));
     let address = start(&clock).await;
 
@@ -410,7 +419,7 @@ async fn s030_t06_r06_verdicts_on_the_wire() {
 }
 
 #[test]
-fn s030_t13_r13_error_texts() {
+fn error_codes_and_texts() {
     let table = [
         (
             ErrorCode::BadAuth,

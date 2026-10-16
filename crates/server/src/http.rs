@@ -1,7 +1,9 @@
 //! The one route of the server (spec 030-ws-protocol R3, R4): `GET /`
 //! upgraded to a WebSocket of at most 70 000-byte messages, with no
-//! extension and no subprotocol. Any other path or method gets 404, and a
-//! request with an `Origin` header 403, both with an empty body.
+//! extension and no subprotocol. Any other path or method, and a `GET /`
+//! that is not an upgrade, gets 404; a `GET /` with an `Origin` header gets
+//! 403; both with an empty body. The path and the method are checked first,
+//! then the `Origin`, then the upgrade.
 
 use std::sync::Arc;
 
