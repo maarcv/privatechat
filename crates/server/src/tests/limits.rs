@@ -574,6 +574,14 @@ fn s033_t05_r05_queue_bytes() {
     assert!(pending.overflowed(), "one byte past 4 MiB");
 }
 
+/// Request `n` on channel 1 from one of three connections.
+fn of_three(n: u16) -> WriteRequest {
+    WriteRequest {
+        connection: u64::from(n % 3),
+        ..writer_request(n, 1, DAY)
+    }
+}
+
 /// A writer with `limits` on a database of its own, its clock at `T0`.
 fn limited(
     name: &str,
@@ -614,23 +622,35 @@ fn one_transaction(
 
 #[test]
 fn s033_t06_r06_channel_rate() {
+    // The defaults of the table "Limits".
     let limits = ChannelLimits::default();
+    assert_eq!(
+        limits,
+        ChannelLimits {
+            publish_per_min: 120,
+            bytes_per_min: 4 * 1024 * 1024,
+            max_blobs: 20_000,
+            max_bytes: 64 * 1024 * 1024,
+        }
+    );
     let max = u16::try_from(limits.publish_per_min).unwrap();
 
-    // 120 inserts within 60 000 ms, from seven connections; the 121st refused.
+    // 120 inserts within 60 000 ms, from three connections; the 121st
+    // refused.
     let (_dir, clock, harness) = limited("s033_t06", limits, Hooks::default());
     for n in 0..max {
-        let outcome = harness.store(writer_request(n, 1, DAY));
+        let outcome = harness.store(of_three(n));
         assert!(outcome.result.is_ok(), "{n}: {outcome:?}");
     }
     assert_eq!(
-        harness.store(writer_request(max, 1, DAY)).result,
+        harness.store(of_three(max)).result,
         Err(Refusal::RateLimited)
     );
     // Another channel is not counted.
     assert!(harness.store(writer_request(max, 2, DAY)).result.is_ok());
     // At the edge of the window the 120 still count; past it, accepted.
-    clock.advance_mono(CHANNEL_WINDOW_MS);
+    assert_eq!(CHANNEL_WINDOW_MS, 60_000);
+    clock.advance_mono(60_000);
     assert_eq!(
         harness.store(writer_request(max + 1, 1, DAY)).result,
         Err(Refusal::RateLimited)
@@ -652,9 +672,15 @@ fn s033_t06_r06_channel_rate() {
         harness.store(sized(fit, 3, 64_673)).result,
         Err(Refusal::RateLimited)
     );
+    // Exactly up to 4 MiB fits; one byte more does not.
+    let left = usize::try_from(limits.bytes_per_min).unwrap() - usize::from(fit) * 64_673;
     assert!(
-        harness.store(sized(fit + 1, 3, 1_185)).result.is_ok(),
-        "within the bytes left"
+        harness.store(sized(fit + 1, 3, left)).result.is_ok(),
+        "exactly 4 MiB"
+    );
+    assert_eq!(
+        harness.store(sized(fit + 2, 3, 1)).result,
+        Err(Refusal::RateLimited)
     );
 
     // The inserts of the same transaction count.
@@ -675,6 +701,48 @@ fn s033_t06_r06_channel_rate() {
         .collect();
     assert_eq!(refused, vec![usize::from(max)]);
     assert_eq!(batch[usize::from(max)].result, Err(Refusal::RateLimited));
+
+    // The bytes of the same transaction count too: 65 blobs of 64 673 bytes.
+    let batch = one_transaction(
+        &harness,
+        &pause,
+        (0..=fit).map(|n| sized(n, 2, 64_673)).collect(),
+    );
+    assert!(
+        batch[..usize::from(fit)]
+            .iter()
+            .all(|outcome| outcome.result.is_ok())
+    );
+    assert_eq!(batch[usize::from(fit)].result, Err(Refusal::RateLimited));
+
+    // Only its own channel's: 120 on one channel, then one on another.
+    let mut requests: Vec<WriteRequest> = (0..max).map(|n| writer_request(n, 4, DAY)).collect();
+    requests.push(writer_request(max, 5, DAY));
+    let batch = one_transaction(&harness, &pause, requests);
+    assert!(batch.iter().all(|outcome| outcome.result.is_ok()));
+}
+
+#[test]
+fn s033_t06_r06_rolled_back_not_counted() {
+    // A transaction whose commit fails inserted nothing: its blobs do not
+    // count in the window.
+    let limits = ChannelLimits {
+        publish_per_min: 1,
+        ..ChannelLimits::RAISED
+    };
+    let fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let failing = fail.clone();
+    let hooks = Hooks {
+        before_commit: Some(Box::new(move |connection| {
+            if failing.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                connection.execute_batch("ROLLBACK").unwrap();
+            }
+        })),
+        ..Hooks::default()
+    };
+    let (_dir, _clock, harness) = limited("s033_t06_rollback", limits, hooks);
+    assert!(harness.store(writer_request(0, 1, DAY)).result.is_err());
+    assert!(harness.store(writer_request(1, 1, DAY)).result.is_ok());
 }
 
 #[test]
@@ -744,12 +812,41 @@ fn s033_t07_r07_channel_quota() {
         Err(Refusal::ChannelQuota)
     );
 
-    // The same on bytes: 500 bytes held, five blobs of 100.
+    // The same on bytes: 500 bytes held, five blobs of 100; also within one
+    // transaction.
     let limits = ChannelLimits {
         max_bytes: 500,
         ..ChannelLimits::RAISED
     };
-    let (_dir, _clock, harness) = limited("s033_t07_bytes", limits, Hooks::default());
+    let pause = Pause::paused();
+    pause.release();
+    let hooks = Hooks {
+        pause: Some(pause.clone()),
+        ..Hooks::default()
+    };
+    let (_dir, _clock, harness) = limited("s033_t07_bytes", limits, hooks);
+    for n in 0..5 {
+        assert!(harness.store(writer_request(n, 1, DAY)).result.is_ok());
+    }
+    assert_eq!(
+        harness.store(writer_request(5, 1, DAY)).result,
+        Err(Refusal::ChannelQuota)
+    );
+    let batch = one_transaction(
+        &harness,
+        &pause,
+        (0..6).map(|n| writer_request(n, 2, DAY)).collect(),
+    );
+    assert!(batch[..5].iter().all(|outcome| outcome.result.is_ok()));
+    assert_eq!(batch[5].result, Err(Refusal::ChannelQuota));
+
+    // A blob both R6 and R7 refuse gets `channel_quota` (BN-D-1).
+    let limits = ChannelLimits {
+        max_blobs: 5,
+        publish_per_min: 5,
+        ..ChannelLimits::RAISED
+    };
+    let (_dir, _clock, harness) = limited("s033_t07_both", limits, Hooks::default());
     for n in 0..5 {
         assert!(harness.store(writer_request(n, 1, DAY)).result.is_ok());
     }

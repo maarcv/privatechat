@@ -236,8 +236,8 @@ struct WriterThread {
     /// The limits of a channel (spec 033-rate-limit-quotas R6, R7).
     limits: ChannelLimits,
     /// What each channel inserted within the last `CHANNEL_WINDOW_MS`, as
-    /// committed: the monotonic time and the bytes of each insert (spec 033
-    /// R6). A channel with none has no entry.
+    /// committed: the monotonic time of each commit and the blobs and bytes
+    /// it inserted (spec 033 R6). A channel with none has no entry.
     windows: Windows,
     /// The largest `received_at` ever committed (R6).
     last: u64,
@@ -349,7 +349,6 @@ impl WriterThread {
             last: self.last,
             stored: None,
             added: Counters::new(),
-            inserted: Vec::new(),
         };
         let mut results = Vec::with_capacity(batch.len());
         for request in batch {
@@ -381,24 +380,23 @@ impl WriterThread {
         self.hooks.before_commit(&transaction);
         transaction.commit()?;
         self.last = working.last;
+        let now = self.clock.mono_ms();
         for (channel_id, usage) in working.added {
             purge::add(&mut self.counters, channel_id, usage);
-        }
-        let now = self.clock.mono_ms();
-        for (channel_id, bytes) in working.inserted {
             self.windows
                 .entry(channel_id)
                 .or_default()
-                .push_back((now, bytes));
+                .push_back((now, usage));
         }
         Ok(results)
     }
 }
 
 /// The refusal of spec 033-rate-limit-quotas `request` gets before it is
-/// inserted, counting what this transaction inserted already: its
-/// channel's inserts within `CHANNEL_WINDOW_MS` (R6), then what the
-/// channel holds (R7). Stored blobs are never deleted to make room.
+/// inserted, counting what this transaction inserted already: first what
+/// its channel holds (R7), which outlasts the window and pauses that channel
+/// alone at the client, then its channel's inserts within `CHANNEL_WINDOW_MS`
+/// (R6). Stored blobs are never deleted to make room.
 fn refusal(
     limits: &ChannelLimits,
     windows: &Windows,
@@ -408,42 +406,32 @@ fn refusal(
 ) -> Option<Refusal> {
     let channel_id = request.channel_id;
     let bytes = u64::try_from(request.blob.len()).unwrap_or(u64::MAX);
-    let ours = working
-        .inserted
-        .iter()
-        .filter(|(of, _)| *of == channel_id)
-        .map(|(_, bytes)| *bytes);
-    let window = windows.get(&channel_id);
-    let recent = window
-        .into_iter()
-        .flatten()
-        .map(|(_, bytes)| *bytes)
-        .chain(ours);
-    let (inserts, inserted_bytes) = recent.fold((0u64, 0u64), |(n, sum), bytes| {
-        (n.saturating_add(1), sum.saturating_add(bytes))
-    });
-    if inserts >= u64::from(limits.publish_per_min)
-        || inserted_bytes.saturating_add(bytes) > limits.bytes_per_min
-    {
-        return Some(Refusal::RateLimited);
-    }
-    let held = [counters.get(&channel_id), working.added.get(&channel_id)]
-        .into_iter()
-        .flatten()
-        .fold(Usage::default(), |sum, usage| Usage {
+    let ours = working.added.get(&channel_id).copied();
+    let sum = |usages: &mut dyn Iterator<Item = Usage>| {
+        usages.fold(Usage::default(), |sum, usage| Usage {
             blobs: sum.blobs.saturating_add(usage.blobs),
             bytes: sum.bytes.saturating_add(usage.bytes),
-        });
+        })
+    };
+    let held = sum(&mut counters.get(&channel_id).copied().into_iter().chain(ours));
     if held.blobs >= u64::from(limits.max_blobs)
         || held.bytes.saturating_add(bytes) > limits.max_bytes
     {
         return Some(Refusal::ChannelQuota);
     }
+    let window = windows.get(&channel_id).into_iter().flatten();
+    let recent = sum(&mut window.map(|(_, usage)| *usage).chain(ours));
+    if recent.blobs >= u64::from(limits.publish_per_min)
+        || recent.bytes.saturating_add(bytes) > limits.bytes_per_min
+    {
+        return Some(Refusal::RateLimited);
+    }
     None
 }
 
-/// What each channel inserted within the window of spec 033 R6.
-type Windows = HashMap<[u8; 16], VecDeque<(u64, u64)>>;
+/// What each channel inserted within the window of spec 033 R6: the
+/// monotonic time of each commit and what it inserted.
+type Windows = HashMap<[u8; 16], VecDeque<(u64, Usage)>>;
 
 /// The `server_id` and `received_at` of a stored request, or its refusal.
 type Stored = Result<([u8; 16], u64), Refusal>;
@@ -454,9 +442,6 @@ struct Working {
     last: u64,
     stored: Option<i64>,
     added: Counters,
-    /// The channel and the bytes of each blob inserted, in order (spec 033
-    /// R6).
-    inserted: Vec<([u8; 16], u64)>,
 }
 
 /// Inserts one request, returning its `server_id` and `received_at`, or
@@ -494,7 +479,6 @@ fn insert(
     working.last = times.received;
     working.stored = Some(times.received_at);
     let bytes = u64::try_from(request.blob.len()).unwrap_or(u64::MAX);
-    working.inserted.push((request.channel_id, bytes));
     purge::add(
         &mut working.added,
         request.channel_id,
