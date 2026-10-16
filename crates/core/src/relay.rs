@@ -84,7 +84,5 @@ pub fn verify_subscribe(
 ///
 /// `Error::BadConfig` for a URL outside the grammar.
 pub fn url_host(server_url: &str) -> Result<String, Error> {
-    url::parse(server_url)
-        .map(str::to_owned)
-        .map_err(|_| Error::BadConfig)
+    Ok(url::parse(server_url)?.to_owned())
 }

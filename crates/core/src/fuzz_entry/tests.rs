@@ -553,11 +553,42 @@ fn s031_t11_r11_seed_reaches_verify() {
         Some(Err(Error::BadSignature))
     );
     assert_eq!(relay_verify_subscribe_verdict(&seed[..131]), None);
-    // The second host is `example.org`, tried after the input's.
-    let mut other = seed[..132].to_vec();
-    other.extend_from_slice(b"not-the-host");
+
+    // The host is cut at 250 bytes, and `example.org` is tried after it.
+    let k_ch = vector.input("k_ch").array();
+    let ttl_seconds = vector.input("ttl_seconds").number();
+    let config =
+        Config::from_parts(Secret::from_bytes(k_ch), "wss://h", ttl_seconds, "room", 0).unwrap();
+    let (_, sk_ch) = config.channel_keypair().unwrap();
+    let nonce: [u8; 32] = vector.input("server_nonce").array();
+    let signed_for = |host: &str| {
+        let message = crate::proto::auth::auth_message(&nonce, config.id(), ttl_seconds, host);
+        crypto::sign_detached(&sk_ch, &message).unwrap().0
+    };
+    let channel_id = Some(Ok(vector.expected("channel_id").array()));
+    let layout = |sig: &[u8; 64], host: &[u8]| {
+        [
+            vector.input("pk_ch").bytes(),
+            &ttl_seconds.to_be_bytes(),
+            sig,
+            &nonce,
+            host,
+        ]
+        .concat()
+    };
+    let long = "h".repeat(250);
+    let sig = signed_for(&long);
     assert_eq!(
-        relay_verify_subscribe_verdict(&other),
+        relay_verify_subscribe_verdict(&layout(&sig, format!("{long}x").as_bytes())),
+        channel_id
+    );
+    assert_eq!(
+        relay_verify_subscribe_verdict(&layout(&sig, &long.as_bytes()[..249])),
         Some(Err(Error::BadSignature))
+    );
+    let sig = signed_for("example.org");
+    assert_eq!(
+        relay_verify_subscribe_verdict(&layout(&sig, b"not-the-host")),
+        channel_id
     );
 }
