@@ -28,6 +28,17 @@ use crate::{DbCause, StartError, StartReason};
 /// The largest WebSocket message or frame the server reads (R4).
 pub(crate) const MAX_MESSAGE: usize = 70_000;
 
+/// What the socket buffers before it writes, tungstenite's default.
+const WRITE_BUFFER: usize = 128 * 1024;
+
+/// The most the socket may buffer unwritten: one more frame than
+/// `WRITE_BUFFER`, every frame the server writes being smaller than
+/// `MAX_MESSAGE`. Without it, the pongs tungstenite queues for a client that
+/// sends pings and reads nothing would grow without bound until R4 or R5 of
+/// spec 033-rate-limit-quotas drops the connection; with it, a pong that does
+/// not fit waits alone, a newer one replacing it.
+const MAX_WRITE_BUFFER: usize = WRITE_BUFFER + MAX_MESSAGE;
+
 /// What every connection shares.
 pub(crate) struct Shared {
     pub(crate) clock: Arc<dyn Clock>,
@@ -143,6 +154,8 @@ async fn upgrade(
         Ok(upgrade) => upgrade
             .max_message_size(MAX_MESSAGE)
             .max_frame_size(MAX_MESSAGE)
+            .write_buffer_size(WRITE_BUFFER)
+            .max_write_buffer_size(MAX_WRITE_BUFFER)
             .on_upgrade(move |socket| connection::run(socket, shared)),
         // Not an upgrade: nothing is served, and no text names the framework.
         Err(_) => StatusCode::NOT_FOUND.into_response(),
