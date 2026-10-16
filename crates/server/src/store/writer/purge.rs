@@ -79,10 +79,12 @@ pub(crate) fn purge(
     on_round: &mut dyn FnMut(usize),
 ) -> Result<(), rusqlite::Error> {
     let deleted = delete_expired(connection, now, counters, on_round);
-    // Even after a failed round, the rounds before it are committed: their
-    // pages are given back and their WAL frames emptied now, not a purge later.
-    let vacuumed = vacuum_and_checkpoint(connection);
-    deleted.and(vacuumed)
+    // Even after a failed round or a failed vacuum, the rounds before are
+    // committed: their WAL frames are emptied now, not a purge later. The
+    // checkpoint writes into pages that exist, so a full disk does not stop it.
+    let vacuumed = vacuum(connection);
+    let checkpointed = checkpoint(connection);
+    deleted.and(vacuumed).and(checkpointed)
 }
 
 /// The rounds of `DELETE … RETURNING`, until one deletes fewer than
@@ -114,11 +116,16 @@ fn delete_expired(
     }
 }
 
-/// Gives free pages back to the file system and empties the WAL (R10, R13).
-fn vacuum_and_checkpoint(connection: &Connection) -> Result<(), rusqlite::Error> {
+/// Gives free pages back to the file system (R10).
+fn vacuum(connection: &Connection) -> Result<(), rusqlite::Error> {
     let mut vacuum = connection.prepare(&format!("PRAGMA incremental_vacuum({VACUUM_PAGES})"))?;
     let mut steps = vacuum.query([])?;
     while steps.next()?.is_some() {}
+    Ok(())
+}
+
+/// Empties the WAL into the file (R10, R13).
+fn checkpoint(connection: &Connection) -> Result<(), rusqlite::Error> {
     // A checkpoint that finds a reader in the way returns busy, and the next
     // purge tries again (R10).
     connection.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))

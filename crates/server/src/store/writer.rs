@@ -9,8 +9,8 @@ pub(crate) mod purge;
 pub(crate) mod test;
 
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -158,19 +158,17 @@ impl Writer {
     pub(crate) fn finish(mut self) -> oneshot::Receiver<()> {
         let (done, finished) = oneshot::channel();
         drop(self.sender.take());
-        let thread = self.thread.take();
-        // A thread of its own, so that no async task blocks on the join.
-        let waiter = std::thread::Builder::new()
+        // Shared with the waiting thread, so that the join still happens here
+        // when that thread cannot start: the receiver never hears of an end
+        // that has not come.
+        let wait = Arc::new(Mutex::new(Some((self.thread.take(), done))));
+        let shared = wait.clone();
+        let spawned = std::thread::Builder::new()
             .name("writer-finish".to_owned())
-            .spawn(move || {
-                if let Some(thread) = thread {
-                    let _ = thread.join();
-                }
-                let _ = done.send(());
-            });
-        // Without a thread to wait, the receiver hears its sender dropped,
-        // which also ends the wait.
-        drop(waiter);
+            .spawn(move || join_and_tell(&shared));
+        if spawned.is_err() {
+            join_and_tell(&wait);
+        }
         finished
     }
 }
@@ -196,6 +194,21 @@ fn live_bytes(connection: &Connection) -> Result<u64, rusqlite::Error> {
 fn pragma_u64(connection: &Connection, name: &str) -> Result<u64, rusqlite::Error> {
     let value: i64 = connection.pragma_query_value(None, name, |row| row.get(0))?;
     u64::try_from(value).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, value))
+}
+
+/// The writer thread and `finish`'s sender, taken by whoever joins first.
+type FinishWait = Mutex<Option<(Option<JoinHandle<()>>, oneshot::Sender<()>)>>;
+
+/// Joins the writer thread, if it still has to be, then tells `finish`'s
+/// receiver; whoever takes the pair first does it.
+fn join_and_tell(wait: &FinishWait) {
+    let taken = wait.lock().unwrap_or_else(PoisonError::into_inner).take();
+    if let Some((thread, done)) = taken {
+        if let Some(thread) = thread {
+            let _ = thread.join();
+        }
+        let _ = done.send(());
+    }
 }
 
 /// `last_received_at` as stored (R6).

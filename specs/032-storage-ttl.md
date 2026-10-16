@@ -98,6 +98,8 @@ impl Writer {
 }
 impl Drop for Writer { /* closes the queue and waits for the thread: the tests' teardown; the server awaits finish */ }
 pub(crate) struct StoreError(rusqlite::Error);   // a failed read; spec 030 R7 closes the connection with 1011
+pub(crate) struct ReadPool { /* 4 read-only connections, a tokio Semaphore of 4 permits */ }
+impl ReadPool { pub(crate) fn open(db: &Path) -> Result<ReadPool, StoreError>; }
 pub(crate) async fn read_page(pool: &ReadPool, channel_id: [u8; 16], from: u64, now: u64) -> Result<Vec<Row>, StoreError>;
 ```
 
@@ -169,5 +171,5 @@ None.
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): a later server upgrades `user_version` in place in one transaction; the power-failure loss worded as a documented residual
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-10-16 T09 amended in slice (c), after the advisor (audit BE): its clause of 500 rows uses rows of 500 bytes, since 500 rows of 1 185 bytes pass R9's 256 KiB, which 1 185-byte rows reach at 221; a clause with rows of 1 185 bytes added
-- 2026-10-16 Interface, after audits BD and BE: the purge and the counters in `store/writer/purge.rs`; `Writer`'s `Drop`
+- 2026-10-16 Interface, after audits BD and BE: the purge and the counters in `store/writer/purge.rs`; `Writer`'s `Drop`; `ReadPool`
 - 2026-10-16 implemented (audits BC, BD and BE, `docs/audit-log.md`)
