@@ -50,6 +50,24 @@ fn s030_t02_r02_relay_check_blob() {
     assert_eq!(refused, 5);
 }
 
+/// Spec 030, R2: the order of `verify`'s step 1 holds for blobs with two
+/// faults: the length, then the version, then the channel.
+#[test]
+fn s030_t02_r02_check_order() {
+    let blob = sealed(10);
+    let channel_id: [u8; 16] = blob[1..17].try_into().unwrap();
+    let other: [u8; 16] = [channel_id[0] ^ 0x01; 16];
+    let mut bad_version = blob.clone();
+    bad_version[0] = 0x02;
+    let short = &bad_version[..bad_version.len() - 1];
+    assert_eq!(check_blob(short, &other), Err(Error::BadLength));
+    assert_eq!(
+        check_blob(&bad_version, &other),
+        Err(Error::UnsupportedVersion)
+    );
+    assert_eq!(check_blob(&blob, &other), Err(Error::WrongChannel));
+}
+
 /// A blob of `text_k1`'s channel with a body of `len` bytes.
 fn sealed(len: usize) -> Vec<u8> {
     let config = Config::from_parts(
@@ -86,11 +104,22 @@ proptest! {
     /// channel, and anywhere after them nothing `check_blob` reads (the
     /// mutation table of spec 013).
     #[test]
-    fn s030_t02_r02_flips_by_region(len in 0usize..3_000, at in any::<prop::sample::Index>(), bit in 0u8..8) {
+    fn s030_t02_r02_flips_by_region(
+        len in 0usize..3_000,
+        region in 0usize..3,
+        at in any::<prop::sample::Index>(),
+        bit in 0u8..8,
+    ) {
         let mut blob = sealed(len);
         let channel_id = blob[1..17].try_into().unwrap();
         prop_assert_eq!(check_blob(&blob, &channel_id), Ok(()));
-        let index = at.index(blob.len());
+        // Each region as often as the others: the version byte, the
+        // channel, and the rest.
+        let index = match region {
+            0 => 0,
+            1 => 1 + at.index(16),
+            _ => 17 + at.index(blob.len() - 17),
+        };
         blob[index] ^= 1 << bit;
         let expected = match index {
             0 => Err(Error::UnsupportedVersion),

@@ -88,7 +88,7 @@ jobs:
         run: |
           direct() {
             local out
-            if ! out="$(cargo tree -e normal,build --all-features --target all -i "$1" --prefix depth 2>&1)"; then
+            if ! out="$(cargo tree -e normal,build --all-features --target all -i "$1" --depth 1 --prefix depth 2>&1)"; then
               case "$out" in *"did not match any packages"*) return 0 ;; esac
               printf '%s\n' "$out" >&2
               return 1

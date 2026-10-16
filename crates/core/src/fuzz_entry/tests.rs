@@ -610,7 +610,9 @@ fn s030_t02_r02_seed_reaches_check_blob() {
     let channel = text_k1_config().channel_id();
     let seed = [&channel[..], &blob].concat();
     assert_eq!(relay_check_blob_verdict(&seed), Some(Ok(())));
-    let other = [&[0u8; 16][..], &blob].concat();
+    let mut flipped = channel;
+    flipped[0] ^= 0x01;
+    let other = [&flipped[..], &blob].concat();
     assert_eq!(
         relay_check_blob_verdict(&other),
         Some(Err(Error::WrongChannel))
