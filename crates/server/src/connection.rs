@@ -315,17 +315,17 @@ impl Connection {
             return Some(Flow::Close(INTERNAL_ERROR));
         };
         let refusal = frames::error(ErrorCode::RateLimited, Some(channel_id), None);
-        if too_soon {
-            return Some(self.enqueue(&refusal));
-        }
-        if self
-            .shared
-            .hub()
-            .ttl_seconds(self.id, &channel_id)
-            .is_some()
-        {
-            // Already here: spec 030 R9 ignores it.
-            return None;
+        // A 17th channel closes the connection, even when it also came too
+        // soon: one refusal answers both rules.
+        let past_cap = held >= MAX_SUBSCRIPTIONS
+            && self
+                .shared
+                .hub()
+                .ttl_seconds(self.id, &channel_id)
+                .is_none();
+        if !past_cap {
+            // Too soon; or a channel already here, which spec 030 R9 ignores.
+            return too_soon.then(|| self.enqueue(&refusal));
         }
         Some(match self.enqueue(&refusal) {
             Flow::Continue => match self.flush().await {

@@ -175,8 +175,25 @@ async fn s033_t03_r03_sixteen_channels() {
         receive_within(&mut client, 300).await,
         Received::Nothing
     ));
-    // A 17th channel: refused, then the close.
+    // A 17th channel, its signature forged: refused before spec 031 would
+    // answer `bad_auth`, then the close.
     clock.advance_mono(SUBSCRIBE_GAP_MS);
+    let (frame, channel_id) = keyed(max, &[9; 32]);
+    send(&mut client, &frame).await;
+    refused(&mut client, "rate_limited", channel_id, None).await;
+    assert!(matches!(receive(&mut client).await, Received::Close(1008)));
+
+    // A 17th channel that also comes too soon: one refusal, then the close.
+    let mut client = connect(server.address).await;
+    let nonce = hello(&mut client).await;
+    for n in 0..max {
+        let (frame, channel_id) = keyed(n, &nonce);
+        send(&mut client, &frame).await;
+        assert!(backlog(&mut client, channel_id).await.is_empty());
+        clock.advance_mono(SUBSCRIBE_GAP_MS);
+    }
+    clock.advance_mono(1);
+    send(&mut client, &keyed(0, &nonce).0).await;
     let (frame, channel_id) = keyed(max, &nonce);
     send(&mut client, &frame).await;
     refused(&mut client, "rate_limited", channel_id, None).await;
