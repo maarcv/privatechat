@@ -9,6 +9,7 @@ use rusqlite::Connection;
 
 use super::purge::Counters;
 use super::{Clock, OnCommit, StartError, Writer};
+use crate::limits::ChannelLimits;
 
 /// A pause the test releases, and can set again once the writer has
 /// stopped at it.
@@ -121,6 +122,7 @@ pub(crate) fn spawn(
     clock: Arc<dyn Clock>,
     on_commit: OnCommit,
     max_db_bytes: u64,
+    limits: ChannelLimits,
     hooks: Hooks,
 ) -> Result<Writer, StartError> {
     Writer::start(
@@ -128,6 +130,7 @@ pub(crate) fn spawn(
         clock,
         on_commit,
         max_db_bytes,
+        limits,
         super::Hooks { test: hooks },
     )
 }

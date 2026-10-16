@@ -92,7 +92,8 @@ pub(crate) type OnCommit = Box<dyn FnMut(Vec<WriteOutcome>) + Send>;   // proces
 
 pub(crate) struct Writer { /* std::sync::mpsc::SyncSender<WriteRequest> */ }
 impl Writer {
-    pub(crate) fn spawn(db: &Path, clock: Arc<dyn Clock>, on_commit: OnCommit, max_db_bytes: u64) -> Result<Writer, StartError>;
+    pub(crate) fn spawn(db: &Path, clock: Arc<dyn Clock>, on_commit: OnCommit, max_db_bytes: u64,
+                        limits: ChannelLimits /* spec 033 */) -> Result<Writer, StartError>;
     pub(crate) fn submit(&self, request: WriteRequest) -> Result<(), Refusal>;   // try_send: RateLimited when full
     pub(crate) fn finish(self) -> oneshot::Receiver<()>;   // spec 035 R7: answer what is queued, checkpoint, close
 }
@@ -173,3 +174,4 @@ None.
 - 2026-10-16 T09 amended in slice (c), after the advisor (audit BE): its clause of 500 rows uses rows of 500 bytes, since 500 rows of 1 185 bytes pass R9's 256 KiB, which 1 185-byte rows reach at 221; a clause with rows of 1 185 bytes added
 - 2026-10-16 Interface, after audits BD and BE: the purge and the counters in `store/writer/purge.rs`; `Writer`'s `Drop`; `ReadPool`
 - 2026-10-16 implemented (audits BC, BD and BE, `docs/audit-log.md`)
+- 2026-10-16 Interface after spec 033 slice (b): `Writer::spawn` takes the `ChannelLimits` of spec 033 R6 and R7

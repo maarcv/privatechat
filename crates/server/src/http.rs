@@ -21,6 +21,7 @@ use tokio::sync::broadcast;
 use crate::clock::Clock;
 use crate::connection;
 use crate::hub::Hub;
+use crate::limits::ChannelLimits;
 use crate::store::reader::ReadPool;
 use crate::store::writer::Writer;
 use crate::{DbCause, StartError, StartReason};
@@ -73,6 +74,7 @@ impl Shared {
         clock: Arc<dyn Clock>,
         hosts: Vec<String>,
         max_db_bytes: u64,
+        limits: ChannelLimits,
     ) -> Result<Arc<Shared>, StartError> {
         let hub = Arc::new(Mutex::new(Hub::default()));
         let results = hub.clone();
@@ -90,10 +92,11 @@ impl Shared {
             clock.clone(),
             on_commit,
             max_db_bytes,
+            limits,
             hooks.writer(),
         )?;
         #[cfg(not(test))]
-        let writer = Writer::spawn(db, clock.clone(), on_commit, max_db_bytes)?;
+        let writer = Writer::spawn(db, clock.clone(), on_commit, max_db_bytes, limits)?;
         let pool = ReadPool::open(db).map_err(|_| StartError {
             reason: StartReason::Database(DbCause::Open),
         })?;

@@ -12,8 +12,10 @@ use tokio_tungstenite::tungstenite::Message;
 use privatechat_core::testing::subscribe_credential;
 use privatechat_core::{Frame, relay};
 
+use super::TestDir;
 use super::catch_up::{T0, backlog, plant, store_many, subscribe_since};
 use super::publish::{blob_of, client_ref, fill_writer, hold_writer, publish, refused};
+use super::store::writer::{Harness, NO_QUOTA, request as writer_request};
 use super::ws::{
     Client, DAY, HOST, Received, channel, connect, hello, receive, receive_within, send, start,
     subscribe,
@@ -21,10 +23,14 @@ use super::ws::{
 use crate::clock::ManualClock;
 use crate::hub::{Encoded, Hub, Pending};
 use crate::limits::{
-    CONN_PUBLISH_MAX, CONN_PUBLISH_WINDOW_MS, MAX_SUBSCRIPTIONS, PING_INTERVAL_MS, PONG_TIMEOUT_MS,
-    SEND_QUEUE_BYTES, SEND_QUEUE_FRAMES, SUBSCRIBE_GAP_MS, WRITE_TIMEOUT_MS, pong_overdue,
+    CHANNEL_WINDOW_MS, CONN_PUBLISH_MAX, CONN_PUBLISH_WINDOW_MS, ChannelLimits, MAX_SUBSCRIPTIONS,
+    PING_INTERVAL_MS, PONG_TIMEOUT_MS, SEND_QUEUE_BYTES, SEND_QUEUE_FRAMES, SUBSCRIBE_GAP_MS,
+    WRITE_TIMEOUT_MS, pong_overdue,
 };
 use crate::store::writer::Row;
+use crate::store::writer::purge::PURGE_INTERVAL_MS;
+use crate::store::writer::test::{Hooks, Pause};
+use crate::store::writer::{Refusal, WriteOutcome, WriteRequest};
 
 /// A `publish` of a blob of the smallest size on the test channel.
 fn on_channel(n: u16) -> Frame {
@@ -566,4 +572,201 @@ fn s033_t05_r05_queue_bytes() {
     assert!(!pending.overflowed(), "a frame written made room");
     hub.enqueue(1, Encoded::from_static(b"x"));
     assert!(pending.overflowed(), "one byte past 4 MiB");
+}
+
+/// A writer with `limits` on a database of its own, its clock at `T0`.
+fn limited(
+    name: &str,
+    limits: ChannelLimits,
+    hooks: Hooks,
+) -> (TestDir, Arc<ManualClock>, Harness) {
+    let dir = TestDir::new(name);
+    let clock = Arc::new(ManualClock::new(T0));
+    let harness = Harness::with_limits(&dir.db(), &clock, hooks, NO_QUOTA, limits);
+    (dir, clock, harness)
+}
+
+/// Request `n` on channel `[channel; 16]` with a blob of `bytes` bytes.
+fn sized(n: u16, channel: u8, bytes: usize) -> WriteRequest {
+    WriteRequest {
+        blob: vec![channel; bytes],
+        ..writer_request(n, channel, DAY)
+    }
+}
+
+/// Submits `requests` while the writer is held, so that they are stored in
+/// one transaction, and returns their outcomes in order.
+fn one_transaction(
+    harness: &Harness,
+    pause: &Pause,
+    requests: Vec<WriteRequest>,
+) -> Vec<WriteOutcome> {
+    pause.hold();
+    let n = requests.len();
+    for request in requests {
+        harness.writer.submit(request).unwrap();
+    }
+    pause.release();
+    let batch = harness.next();
+    assert_eq!(batch.len(), n, "not one transaction");
+    batch
+}
+
+#[test]
+fn s033_t06_r06_channel_rate() {
+    let limits = ChannelLimits::default();
+    let max = u16::try_from(limits.publish_per_min).unwrap();
+
+    // 120 inserts within 60 000 ms, from seven connections; the 121st refused.
+    let (_dir, clock, harness) = limited("s033_t06", limits, Hooks::default());
+    for n in 0..max {
+        let outcome = harness.store(writer_request(n, 1, DAY));
+        assert!(outcome.result.is_ok(), "{n}: {outcome:?}");
+    }
+    assert_eq!(
+        harness.store(writer_request(max, 1, DAY)).result,
+        Err(Refusal::RateLimited)
+    );
+    // Another channel is not counted.
+    assert!(harness.store(writer_request(max, 2, DAY)).result.is_ok());
+    // At the edge of the window the 120 still count; past it, accepted.
+    clock.advance_mono(CHANNEL_WINDOW_MS);
+    assert_eq!(
+        harness.store(writer_request(max + 1, 1, DAY)).result,
+        Err(Refusal::RateLimited)
+    );
+    clock.advance_mono(1);
+    assert!(
+        harness
+            .store(writer_request(max + 2, 1, DAY))
+            .result
+            .is_ok()
+    );
+
+    // Blobs of 64 673 bytes: refused once the next would pass 4 MiB.
+    let fit = u16::try_from(limits.bytes_per_min / 64_673).unwrap();
+    for n in 0..fit {
+        assert!(harness.store(sized(n, 3, 64_673)).result.is_ok());
+    }
+    assert_eq!(
+        harness.store(sized(fit, 3, 64_673)).result,
+        Err(Refusal::RateLimited)
+    );
+    assert!(
+        harness.store(sized(fit + 1, 3, 1_185)).result.is_ok(),
+        "within the bytes left"
+    );
+
+    // The inserts of the same transaction count.
+    let pause = Pause::paused();
+    pause.release();
+    let hooks = Hooks {
+        pause: Some(pause.clone()),
+        ..Hooks::default()
+    };
+    let (_dir, _clock, harness) = limited("s033_t06_batch", limits, hooks);
+    let batch = one_transaction(
+        &harness,
+        &pause,
+        (0..=max).map(|n| writer_request(n, 1, DAY)).collect(),
+    );
+    let refused: Vec<usize> = (0..batch.len())
+        .filter(|k| batch[*k].result.is_err())
+        .collect();
+    assert_eq!(refused, vec![usize::from(max)]);
+    assert_eq!(batch[usize::from(max)].result, Err(Refusal::RateLimited));
+}
+
+#[test]
+fn s033_t07_r07_channel_quota() {
+    let limits = ChannelLimits {
+        max_blobs: 5,
+        ..ChannelLimits::RAISED
+    };
+
+    // Five held; the sixth refused, the five still there.
+    let (dir, _clock, harness) = limited("s033_t07", limits, Hooks::default());
+    for n in 0..5 {
+        assert!(harness.store(writer_request(n, 1, DAY)).result.is_ok());
+    }
+    assert_eq!(
+        harness.store(writer_request(5, 1, DAY)).result,
+        Err(Refusal::ChannelQuota)
+    );
+    assert_eq!(rows_of(&dir, 1), 5);
+
+    // Six in one transaction: the sixth refused.
+    let pause = Pause::paused();
+    pause.release();
+    let hooks = Hooks {
+        pause: Some(pause.clone()),
+        ..Hooks::default()
+    };
+    let (_dir, _clock, held) = limited("s033_t07_batch", limits, hooks);
+    let batch = one_transaction(
+        &held,
+        &pause,
+        (0..6).map(|n| writer_request(n, 1, DAY)).collect(),
+    );
+    assert!(batch[..5].iter().all(|outcome| outcome.result.is_ok()));
+    assert_eq!(batch[5].result, Err(Refusal::ChannelQuota));
+
+    // Two of five expire and the purge removes them: two more fit.
+    let (purged_tx, purged) = std::sync::mpsc::channel();
+    let hooks = Hooks {
+        purge_round: Some(Box::new(move |rows| {
+            let _ = purged_tx.send(rows);
+        })),
+        ..Hooks::default()
+    };
+    let (dir, clock, harness) = limited("s033_t07_purge", limits, hooks);
+    for n in 0..2 {
+        assert!(harness.store(writer_request(n, 1, 60)).result.is_ok());
+    }
+    for n in 2..5 {
+        assert!(harness.store(writer_request(n, 1, DAY)).result.is_ok());
+    }
+    assert_eq!(
+        harness.store(writer_request(5, 1, DAY)).result,
+        Err(Refusal::ChannelQuota)
+    );
+    clock.advance(PURGE_INTERVAL_MS + 1);
+    let mut removed = 0;
+    while removed < 2 {
+        removed += purged.recv_timeout(Duration::from_secs(30)).unwrap();
+    }
+    assert_eq!(rows_of(&dir, 1), 3);
+    for n in 6..8 {
+        assert!(harness.store(writer_request(n, 1, DAY)).result.is_ok());
+    }
+    assert_eq!(
+        harness.store(writer_request(8, 1, DAY)).result,
+        Err(Refusal::ChannelQuota)
+    );
+
+    // The same on bytes: 500 bytes held, five blobs of 100.
+    let limits = ChannelLimits {
+        max_bytes: 500,
+        ..ChannelLimits::RAISED
+    };
+    let (_dir, _clock, harness) = limited("s033_t07_bytes", limits, Hooks::default());
+    for n in 0..5 {
+        assert!(harness.store(writer_request(n, 1, DAY)).result.is_ok());
+    }
+    assert_eq!(
+        harness.store(writer_request(5, 1, DAY)).result,
+        Err(Refusal::ChannelQuota)
+    );
+}
+
+/// The rows of channel `[channel; 16]` in the database of `dir`.
+fn rows_of(dir: &TestDir, channel: u8) -> i64 {
+    rusqlite::Connection::open(dir.db())
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM messages WHERE channel_id = ?1",
+            [&[channel; 16][..]],
+            |row| row.get(0),
+        )
+        .unwrap()
 }
