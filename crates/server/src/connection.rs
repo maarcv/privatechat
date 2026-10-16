@@ -366,13 +366,7 @@ impl Connection {
             return Flow::Continue;
         };
         for row in page {
-            let push = Frame::Push {
-                channel_id: step.channel_id,
-                server_id: row.server_id,
-                received_at: row.received_at,
-                blob: row.blob,
-            };
-            let flow = self.send(&push).await;
+            let flow = self.send(&frames::push(step.channel_id, row)).await;
             if !matches!(flow, Flow::Continue) {
                 return flow;
             }

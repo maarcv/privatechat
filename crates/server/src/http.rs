@@ -182,9 +182,10 @@ pub(crate) mod test {
         pub(crate) fail_relay: AtomicBool,
         /// Held, the writer stops before its next batch and its queue fills.
         pub(crate) writer_pause: Arc<Pause>,
-        /// While `true`, the writer draws the `server_id` it drew last, which
-        /// it then refuses as `server_full` (spec 032).
-        pub(crate) repeat_server_id: Arc<AtomicBool>,
+        /// After this many fresh `server_id`s, the writer draws the last one
+        /// again, once, and refuses that blob as `server_full` (spec 032);
+        /// `usize::MAX`, never.
+        pub(crate) repeat_after: Arc<AtomicUsize>,
     }
 
     impl Default for Hooks {
@@ -196,7 +197,7 @@ pub(crate) mod test {
                 catch_up_paused: watch::channel(false).0,
                 fail_relay: AtomicBool::new(false),
                 writer_pause: Arc::new(Pause::default()),
-                repeat_server_id: Arc::new(AtomicBool::new(false)),
+                repeat_after: Arc::new(AtomicUsize::new(usize::MAX)),
             }
         }
     }
@@ -212,13 +213,19 @@ pub(crate) mod test {
 
         /// The writer's hooks, wired to these.
         pub(super) fn writer(&self) -> WriterHooks {
-            let repeat = self.repeat_server_id.clone();
+            let repeat_after = self.repeat_after.clone();
             let mut last = [0; 16];
             WriterHooks {
                 pause: Some(self.writer_pause.clone()),
                 server_id: Some(Box::new(move || {
-                    if !repeat.load(Ordering::SeqCst) {
-                        last = privatechat_core::relay::new_server_id().unwrap_or(last);
+                    match repeat_after.load(Ordering::SeqCst) {
+                        0 => repeat_after.store(usize::MAX, Ordering::SeqCst),
+                        fresh => {
+                            if fresh != usize::MAX {
+                                repeat_after.store(fresh - 1, Ordering::SeqCst);
+                            }
+                            last = privatechat_core::relay::new_server_id().unwrap_or(last);
+                        }
                     }
                     last
                 })),

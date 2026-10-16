@@ -276,27 +276,35 @@ async fn s030_t12_r12_ack_and_fan_out() {
     let refs: Vec<[u8; 16]> = acked.iter().map(|(client_ref, _)| *client_ref).collect();
     assert_eq!(refs, (0..30).map(client_ref).collect::<Vec<_>>());
 
-    // A refusal of the writer: its `error`, with both fields, between the
-    // `ack`s of the publishes before and after it.
-    send(&mut client, &publish(channel(), 100, blob_of(channel(), 8))).await;
+    // A refusal of the writer, in one batch with a publish before and after
+    // it: its `error`, with both fields, between their `ack`s.
+    let pause = server.shared.hooks.writer_pause.clone();
+    tokio::task::spawn_blocking(move || pause.hold())
+        .await
+        .unwrap();
+    for n in 100..103 {
+        send(&mut client, &publish(channel(), n, blob_of(channel(), 8))).await;
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    server.shared.hooks.repeat_after.store(1, Ordering::SeqCst);
+    server.shared.hooks.writer_pause.release();
+    let seen = frames(&mut client, 5).await;
     assert!(
-        matches!(&frames(&mut client, 2).await[..], [Frame::Ack { client_ref: acked, .. }, Frame::Push { .. }] if *acked == client_ref(100))
-    );
-    server
-        .shared
-        .hooks
-        .repeat_server_id
-        .store(true, Ordering::SeqCst);
-    send(&mut client, &publish(channel(), 101, blob_of(channel(), 8))).await;
-    refused(&mut client, "server_full", channel(), 101).await;
-    server
-        .shared
-        .hooks
-        .repeat_server_id
-        .store(false, Ordering::SeqCst);
-    send(&mut client, &publish(channel(), 102, blob_of(channel(), 8))).await;
-    assert!(
-        matches!(&frames(&mut client, 2).await[..], [Frame::Ack { client_ref: acked, .. }, Frame::Push { .. }] if *acked == client_ref(102))
+        matches!(
+            &seen[..],
+            [
+                Frame::Ack { client_ref: first, .. },
+                Frame::Push { .. },
+                Frame::Error { code, channel_id: Some(of), client_ref: Some(refused), .. },
+                Frame::Ack { client_ref: last, .. },
+                Frame::Push { .. },
+            ] if *first == client_ref(100)
+                && code == "server_full"
+                && *of == channel()
+                && *refused == client_ref(101)
+                && *last == client_ref(102)
+        ),
+        "{seen:?}"
     );
 }
 
@@ -358,29 +366,69 @@ fn vector_frame(name: &str) -> Vec<u8> {
     unhex(&vectors[start..end])
 }
 
-/// The 16 bytes from `first` on.
-fn run(first: u8) -> [u8; 16] {
-    std::array::from_fn(|k| first + u8::try_from(k).unwrap())
+/// A hex field of the `expected` of the vector `name`, read from the text.
+fn vector_field(name: &str, field: &str) -> Vec<u8> {
+    let vectors = include_str!("../../../../specs/vectors/028.json");
+    let at = vectors.find(&format!("\"name\": \"{name}\"")).unwrap();
+    let key = format!("\"{field}\": \"");
+    let start = at + vectors[at..].find(&key).unwrap() + key.len();
+    let end = start + vectors[start..].find('"').unwrap();
+    unhex(&vectors[start..end])
+}
+
+fn array<const N: usize>(bytes: &[u8]) -> [u8; N] {
+    bytes.try_into().unwrap()
 }
 
 #[test]
 fn s030_t14_r14_frames_match_vectors() {
-    let received_at = 0x0000_01a0_c451_f2a0;
-    let blob: Vec<u8> = (0xc0..=0xfe).collect();
-    let row = Row {
-        server_id: run(0x30),
-        received_at,
-        blob: blob.clone(),
+    let field = |name, key| vector_field(name, key);
+    let row_of = |name| Row {
+        server_id: array(&field(name, "server_id")),
+        received_at: u64::from_be_bytes(array(&field(name, "received_at"))),
+        blob: if name == "push_reference" {
+            field(name, "blob")
+        } else {
+            Vec::new()
+        },
     };
-    let nonce: [u8; 32] = std::array::from_fn(|k| 0x40 + u8::try_from(k).unwrap());
+    let code = String::from_utf8(field("error_reference", "code")).unwrap();
+    let message = String::from_utf8(field("error_reference", "message")).unwrap();
+    let error_code = super::ws::ERRORS
+        .iter()
+        .find(|(_, name, text)| *name == code && *text == message)
+        .map(|(error_code, _, _)| *error_code);
+    assert!(error_code.is_some(), "{code} {message}");
     let built = [
-        ("hello_reference", auth::hello(nonce)),
-        ("ok_reference", frames::ok(run(0x10))),
-        ("ack_reference", frames::ack(run(0x20), &row)),
-        ("push_reference", frames::push(run(0x10), row.clone())),
+        (
+            "hello_reference",
+            auth::hello(array(&field("hello_reference", "server_nonce"))),
+        ),
+        (
+            "ok_reference",
+            frames::ok(array(&field("ok_reference", "channel_id"))),
+        ),
+        (
+            "ack_reference",
+            frames::ack(
+                array(&field("ack_reference", "client_ref")),
+                &row_of("ack_reference"),
+            ),
+        ),
+        (
+            "push_reference",
+            frames::push(
+                array(&field("push_reference", "channel_id")),
+                row_of("push_reference"),
+            ),
+        ),
         (
             "error_reference",
-            frames::error(ErrorCode::ChannelQuota, Some(run(0x10)), Some(run(0x20))),
+            frames::error(
+                error_code.unwrap_or(ErrorCode::BadAuth),
+                Some(array(&field("error_reference", "channel_id"))),
+                Some(array(&field("error_reference", "client_ref"))),
+            ),
         ),
     ];
     for (name, frame) in built {
@@ -402,18 +450,25 @@ async fn s030_t07_r07_publish_during_catch_up() {
     send(&mut client, &subscribe_third(&nonce)).await;
     assert!(backlog(&mut client, third_channel()).await.is_empty());
 
+    send(&mut client, &subscribe_since(&nonce, None)).await;
+    send(&mut client, &subscribe_other(&nonce)).await;
+    // The catch-up under way: a backlog push received, then the writes
+    // paused within a page while the publish comes.
+    let first = receive(&mut client).await;
+    assert!(
+        matches!(first, Received::Frame(Frame::Push { .. })),
+        "{first:?}"
+    );
     server.shared.hooks.pause_writes(true);
     send(
         &mut client,
         &publish(third_channel(), 1, blob_of(third_channel(), 1)),
     )
     .await;
-    send(&mut client, &subscribe_since(&nonce, None)).await;
-    send(&mut client, &subscribe_other(&nonce)).await;
     tokio::time::sleep(Duration::from_millis(200)).await;
     server.shared.hooks.pause_writes(false);
 
-    let (mut oks, mut pages, mut ack_at, mut echo_at) = (0, 0usize, None, None);
+    let (mut oks, mut pages, mut ack_at, mut echo_at) = (0, 1usize, None, None);
     while oks < 2 {
         match receive(&mut client).await {
             Received::Frame(Frame::Push { channel_id, .. }) if channel_id == third_channel() => {
@@ -430,8 +485,12 @@ async fn s030_t07_r07_publish_during_catch_up() {
         }
     }
     assert_eq!(pages, 80);
+    // Before the catch-ups end. How many pushes come first depends on what
+    // the socket buffers held when the writes paused; that the queue goes
+    // out before each page is pinned by `queue_before_the_next_page`, whose
+    // writes pause before the first page.
     assert!(
-        ack_at.is_some_and(|at| at <= 4),
+        ack_at.is_some_and(|at| at < 80),
         "ack after {ack_at:?} backlog pushes"
     );
     assert_eq!(

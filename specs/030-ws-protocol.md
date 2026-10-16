@@ -129,13 +129,13 @@ Dependencies of `privatechat-server` added by this spec, each justified in its p
 - T11 (covers R11): `s030_t11_r11_publish_refusals`: a `publish` on a channel not subscribed → `not_subscribed` naming the `channel_id` and `client_ref`; a blob of 1 184 bytes, of version 2 or of another channel → `bad_blob` naming both; with the writer's queue filled by a test hook → `rate_limited` naming both; nothing stored in each case.
 - T12 (covers R12): `s030_t12_r12_ack_and_fan_out`, with the channel limits of spec 033 raised: three connections on one channel, one publishes → `ack` on the publisher, then a `push` to all three, the publisher included, with the same `server_id` and `received_at`; four publishers interleaving 25 blobs each → every connection sees the same `received_at` order; one connection publishing 30 blobs → 30 `ack`s in the order sent, each before its own echo; a writer refusal → its `error` with both fields, in order among the `ack`s.
 - T13 (covers R13): `s030_t13_r13_frames_sent`: over a run of T07–T12 every frame received decodes as one of the seven types, every `error.message` equals the text of its code, and no `error` carries `unsupported_version`.
-- T14 (covers R14): `s030_t14_r14_frames_match_vectors`: the server's encoder, given the fields of each positive server-direction frame of `028.json` other than `ok_unknown_key`, writes the vector's bytes.
+- T14 (covers R14): `s030_t14_r14_frames_match_vectors`: the server's encoder, given the fields of each positive server-direction frame of `028.json` other than `ok_unknown_key` and the `hello`s of other version lists (`hello_nine_versions`, `hello_no_version`, `hello_without_1`), which the server never builds, read from the vector's `expected`, writes the vector's bytes.
 - T15 (covers R15): `s030_t15_r15_disconnect_forgets`: after a client closes, the hub holds no subscription of that connection; a publish whose connection closes before the commit → stored, pushed to the other subscriber, no `ack`.
 - T16 (covers R16): `s030_t16_r16_internal_error_closes`: a `cfg(test)` hook that fails `read_page` during a backlog → close 1011; a hook in the server's wrapper around the `relay` calls, compiled only under `cfg(test)`, that returns `Internal` → close 1011, no `error` frame.
 
 ## Vectors
 
-No new vector file. The server reproduces the positive server-direction frames of `028.json` other than `ok_unknown_key` (T14), and `check_blob` reproduces the length, version and channel rows of `013.json` (T02).
+No new vector file. The server reproduces the positive server-direction frames of `028.json` that it builds: all but `ok_unknown_key` and the `hello`s of other version lists (T14), and `check_blob` reproduces the length, version and channel rows of `013.json` (T02).
 
 ## Acceptance criterion
 
@@ -170,3 +170,4 @@ None.
 - 2026-10-16 Interface after audit BJ: the tests of the catch-up in `tests/catch_up.rs`, the test hooks in `http.rs`, T16's `relay` failures in `tests/auth.rs`
 - 2026-10-16 R8 amended after audit BJ (`docs/audit-log.md`, BJ-D-1, the human's decision): the bound passed chooses the subscription ended, the most bytes past 4 MiB, else the most pushes past 256; the Limits row, Security and T08 with it
 - 2026-10-16 Interface after slice (d): the publish tests in `tests/publish.rs`, the frame builders in `frames.rs`, the writer's test hooks in `http.rs`
+- 2026-10-16 T14 and Vectors after audit BK: the `hello`s of other version lists are left out with `ok_unknown_key`, since the server builds only `[1]`, and the fields are read from the vector's `expected`
