@@ -2,6 +2,25 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BF
+
+**2026-10-16 — Audit BF, the code audit of slice (a) of spec 031-auth-channel-signature (branch `031-a-relay`), the core half: `relay::{new_nonce, channel_id, verify_subscribe, url_host}`, `031.json` from the reference script, the fuzz target `relay_verify_subscribe`, spec 016 amended. Two rounds of three passes.** No defect in the check of a `subscribe`: every mutant of `relay.rs` died in round 1. The findings were in the tests, the fuzz harness and the spec's wording.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BF1 | The fuzz verdict answered a short input with `Err(BadPayload)`, not the `None` of spec 016's Interface (A) | Low | `Option<Result<…>>` |
+| BF2 | T03 and T04 checked two positives, not each one (A) | Low | Every positive, against its vector and its config |
+| BF3 | The round-trip proptest drew hosts of 60 bytes at most (A) | Low | Up to 250, within the URL's 256 |
+| BF4 | The fuzz host's 250-byte cut, its second host and a short host of its own were untested (C, rounds 1 and 2) | Low | A test each |
+| BF5 | `session_on_frame` lost `bench = false` in the fuzz manifest (A, round 2) | Low | Restored |
+| BF6 | T11 said every seed reaches `verify_detached`; two stop at `BadConfig` (A, round 2) | Low | T11 worded |
+| BF7 | The Vectors row `auth_ttl_ends` held two TTLs in one vector, against the one shape of `specs/vectors/README.md` | Low | `auth_ttl_60` and `auth_ttl_2592000`, after the advisor (three passes, unanimous); T03 names the check |
+| BF8 | `verify_subscribe` takes any `String` as a host (B) | Far-fetched | None: the server passes only `url_host`'s output (R8) |
+| BF9 | The signature covers the host, not the scheme or the port (B) | Far-fetched | None: by design (`docs/spec.md` §6, `auth_url_with_port`); it needs two operators on one host name serving the same `K_ch` |
+| BF10 | Two configured URLs with one host double the work of a failing `subscribe` (B) | Far-fetched | None: the operator's configuration; spec 033 bounds the attempts |
+
+The audit ends with round 2: passes A and B found only Low or far-fetched points, now fixed or recorded, and pass C one test gap, now closed. The pull request is about 650 net lines, 400 of them tests and the reference script's section, and carries `adr-not-needed`: it implements accepted spec 031, adds `031.json` before phase 3 closes, and changes no format.
+
 ## Audit BE
 
 **2026-10-16 — Audit BE, the code audit of slice (c) of spec 032-storage-ttl (branch `032-c-purge`): R9, the backlog reads and their pool; R10, the purge; R11, the retention counters; R12 and R13, nothing copied and nothing left behind; `Writer::finish`; the clauses of T06, T07, T08 and T14 that need a purge; the spec marked `implemented`. Two rounds of three passes.** No production defect an adversary reaches. Round 1 found reads that waited on a blocking thread and a purge that skipped its checkpoint after a failed round, and nine surviving mutants of 25; round 2 a checkpoint skipped after a failed vacuum and two surviving mutants of 31, all closed.
