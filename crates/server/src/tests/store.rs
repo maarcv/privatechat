@@ -122,6 +122,14 @@ fn s032_t01_r01_schema() {
             "x'03030303030303030303030303030303', x'02020202020202020202020202020202', 1, 2, NULL",
             "a NULL blob",
         ),
+        (
+            "x'04040404040404040404040404040404', x'02020202020202020202020202020202', NULL, 2, x'00'",
+            "a NULL received_at",
+        ),
+        (
+            "x'05050505050505050505050505050505', x'02020202020202020202020202020202', 1, NULL, x'00'",
+            "a NULL expires_at",
+        ),
     ] {
         let sql = format!(
             "INSERT INTO messages(server_id, channel_id, received_at, expires_at, blob) VALUES ({columns})"
@@ -133,6 +141,12 @@ fn s032_t01_r01_schema() {
             .execute("INSERT INTO meta(id, last_received_at) VALUES (1, 0)", [])
             .is_err(),
         "a second meta row"
+    );
+    assert!(
+        connection
+            .execute("UPDATE meta SET last_received_at = NULL", [])
+            .is_err(),
+        "a NULL last_received_at"
     );
 
     // Reopening a file of version 1 keeps it as it is.
@@ -240,6 +254,23 @@ fn s032_t03_r03_start_up_refusals() {
     assert_eq!(pragma_i64(&connection, "user_version"), 0);
     drop(connection);
 
+    // A file of version 1 whose vacuum mode was turned to full.
+    let path = dir.path().join("vacuum-full.db");
+    drop(open_writer(&path).unwrap());
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .pragma_update(None, "auto_vacuum", "FULL")
+        .unwrap();
+    assert_eq!(pragma_i64(&connection, "auto_vacuum"), 1);
+    drop(connection);
+    assert_eq!(cause(open_writer(&path)), Some(DbCause::AutoVacuum));
+
+    // A database with no file has no WAL.
+    assert_eq!(
+        cause(open_writer(Path::new(":memory:"))),
+        Some(DbCause::JournalMode)
+    );
+
     // A file of version 1 whose vacuum mode was turned off.
     let path = dir.path().join("vacuum-off.db");
     drop(open_writer(&path).unwrap());
@@ -337,8 +368,18 @@ fn s032_t14_r14_one_clock() {
 
 #[test]
 fn s032_t15_r15_server_id() {
-    let first = privatechat_core::relay::new_server_id().unwrap();
-    let second = privatechat_core::relay::new_server_id().unwrap();
+    let ids: Vec<[u8; 16]> = (0..64)
+        .map(|_| privatechat_core::relay::new_server_id().unwrap())
+        .collect();
+    // Every byte position is drawn: none keeps one value over 64 ids.
+    for position in 0..16 {
+        let first = ids[0][position];
+        assert!(
+            ids.iter().any(|id| id[position] != first),
+            "byte {position}"
+        );
+    }
+    let (first, second) = (ids[0], ids[1]);
     assert_ne!(first, [0; 16]);
     // Random, not a counter: two draws share few byte positions.
     let same = first.iter().zip(&second).filter(|(a, b)| a == b).count();
