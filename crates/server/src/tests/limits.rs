@@ -326,30 +326,51 @@ async fn s033_t04_r04_ping_pong() {
             .unwrap();
     let nonce = hello(&mut client).await;
     send(&mut client, &subscribe_since(&nonce, None)).await;
-    let mut pushes = 0;
+    let (mut pushes, mut pings) = (0, 0);
     loop {
-        match receive(&mut client).await {
-            Received::Frame(Frame::Push { .. }) => {
-                // 2 000 ms of the clock a push: two pings come due behind
-                // the pushes, while every push read lets another write
-                // complete.
-                pushes += 1;
-                clock.advance_mono(2_000);
-                ticks().await;
-            }
-            Received::Frame(Frame::Ok { .. }) => break,
+        match next_message(&mut client).await {
+            Some(Message::Binary(bytes)) => match Frame::decode(&bytes) {
+                Ok(Frame::Push { .. }) => {
+                    // `STEP` of the clock a push: pings come due among the
+                    // pushes and wait behind those the socket holds, while
+                    // every push read lets another write complete.
+                    pushes += 1;
+                    clock.advance_mono(STEP);
+                    ticks().await;
+                }
+                Ok(Frame::Ok { .. }) => break,
+                other => {
+                    let unexpected = Some(other);
+                    assert!(unexpected.is_none(), "unexpected {unexpected:?}");
+                    break;
+                }
+            },
+            Some(Message::Ping(_)) => pings += 1,
             other => {
                 let unexpected = Some(other);
                 assert!(
                     unexpected.is_none(),
-                    "unexpected {unexpected:?} after {pushes}"
+                    "unexpected {unexpected:?} after {pushes} pushes"
                 );
                 break;
             }
         }
     }
     assert_eq!(pushes, 40);
+    assert!(pings >= 1, "no ping among the pushes");
+    // After `ok`, well past the due time of every ping sent: still open.
+    for _ in 0..4 {
+        clock.advance_mono(PING_INTERVAL_MS / 2);
+        let next = tokio::time::timeout(Duration::from_millis(300), client.next()).await;
+        assert!(
+            matches!(next, Err(_) | Ok(Some(Ok(Message::Ping(_))))),
+            "{next:?}"
+        );
+    }
 }
+
+/// The clock a slow reader moves for each push it reads.
+const STEP: u64 = 6_000;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s033_t05_r05_send_queue_and_write_deadline() {
@@ -407,23 +428,36 @@ async fn s033_t05_r05_send_queue_and_write_deadline() {
         }
     }
 
-    // A write paused mid-frame: the TCP connection dropped, with no close
-    // frame, `WRITE_TIMEOUT_MS` of the monotonic clock after it began.
+    // A client that stops reading with a small receive buffer: a write stuck
+    // mid-frame, part of it taken; the TCP connection dropped with no close
+    // frame `WRITE_TIMEOUT_MS` of the monotonic clock after that write began.
     let clock = Arc::new(ManualClock::new(T0));
-    let (server, mut client) = subscriber(&clock).await;
-    server.shared.hooks.pause_writes(true);
-    store_many(&server, channel(), 1, 1_185).await;
-    ticks().await;
+    let server = start(&clock).await;
+    plant(&server, channel(), 40, 64_673, T0 - 300, T0 + 3_600_000);
+    let socket = TcpSocket::new_v4().unwrap();
+    socket.set_recv_buffer_size(65_536).unwrap();
+    let stream = socket.connect(server.address).await.unwrap();
+    let stream = tokio_tungstenite::MaybeTlsStream::Plain(stream);
+    let (mut client, _) =
+        tokio_tungstenite::client_async(format!("ws://{}/", server.address), stream)
+            .await
+            .unwrap();
+    let nonce = hello(&mut client).await;
+    send(&mut client, &subscribe_since(&nonce, None)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
     clock.advance_mono(WRITE_TIMEOUT_MS - 1);
     ticks().await;
     assert_eq!(server.shared.hub().subscriptions(0), 1, "dropped early");
     clock.advance_mono(1);
     ticks().await;
     assert_eq!(server.shared.hub().subscriptions(0), 0, "not dropped");
-    server.shared.hooks.pause_writes(false);
-    let last = next_message(&mut client).await;
-    assert!(
-        !matches!(last, Some(Message::Close(_) | Message::Binary(_))),
-        "{last:?}"
-    );
+    let mut pushes = 0;
+    let end = loop {
+        match next_message(&mut client).await {
+            Some(Message::Binary(_)) => pushes += 1,
+            other => break other,
+        }
+    };
+    assert!(pushes < 40, "all {pushes} pushes came");
+    assert!(!matches!(end, Some(Message::Close(_))), "{end:?}");
 }

@@ -111,10 +111,10 @@ impl Drop for Registration {
 
 /// The connection of `socket`, until either side closes it.
 pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
-    let mut ticks = shared.ticks.subscribe();
+    let ticks = shared.ticks.subscribe();
     let now = shared.clock.mono_ms();
     let Ok((auth, hello)) = AuthState::new(now) else {
-        close(&mut socket, &mut ticks, &shared, INTERNAL_ERROR).await;
+        close(&mut socket, &shared, INTERNAL_ERROR).await;
         return;
     };
     #[cfg(test)]
@@ -125,6 +125,8 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
         auth
     };
     let id = shared.next_connection();
+    // Unbounded as a channel, bounded by `Pending`: the hub queues nothing
+    // past 256 frames or 4 MiB not yet written (spec 033 R5).
     let (sender, queue) = mpsc::unbounded_channel();
     let pending = Arc::new(Pending::default());
     shared.hub().connect(id, sender, pending.clone());
@@ -154,17 +156,17 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
     // Forgotten at once, not after the close frame has been sent (R15):
     // the hub's registration, and the nonce, the queue and the catch-ups.
     drop(registration);
-    let (mut socket, mut ticks, shared) = connection.into_socket();
+    let (mut socket, shared) = connection.into_socket();
     if let Flow::Close(code) = flow {
-        close(&mut socket, &mut ticks, &shared, code).await;
+        close(&mut socket, &shared, code).await;
     }
 }
 
 impl Connection {
     /// Its socket, with what a close needs; the rest of its state dropped
     /// here.
-    fn into_socket(self) -> (WebSocket, broadcast::Receiver<()>, Arc<Shared>) {
-        (self.socket, self.ticks, self.shared)
+    fn into_socket(self) -> (WebSocket, Arc<Shared>) {
+        (self.socket, self.shared)
     }
 
     async fn serve(&mut self) -> Flow {
@@ -224,7 +226,7 @@ impl Connection {
             self.next_ping = due.saturating_add(PING_INTERVAL_MS);
             self.ping_due = Some(due);
             let ping = Message::Ping(Vec::new().into());
-            if !send_within(&mut self.socket, &mut self.ticks, &self.shared, ping).await {
+            if !send_within(&mut self.socket, &self.shared, ping).await {
                 return Flow::Gone;
             }
         }
@@ -531,10 +533,16 @@ impl Connection {
     }
 
     /// Writes an encoded frame; a socket that fails, or whose write is still
-    /// pending `WRITE_TIMEOUT_MS` after it began, is gone (spec 033 R5).
+    /// pending `WRITE_TIMEOUT_MS` after it began, is gone (spec 033 R5). The
+    /// checks of a tick run first: a catch-up writes page after page without
+    /// coming back to `serve`, and a ping is due all the same (spec 033 R4).
     async fn write(&mut self, frame: Encoded) -> Flow {
+        let flow = self.on_tick().await;
+        if !matches!(flow, Flow::Continue) {
+            return flow;
+        }
         let message = Message::Binary(frame);
-        if !send_within(&mut self.socket, &mut self.ticks, &self.shared, message).await {
+        if !send_within(&mut self.socket, &self.shared, message).await {
             return Flow::Gone;
         }
         self.progress = self.shared.clock.mono_ms();
@@ -545,13 +553,10 @@ impl Connection {
 /// Sends `message`, false when the socket fails or the write is still pending
 /// `WRITE_TIMEOUT_MS` of the monotonic clock after it began, measured at each
 /// tick of the deadline task; progress within the write does not restart that
-/// time (spec 033-rate-limit-quotas R5).
-async fn send_within(
-    socket: &mut WebSocket,
-    ticks: &mut broadcast::Receiver<()>,
-    shared: &Shared,
-    message: Message,
-) -> bool {
+/// time (spec 033-rate-limit-quotas R5). It hears the ticks on a receiver of
+/// its own, so that the connection's are left for its other checks.
+async fn send_within(socket: &mut WebSocket, shared: &Shared, message: Message) -> bool {
+    let mut ticks = shared.ticks.subscribe();
     let began = shared.clock.mono_ms();
     let send = async {
         #[cfg(test)]
@@ -591,15 +596,10 @@ fn read_error(error: axum::Error) -> Option<u16> {
 
 /// Sends a close frame of `code` with no reason, within the deadline of a
 /// write; a socket already gone has nothing to hear it.
-async fn close(
-    socket: &mut WebSocket,
-    ticks: &mut broadcast::Receiver<()>,
-    shared: &Shared,
-    code: u16,
-) {
+async fn close(socket: &mut WebSocket, shared: &Shared, code: u16) {
     let frame = CloseFrame {
         code,
         reason: "".into(),
     };
-    send_within(socket, ticks, shared, Message::Close(Some(frame))).await;
+    send_within(socket, shared, Message::Close(Some(frame))).await;
 }
