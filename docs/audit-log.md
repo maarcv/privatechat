@@ -2,6 +2,27 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BE
+
+**2026-10-16 — Audit BE, the code audit of slice (c) of spec 032-storage-ttl (branch `032-c-purge`): R9, the backlog reads and their pool; R10, the purge; R11, the retention counters; R12 and R13, nothing copied and nothing left behind; `Writer::finish`; the clauses of T06, T07, T08 and T14 that need a purge; the spec marked `implemented`. Two rounds of three passes.** No production defect an adversary reaches. Round 1 found reads that waited on a blocking thread and a purge that skipped its checkpoint after a failed round, and nine surviving mutants of 25; round 2 a checkpoint skipped after a failed vacuum and two surviving mutants of 31, all closed.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BE1 | A read waiting for a connection held a blocking thread, and a dropped read still ran (B) | Low | The pool waits on a tokio `Semaphore` of four permits in async code, before `spawn_blocking` |
+| BE2 | T08's purge clause passed a quota that counted free pages (A) | Medium | The quota sits between the file's size after the purge's vacuum and before it |
+| BE3 | Counters merged before the commit survived (A, C) | Medium | T07's counters clause on a batch that fails after an insert, and on a failed commit |
+| BE4 | T09's pool check could not fail (A, C) | Medium | `POOL_SIZE` is 4, and a fifth read waits while four permits are held |
+| BE5 | A failed purge round, then a failed vacuum, skipped the truncating checkpoint (B, rounds 1 and 2) | Low | The vacuum and the checkpoint run whatever came before them |
+| BE6 | The purge's `<`, the vacuum's 1 000 pages, the 60 000 ms interval, a repeated purge, a full page of exactly 256 KiB, `finish`'s own checkpoint and a failed read's connection were untested (C, rounds 1 and 2) | Low | A test each |
+| BE7 | A failing start-up purge refused the start, with a cause R3 does not name (C) | Low | Its rows are left to the next purge, as every purge's are |
+| BE8 | T12 missed `ATTACH`, serialisation, extensions and a split `VACUUM … INTO` (B, C) | Low | The step bans them, in the code and as `rusqlite` features |
+| BE9 | `ReadPool`, `Writer`'s `Drop` and `store/writer/purge.rs` were not in the Interface (A; BD, round 2 of A) | Low | Added to spec 032's Interface |
+| BE10 | `finish` could answer before the writer had stopped if its waiting thread could not start (A, round 2) | Low | The join then happens in `finish` |
+| BE11 | T09 asked for pages of 500 rows of 1 185 bytes, beyond R9's 256 KiB (A) | Low | T09 amended after the advisor: 500 rows of 500 bytes, and 221 rows of 1 185 bytes |
+| BE12 | No purge at shutdown: rows that expired since the last purge stay while the server is down (B) | Far-fetched | None: at most the 60 s R10 grants; disk encryption covers the downtime |
+
+The audit ends with round 2: passes A and B found only Low or far-fetched points, now fixed, and pass C test gaps, now closed. Slice (c) is about 1 100 net lines, 650 of them tests: R9–R13 are one block, and the tests that kill the audit's mutants are not trimmed. `tokio` comes in with `rt` and `sync` only, for `spawn_blocking`, the read pool's `Semaphore` and `finish`'s `oneshot`.
+
 ## Audit BD
 
 **2026-10-16 — Audit BD, the code audit of slice (b) of spec 032-storage-ttl (branch `032-b-writer`): R4–R8, the writer thread, its batches, `received_at`, the commit and the live-size quota. Three rounds of three passes.** No production defect an adversary reaches. Round 1 found T07's whole-batch refusals untested on batches of more than one, and five surviving mutants of 20; round 2 a restart over an emptied table untested and four of 24; round 3 nothing in A and B and two surviving mutants of 40, all closed.
