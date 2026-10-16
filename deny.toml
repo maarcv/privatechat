@@ -79,6 +79,9 @@ deny = [
   # The WebSocket handshake of RFC 6455 hashes `Sec-WebSocket-Key` with SHA-1,
   # which protects nothing here; no other crate may bring it in (spec 030 R1).
   { crate = "sha1", wrappers = ["axum", "tungstenite"] },
+  # SHA-1 under its other names, which no wrapper lets in.
+  { crate = "sha1_smol" },
+  { crate = "sha-1" },
   { crate = "md5" },
   { crate = "pbkdf2" },
   { crate = "scrypt" },

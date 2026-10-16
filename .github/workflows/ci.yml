@@ -93,7 +93,7 @@ jobs:
               printf '%s\n' "$out" >&2
               return 1
             fi
-            printf '%s\n' "$out" | sed -n 's/^1\([a-z0-9_-]*\) .*/\1/p' | sort -u
+            printf '%s\n' "$out" | sed -n 's/^1\([A-Za-z0-9_-]*\) .*/\1/p' | sort -u
           }
           sha1="$(direct sha1)" || exit 1
           rand="$(direct rand)" || exit 1

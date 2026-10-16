@@ -208,6 +208,8 @@ pub(crate) mod tests {
             "zstd",
             "brotli",
             "lz4",
+            "sha1_smol",
+            "sha-1",
         ] {
             let line = entry(crate_name).expect("deny.toml bans every crate of the list");
             // Any other key (`wrappers`, `deny-multiple-versions`) stops the outright ban.
