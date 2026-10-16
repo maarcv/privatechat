@@ -59,7 +59,8 @@ crates/core/src/proto/auth/tests.rs      s031_* core tests, 031.json
 crates/core/src/relay.rs                 new_nonce, channel_id, verify_subscribe, url_host (R1, R3, R4, R8)
 crates/core/fuzz/fuzz_targets/relay_verify_subscribe.rs
 crates/server/src/auth.rs                AuthState: nonces, attempt count and deadline per connection (R1, R5–R7, R9)
-crates/server/src/tests/auth.rs          s031_* server tests, over AuthState with a ManualClock and no socket
+crates/server/src/tests/auth.rs          s031_* server tests, over AuthState with a monotonic `now` (spec 032 R14) and no socket
+crates/core/src/testing/auth.rs          subscribe_credential, which signs as the session does, for the server tests (feature `test-support`)
 scripts/reference/vectors.py             the section of R10
 specs/vectors/031.json
 ```
@@ -115,11 +116,11 @@ The subscription signature is `sign_detached(sk_ch, auth_message(…))`, compute
 - T02 (covers R2): `s031_t02_r02_auth_message`: `auth_message` of `auth_reference` equals the vector's `message`; `AUTH_TAG` is 19 bytes and equals the §4 literal; the subscribe that spec 028 R6 builds for the vector's config and nonce carries the vector's `sig` (Ed25519 is deterministic).
 - T03 (covers R3): `s031_t03_r03_channel_id`: `relay::channel_id` of each positive vector equals its `channel_id` and `Config::channel_id()` of the same config; `auth_ttl_60` and `auth_ttl_2592000` give different `channel_id`s.
 - T04 (covers R4): `s031_t04_r04_verify_subscribe`: every positive of `031.json` → `Ok(channel_id)`; `auth_ttl_59` and `auth_ttl_2592001` → `BadConfig` before any signature check; `auth_wrong_host`, `auth_wrong_nonce`, `auth_flipped_sig` and `auth_other_ttl` → `BadSignature`; the host matching only the third of three configured hosts → `Ok`; nine hosts, or none → `BadConfig`.
-- T05 (covers R5): `s031_t05_r05_verdicts`, over `AuthState`: a valid `subscribe` → `Accept` with the vector's `channel_id`; each negative vector → the verdict of the table "Vectors" naming the vector's `channel_id`; an expired nonce with a bad signature too → `NonceExpired` (the age is checked first).
+- T05 (covers R5): `s031_t05_r05_verdicts`, over `AuthState`, each vector signed again under the state's nonce: a valid `subscribe` → `Accept` with the vector's `channel_id`; each negative vector → the verdict of the table "Vectors" naming the vector's `channel_id`; an expired nonce with a bad signature too → `NonceExpired` (the age is checked first).
 - T06 (covers R6): `s031_t06_r06_three_failures_close`, over `AuthState`: two `BadAuth` and one `NonceExpired` → no `Close`; a third `BadAuth` → `BadAuth` then `Close`; `BadTtl`, `BadAuth`, `BadTtl` → `Close` after the third. Spec 030's socket tests check that `Close` becomes status 1008.
-- T07 (covers R7): `s031_t07_r07_first_subscribe_deadline`, over `AuthState`: no `subscribe` for 60 001 ms → `deadline_passed` true; an `Accept` at 30 000 ms, then 10 minutes later → false.
+- T07 (covers R7): `s031_t07_r07_first_subscribe_deadline`, over `AuthState`: no `subscribe` for 60 001 ms → `deadline_passed` true, and a `subscribe` then gets `Close` alone; an `Accept` at 30 000 ms, then 10 minutes later → false.
 - T08 (covers R8): `s031_t08_r08_hosts_from_config`: configured URLs `wss://chat.example.org` and `ws://<56 chars>.onion` → a signature over either host is accepted; over `chat.example.org:9001` → `BadAuth`; `AuthState::on_subscribe` takes no request header, so the `Host` header cannot reach it; `url_host` of `wss://h:9001` → `h`, and of `wss://h/` → `BadConfig`.
-- T09 (covers R9): `s031_t09_r09_nothing_kept`: after an accepted subscribe, the `Debug` of `AuthState` and of the subscription contains neither `pk_ch` nor `sig` in hex.
+- T09 (covers R9): `s031_t09_r09_nothing_kept`: after an accepted subscribe, the `Debug` of `AuthState` and of the subscription contains neither `pk_ch` nor `sig` in hex; the subscription is spec 030-ws-protocol's, whose tests check its half.
 - T10 (covers R10): `s031_t10_r10_vectors_reproduced`: every vector of `031.json` is reproduced by `auth_message`, `relay::channel_id` and `verify_subscribe`; the CI step of spec 015 regenerates `031.json` byte for byte.
 - T11 (covers R11): `s031_t11_r11_round_trip_and_fuzz`: the proptest of R11; `scripts/check_fuzz_targets.sh` lists `relay_verify_subscribe`; the seed of each signature vector reaches `verify_detached`, and the two of a TTL out of range stop at `BadConfig`.
 
@@ -168,3 +169,4 @@ None.
 - 2026-10-15 amended after audit BB (`docs/audit-log.md`, BB-D-11): R10 names how the client path is covered, through the shared `auth_message` and spec 028's `s028_t06_r06_subscribe_contents_and_pacing`; R11 names the `fuzz_entry` function and its `_verdict` (spec 016 R2, R7)
 - 2026-10-16 Vectors: `auth_ttl_ends` split into `auth_ttl_60` and `auth_ttl_2592000`, one vector per TTL like the negatives and the schema of `specs/vectors/README.md`; T03 names the check (after the advisor, three passes, unanimous)
 - 2026-10-16 T11 worded after audit BF: the seeds of a TTL out of range stop before the signature
+- 2026-10-16 after audit BG: a `subscribe` past the first-subscribe deadline gets `Close` alone (T07); T05 signs each vector again under the state's nonce; the Interface names `testing::subscribe_credential` and the monotonic `now` of the server tests

@@ -2,6 +2,22 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BG
+
+**2026-10-16 — Audit BG, the code audit of slice (b) of spec 031-auth-channel-signature (branch `031-b-auth`), the server half: `AuthState`, one per connection, with its nonces, failed attempts and first-subscribe deadline, over a monotonic `now` and no socket; and `testing::subscribe_credential`, which signs as the session does for the server's tests. Two rounds of three passes.** One defect: a `subscribe` after the first-subscribe deadline could still be accepted when the caller checked the deadline less often than the client subscribed. The rest were test gaps.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BG1 | `on_subscribe` did not look at the first-subscribe deadline: a nonce expired at 60 001 ms could be signed again and accepted, and the connection then lived on (A, B) | Medium | `on_subscribe` answers `Close` alone past the deadline; T07 checks it; spec 031 T07 says so |
+| BG2 | T05 built its own negatives, missed `auth_other_ttl`, and took the expected `channel_id` from the function under test (A) | Medium | T05 runs every vector of `031.json`, signed again under the state's nonce; spec 031 T05 says so |
+| BG3 | T09 looked for the nonce in hex only, while a derived `Debug` prints decimal, and never with a previous nonce held (A, C, rounds 1 and 2) | Medium | Hex, decimal and field names, after a nonce has expired |
+| BG4 | The previous nonce at exactly +10 000 ms and a nonce timed from its own `hello` were untested (C) | Medium | A test each |
+| BG5 | `Verdict` derived `Debug`, which prints a full `channel_id` (A) | Low | No `Debug` (AGENTS 19) |
+| BG6 | `testing::subscribe_credential` and the tests' monotonic `now` were not in the Interface; T09's subscription half had no owner (A) | Low | Spec 031's Interface names them; T09 leaves the subscription to spec 030's tests |
+| BG7 | `first_hello_at` equals `hello_at` until an accept (C, round 2) | Low | Kept, with the reason: R1 and R7 stay independent if one window changes |
+
+The audit ends with round 2: pass A found Low points, pass B nothing, pass C one test gap, now closed. Spec 031 stays `accepted` until spec 030 puts `AuthState` on a socket: the 1008 closes of R6 and R7, the hand-off of an accepted channel and the configured hosts of R8 are tested there (round 1 of A). The pull request is about 620 net lines, 370 of them tests.
+
 ## Audit BF
 
 **2026-10-16 — Audit BF, the code audit of slice (a) of spec 031-auth-channel-signature (branch `031-a-relay`), the core half: `relay::{new_nonce, channel_id, verify_subscribe, url_host}`, `031.json` from the reference script, the fuzz target `relay_verify_subscribe`, spec 016 amended. Two rounds of three passes.** No defect in the check of a `subscribe`: every mutant of `relay.rs` died in round 1. The findings were in the tests, the fuzz harness and the spec's wording.
