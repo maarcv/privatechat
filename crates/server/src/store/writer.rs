@@ -12,9 +12,9 @@ use std::time::Duration;
 
 use rusqlite::{Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior};
 
-use super::open_writer;
+use super::{open_writer, refused};
 use crate::clock::Clock;
-use crate::{DbCause, StartError, StartReason};
+use crate::{DbCause, StartError};
 
 /// Requests waiting for the writer; one more is refused (R4).
 pub(crate) const QUEUE_LEN: usize = 1_024;
@@ -100,7 +100,7 @@ impl Writer {
         hooks: Hooks,
     ) -> Result<Writer, StartError> {
         let connection = open_writer(db)?;
-        let last = read_last(&connection).map_err(|_| refused_open())?;
+        let last = read_last(&connection).map_err(|_| refused(DbCause::Open))?;
         let (sender, receiver) = mpsc::sync_channel(QUEUE_LEN);
         let mut thread = WriterThread {
             connection,
@@ -113,7 +113,7 @@ impl Writer {
         let handle = std::thread::Builder::new()
             .name("writer".to_owned())
             .spawn(move || thread.run(&receiver))
-            .map_err(|_| refused_open())?;
+            .map_err(|_| refused(DbCause::Open))?;
         Ok(Writer {
             sender: Some(sender),
             thread: Some(handle),
@@ -164,12 +164,6 @@ fn read_last(connection: &Connection) -> Result<u64, rusqlite::Error> {
         |row| row.get(0),
     )?;
     u64::try_from(last).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, last))
-}
-
-fn refused_open() -> StartError {
-    StartError {
-        reason: StartReason::Database(DbCause::Open),
-    }
 }
 
 /// What the writer thread owns.

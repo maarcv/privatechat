@@ -390,16 +390,7 @@ fn s032_t08_r08_disk_quota() {
     let dir = TestDir::new("s032_t08");
     let clock = Arc::new(ManualClock::new(T0));
     drop(Harness::new(&dir.db(), &clock, Hooks::default()));
-    let connection = Connection::open(dir.db()).unwrap();
-    let live: i64 = connection
-        .query_row(
-            "SELECT (page_count - freelist_count) * page_size FROM pragma_page_count, pragma_freelist_count, pragma_page_size",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    drop(connection);
-    let live = u64::try_from(live).unwrap();
+    let live = live_bytes(&dir.db());
 
     // At the quota: refused, nothing inserted.
     let harness = Harness::with_quota(&dir.db(), &clock, Hooks::default(), live);
@@ -542,4 +533,50 @@ fn s032_t04_r04_dropping_the_writer_stores_what_is_queued() {
     pause.release();
     drop(harness);
     assert_eq!(count(&dir.db()), 300);
+}
+
+#[test]
+fn s032_t06_r06_last_at_the_integer_limit() {
+    let dir = TestDir::new("s032_t06_last_max");
+    let clock = Arc::new(ManualClock::new(T0));
+    drop(Harness::new(&dir.db(), &clock, Hooks::default()));
+    Connection::open(dir.db())
+        .unwrap()
+        .execute(
+            "UPDATE meta SET last_received_at = ?1 WHERE id = 0",
+            [i64::MAX],
+        )
+        .unwrap();
+    let harness = Harness::new(&dir.db(), &clock, Hooks::default());
+    assert_eq!(
+        harness.store(request(1, 1, 60)).result,
+        Err(Refusal::ServerFull)
+    );
+    drop(harness);
+    assert_eq!(count(&dir.db()), 0);
+}
+
+#[test]
+fn s032_t06_r06_unreadable_last_refuses_the_start() {
+    let dir = TestDir::new("s032_t06_last_bad");
+    let clock = Arc::new(ManualClock::new(T0));
+    drop(Harness::new(&dir.db(), &clock, Hooks::default()));
+    Connection::open(dir.db())
+        .unwrap()
+        .execute("UPDATE meta SET last_received_at = -1 WHERE id = 0", [])
+        .unwrap();
+    let clock: Arc<dyn Clock> = clock;
+    let refused = spawn(
+        &dir.db(),
+        clock,
+        Box::new(|_| {}),
+        NO_QUOTA,
+        Hooks::default(),
+    );
+    assert!(matches!(
+        refused,
+        Err(StartError {
+            reason: StartReason::Database(DbCause::Open)
+        })
+    ));
 }
