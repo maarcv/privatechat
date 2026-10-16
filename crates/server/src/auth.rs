@@ -25,8 +25,8 @@ pub(crate) const MAX_FAILED: u8 = 3;
 /// The only protocol version of v1 (`docs/spec.md` §6 "Version").
 const PROTO_VERSION: u8 = 1;
 
-/// What the connection answers a `subscribe` with, in order (R5, R6).
-#[derive(Debug)]
+/// What the connection answers a `subscribe` with, in order (R5, R6). It
+/// derives no `Debug`: a full `channel_id` must not reach a log (AGENTS 19).
 pub(crate) enum Verdict {
     /// Accepted: spec 030-ws-protocol R7 takes the channel.
     Accept { channel_id: [u8; 16] },
@@ -36,7 +36,8 @@ pub(crate) enum Verdict {
     BadTtl { channel_id: [u8; 16] },
     /// `error{bad_auth, channel_id}`, a failed attempt.
     BadAuth { channel_id: [u8; 16] },
-    /// Close with status 1008, after the error of the third failed attempt.
+    /// Close with status 1008, after the error of the third failed attempt,
+    /// or with no frame when the first-subscribe deadline has passed (R7).
     Close,
 }
 
@@ -101,6 +102,11 @@ impl AuthState {
         hosts: &[String],
         now: u64,
     ) -> Result<Vec<Verdict>, Error> {
+        // Checked here as well as by the deadline task, so that no subscribe
+        // is answered past the deadline, whatever the task's period (R7).
+        if self.deadline_passed(now) {
+            return Ok(vec![Verdict::Close]);
+        }
         let channel_id = relay::channel_id(pk_ch, ttl_seconds)?;
         if now.saturating_sub(self.hello_at) > NONCE_LIFETIME_MS {
             self.previous = Some(self.nonce);
