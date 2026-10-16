@@ -106,9 +106,28 @@ fn s032_t01_r01_schema() {
         "17-byte server_id"
     );
     assert!(
+        insert(&connection, &[3; 16], &[2; 17]).is_err(),
+        "17-byte channel_id"
+    );
+    assert!(
         insert(&connection, &[1; 16], &[2; 16]).is_err(),
         "a server_id twice"
     );
+    for (columns, what) in [
+        (
+            "x'03030303030303030303030303030303', NULL, 1, 2, x'00'",
+            "a NULL channel_id",
+        ),
+        (
+            "x'03030303030303030303030303030303', x'02020202020202020202020202020202', 1, 2, NULL",
+            "a NULL blob",
+        ),
+    ] {
+        let sql = format!(
+            "INSERT INTO messages(server_id, channel_id, received_at, expires_at, blob) VALUES ({columns})"
+        );
+        assert!(connection.execute(&sql, []).is_err(), "{what}");
+    }
     assert!(
         connection
             .execute("INSERT INTO meta(id, last_received_at) VALUES (1, 0)", [])
@@ -155,6 +174,17 @@ fn s032_t02_r02_pragmas() {
     }
     assert!(insert(&reader, &[1; 16], &[2; 16]).is_err());
     assert!(insert(&writer, &[1; 16], &[2; 16]).is_ok());
+
+    // The writer's pragmas belong to the connection: a restart sets them again.
+    drop((reader, writer));
+    let writer = open_writer(&dir.db()).unwrap();
+    for (name, value) in [
+        ("synchronous", 1),
+        ("secure_delete", 1),
+        ("journal_size_limit", 0),
+    ] {
+        assert_eq!(pragma_i64(&writer, name), value, "reopened writer {name}");
+    }
 }
 
 /// A database at `path` whose `user_version` is `version`, as the server
@@ -183,6 +213,32 @@ fn s032_t03_r03_start_up_refusals() {
         .unwrap();
     drop(connection);
     assert_eq!(cause(open_writer(&path)), Some(DbCause::AutoVacuum));
+    // Refused before its journal was switched to WAL.
+    let connection = Connection::open(&path).unwrap();
+    let journal: String = connection
+        .pragma_query_value(None, "journal_mode", |row| row.get(0))
+        .unwrap();
+    assert_eq!(journal, "delete");
+    drop(connection);
+
+    // A new-looking file whose schema fails half way keeps none of it: the
+    // tables, the meta row and the version are one transaction.
+    let path = dir.path().join("half-schema.db");
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "PRAGMA auto_vacuum = INCREMENTAL; PRAGMA journal_mode = WAL; CREATE TABLE meta(x);",
+        )
+        .unwrap();
+    drop(connection);
+    assert_eq!(cause(open_writer(&path)), Some(DbCause::Open));
+    let connection = Connection::open(&path).unwrap();
+    assert_eq!(
+        schema_names(&connection),
+        [("table".to_owned(), "meta".to_owned())]
+    );
+    assert_eq!(pragma_i64(&connection, "user_version"), 0);
+    drop(connection);
 
     // A file of version 1 whose vacuum mode was turned off.
     let path = dir.path().join("vacuum-off.db");
@@ -213,7 +269,7 @@ fn s032_t03_r03_start_up_refusals() {
     let path = dir.path().join("missing").join("messages.db");
     assert_eq!(cause(open_writer(&path)), Some(DbCause::Open));
 
-    // None of the refusals touched a file it did not create.
+    // A refused path creates no directory.
     assert!(!dir.path().join("missing").exists());
 }
 
@@ -268,18 +324,23 @@ fn s032_t14_r14_one_clock() {
     clock.set_wall(100);
     assert_eq!((clock.wall_ms(), clock.mono_ms()), (100, 60_500));
 
-    // The host's clock: a wall reading of this century, a monotonic one that
-    // never goes back.
+    // The host's clock: a wall reading of this century, and a monotonic one
+    // that counts from its first reading in the process and moves on its own.
     let system = crate::SystemClock;
-    assert!(system.wall_ms() > 1_700_000_000_000);
+    let wall = system.wall_ms();
+    assert!(wall > 1_700_000_000_000);
     let first = system.mono_ms();
-    assert!(system.mono_ms() >= first);
+    assert!(first < 60_000, "{first}");
+    while system.mono_ms() == first && system.wall_ms() < wall + 1_000 {}
+    assert!(system.mono_ms() > first);
 }
 
 #[test]
 fn s032_t15_r15_server_id() {
     let first = privatechat_core::relay::new_server_id().unwrap();
     let second = privatechat_core::relay::new_server_id().unwrap();
-    assert_ne!(first, second);
     assert_ne!(first, [0; 16]);
+    // Random, not a counter: two draws share few byte positions.
+    let same = first.iter().zip(&second).filter(|(a, b)| a == b).count();
+    assert!(same < 8, "{same} equal bytes");
 }

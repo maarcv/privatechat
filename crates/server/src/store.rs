@@ -71,17 +71,21 @@ pub(crate) fn open_writer(db: &Path) -> Result<Connection, StartError> {
         USER_VERSION => false,
         _ => return Err(refused(DbCause::UserVersion)),
     };
+    // The vacuum mode is fixed when the first table is created, and must be
+    // set before the journal turns to WAL (R2); it is read back first, so a
+    // file refused for it keeps its journal as it was.
     if is_new {
-        // The vacuum mode is fixed when the first table is created, and must
-        // be set before the journal turns to WAL (R2).
         connection
             .pragma_update(None, "auto_vacuum", "INCREMENTAL")
             .map_err(|_| refused(DbCause::Open))?;
+    }
+    check_vacuum(&connection)?;
+    if is_new {
         connection
             .pragma_update(None, "journal_mode", "WAL")
-            .map_err(|_| refused(DbCause::JournalMode))?;
+            .map_err(|_| refused(DbCause::Open))?;
     }
-    check_modes(&connection)?;
+    check_journal(&connection)?;
     if is_new {
         let transaction = connection
             .transaction()
@@ -123,19 +127,24 @@ fn set_writer(connection: &Connection) -> Result<(), rusqlite::Error> {
     connection.pragma_update(None, "journal_size_limit", 0)
 }
 
-/// The journal and vacuum modes, read back (R3).
-fn check_modes(connection: &Connection) -> Result<(), StartError> {
-    let journal: String = connection
-        .pragma_query_value(None, "journal_mode", |row| row.get(0))
-        .map_err(|_| refused(DbCause::Open))?;
-    if !journal.eq_ignore_ascii_case("wal") {
-        return Err(refused(DbCause::JournalMode));
-    }
+/// The vacuum mode, read back (R3).
+fn check_vacuum(connection: &Connection) -> Result<(), StartError> {
     let vacuum: i64 = connection
         .pragma_query_value(None, "auto_vacuum", |row| row.get(0))
         .map_err(|_| refused(DbCause::Open))?;
     if vacuum != AUTO_VACUUM_INCREMENTAL {
         return Err(refused(DbCause::AutoVacuum));
+    }
+    Ok(())
+}
+
+/// The journal mode, read back (R3).
+fn check_journal(connection: &Connection) -> Result<(), StartError> {
+    let journal: String = connection
+        .pragma_query_value(None, "journal_mode", |row| row.get(0))
+        .map_err(|_| refused(DbCause::Open))?;
+    if !journal.eq_ignore_ascii_case("wal") {
+        return Err(refused(DbCause::JournalMode));
     }
     Ok(())
 }
