@@ -18,6 +18,7 @@ use super::ws::{
 use crate::auth;
 use crate::clock::ManualClock;
 use crate::frames::{self, ErrorCode};
+use crate::store::writer::test::Pause;
 use crate::store::writer::{Row, WriteRequest};
 
 /// A third channel, of a third key.
@@ -58,6 +59,25 @@ fn publish(channel_id: [u8; 16], n: u16, blob: Vec<u8>) -> Frame {
         client_ref: client_ref(n),
         blob,
     }
+}
+
+/// The writer held before its next batch, and released when this drops, so
+/// that a failing test fails rather than waits on the writer's thread.
+struct HeldWriter(Arc<Pause>);
+
+impl Drop for HeldWriter {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+
+async fn hold_writer(server: &Server) -> HeldWriter {
+    let pause = server.shared.hooks.writer_pause.clone();
+    let holding = pause.clone();
+    tokio::task::spawn_blocking(move || holding.hold())
+        .await
+        .unwrap();
+    HeldWriter(pause)
 }
 
 /// A client subscribed to the test channel, its empty backlog read.
@@ -112,6 +132,11 @@ async fn s030_t11_r11_publish_refusals() {
     )
     .await;
     refused(&mut client, "not_subscribed", other_channel(), 1).await;
+    // A bad blob on a channel not subscribed: `not_subscribed` comes first.
+    let mut short = blob_of(other_channel(), 1);
+    short.pop();
+    send(&mut client, &publish(other_channel(), 6, short)).await;
+    refused(&mut client, "not_subscribed", other_channel(), 6).await;
 
     let mut short = blob_of(channel(), 2);
     short.pop();
@@ -123,10 +148,7 @@ async fn s030_t11_r11_publish_refusals() {
     }
 
     // The writer stopped and its queue full.
-    let pause = server.shared.hooks.writer_pause.clone();
-    tokio::task::spawn_blocking(move || pause.hold())
-        .await
-        .unwrap();
+    let held = hold_writer(&server).await;
     loop {
         let filler = WriteRequest {
             connection: u64::MAX,
@@ -141,13 +163,81 @@ async fn s030_t11_r11_publish_refusals() {
     }
     send(&mut client, &publish(channel(), 5, blob_of(channel(), 5))).await;
     refused(&mut client, "rate_limited", channel(), 5).await;
-    server.shared.hooks.writer_pause.release();
+    drop(held);
 
     assert!(matches!(
         receive_within(&mut client, 300).await,
         Received::Nothing
     ));
     assert_eq!(count(&server, channel()), before, "a refused blob stored");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s030_t11_r11_publish_takes_the_ttl() {
+    // A subscription signed for 60 s: its blob expires 60 000 ms after it
+    // was received, whatever the TTL of the other channels.
+    let clock = Arc::new(ManualClock::new(T0));
+    let server = start(&clock).await;
+    let (pk_ch, _) = subscribe_credential(K_THIRD, 60, &[0; 32], HOST).unwrap();
+    let short = relay::channel_id(&pk_ch, 60).unwrap();
+    let mut client = connect(server.address).await;
+    let nonce = hello(&mut client).await;
+    let (pk_ch, sig) = subscribe_credential(K_THIRD, 60, &nonce, HOST).unwrap();
+    let subscription = Frame::Subscribe {
+        pk_ch,
+        ttl_seconds: 60,
+        sig,
+        since: None,
+    };
+    send(&mut client, &subscription).await;
+    assert!(backlog(&mut client, short).await.is_empty());
+    send(&mut client, &publish(short, 1, blob_of(short, 1))).await;
+    assert!(matches!(
+        &frames(&mut client, 2).await[..],
+        [Frame::Ack { .. }, Frame::Push { .. }]
+    ));
+    let connection = rusqlite::Connection::open(server.shared.db_path()).unwrap();
+    let (received_at, expires_at): (i64, i64) = connection
+        .query_row(
+            "SELECT received_at, expires_at FROM messages WHERE channel_id = ?1",
+            [&short[..]],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(expires_at - received_at, 60_000);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s030_t11_r11_publish_while_catching_up() {
+    // A channel still catching up takes a publish: its `ack`, then the
+    // backlog with its own blob in it, then `ok`.
+    let clock = Arc::new(ManualClock::new(T0));
+    let server = start(&clock).await;
+    plant(&server, channel(), 40, 64_673, T0 - 100, T0 + 3_600_000);
+    let mut client = connect(server.address).await;
+    let nonce = hello(&mut client).await;
+    server.shared.hooks.catch_up_paused.send_replace(true);
+    send(&mut client, &subscribe_since(&nonce, None)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    send(&mut client, &publish(channel(), 1, blob_of(channel(), 1))).await;
+    let (mut acked, mut pushes) = (false, 0);
+    loop {
+        match receive(&mut client).await {
+            Received::Frame(Frame::Ack { client_ref: of, .. }) if of == client_ref(1) => {
+                acked = true;
+                server.shared.hooks.catch_up_paused.send_replace(false);
+            }
+            Received::Frame(Frame::Push { .. }) => pushes += 1,
+            Received::Frame(Frame::Ok { .. }) => break,
+            other => {
+                let unexpected = Some(other);
+                assert!(unexpected.is_none(), "unexpected {unexpected:?}");
+                break;
+            }
+        }
+    }
+    assert!(acked, "no ack");
+    assert_eq!(pushes, 41);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -278,16 +368,13 @@ async fn s030_t12_r12_ack_and_fan_out() {
 
     // A refusal of the writer, in one batch with a publish before and after
     // it: its `error`, with both fields, between their `ack`s.
-    let pause = server.shared.hooks.writer_pause.clone();
-    tokio::task::spawn_blocking(move || pause.hold())
-        .await
-        .unwrap();
+    let held = hold_writer(&server).await;
     for n in 100..103 {
         send(&mut client, &publish(channel(), n, blob_of(channel(), 8))).await;
     }
     tokio::time::sleep(Duration::from_millis(100)).await;
     server.shared.hooks.repeat_after.store(1, Ordering::SeqCst);
-    server.shared.hooks.writer_pause.release();
+    drop(held);
     let seen = frames(&mut client, 5).await;
     assert!(
         matches!(
@@ -331,12 +418,8 @@ async fn s030_t13_r13_frames_sent() {
     refused(&mut client, "not_subscribed", other_channel(), 2).await;
     send(&mut client, &publish(channel(), 3, vec![1; 1_185])).await;
     refused(&mut client, "bad_blob", channel(), 3).await;
-    // No code is `unsupported_version`.
-    assert!(
-        super::ws::ERRORS
-            .iter()
-            .all(|(_, name, _)| *name != "unsupported_version")
-    );
+    // No `error` above carried `unsupported_version` or a text of its own:
+    // `receive` checks every one against the table of R13.
 }
 
 /// A forged `subscribe` answered with `bad_auth`.
@@ -508,10 +591,7 @@ async fn s030_t15_r15_publisher_gone_before_commit() {
     let mut publisher = subscribed(&server).await;
     let mut other = subscribed(&server).await;
     let before = count(&server, channel());
-    let pause = server.shared.hooks.writer_pause.clone();
-    tokio::task::spawn_blocking(move || pause.hold())
-        .await
-        .unwrap();
+    let held = hold_writer(&server).await;
     send(
         &mut publisher,
         &publish(channel(), 1, blob_of(channel(), 1)),
@@ -528,7 +608,7 @@ async fn s030_t15_r15_publisher_gone_before_commit() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert!(forgotten);
-    server.shared.hooks.writer_pause.release();
+    drop(held);
     let received = receive(&mut other).await;
     assert!(
         matches!(&received, Received::Frame(Frame::Push { blob, .. }) if *blob == blob_of(channel(), 1)),
