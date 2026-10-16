@@ -8,7 +8,8 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(test)]
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
@@ -18,27 +19,19 @@ use tokio::sync::{broadcast, mpsc};
 use crate::auth::{AuthState, Verdict};
 use crate::frames::{self, ErrorCode};
 use crate::http::Shared;
-use crate::hub::Encoded;
-use crate::limits::{MAX_SUBSCRIPTIONS, PublishWindow, SUBSCRIBE_GAP_MS};
+use crate::hub::{Encoded, Pending};
+use crate::limits::{
+    MAX_SUBSCRIPTIONS, PING_INTERVAL_MS, PublishWindow, SEND_QUEUE_FRAMES, SUBSCRIBE_GAP_MS,
+    WRITE_TIMEOUT_MS, pong_overdue,
+};
 use crate::store::reader::read_page;
 use crate::store::writer::WriteRequest;
 
 /// How often the deadline task wakes, in real time (spec 032 R14).
 pub(crate) const TICK: Duration = Duration::from_millis(100);
 
-/// How long one write may take before the connection is dropped. Until spec
-/// 033-rate-limit-quotas R5 measures the pending write on the monotonic clock
-/// from the deadline task, this bounds it in real time, so that a peer that
-/// stops reading cannot hold the task, the first-subscribe deadline included.
-const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// The frames of the queue the hub fills for a connection. The frame the task
-/// has taken and is writing is not counted, so 257 can wait unwritten; spec
-/// 033-rate-limit-quotas R5, in its slice (a), counts it and adds the byte
-/// bound.
-pub(crate) const QUEUE_FRAMES: usize = 256;
-
 /// The close codes the server sends (RFC 6455 §7.4.1).
+const GOING_AWAY: u16 = 1001;
 const UNSUPPORTED_DATA: u16 = 1003;
 const POLICY_VIOLATION: u16 = 1008;
 const TOO_BIG: u16 = 1009;
@@ -86,7 +79,16 @@ struct Connection {
     shared: Arc<Shared>,
     auth: AuthState,
     queue: mpsc::Receiver<Encoded>,
-    overflowed: Arc<AtomicBool>,
+    /// What the queue holds not yet written (spec 033-rate-limit-quotas R5).
+    pending: Arc<Pending>,
+    /// The ticks of the deadline task (spec 032-storage-ttl R14).
+    ticks: broadcast::Receiver<()>,
+    /// When the next ping is due, on the monotonic clock (spec 033 R4).
+    next_ping: u64,
+    /// When the ping awaiting its pong was due.
+    ping_due: Option<u64>,
+    /// When a write other than a ping last completed (spec 033 R4).
+    progress: u64,
     /// The subscriptions catching up, streamed in turn.
     catching: VecDeque<CatchUp>,
     /// The `publish`es handed to the writer (spec 033-rate-limit-quotas R1).
@@ -109,9 +111,12 @@ impl Drop for Registration {
 
 /// The connection of `socket`, until either side closes it.
 pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
-    let mut ticks = shared.ticks.subscribe();
-    let Ok((auth, hello)) = AuthState::new(shared.clock.mono_ms()) else {
-        close(&mut socket, INTERNAL_ERROR).await;
+    #[cfg(test)]
+    let _task = shared.hooks.task();
+    let ticks = shared.ticks.subscribe();
+    let now = shared.clock.mono_ms();
+    let Ok((auth, hello)) = AuthState::new(now) else {
+        close(&mut socket, &shared, INTERNAL_ERROR).await;
         return;
     };
     #[cfg(test)]
@@ -122,9 +127,11 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
         auth
     };
     let id = shared.next_connection();
-    let (sender, queue) = mpsc::channel(QUEUE_FRAMES);
-    let overflowed = Arc::new(AtomicBool::new(false));
-    shared.hub().connect(id, sender, overflowed.clone());
+    // `Pending` holds the bound of spec 033 R5, the frame being written
+    // included; the channel's own bound is the same, a backstop.
+    let (sender, queue) = mpsc::channel(SEND_QUEUE_FRAMES);
+    let pending = Arc::new(Pending::default());
+    shared.hub().connect(id, sender, pending.clone());
     let registration = Registration {
         id,
         shared: shared.clone(),
@@ -135,31 +142,36 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
         shared,
         auth,
         queue,
-        overflowed,
+        pending,
+        ticks,
+        next_ping: now.saturating_add(PING_INTERVAL_MS),
+        ping_due: None,
+        progress: now,
         catching: VecDeque::new(),
         publishes: PublishWindow::default(),
         last_subscribe: None,
     };
     let flow = match connection.send(&hello).await {
-        Flow::Continue => connection.serve(&mut ticks).await,
+        Flow::Continue => connection.serve().await,
         stopped => stopped,
     };
     // Forgotten at once, not after the close frame has been sent (R15):
     // the hub's registration, and the nonce, the queue and the catch-ups.
     drop(registration);
-    let mut socket = connection.into_socket();
+    let (mut socket, shared) = connection.into_socket();
     if let Flow::Close(code) = flow {
-        close(&mut socket, code).await;
+        close(&mut socket, &shared, code).await;
     }
 }
 
 impl Connection {
-    /// Its socket, the rest of its state dropped here.
-    fn into_socket(self) -> WebSocket {
-        self.socket
+    /// Its socket, with what a close needs; the rest of its state dropped
+    /// here.
+    fn into_socket(self) -> (WebSocket, Arc<Shared>) {
+        (self.socket, self.shared)
     }
 
-    async fn serve(&mut self, ticks: &mut broadcast::Receiver<()>) -> Flow {
+    async fn serve(&mut self) -> Flow {
         loop {
             let catching_up = !self.catching.is_empty();
             let flow = tokio::select! {
@@ -169,16 +181,21 @@ impl Connection {
                 // page, and every frame of the queue is written before each
                 // page and each batch of held pushes (R7).
                 biased;
-                tick = ticks.recv() => match tick {
+                tick = self.ticks.recv() => match tick {
                     // A lagging receiver missed ticks, which only delays the check.
-                    Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => self.on_tick(),
+                    Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => self.on_tick().await,
                     Err(broadcast::error::RecvError::Closed) => Flow::Gone,
                 },
                 message = self.socket.recv() => match message {
                     None | Some(Ok(Message::Close(_))) => Flow::Gone,
                     Some(Ok(Message::Binary(bytes))) => self.on_frame(&bytes).await,
                     Some(Ok(Message::Text(_))) => Flow::Close(UNSUPPORTED_DATA),
-                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => Flow::Continue,
+                    Some(Ok(Message::Pong(_))) => {
+                        self.ping_due = None;
+                        Flow::Continue
+                    }
+                    // axum answers it.
+                    Some(Ok(Message::Ping(_))) => Flow::Continue,
                     Some(Err(error)) => read_error(error).map_or(Flow::Gone, Flow::Close),
                 },
                 frame = self.queue.recv() => match frame {
@@ -193,14 +210,27 @@ impl Connection {
         }
     }
 
-    fn on_tick(&self) -> Flow {
-        // `write_queued` closes first, unless a client that keeps its socket
-        // busy keeps the queue from being polled: the tick comes before it.
-        if self.overflowed.load(Ordering::SeqCst) {
+    async fn on_tick(&mut self) -> Flow {
+        // At every tick and before every write: once a frame was dropped,
+        // nothing more is written (spec 033 R5).
+        if self.pending.overflowed() {
             return Flow::Close(TRY_AGAIN_LATER);
         }
-        if self.auth.deadline_passed(self.shared.clock.mono_ms()) {
+        let now = self.shared.clock.mono_ms();
+        if self.auth.deadline_passed(now) {
             return Flow::Close(POLICY_VIOLATION);
+        }
+        if pong_overdue(now, self.ping_due, self.progress) {
+            return Flow::Close(GOING_AWAY);
+        }
+        if now >= self.next_ping {
+            let due = self.next_ping;
+            self.next_ping = due.saturating_add(PING_INTERVAL_MS);
+            self.ping_due = Some(due);
+            let ping = Message::Ping(Vec::new().into());
+            if !send_within(&mut self.socket, &self.shared, ping).await {
+                return Flow::Gone;
+            }
         }
         Flow::Continue
     }
@@ -470,14 +500,15 @@ impl Connection {
         Flow::Continue
     }
 
-    /// Writes a frame of the queue, unless the queue overflowed: then the
-    /// connection closes and nothing more of the queue is written (spec
-    /// 033-rate-limit-quotas R5).
+    /// Writes a frame of the queue, then takes it off what waits; `write`
+    /// closes instead once the queue overflowed (spec 033-rate-limit-quotas
+    /// R5).
     async fn write_queued(&mut self, frame: Encoded) -> Flow {
-        if self.overflowed.load(Ordering::SeqCst) {
-            return Flow::Close(TRY_AGAIN_LATER);
-        }
-        self.write(frame).await
+        let bytes = frame.len();
+        let flow = self.write(frame).await;
+        // Written, or the connection is gone: either way no longer waiting.
+        self.pending.written(bytes);
+        flow
     }
 
     /// Encodes `frame` into the connection's queue, where it counts toward
@@ -500,18 +531,53 @@ impl Connection {
         }
     }
 
-    /// Writes an encoded frame; a socket that fails or stalls past
-    /// `WRITE_TIMEOUT` is gone.
+    /// Writes an encoded frame; a socket that fails, or whose write is still
+    /// pending `WRITE_TIMEOUT_MS` after it began, is gone (spec 033 R5). The
+    /// checks of a tick run first: a catch-up writes page after page without
+    /// coming back to `serve`, and a ping is due all the same (spec 033 R4).
     async fn write(&mut self, frame: Encoded) -> Flow {
+        let flow = self.on_tick().await;
+        if !matches!(flow, Flow::Continue) {
+            return flow;
+        }
+        let message = Message::Binary(frame);
+        if !send_within(&mut self.socket, &self.shared, message).await {
+            return Flow::Gone;
+        }
+        self.progress = self.shared.clock.mono_ms();
+        Flow::Continue
+    }
+}
+
+/// Sends `message`, false when the socket fails or the write is still pending
+/// `WRITE_TIMEOUT_MS` of the monotonic clock after it began, measured at each
+/// tick of the deadline task; progress within the write does not restart that
+/// time (spec 033-rate-limit-quotas R5). It hears the ticks on a receiver of
+/// its own, so that the connection's are left for its other checks.
+async fn send_within(socket: &mut WebSocket, shared: &Shared, message: Message) -> bool {
+    let mut ticks = shared.ticks.subscribe();
+    let began = shared.clock.mono_ms();
+    let send = async {
         #[cfg(test)]
         {
-            let mut paused = self.shared.hooks.writes_paused.subscribe();
+            let mut paused = shared.hooks.writes_paused.subscribe();
             let _ = paused.wait_for(|paused| !paused).await;
         }
-        let sent = tokio::time::timeout(WRITE_TIMEOUT, self.socket.send(Message::Binary(frame)));
-        match sent.await {
-            Ok(Ok(())) => Flow::Continue,
-            Ok(Err(_)) | Err(_) => Flow::Gone,
+        socket.send(message).await
+    };
+    tokio::pin!(send);
+    loop {
+        tokio::select! {
+            biased;
+            sent = &mut send => return sent.is_ok(),
+            tick = ticks.recv() => match tick {
+                Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                    if shared.clock.mono_ms().saturating_sub(began) >= WRITE_TIMEOUT_MS {
+                        return false;
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => return false,
+            },
         }
     }
 }
@@ -527,12 +593,12 @@ fn read_error(error: axum::Error) -> Option<u16> {
     }
 }
 
-/// Sends a close frame of `code` with no reason; a socket already gone has
-/// nothing to hear it.
-async fn close(socket: &mut WebSocket, code: u16) {
+/// Sends a close frame of `code` with no reason, within the deadline of a
+/// write; a socket already gone has nothing to hear it.
+async fn close(socket: &mut WebSocket, shared: &Shared, code: u16) {
     let frame = CloseFrame {
         code,
         reason: "".into(),
     };
-    let _ = tokio::time::timeout(WRITE_TIMEOUT, socket.send(Message::Close(Some(frame)))).await;
+    send_within(socket, shared, Message::Close(Some(frame))).await;
 }

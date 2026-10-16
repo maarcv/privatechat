@@ -6,12 +6,13 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use axum::body::Bytes;
 use tokio::sync::mpsc;
 
 use crate::frames::{self, ErrorCode};
+use crate::limits::{SEND_QUEUE_BYTES, SEND_QUEUE_FRAMES};
 use crate::store::writer::WriteOutcome;
 
 /// The most pushes all the catching-up subscriptions of one connection may
@@ -56,12 +57,34 @@ struct Subscription {
     stage: Stage,
 }
 
-/// What the hub keeps of a connection: its queue and whether it overflowed.
+/// The frames of one connection's queue not yet written, the one being
+/// written included, and their bytes (spec 033-rate-limit-quotas R5): the hub
+/// adds what it queues, the connection takes off what it has written.
+#[derive(Debug, Default)]
+pub(crate) struct Pending {
+    frames: AtomicUsize,
+    bytes: AtomicUsize,
+    /// Set when a frame would have passed a bound: the connection closes.
+    overflowed: AtomicBool,
+}
+
+impl Pending {
+    /// Whether a frame was dropped: the connection closes with 1013.
+    pub(crate) fn overflowed(&self) -> bool {
+        self.overflowed.load(Ordering::SeqCst)
+    }
+
+    /// A frame of `bytes` bytes taken from the queue has been written.
+    pub(crate) fn written(&self, bytes: usize) {
+        self.frames.fetch_sub(1, Ordering::SeqCst);
+        self.bytes.fetch_sub(bytes, Ordering::SeqCst);
+    }
+}
+
+/// What the hub keeps of a connection: its queue and what the queue holds.
 struct Connection {
     queue: mpsc::Sender<Encoded>,
-    /// Set when its queue could not take a frame: the connection closes
-    /// (spec 033-rate-limit-quotas R5).
-    overflowed: Arc<AtomicBool>,
+    pending: Arc<Pending>,
     subscriptions: HashMap<[u8; 16], Subscription>,
 }
 
@@ -79,17 +102,12 @@ pub(crate) struct Hub {
 
 impl Hub {
     /// A connection and its queue.
-    pub(crate) fn connect(
-        &mut self,
-        id: u64,
-        queue: mpsc::Sender<Encoded>,
-        overflowed: Arc<AtomicBool>,
-    ) {
+    pub(crate) fn connect(&mut self, id: u64, queue: mpsc::Sender<Encoded>, pending: Arc<Pending>) {
         self.connections.insert(
             id,
             Connection {
                 queue,
-                overflowed,
+                pending,
                 subscriptions: HashMap::new(),
             },
         );
@@ -385,15 +403,36 @@ impl Hub {
     }
 }
 
-/// Puts `frame` in the connection's queue; a full queue marks it for closing
-/// (spec 033-rate-limit-quotas R5) and drops the frame, and every frame after
-/// it: none may reach the client past a dropped one, whose cursor would skip
-/// it.
+/// Puts `frame` in the connection's queue. One that would take the frames
+/// not yet written past `SEND_QUEUE_FRAMES` or `SEND_QUEUE_BYTES` marks the
+/// connection for closing (spec 033-rate-limit-quotas R5) and is dropped, and
+/// every frame after it: none may reach the client past a dropped one, whose
+/// cursor would skip it. Only the hub adds, under its lock, so the check and
+/// the add do not race; the connection only takes off.
 fn queue(connection: &Connection, frame: Encoded) {
-    if connection.overflowed.load(Ordering::SeqCst) {
+    let pending = &connection.pending;
+    if pending.overflowed() {
         return;
     }
-    if connection.queue.try_send(frame).is_err() {
-        connection.overflowed.store(true, Ordering::SeqCst);
+    let frames = pending.frames.load(Ordering::SeqCst);
+    let bytes = pending.bytes.load(Ordering::SeqCst);
+    if frames >= SEND_QUEUE_FRAMES || bytes.saturating_add(frame.len()) > SEND_QUEUE_BYTES {
+        pending.overflowed.store(true, Ordering::SeqCst);
+        return;
+    }
+    // Counted before it is sent, so that the connection never takes off a
+    // frame not yet counted.
+    let bytes = frame.len();
+    pending.frames.fetch_add(1, Ordering::SeqCst);
+    pending.bytes.fetch_add(bytes, Ordering::SeqCst);
+    match connection.queue.try_send(frame) {
+        Ok(()) => {}
+        // Never while `Pending` holds the bound, the channel's being the same.
+        Err(mpsc::error::TrySendError::Full(_)) => {
+            pending.written(bytes);
+            pending.overflowed.store(true, Ordering::SeqCst);
+        }
+        // A connection gone has dropped its receiver; it hears nothing more.
+        Err(mpsc::error::TrySendError::Closed(_)) => pending.written(bytes),
     }
 }

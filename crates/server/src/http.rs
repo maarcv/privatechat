@@ -28,6 +28,17 @@ use crate::{DbCause, StartError, StartReason};
 /// The largest WebSocket message or frame the server reads (R4).
 pub(crate) const MAX_MESSAGE: usize = 70_000;
 
+/// What the socket buffers before it writes, tungstenite's default.
+const WRITE_BUFFER: usize = 128 * 1024;
+
+/// The most the socket may buffer unwritten: one more frame than
+/// `WRITE_BUFFER`, every frame the server writes being smaller than
+/// `MAX_MESSAGE`. Without it, the pongs tungstenite queues for a client that
+/// sends pings and reads nothing would grow without bound until R4 or R5 of
+/// spec 033-rate-limit-quotas drops the connection; with it, a pong that does
+/// not fit waits alone, a newer one replacing it.
+const MAX_WRITE_BUFFER: usize = WRITE_BUFFER + MAX_MESSAGE;
+
 /// What every connection shares.
 pub(crate) struct Shared {
     pub(crate) clock: Arc<dyn Clock>,
@@ -143,6 +154,8 @@ async fn upgrade(
         Ok(upgrade) => upgrade
             .max_message_size(MAX_MESSAGE)
             .max_frame_size(MAX_MESSAGE)
+            .write_buffer_size(WRITE_BUFFER)
+            .max_write_buffer_size(MAX_WRITE_BUFFER)
             .on_upgrade(move |socket| connection::run(socket, shared)),
         // Not an upgrade: nothing is served, and no text names the framework.
         Err(_) => StatusCode::NOT_FOUND.into_response(),
@@ -167,6 +180,15 @@ pub(crate) mod test {
 
     use crate::store::writer::test::{Hooks as WriterHooks, Pause};
 
+    /// A running connection task; its end takes it off the count.
+    pub(crate) struct Task(Arc<AtomicUsize>);
+
+    impl Drop for Task {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
     pub(crate) struct Hooks {
         /// How many `read_page` calls the connections made.
         pub(crate) reads: AtomicUsize,
@@ -182,6 +204,8 @@ pub(crate) mod test {
         pub(crate) fail_relay: AtomicBool,
         /// Held, the writer stops before its next batch and its queue fills.
         pub(crate) writer_pause: Arc<Pause>,
+        /// How many connection tasks are running.
+        pub(crate) tasks: Arc<AtomicUsize>,
         /// After this many fresh `server_id`s, the writer draws the last one
         /// again, once, and refuses that blob as `server_full` (spec 032);
         /// `usize::MAX`, never.
@@ -196,6 +220,7 @@ pub(crate) mod test {
                 fail_reads: AtomicBool::new(false),
                 catch_up_paused: watch::channel(false).0,
                 fail_relay: AtomicBool::new(false),
+                tasks: Arc::new(AtomicUsize::new(0)),
                 writer_pause: Arc::new(Pause::default()),
                 repeat_after: Arc::new(AtomicUsize::new(usize::MAX)),
             }
@@ -209,6 +234,16 @@ pub(crate) mod test {
 
         pub(crate) fn reads(&self) -> usize {
             self.reads.load(Ordering::SeqCst)
+        }
+
+        pub(crate) fn tasks(&self) -> usize {
+            self.tasks.load(Ordering::SeqCst)
+        }
+
+        /// One running connection task, counted until it ends.
+        pub(crate) fn task(&self) -> Task {
+            self.tasks.fetch_add(1, Ordering::SeqCst);
+            Task(self.tasks.clone())
         }
 
         /// The writer's hooks, wired to these.
