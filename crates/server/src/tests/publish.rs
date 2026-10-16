@@ -18,6 +18,7 @@ use super::ws::{
 use crate::auth;
 use crate::clock::ManualClock;
 use crate::frames::{self, ErrorCode};
+use crate::limits::{CONN_PUBLISH_WINDOW_MS, SUBSCRIBE_GAP_MS};
 use crate::store::writer::test::Pause;
 use crate::store::writer::{Row, WriteRequest};
 
@@ -372,7 +373,9 @@ async fn s030_t12_r12_ack_and_fan_out() {
     assert_eq!(refs, (0..30).map(client_ref).collect::<Vec<_>>());
 
     // A refusal of the writer, in one batch with a publish before and after
-    // it: its `error`, with both fields, between their `ack`s.
+    // it: its `error`, with both fields, between their `ack`s; past the
+    // window of spec 033 R1 for the 30 above.
+    clock.advance_mono(CONN_PUBLISH_WINDOW_MS + 1);
     let held = hold_writer(&server).await;
     for n in 100..103 {
         send(&mut client, &publish(channel(), n, blob_of(channel(), 8))).await;
@@ -410,6 +413,7 @@ async fn s030_t13_r13_frames_sent() {
     let nonce = hello(&mut client).await;
     send(&mut client, &subscribe(&[9; 32], HOST)).await;
     refused_subscribe(&mut client).await;
+    clock.advance_mono(SUBSCRIBE_GAP_MS);
     send(&mut client, &subscribe_since(&nonce, None)).await;
     assert!(backlog(&mut client, channel()).await.is_empty());
     send(&mut client, &publish(channel(), 1, blob_of(channel(), 1))).await;
@@ -538,7 +542,15 @@ async fn s030_t07_r07_publish_during_catch_up() {
     send(&mut client, &subscribe_third(&nonce)).await;
     assert!(backlog(&mut client, third_channel()).await.is_empty());
 
+    // Each subscribe past the gap of spec 033 R2, the first catching up.
+    clock.advance_mono(SUBSCRIBE_GAP_MS);
     send(&mut client, &subscribe_since(&nonce, None)).await;
+    let earlier = receive(&mut client).await;
+    assert!(
+        matches!(earlier, Received::Frame(Frame::Push { .. })),
+        "{earlier:?}"
+    );
+    clock.advance_mono(SUBSCRIBE_GAP_MS);
     send(&mut client, &subscribe_other(&nonce)).await;
     // The catch-up under way: a backlog push received, then the writes
     // paused within a page while the publish comes.
@@ -556,7 +568,7 @@ async fn s030_t07_r07_publish_during_catch_up() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     server.shared.hooks.pause_writes(false);
 
-    let (mut oks, mut pages, mut ack_at, mut echo_at) = (0, 1usize, None, None);
+    let (mut oks, mut pages, mut ack_at, mut echo_at) = (0, 2usize, None, None);
     while oks < 2 {
         match receive(&mut client).await {
             Received::Frame(Frame::Push { channel_id, .. }) if channel_id == third_channel() => {

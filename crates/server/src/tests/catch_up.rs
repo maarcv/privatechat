@@ -18,6 +18,7 @@ use super::ws::{
     start, subscribe,
 };
 use crate::clock::ManualClock;
+use crate::limits::SUBSCRIBE_GAP_MS;
 
 use tokio::sync::mpsc;
 
@@ -273,8 +274,15 @@ async fn s030_t07_r07_pages_and_turns() {
     let mut client = connect(server.address).await;
     let nonce = hello(&mut client).await;
     send(&mut client, &subscribe_since(&nonce, None)).await;
+    // The first catching up, the second comes past the gap of spec 033 R2.
+    let first = receive(&mut client).await;
+    assert!(
+        matches!(&first, Received::Frame(Frame::Push { channel_id, .. }) if *channel_id == channel()),
+        "{first:?}"
+    );
+    clock.advance_mono(SUBSCRIBE_GAP_MS);
     send(&mut client, &subscribe_other(&nonce)).await;
-    let mut order = Vec::new();
+    let mut order = vec![true];
     let mut oks = 0;
     while oks < 2 {
         match receive(&mut client).await {
@@ -336,6 +344,7 @@ async fn s030_t07_r07_queue_before_the_next_page() {
         send(&mut client, &subscribe_other(&nonce)).await;
         let earlier = backlog(&mut client, other_channel()).await.len();
         assert_eq!(earlier, usize::from(round));
+        clock.advance_mono(SUBSCRIBE_GAP_MS);
         server.shared.hooks.pause_writes(true);
         send(&mut client, &subscribe_since(&nonce, None)).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -439,6 +448,7 @@ async fn s030_t08_r08_hold_bound_ends_one_subscription() {
         send(&mut client, &subscribe_other(&nonce)).await;
         assert!(backlog(&mut client, other_channel()).await.is_empty());
         plant(&server, channel(), 10, 1_185, T0 - 1_000, T0 + 3_600_000);
+        clock.advance_mono(SUBSCRIBE_GAP_MS);
         server.shared.hooks.pause_writes(true);
         send(&mut client, &subscribe_since(&nonce, None)).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -476,6 +486,7 @@ async fn s030_t08_r08_hold_bound_ends_one_subscription() {
         assert!(other_push, "the other channel stopped");
 
         // A new subscribe of the ended channel gets a fresh backlog.
+        clock.advance_mono(SUBSCRIBE_GAP_MS);
         send(&mut client, &subscribe_since(&nonce, None)).await;
         let times = backlog(&mut client, channel()).await;
         assert_eq!(times.len(), 10 + usize::from(count));
@@ -553,8 +564,9 @@ async fn s030_t09_r09_second_subscribe_ignored() {
     let mut client = connect(server.address).await;
     let nonce = hello(&mut client).await;
     send(&mut client, &subscribe_since(&nonce, None)).await;
-    send(&mut client, &subscribe_since(&nonce, None)).await;
     assert_eq!(backlog(&mut client, channel()).await.len(), 5);
+    clock.advance_mono(SUBSCRIBE_GAP_MS);
+    send(&mut client, &subscribe_since(&nonce, None)).await;
     assert!(matches!(
         receive_within(&mut client, 300).await,
         Received::Nothing
@@ -576,6 +588,7 @@ async fn s030_t09_r09_second_subscribe_mid_backlog() {
         matches!(first, Received::Frame(Frame::Push { .. })),
         "{first:?}"
     );
+    clock.advance_mono(SUBSCRIBE_GAP_MS);
     send(&mut client, &subscribe_since(&nonce, None)).await;
     let rest = backlog(&mut client, channel()).await;
     assert_eq!(rest.len(), 1_999);

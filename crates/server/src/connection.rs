@@ -19,6 +19,7 @@ use crate::auth::{AuthState, Verdict};
 use crate::frames::{self, ErrorCode};
 use crate::http::Shared;
 use crate::hub::Encoded;
+use crate::limits::{MAX_SUBSCRIPTIONS, PublishWindow, SUBSCRIBE_GAP_MS};
 use crate::store::reader::read_page;
 use crate::store::writer::WriteRequest;
 
@@ -88,6 +89,10 @@ struct Connection {
     overflowed: Arc<AtomicBool>,
     /// The subscriptions catching up, streamed in turn.
     catching: VecDeque<CatchUp>,
+    /// The `publish`es handed to the writer (spec 033-rate-limit-quotas R1).
+    publishes: PublishWindow,
+    /// When the last `subscribe` came, on the monotonic clock (spec 033 R2).
+    last_subscribe: Option<u64>,
 }
 
 /// Forgets the connection in the hub however the task ends (R15).
@@ -132,6 +137,8 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
         queue,
         overflowed,
         catching: VecDeque::new(),
+        publishes: PublishWindow::default(),
+        last_subscribe: None,
     };
     let flow = match connection.send(&hello).await {
         Flow::Continue => connection.serve(&mut ticks).await,
@@ -208,6 +215,9 @@ impl Connection {
                 since,
             }) => {
                 let now = self.shared.clock.mono_ms();
+                if let Some(flow) = self.limit_subscribe(&pk_ch, ttl_seconds, now).await {
+                    return flow;
+                }
                 let hosts = &self.shared.hosts;
                 match self
                     .auth
@@ -285,6 +295,47 @@ impl Connection {
         Flow::Continue
     }
 
+    /// The limits of spec 033-rate-limit-quotas on a `subscribe`, before any
+    /// check of spec 031: one per `SUBSCRIBE_GAP_MS` (R2), which is not a
+    /// failed attempt, and `MAX_SUBSCRIPTIONS` channels (R3), past which the
+    /// connection closes. `None` lets it through.
+    async fn limit_subscribe(
+        &mut self,
+        pk_ch: &[u8; 32],
+        ttl_seconds: u32,
+        now: u64,
+    ) -> Option<Flow> {
+        let previous = self.last_subscribe.replace(now);
+        let too_soon = previous.is_some_and(|at| now.saturating_sub(at) < SUBSCRIBE_GAP_MS);
+        let held = self.shared.hub().subscriptions(self.id);
+        if !too_soon && held < MAX_SUBSCRIPTIONS {
+            return None;
+        }
+        let Ok(channel_id) = relay::channel_id(pk_ch, ttl_seconds) else {
+            return Some(Flow::Close(INTERNAL_ERROR));
+        };
+        let refusal = frames::error(ErrorCode::RateLimited, Some(channel_id), None);
+        if too_soon {
+            return Some(self.enqueue(&refusal));
+        }
+        if self
+            .shared
+            .hub()
+            .ttl_seconds(self.id, &channel_id)
+            .is_some()
+        {
+            // Already here: spec 030 R9 ignores it.
+            return None;
+        }
+        Some(match self.enqueue(&refusal) {
+            Flow::Continue => match self.flush().await {
+                Flow::Continue => Flow::Close(POLICY_VIOLATION),
+                stopped => stopped,
+            },
+            stopped => stopped,
+        })
+    }
+
     /// A `publish`: refused at once, in the order of R11, or handed to the
     /// writer with the subscription's TTL; its `ack` or the writer's refusal
     /// comes back through the hub (R12).
@@ -298,6 +349,10 @@ impl Connection {
             Err(Error::Internal) => return Flow::Close(INTERNAL_ERROR),
             Err(_) => return self.enqueue(&refuse(ErrorCode::BadBlob)),
         }
+        let now = self.shared.clock.mono_ms();
+        if !self.publishes.allows(now) {
+            return self.enqueue(&refuse(ErrorCode::RateLimited));
+        }
         let request = WriteRequest {
             connection: self.id,
             client_ref,
@@ -306,7 +361,10 @@ impl Connection {
             blob,
         };
         match self.shared.writer.submit(request) {
-            Ok(()) => Flow::Continue,
+            Ok(()) => {
+                self.publishes.handed(now);
+                Flow::Continue
+            }
             Err(refusal) => self.enqueue(&refuse(ErrorCode::from(refusal))),
         }
     }
