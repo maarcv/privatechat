@@ -117,7 +117,7 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
     let (sender, queue) = mpsc::channel(QUEUE_FRAMES);
     let overflowed = Arc::new(AtomicBool::new(false));
     shared.hub().connect(id, sender, overflowed.clone());
-    let _registration = Registration {
+    let registration = Registration {
         id,
         shared: shared.clone(),
     };
@@ -136,7 +136,7 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
     };
     // Forgotten at once, not after the close frame has been sent (R15):
     // the hub's registration, and the nonce, the queue and the catch-ups.
-    drop(_registration);
+    drop(registration);
     let mut socket = connection.into_socket();
     if let Flow::Close(code) = flow {
         close(&mut socket, code).await;
@@ -155,8 +155,9 @@ impl Connection {
             let flow = tokio::select! {
                 // In this order: the tick first, so that neither the client
                 // nor the queue puts off a close; the catch-up, always ready,
-                // last, so that a frame already read or queued is never left
-                // behind a page.
+                // last, so that a frame already read is never left behind a
+                // page, and every frame of the queue is written before each
+                // page and each batch of held pushes (R7).
                 biased;
                 tick = ticks.recv() => match tick {
                     // A lagging receiver missed ticks, which only delays the check.
@@ -183,9 +184,6 @@ impl Connection {
     }
 
     fn on_tick(&self) -> Flow {
-        if self.overflowed.load(Ordering::SeqCst) {
-            return Flow::Close(TRY_AGAIN_LATER);
-        }
         if self.auth.deadline_passed(self.shared.clock.mono_ms()) {
             return Flow::Close(POLICY_VIOLATION);
         }
@@ -276,14 +274,10 @@ impl Connection {
         Flow::Continue
     }
 
-    /// One step of the catch-up of the next subscription in turn: the queue
-    /// written first, then one backlog page, or once the backlog is done its
-    /// held pushes, or its `ok` (R7, R8).
+    /// One step of the catch-up of the next subscription in turn: one backlog
+    /// page, or once the backlog is done its held pushes, or its `ok` (R7,
+    /// R8). The order of `serve` has written the queue before it.
     async fn catch_up(&mut self) -> Flow {
-        let flow = self.flush().await;
-        if !matches!(flow, Flow::Continue) {
-            return flow;
-        }
         let Some(mut step) = self.catching.pop_front() else {
             return Flow::Continue;
         };
@@ -300,14 +294,9 @@ impl Connection {
         } else {
             self.backlog_page(&mut step).await
         };
-        // Over once its `ok` is queued or the subscription ended; in turn
-        // again otherwise.
-        let over = step.done
-            && !self
-                .shared
-                .hub()
-                .is_catching_up(self.id, &step.channel_id, step.generation);
-        if matches!(flow, Flow::Continue) && !over {
+        // In turn again; once its `ok` is queued or it ended, the check
+        // above drops it at its next turn.
+        if matches!(flow, Flow::Continue) {
             self.catching.push_back(step);
         }
         flow

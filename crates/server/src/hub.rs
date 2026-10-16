@@ -297,32 +297,33 @@ impl Hub {
         }
     }
 
-    /// Ends the subscription holding the most bytes, alone, while the holds of
-    /// one connection pass `HOLD_FRAMES` or `HOLD_BYTES` (R8).
+    /// While the holds of one connection pass `HOLD_BYTES` or `HOLD_FRAMES`,
+    /// ends, alone, the subscription holding the most of the bound passed:
+    /// bytes first, then frames (R8). A flood of small pushes on some
+    /// channels ends one of them, not a channel of a few large blobs.
     fn bound_holds(&mut self, id: u64) {
         loop {
             let Some(connection) = self.connections.get_mut(&id) else {
                 return;
             };
-            let (mut frames, mut bytes) = (0usize, 0usize);
-            let mut largest: Option<([u8; 16], usize)> = None;
-            for (channel_id, subscription) in &connection.subscriptions {
-                if let Stage::CatchingUp {
-                    held,
-                    bytes: held_bytes,
-                } = &subscription.stage
-                {
-                    frames = frames.saturating_add(held.len());
-                    bytes = bytes.saturating_add(*held_bytes);
-                    if largest.is_none_or(|(_, most)| *held_bytes > most) {
-                        largest = Some((*channel_id, *held_bytes));
-                    }
-                }
-            }
-            if frames <= HOLD_FRAMES && bytes <= HOLD_BYTES {
+            let holds: Vec<([u8; 16], usize, usize)> = connection
+                .subscriptions
+                .iter()
+                .filter_map(|(channel_id, subscription)| match &subscription.stage {
+                    Stage::CatchingUp { held, bytes } => Some((*channel_id, held.len(), *bytes)),
+                    Stage::Subscribed { .. } => None,
+                })
+                .collect();
+            let frames: usize = holds.iter().map(|(_, frames, _)| frames).sum();
+            let bytes: usize = holds.iter().map(|(_, _, bytes)| bytes).sum();
+            let largest = if bytes > HOLD_BYTES {
+                holds.iter().max_by_key(|(_, _, bytes)| *bytes)
+            } else if frames > HOLD_FRAMES {
+                holds.iter().max_by_key(|(_, frames, _)| *frames)
+            } else {
                 return;
-            }
-            let Some((channel_id, _)) = largest else {
+            };
+            let Some(&(channel_id, _, _)) = largest else {
                 return;
             };
             connection.subscriptions.remove(&channel_id);

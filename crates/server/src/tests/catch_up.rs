@@ -22,7 +22,7 @@ use crate::clock::ManualClock;
 use tokio::sync::mpsc;
 
 use crate::connection::QUEUE_FRAMES;
-use crate::hub::{HOLD_FRAMES, Hub};
+use crate::hub::{Encoded, HOLD_FRAMES, Hub};
 use crate::store::writer::{Row, WriteOutcome, WriteRequest};
 
 /// A wall clock of this century, which every planted blob outlives.
@@ -598,7 +598,7 @@ async fn s030_t10_r10_overflow_closes_1013() {
     let first = times.first().copied().unwrap_or(T0);
     let expected: Vec<u64> = (first..).take(times.len()).collect();
     assert_eq!(times, expected);
-    assert!(times.len() < 300, "{} pushes, none dropped", times.len());
+    assert!(times.len() <= 1, "{} pushes past the drop", times.len());
 }
 
 #[test]
@@ -629,6 +629,23 @@ fn s030_t10_r10_nothing_queued_past_a_drop() {
     assert!(queue.try_recv().is_ok(), "the ok");
     hub.on_commit(vec![push(1)]);
     assert!(queue.try_recv().is_err(), "a push past the dropped one");
+}
+
+#[test]
+fn s030_t10_r10_an_answer_counts() {
+    // An answer to a `subscribe` that finds the queue full overflows it,
+    // and nothing is queued after it.
+    let mut hub = Hub::default();
+    let (sender, mut queue) = mpsc::channel(1);
+    let overflowed = Arc::new(AtomicBool::new(false));
+    hub.connect(1, sender, overflowed.clone());
+    hub.enqueue(1, Encoded::from_static(b"first"));
+    assert!(!overflowed.load(Ordering::SeqCst));
+    hub.enqueue(1, Encoded::from_static(b"second"));
+    assert!(overflowed.load(Ordering::SeqCst));
+    assert!(queue.try_recv().is_ok(), "the first");
+    hub.enqueue(1, Encoded::from_static(b"third"));
+    assert!(queue.try_recv().is_err(), "an answer past the dropped one");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -754,6 +771,40 @@ async fn s030_t08_r08_held_after_a_backlog() {
     let times = backlog(&mut client, channel()).await;
     let expected: Vec<u64> = (T0 - 100..T0 - 80).chain(T0..T0 + 10).collect();
     assert_eq!(times, expected);
+}
+
+#[test]
+fn s030_t08_r08_the_bound_passed_chooses() {
+    // Two channels flooded with small pushes and a third of a few large
+    // blobs: the 257th push passes the frame bound, and one of the flooded
+    // channels ends, not the third, which holds the most bytes.
+    let third = [0x33; 16];
+    let mut hub = Hub::default();
+    let (sender, _queue) = mpsc::channel(QUEUE_FRAMES);
+    hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
+    let first = generation(hub.subscribe(1, channel(), DAY));
+    let second = generation(hub.subscribe(1, other_channel(), DAY));
+    let large = generation(hub.subscribe(1, third, DAY));
+    let outcome = |channel_id: [u8; 16], k: u64, bytes: usize| WriteOutcome {
+        connection: 9,
+        client_ref: [0; 16],
+        channel_id,
+        result: Ok(Row {
+            server_id: [u8::try_from(k % 256).unwrap(); 16],
+            received_at: T0 + k,
+            blob: vec![1; bytes],
+        }),
+    };
+    let mut outcomes: Vec<WriteOutcome> = (0..17).map(|k| outcome(third, k, 64_673)).collect();
+    outcomes.extend((17..137).map(|k| outcome(channel(), k, 1_185)));
+    outcomes.extend((137..257).map(|k| outcome(other_channel(), k, 1_185)));
+    hub.on_commit(outcomes);
+    assert!(hub.is_catching_up(1, &third, large), "the third goes on");
+    let ended = [
+        !hub.is_catching_up(1, &channel(), first),
+        !hub.is_catching_up(1, &other_channel(), second),
+    ];
+    assert_eq!(ended.iter().filter(|ended| **ended).count(), 1, "{ended:?}");
 }
 
 /// The generation of a new subscription; `None` fails the test.
