@@ -280,42 +280,43 @@ impl Hub {
         }
     }
 
-    /// While the holds of one connection pass `HOLD_BYTES` or `HOLD_FRAMES`,
+    /// When the holds of one connection pass `HOLD_BYTES` or `HOLD_FRAMES`,
     /// ends, alone, the subscription holding the most of the bound passed:
     /// bytes first, then frames (R8). A flood of small pushes on some
-    /// channels ends one of them, not a channel of a few large blobs.
+    /// channels ends one of them, not a channel of a few large blobs. One
+    /// end is enough: the holds were within both bounds before this push,
+    /// and the one ended holds at least one push and, past 4 MiB, at least
+    /// the bytes of this one.
     fn bound_holds(&mut self, id: u64) {
-        loop {
-            let Some(connection) = self.connections.get_mut(&id) else {
-                return;
-            };
-            let holds: Vec<([u8; 16], usize, usize)> = connection
-                .subscriptions
-                .iter()
-                .filter_map(|(channel_id, subscription)| match &subscription.stage {
-                    Stage::CatchingUp { held, bytes } => Some((*channel_id, held.len(), *bytes)),
-                    Stage::Subscribed { .. } => None,
-                })
-                .collect();
-            let frames: usize = holds.iter().map(|(_, frames, _)| frames).sum();
-            let bytes: usize = holds.iter().map(|(_, _, bytes)| bytes).sum();
-            let largest = if bytes > HOLD_BYTES {
-                holds.iter().max_by_key(|(_, _, bytes)| *bytes)
-            } else if frames > HOLD_FRAMES {
-                holds.iter().max_by_key(|(_, frames, _)| *frames)
-            } else {
-                return;
-            };
-            let Some(&(channel_id, _, _)) = largest else {
-                return;
-            };
-            connection.subscriptions.remove(&channel_id);
-            let error = frames::error(ErrorCode::RateLimited, Some(channel_id), None).encode();
-            if let Ok(error) = error {
-                queue(connection, Encoded::from(error));
-            }
-            self.forget_channel(&channel_id, id);
+        let Some(connection) = self.connections.get_mut(&id) else {
+            return;
+        };
+        let holds: Vec<([u8; 16], usize, usize)> = connection
+            .subscriptions
+            .iter()
+            .filter_map(|(channel_id, subscription)| match &subscription.stage {
+                Stage::CatchingUp { held, bytes } => Some((*channel_id, held.len(), *bytes)),
+                Stage::Subscribed { .. } => None,
+            })
+            .collect();
+        let frames: usize = holds.iter().map(|(_, frames, _)| frames).sum();
+        let bytes: usize = holds.iter().map(|(_, _, bytes)| bytes).sum();
+        let largest = if bytes > HOLD_BYTES {
+            holds.iter().max_by_key(|(_, _, bytes)| *bytes)
+        } else if frames > HOLD_FRAMES {
+            holds.iter().max_by_key(|(_, frames, _)| *frames)
+        } else {
+            return;
+        };
+        let Some(&(channel_id, _, _)) = largest else {
+            return;
+        };
+        connection.subscriptions.remove(&channel_id);
+        let error = frames::error(ErrorCode::RateLimited, Some(channel_id), None).encode();
+        if let Ok(error) = error {
+            queue(connection, Encoded::from(error));
         }
+        self.forget_channel(&channel_id, id);
     }
 
     fn forget_channel(&mut self, channel_id: &[u8; 16], id: u64) {
@@ -331,6 +332,12 @@ impl Hub {
     #[cfg(test)]
     pub(crate) fn committed(&self, channel_id: &[u8; 16]) -> u64 {
         self.committed.get(channel_id).copied().unwrap_or(0)
+    }
+
+    /// The channels in the index, empty entries included.
+    #[cfg(test)]
+    pub(crate) fn indexed_channels(&self) -> usize {
+        self.channels.len()
     }
 
     /// The subscriptions the hub holds of a connection, for the tests of R15.

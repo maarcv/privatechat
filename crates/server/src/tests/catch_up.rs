@@ -117,6 +117,20 @@ fn count(server: &Server, channel_id: [u8; 16]) -> u64 {
     u64::try_from(rows).unwrap()
 }
 
+/// One stored blob of `bytes` bytes, as the writer hands it to the hub.
+fn committed(channel_id: [u8; 16], k: u64, bytes: usize) -> WriteOutcome {
+    WriteOutcome {
+        connection: 9,
+        client_ref: [0; 16],
+        channel_id,
+        result: Ok(Row {
+            server_id: [u8::try_from(k % 256).unwrap(); 16],
+            received_at: T0 + k,
+            blob: vec![1; bytes],
+        }),
+    }
+}
+
 /// A second channel, of another key.
 const K_OTHER: [u8; 32] = [0x41; 32];
 
@@ -497,18 +511,10 @@ fn s030_t08_r08_hold_bound_ends_the_largest_only() {
     hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
     let large = generation(hub.subscribe(1, channel()));
     let small = generation(hub.subscribe(1, other_channel()));
-    let outcome = |channel_id: [u8; 16], k: u64| WriteOutcome {
-        connection: 9,
-        client_ref: [0; 16],
-        channel_id,
-        result: Ok(Row {
-            server_id: [u8::try_from(k % 256).unwrap(); 16],
-            received_at: T0 + k,
-            blob: vec![1; 1_185],
-        }),
-    };
-    let mut outcomes: Vec<WriteOutcome> = (0..57).map(|k| outcome(other_channel(), k)).collect();
-    outcomes.extend((57..257).map(|k| outcome(channel(), k)));
+    let mut outcomes: Vec<WriteOutcome> = (0..57)
+        .map(|k| committed(other_channel(), k, 1_185))
+        .collect();
+    outcomes.extend((57..257).map(|k| committed(channel(), k, 1_185)));
     hub.on_commit(outcomes);
     assert!(
         !hub.is_catching_up(1, &channel(), large),
@@ -615,20 +621,10 @@ fn s030_t10_r10_nothing_queued_past_a_drop() {
         hub.after_backlog(1, channel(), subscription, None)
             .is_empty()
     );
-    let push = |k: u64| WriteOutcome {
-        connection: 9,
-        client_ref: [0; 16],
-        channel_id: channel(),
-        result: Ok(Row {
-            server_id: [u8::try_from(k).unwrap(); 16],
-            received_at: T0 + k,
-            blob: vec![1; 1_185],
-        }),
-    };
-    hub.on_commit(vec![push(0)]);
+    hub.on_commit(vec![committed(channel(), 0, 1_185)]);
     assert!(overflowed.load(Ordering::SeqCst));
     assert!(queue.try_recv().is_ok(), "the ok");
-    hub.on_commit(vec![push(1)]);
+    hub.on_commit(vec![committed(channel(), 1, 1_185)]);
     assert!(queue.try_recv().is_err(), "a push past the dropped one");
 }
 
@@ -701,6 +697,11 @@ async fn s030_t15_r15_disconnect_forgets() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert!(forgotten);
+    assert_eq!(
+        server.shared.hub().indexed_channels(),
+        0,
+        "an empty entry left"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -788,19 +789,9 @@ fn s030_t08_r08_the_bound_passed_chooses() {
     let first = generation(hub.subscribe(1, channel()));
     let second = generation(hub.subscribe(1, other_channel()));
     let large = generation(hub.subscribe(1, third));
-    let outcome = |channel_id: [u8; 16], k: u64, bytes: usize| WriteOutcome {
-        connection: 9,
-        client_ref: [0; 16],
-        channel_id,
-        result: Ok(Row {
-            server_id: [u8::try_from(k % 256).unwrap(); 16],
-            received_at: T0 + k,
-            blob: vec![1; bytes],
-        }),
-    };
-    let mut outcomes: Vec<WriteOutcome> = (0..17).map(|k| outcome(third, k, 64_673)).collect();
-    outcomes.extend((17..137).map(|k| outcome(channel(), k, 1_185)));
-    outcomes.extend((137..257).map(|k| outcome(other_channel(), k, 1_185)));
+    let mut outcomes: Vec<WriteOutcome> = (0..17).map(|k| committed(third, k, 64_673)).collect();
+    outcomes.extend((17..137).map(|k| committed(channel(), k, 1_185)));
+    outcomes.extend((137..257).map(|k| committed(other_channel(), k, 1_185)));
     hub.on_commit(outcomes);
     assert!(hub.is_catching_up(1, &third, large), "the third goes on");
     let ended = [
@@ -820,20 +811,10 @@ fn s030_t08_r08_bytes_passed_first() {
     hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
     let large = generation(hub.subscribe(1, channel()));
     let many = generation(hub.subscribe(1, other_channel()));
-    let outcome = |channel_id: [u8; 16], k: u64, bytes: usize| WriteOutcome {
-        connection: 9,
-        client_ref: [0; 16],
-        channel_id,
-        result: Ok(Row {
-            server_id: [u8::try_from(k % 256).unwrap(); 16],
-            received_at: T0 + k,
-            blob: vec![1; bytes],
-        }),
-    };
     let mut outcomes: Vec<WriteOutcome> = (0..100)
-        .map(|k| outcome(other_channel(), k, 1_185))
+        .map(|k| committed(other_channel(), k, 1_185))
         .collect();
-    outcomes.extend((100..164).map(|k| outcome(channel(), k, 64_673)));
+    outcomes.extend((100..164).map(|k| committed(channel(), k, 64_673)));
     hub.on_commit(outcomes);
     assert!(
         !hub.is_catching_up(1, &channel(), large),
@@ -855,19 +836,10 @@ fn s030_t08_r08_both_bounds_bytes_first() {
     hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
     let large = generation(hub.subscribe(1, channel()));
     let small = generation(hub.subscribe(1, other_channel()));
-    let outcome = |channel_id: [u8; 16], k: u64, bytes: usize| WriteOutcome {
-        connection: 9,
-        client_ref: [0; 16],
-        channel_id,
-        result: Ok(Row {
-            server_id: [u8::try_from(k % 256).unwrap(); 16],
-            received_at: T0 + k,
-            blob: vec![1; bytes],
-        }),
-    };
-    let mut outcomes: Vec<WriteOutcome> = (0..61).map(|k| outcome(channel(), k, 64_673)).collect();
-    outcomes.extend((61..256).map(|k| outcome(other_channel(), k, 1_185)));
-    outcomes.push(outcome(channel(), 256, 64_673));
+    let mut outcomes: Vec<WriteOutcome> =
+        (0..61).map(|k| committed(channel(), k, 64_673)).collect();
+    outcomes.extend((61..256).map(|k| committed(other_channel(), k, 1_185)));
+    outcomes.push(committed(channel(), 256, 64_673));
     hub.on_commit(outcomes);
     assert!(
         !hub.is_catching_up(1, &channel(), large),
@@ -900,22 +872,14 @@ fn s030_t08_r08_a_stale_step_does_not_act() {
     hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
     let first = generation(hub.subscribe(1, channel()));
     let flood: Vec<WriteOutcome> = (0..=u64::try_from(HOLD_FRAMES).unwrap())
-        .map(|k| WriteOutcome {
-            connection: 9,
-            client_ref: [0; 16],
-            channel_id: channel(),
-            result: Ok(Row {
-                server_id: [u8::try_from(k % 256).unwrap(); 16],
-                received_at: T0 + k,
-                blob: vec![1; 1_185],
-            }),
-        })
+        .map(|k| committed(channel(), k, 1_185))
         .collect();
     hub.on_commit(flood);
     assert!(
         !hub.is_catching_up(1, &channel(), first),
         "ended by the hold bound"
     );
+    assert_eq!(hub.indexed_channels(), 0, "an empty entry left");
     let second = generation(hub.subscribe(1, channel()));
     assert_ne!(first, second);
     assert!(!hub.is_catching_up(1, &channel(), first));
@@ -929,20 +893,6 @@ fn s030_t08_r08_a_stale_step_does_not_act() {
         !hub.is_catching_up(1, &channel(), second),
         "the second is subscribed"
     );
-}
-
-/// One stored blob of `bytes` bytes, as the writer hands it to the hub.
-fn committed(channel_id: [u8; 16], k: u64, bytes: usize) -> WriteOutcome {
-    WriteOutcome {
-        connection: 9,
-        client_ref: [0; 16],
-        channel_id,
-        result: Ok(Row {
-            server_id: [u8::try_from(k % 256).unwrap(); 16],
-            received_at: T0 + k,
-            blob: vec![1; bytes],
-        }),
-    }
 }
 
 #[test]
