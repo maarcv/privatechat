@@ -28,7 +28,8 @@ multiple-versions = "warn"
 wildcards = "deny"
 # No cryptographic primitive or randomness source outside libsodium (AGENTS 2).
 # `rand`, `rand_core`, `rand_chacha` and `rand_xorshift` may only come in pulled
-# by `proptest` in dev-dependencies, and `getrandom` and `fastrand` only under
+# by `proptest` in dev-dependencies, `rand` also by `tungstenite` in the server
+# (spec 030 R1), and `getrandom` and `fastrand` only under
 # those or under `tempfile`, which `proptest` uses to name the files of a
 # failed-case persistence run. None of them reaches `core`. `minisign-verify`
 # (Ed25519 and BLAKE2b in Rust) comes only through the build script of

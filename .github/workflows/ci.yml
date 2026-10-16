@@ -84,11 +84,21 @@ jobs:
       - name: s030_t01_r01_deny_wrappers
         # `sha1` comes in only under `axum` and `tungstenite`, and `rand` only under `proptest`
         # and `tungstenite` (spec 030 R1); `cargo deny` checks the wrappers of every other path.
+        # A crate cargo cannot name alone (two versions in the lock) fails the step.
         run: |
-          direct() { cargo tree -e normal -i "$1" --prefix depth 2>/dev/null | sed -n 's/^1\([a-z0-9_-]*\) .*/\1/p' | sort -u; }
-          bad_sha1="$(direct sha1 | grep -vxE 'axum|tungstenite' || true)"
-          bad_rand="$(direct rand | grep -vxE 'proptest|tungstenite' || true)"
-          if [ -n "$bad_sha1$bad_rand" ]; then echo "sha1: $bad_sha1"; echo "rand: $bad_rand"; exit 1; fi
+          direct() {
+            local out
+            if ! out="$(cargo tree -e normal,build --all-features --target all -i "$1" --prefix depth 2>&1)"; then
+              case "$out" in *"did not match any packages"*) return 0 ;; esac
+              printf '%s\n' "$out" >&2
+              return 1
+            fi
+            printf '%s\n' "$out" | sed -n 's/^1\([a-z0-9_-]*\) .*/\1/p' | sort -u
+          }
+          sha1="$(direct sha1)" || exit 1
+          rand="$(direct rand)" || exit 1
+          bad="$( { printf '%s\n' "$sha1" | grep -vxE 'axum|tungstenite'; printf '%s\n' "$rand" | grep -vxE 'proptest|tungstenite'; } | grep -v '^$' || true)"
+          if [ -n "$bad" ]; then echo "sha1 under: $sha1"; echo "rand under: $rand"; exit 1; fi
       - name: s032_t12_r12_no_copy
         # The server copies no blob: no backup, `VACUUM INTO`, `ATTACH`, serialisation,
         # extension, SQL trace or profile, in its code or as a feature of `rusqlite` (spec 032 R12).

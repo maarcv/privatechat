@@ -31,7 +31,7 @@ The desktop wraps the host in Tauri commands (spec 041-desktop-bridge), and Andr
   - `[bans] allow-wildcard-paths = true`, for the path dependencies of R1.
   - These wrappers on entries of the root `[bans] deny` list, added to the root's own wrappers of the same entry:
     - `rustls` under `privatechat-host` and `tokio-rustls`, and `ring` under `rustls` and `rustls-webpki`: the TLS stack (ADR 0041);
-    - `sha1` and `rand` under `tungstenite`; `rand_core` under `chacha20` and `getrandom`; `chacha20` under `rand`. These serve the WebSocket accept key, and the handshake key and frame masks that RFC 6455 uses against proxy cache poisoning, never secrecy (ADR 0041);
+    - `rand_core` under `chacha20` and `getrandom`; `chacha20` under `rand` (the root already wraps `sha1` and `rand` under `tungstenite`, spec 030-ws-protocol R1). These serve the WebSocket accept key, and the handshake key and frame masks that RFC 6455 uses against proxy cache poisoning, never secrecy (ADR 0041);
     - `getrandom` under `ring` and `rand`. `ring` draws the TLS key shares with it; no key of the protocol comes from it (`docs/spec.md` §4).
   - `[licenses]`: one `[[licenses.exceptions]]` entry that allows `CDLA-Permissive-2.0` for `webpki-roots` alone, the licence of Mozilla's root list.
   - These entries that the root list does not have, with no wrapper: `native-tls`, `rustls-native-certs`, `rustls-platform-verifier` and `openssl-probe`, so that no path reads the operating system's trust store or hands the chain to its verifier (ADR 0041); and `env_logger`, `android_logger`, `oslog`, `simple_logger`, `fern`, `log4rs`, `tracing-subscriber` and `tauri-plugin-log`, so that no logger can be installed. The `log` facade itself stays: `tungstenite` and `tokio-tungstenite` depend on it with no option to drop it (measured), and with no logger installed its macros write nowhere.
@@ -286,3 +286,4 @@ None. The host calls `Device` in-process, in Rust, so every vector already reach
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the Windows libsodium binary is a v1 residual with no owner, not a change spec 060 makes (P-D8)
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): blocks spec 065; on Apple targets every host, an IPv4 literal included, resolved through `getaddrinfo` so that NAT64 synthesis applies (042-R9)
 - 2026-09-28 accepted (Marc Vilardebó)
+- 2026-10-16 R2 amended after audit BH: the root `deny.toml` already wraps `sha1` and `rand` under `tungstenite` (spec 030-ws-protocol R1), so the host no longer adds them
