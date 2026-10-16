@@ -4,7 +4,7 @@
 //! and the live pushes of its channel are held for it meanwhile, in order,
 //! within one bound per connection.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -29,7 +29,8 @@ const HELD_CHUNK_BYTES: usize = 256 * 1024;
 /// A frame encoded once, shared by every queue and hold it enters.
 pub(crate) type Encoded = Bytes;
 
-/// A live push held for a catching-up subscription.
+/// A live push, held for a catching-up subscription.
+#[derive(Clone)]
 struct Held {
     received_at: u64,
     frame: Encoded,
@@ -67,27 +68,12 @@ struct Connection {
 #[derive(Default)]
 pub(crate) struct Hub {
     connections: HashMap<u64, Connection>,
-    channels: HashMap<[u8; 16], Vec<u64>>,
+    channels: HashMap<[u8; 16], HashSet<u64>>,
     next_generation: u64,
-}
-
-/// What `subscribe` did.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Registered {
-    /// A new subscription, catching up, of this generation.
-    CatchingUp(u64),
-    /// The channel was already subscribed or catching up here (R9).
-    Already,
-}
-
-/// What a catching-up subscription does next (R7, R8).
-pub(crate) enum Next {
-    /// Its held pushes, past its last backlog push, to write now.
-    Held(Vec<Encoded>),
-    /// Its `ok` is queued and it is subscribed.
-    Subscribed,
-    /// It is gone: ended by R8, or the connection left.
-    Gone,
+    /// The stored blobs the writer handed to the hub, per channel, for the
+    /// tests that wait for them.
+    #[cfg(test)]
+    committed: HashMap<[u8; 16], u64>,
 }
 
 impl Hub {
@@ -118,18 +104,17 @@ impl Hub {
     }
 
     /// Registers an accepted subscription as catching up, before any stored
-    /// blob is read (R7), unless the channel is already here (R9).
+    /// blob is read (R7), and returns its generation; `None` when the channel
+    /// is already here (R9), or the connection is not.
     pub(crate) fn subscribe(
         &mut self,
         id: u64,
         channel_id: [u8; 16],
         ttl_seconds: u32,
-    ) -> Registered {
-        let Some(connection) = self.connections.get_mut(&id) else {
-            return Registered::Already;
-        };
+    ) -> Option<u64> {
+        let connection = self.connections.get_mut(&id)?;
         if connection.subscriptions.contains_key(&channel_id) {
-            return Registered::Already;
+            return None;
         }
         let generation = self.next_generation;
         self.next_generation = self.next_generation.saturating_add(1);
@@ -144,8 +129,8 @@ impl Hub {
                 },
             },
         );
-        self.channels.entry(channel_id).or_default().push(id);
-        Registered::CatchingUp(generation)
+        self.channels.entry(channel_id).or_default().insert(id);
+        Some(generation)
     }
 
     /// The TTL of a channel subscribed or catching up on this connection.
@@ -172,27 +157,34 @@ impl Hub {
     }
 
     /// After the backlog, whose last push was at `after` (`None` for none):
-    /// the held pushes past it, or, when none is left, the `ok` queued and the
-    /// subscription marked subscribed, in this one step under the lock (R7,
-    /// R8).
+    /// the held pushes past it to write now, or, when none is left, nothing,
+    /// and the `ok` queued and the subscription marked subscribed, in this one
+    /// step under the lock (R7, R8). A subscription of another generation, or
+    /// gone, gets nothing and is left as it is.
     pub(crate) fn after_backlog(
         &mut self,
         id: u64,
         channel_id: [u8; 16],
         generation: u64,
         after: Option<u64>,
-    ) -> Next {
+    ) -> Vec<Encoded> {
+        let Ok(ok) = Frame::Ok { channel_id }.encode() else {
+            // Never for 16 bytes; if it were, the subscription ends rather
+            // than staying in turn for an `ok` that cannot be sent.
+            self.end(id, channel_id, generation);
+            return Vec::new();
+        };
         let Some(connection) = self.connections.get_mut(&id) else {
-            return Next::Gone;
+            return Vec::new();
         };
         let Some(subscription) = connection.subscriptions.get_mut(&channel_id) else {
-            return Next::Gone;
+            return Vec::new();
         };
         if subscription.generation != generation {
-            return Next::Gone;
+            return Vec::new();
         }
         let Stage::CatchingUp { held, bytes } = &mut subscription.stage else {
-            return Next::Gone;
+            return Vec::new();
         };
         // One chunk at a time, the rest still held and counted; pushes at
         // or below the last backlog push are dropped as already sent.
@@ -211,17 +203,25 @@ impl Hub {
                 pushes.push(push.frame);
             }
         }
-        if !pushes.is_empty() {
-            return Next::Held(pushes);
+        if pushes.is_empty() {
+            subscription.stage = Stage::Subscribed { floor: after };
+            queue(connection, Encoded::from(ok));
         }
-        let ok = Frame::Ok { channel_id }.encode().map(Encoded::from);
-        match ok {
-            Ok(frame) => {
-                subscription.stage = Stage::Subscribed { floor: after };
-                queue(connection, frame);
-                Next::Subscribed
-            }
-            Err(_) => Next::Gone,
+        pushes
+    }
+
+    /// Ends the subscription of `generation`, if it is still here.
+    fn end(&mut self, id: u64, channel_id: [u8; 16], generation: u64) {
+        let Some(connection) = self.connections.get_mut(&id) else {
+            return;
+        };
+        if connection
+            .subscriptions
+            .get(&channel_id)
+            .is_some_and(|subscription| subscription.generation == generation)
+        {
+            connection.subscriptions.remove(&channel_id);
+            self.forget_channel(&channel_id, id);
         }
     }
 
@@ -233,6 +233,12 @@ impl Hub {
             let Ok(row) = outcome.result else {
                 continue;
             };
+            #[cfg(test)]
+            {
+                let committed = self.committed.entry(outcome.channel_id).or_default();
+                *committed = committed.saturating_add(1);
+            }
+            let received_at = row.received_at;
             let blob_bytes = row.blob.len();
             let push = Frame::Push {
                 channel_id: outcome.channel_id,
@@ -243,27 +249,24 @@ impl Hub {
             let Ok(frame) = push.encode() else {
                 continue;
             };
-            let frame = Encoded::from(frame);
+            let held = Held {
+                received_at,
+                frame: Encoded::from(frame),
+                blob_bytes,
+            };
             let subscribers = self
                 .channels
                 .get(&outcome.channel_id)
                 .cloned()
                 .unwrap_or_default();
             for id in subscribers {
-                self.push(id, outcome.channel_id, row.received_at, &frame, blob_bytes);
+                self.push(id, outcome.channel_id, &held);
             }
         }
     }
 
     /// One push for one subscription.
-    fn push(
-        &mut self,
-        id: u64,
-        channel_id: [u8; 16],
-        received_at: u64,
-        frame: &Encoded,
-        blob_bytes: usize,
-    ) {
+    fn push(&mut self, id: u64, channel_id: [u8; 16], push: &Held) {
         let Some(connection) = self.connections.get_mut(&id) else {
             return;
         };
@@ -273,17 +276,13 @@ impl Hub {
         match &mut subscription.stage {
             Stage::Subscribed { floor } => {
                 // A blob the backlog read before the writer reached the hub.
-                if floor.is_none_or(|floor| received_at > floor) {
-                    queue(connection, frame.clone());
+                if floor.is_none_or(|floor| push.received_at > floor) {
+                    queue(connection, push.frame.clone());
                 }
             }
             Stage::CatchingUp { held, bytes } => {
-                held.push_back(Held {
-                    received_at,
-                    frame: frame.clone(),
-                    blob_bytes,
-                });
-                *bytes = bytes.saturating_add(blob_bytes);
+                held.push_back(push.clone());
+                *bytes = bytes.saturating_add(push.blob_bytes);
                 self.bound_holds(id);
             }
         }
@@ -328,11 +327,17 @@ impl Hub {
 
     fn forget_channel(&mut self, channel_id: &[u8; 16], id: u64) {
         if let Some(ids) = self.channels.get_mut(channel_id) {
-            ids.retain(|other| *other != id);
+            ids.remove(&id);
             if ids.is_empty() {
                 self.channels.remove(channel_id);
             }
         }
+    }
+
+    /// The stored blobs of `channel_id` the writer handed to the hub.
+    #[cfg(test)]
+    pub(crate) fn committed(&self, channel_id: &[u8; 16]) -> u64 {
+        self.committed.get(channel_id).copied().unwrap_or(0)
     }
 
     /// The subscriptions the hub holds of a connection, for the tests of R15.

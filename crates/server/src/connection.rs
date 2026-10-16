@@ -18,7 +18,7 @@ use tokio::sync::{broadcast, mpsc};
 use crate::auth::{AuthState, Verdict};
 use crate::frames::{self, ErrorCode};
 use crate::http::Shared;
-use crate::hub::{Encoded, Next, Registered};
+use crate::hub::Encoded;
 use crate::store::reader::read_page;
 
 /// How often the deadline task wakes, in real time (spec 032 R14).
@@ -246,7 +246,7 @@ impl Connection {
             .shared
             .hub()
             .subscribe(self.id, channel_id, ttl_seconds);
-        let Registered::CatchingUp(generation) = registered else {
+        let Some(generation) = registered else {
             return Flow::Continue;
         };
         // `since` past the server's clock reads as now (R7).
@@ -306,11 +306,19 @@ impl Connection {
         #[cfg(test)]
         {
             self.shared.hooks.reads.fetch_add(1, Ordering::SeqCst);
-            if self.shared.hooks.fail_reads.load(Ordering::SeqCst) {
-                return Flow::Close(INTERNAL_ERROR);
-            }
         }
-        let page = match read_page(&self.shared.pool, step.channel_id, step.from, now).await {
+        let read = read_page(&self.shared.pool, step.channel_id, step.from, now)
+            .await
+            .map_err(drop);
+        #[cfg(test)]
+        let read = read.and_then(|page| {
+            if self.shared.hooks.fail_reads.load(Ordering::SeqCst) {
+                Err(())
+            } else {
+                Ok(page)
+            }
+        });
+        let page = match read {
             Ok(page) => page,
             Err(_) => return Flow::Close(INTERNAL_ERROR),
         };
@@ -342,13 +350,10 @@ impl Connection {
             let mut paused = self.shared.hooks.catch_up_paused.subscribe();
             let _ = paused.wait_for(|paused| !paused).await;
         }
-        let next =
+        let pushes =
             self.shared
                 .hub()
                 .after_backlog(self.id, step.channel_id, step.generation, step.last);
-        let Next::Held(pushes) = next else {
-            return Flow::Continue;
-        };
         for push in pushes {
             let flow = self.write(push).await;
             if !matches!(flow, Flow::Continue) {
