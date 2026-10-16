@@ -17,6 +17,12 @@
     )
 )]
 
+#[allow(
+    dead_code,
+    reason = "reached through the connections, spec 030-ws-protocol"
+)]
+mod auth;
+
 mod clock;
 
 #[allow(

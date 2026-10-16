@@ -6,6 +6,7 @@
     reason = "the tests make and remove their own directories"
 )]
 
+mod auth;
 mod store;
 
 use std::path::{Path, PathBuf};

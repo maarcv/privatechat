@@ -35,6 +35,9 @@ tokio = { version = "1.53.1", default-features = false, features = ["rt", "sync"
 test-support = []
 
 [dev-dependencies]
+# `testing::subscribe_credential`, so that the tests sign what a client signs
+# (spec 031-auth-channel-signature); the server itself holds no key.
+privatechat-core = { path = "../core", version = "0.0.0", features = ["test-support"] }
 
 [lints]
 workspace = true
