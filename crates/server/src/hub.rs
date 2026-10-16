@@ -51,7 +51,6 @@ struct Subscription {
     /// Which subscription of the channel on this connection this is: a step
     /// of an earlier one, ended by R8, must not act for it.
     generation: u64,
-    ttl_seconds: u32,
     stage: Stage,
 }
 
@@ -114,12 +113,7 @@ impl Hub {
     /// Registers an accepted subscription as catching up, before any stored
     /// blob is read (R7), and returns its generation; `None` when the channel
     /// is already here (R9), or the connection is not.
-    pub(crate) fn subscribe(
-        &mut self,
-        id: u64,
-        channel_id: [u8; 16],
-        ttl_seconds: u32,
-    ) -> Option<u64> {
+    pub(crate) fn subscribe(&mut self, id: u64, channel_id: [u8; 16]) -> Option<u64> {
         let connection = self.connections.get_mut(&id)?;
         if connection.subscriptions.contains_key(&channel_id) {
             return None;
@@ -130,7 +124,6 @@ impl Hub {
             channel_id,
             Subscription {
                 generation,
-                ttl_seconds,
                 stage: Stage::CatchingUp {
                     held: VecDeque::new(),
                     bytes: 0,
@@ -139,16 +132,6 @@ impl Hub {
         );
         self.channels.entry(channel_id).or_default().insert(id);
         Some(generation)
-    }
-
-    /// The TTL of a channel subscribed or catching up on this connection,
-    /// which its publishes take (R11, the next slice).
-    pub(crate) fn ttl_seconds(&self, id: u64, channel_id: &[u8; 16]) -> Option<u32> {
-        self.connections
-            .get(&id)?
-            .subscriptions
-            .get(channel_id)
-            .map(|subscription| subscription.ttl_seconds)
     }
 
     /// Whether the subscription is still catching up (R8 may have ended it).

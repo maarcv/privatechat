@@ -210,7 +210,7 @@ impl Connection {
                     .auth
                     .on_subscribe(&pk_ch, ttl_seconds, &sig, hosts, now)
                 {
-                    Ok(verdicts) => self.answer(verdicts, ttl_seconds, since).await,
+                    Ok(verdicts) => self.answer(verdicts, since).await,
                     Err(_) => Flow::Close(INTERNAL_ERROR),
                 }
             }
@@ -222,15 +222,10 @@ impl Connection {
     }
 
     /// The frames of `verdicts`, in order (spec 031 R5, R6).
-    async fn answer(
-        &mut self,
-        verdicts: Vec<Verdict>,
-        ttl_seconds: u32,
-        since: Option<u64>,
-    ) -> Flow {
+    async fn answer(&mut self, verdicts: Vec<Verdict>, since: Option<u64>) -> Flow {
         for verdict in verdicts {
             let flow = match verdict {
-                Verdict::Accept { channel_id } => self.accept(channel_id, ttl_seconds, since),
+                Verdict::Accept { channel_id } => self.accept(channel_id, since),
                 Verdict::NonceExpired { channel_id, hello } => {
                     let error = frames::error(ErrorCode::NonceExpired, Some(channel_id), None);
                     match self.enqueue(&error) {
@@ -259,11 +254,8 @@ impl Connection {
 
     /// An accepted channel: registered as catching up before anything is
     /// read (R7), or nothing at all when it is already here (R9).
-    fn accept(&mut self, channel_id: [u8; 16], ttl_seconds: u32, since: Option<u64>) -> Flow {
-        let registered = self
-            .shared
-            .hub()
-            .subscribe(self.id, channel_id, ttl_seconds);
+    fn accept(&mut self, channel_id: [u8; 16], since: Option<u64>) -> Flow {
+        let registered = self.shared.hub().subscribe(self.id, channel_id);
         let Some(generation) = registered else {
             return Flow::Continue;
         };
