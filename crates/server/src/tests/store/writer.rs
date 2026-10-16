@@ -152,9 +152,14 @@ fn s032_t05_r05_batches() {
     assert_eq!((first.len(), second.len()), (MAX_BATCH, 44));
     let all: Vec<WriteOutcome> = first.into_iter().chain(second).collect();
     for (n, outcome) in all.iter().enumerate() {
+        let submitted = request(u16::try_from(n).unwrap(), 1, 60);
         assert_eq!(
-            outcome.client_ref,
-            request(u16::try_from(n).unwrap(), 1, 60).client_ref
+            (outcome.connection, outcome.client_ref, outcome.channel_id),
+            (
+                submitted.connection,
+                submitted.client_ref,
+                submitted.channel_id
+            )
         );
     }
     assert!(
@@ -265,7 +270,10 @@ fn s032_t07_r07_report_after_commit() {
     let busy = Arc::new(AtomicBool::new(false));
     let (full_hook, busy_hook) = (full.clone(), busy.clone());
     let (reports_hook, seen) = (reports.clone(), seen_before_commit.clone());
+    let pause = Pause::paused();
+    pause.release();
     let hooks = Hooks {
+        pause: Some(pause.clone()),
         before_transaction: Some(Box::new(move |connection| {
             let pages: i64 = connection
                 .pragma_query_value(None, "page_count", |row| row.get(0))
@@ -313,26 +321,46 @@ fn s032_t07_r07_report_after_commit() {
     // Each commit came before its own report and after the previous one.
     assert_eq!(*seen_before_commit.lock().unwrap(), [0, 1]);
 
-    // A full disk refuses the whole batch with `server_full`.
+    // A full disk refuses the whole batch with `server_full`, the inserts
+    // that went in before the failing one included.
+    pause.hold();
+    let mut big = request(4, 1, 60);
+    big.blob = vec![4; 64 * 1024];
+    for submitted in [request(3, 1, 60), big, request(5, 1, 60)] {
+        harness.writer.submit(submitted).unwrap();
+    }
     full.store(true, Ordering::SeqCst);
-    let mut big = request(3, 1, 60);
-    big.blob = vec![3; 64 * 1024];
-    let refused = harness.store(big);
-    assert_eq!(refused.result, Err(Refusal::ServerFull));
+    pause.release();
+    let refused = harness.next();
+    assert_eq!(refused.len(), 3);
+    assert!(
+        refused
+            .iter()
+            .all(|outcome| outcome.result == Err(Refusal::ServerFull))
+    );
+    assert_eq!(count(&dir.db()), 2);
     full.store(false, Ordering::SeqCst);
-    assert_eq!(received_at(&harness.store(request(4, 1, 60))), T0 + 2);
+    assert_eq!(received_at(&harness.store(request(6, 1, 60))), T0 + 2);
 
     // A lock held elsewhere refuses it with `rate_limited`.
     let other = Connection::open(dir.db()).unwrap();
     other.execute_batch("BEGIN IMMEDIATE").unwrap();
     busy.store(true, Ordering::SeqCst);
-    assert_eq!(
-        harness.store(request(5, 1, 60)).result,
-        Err(Refusal::RateLimited)
+    pause.hold();
+    for n in 7..10 {
+        harness.writer.submit(request(n, 1, 60)).unwrap();
+    }
+    pause.release();
+    let refused = harness.next();
+    assert_eq!(refused.len(), 3);
+    assert!(
+        refused
+            .iter()
+            .all(|outcome| outcome.result == Err(Refusal::RateLimited))
     );
     other.execute_batch("COMMIT").unwrap();
     busy.store(false, Ordering::SeqCst);
-    assert_eq!(received_at(&harness.store(request(6, 1, 60))), T0 + 3);
+    assert_eq!(received_at(&harness.store(request(10, 1, 60))), T0 + 3);
 
     // Only the committed transactions reached the hook before their commit.
     assert_eq!(*seen_before_commit.lock().unwrap(), [0, 1, 3, 5]);
@@ -344,13 +372,30 @@ fn s032_t07_r07_report_after_commit() {
 fn s032_t08_r08_disk_quota() {
     let dir = TestDir::new("s032_t08");
     let clock = Arc::new(ManualClock::new(T0));
-    let harness = Harness::with_quota(&dir.db(), &clock, Hooks::default(), 1);
+    drop(Harness::new(&dir.db(), &clock, Hooks::default()));
+    let connection = Connection::open(dir.db()).unwrap();
+    let live: i64 = connection
+        .query_row(
+            "SELECT (page_count - freelist_count) * page_size FROM pragma_page_count, pragma_freelist_count, pragma_page_size",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    drop(connection);
+    let live = u64::try_from(live).unwrap();
+
+    // At the quota: refused, nothing inserted.
+    let harness = Harness::with_quota(&dir.db(), &clock, Hooks::default(), live);
     assert_eq!(
         harness.store(request(1, 1, 60)).result,
         Err(Refusal::ServerFull)
     );
     drop(harness);
     assert_eq!(count(&dir.db()), 0);
+
+    // One byte above it: stored.
+    let harness = Harness::with_quota(&dir.db(), &clock, Hooks::default(), live + 1);
+    assert!(harness.store(request(2, 1, 60)).result.is_ok());
 }
 
 #[test]
