@@ -213,7 +213,7 @@ impl AuthState {
 }
 
 /// The `hello` that carries `nonce` (R1).
-fn hello(nonce: [u8; 32]) -> Frame {
+pub(crate) fn hello(nonce: [u8; 32]) -> Frame {
     Frame::Hello {
         server_nonce: nonce,
         proto_versions: vec![PROTO_VERSION],

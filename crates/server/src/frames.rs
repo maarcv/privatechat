@@ -4,6 +4,8 @@
 
 use privatechat_core::Frame;
 
+use crate::store::writer::{Refusal, Row};
+
 /// The error codes the server sends; `unsupported_version` is reserved for a
 /// later `proto_version` and is not one of them (R13).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +47,41 @@ impl ErrorCode {
             ErrorCode::ChannelQuota => "channel full",
             ErrorCode::ServerFull => "server full",
         }
+    }
+}
+
+impl From<Refusal> for ErrorCode {
+    /// The code of a refusal of the writer (spec 032-storage-ttl).
+    fn from(refusal: Refusal) -> ErrorCode {
+        match refusal {
+            Refusal::RateLimited => ErrorCode::RateLimited,
+            Refusal::ChannelQuota => ErrorCode::ChannelQuota,
+            Refusal::ServerFull => ErrorCode::ServerFull,
+        }
+    }
+}
+
+/// The `ok` of a subscription (R7).
+pub(crate) fn ok(channel_id: [u8; 16]) -> Frame {
+    Frame::Ok { channel_id }
+}
+
+/// The `ack` of a stored `publish` (R12).
+pub(crate) fn ack(client_ref: [u8; 16], row: &Row) -> Frame {
+    Frame::Ack {
+        client_ref,
+        server_id: row.server_id,
+        received_at: row.received_at,
+    }
+}
+
+/// The `push` of a stored blob (R7, R12).
+pub(crate) fn push(channel_id: [u8; 16], row: Row) -> Frame {
+    Frame::Push {
+        channel_id,
+        server_id: row.server_id,
+        received_at: row.received_at,
+        blob: row.blob,
     }
 }
 

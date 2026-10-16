@@ -71,6 +71,17 @@ impl Shared {
                 .unwrap_or_else(PoisonError::into_inner)
                 .on_commit(outcomes);
         });
+        #[cfg(test)]
+        let hooks = test::Hooks::default();
+        #[cfg(test)]
+        let writer = crate::store::writer::test::spawn(
+            db,
+            clock.clone(),
+            on_commit,
+            max_db_bytes,
+            hooks.writer(),
+        )?;
+        #[cfg(not(test))]
         let writer = Writer::spawn(db, clock.clone(), on_commit, max_db_bytes)?;
         let pool = ReadPool::open(db).map_err(|_| StartError {
             reason: StartReason::Database(DbCause::Open),
@@ -87,7 +98,7 @@ impl Shared {
             #[cfg(test)]
             db: db.to_path_buf(),
             #[cfg(test)]
-            hooks: test::Hooks::default(),
+            hooks,
         }))
     }
 
@@ -146,11 +157,15 @@ async fn not_found() -> Response {
 pub(crate) mod test {
     //! The points where the tests of specs 030, 033 and 035 watch or steer a
     //! connection: the backlog reads, a pause of its socket writes, a failing
-    //! read and a failing `relay` call.
+    //! read and a failing `relay` call; and the writer: a pause before its
+    //! next batch and a `server_id` already used, which it refuses.
 
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use tokio::sync::watch;
+
+    use crate::store::writer::test::{Hooks as WriterHooks, Pause};
 
     pub(crate) struct Hooks {
         /// How many `read_page` calls the connections made.
@@ -165,6 +180,11 @@ pub(crate) mod test {
         /// The first `relay` call of a `subscribe` fails as `Internal`; the
         /// others are made to fail in the tests of `AuthState`.
         pub(crate) fail_relay: AtomicBool,
+        /// Held, the writer stops before its next batch and its queue fills.
+        pub(crate) writer_pause: Arc<Pause>,
+        /// While `true`, the writer draws the `server_id` it drew last, which
+        /// it then refuses as `server_full` (spec 032).
+        pub(crate) repeat_server_id: Arc<AtomicBool>,
     }
 
     impl Default for Hooks {
@@ -175,6 +195,8 @@ pub(crate) mod test {
                 fail_reads: AtomicBool::new(false),
                 catch_up_paused: watch::channel(false).0,
                 fail_relay: AtomicBool::new(false),
+                writer_pause: Arc::new(Pause::default()),
+                repeat_server_id: Arc::new(AtomicBool::new(false)),
             }
         }
     }
@@ -186,6 +208,22 @@ pub(crate) mod test {
 
         pub(crate) fn reads(&self) -> usize {
             self.reads.load(Ordering::SeqCst)
+        }
+
+        /// The writer's hooks, wired to these.
+        pub(super) fn writer(&self) -> WriterHooks {
+            let repeat = self.repeat_server_id.clone();
+            let mut last = [0; 16];
+            WriterHooks {
+                pause: Some(self.writer_pause.clone()),
+                server_id: Some(Box::new(move || {
+                    if !repeat.load(Ordering::SeqCst) {
+                        last = privatechat_core::relay::new_server_id().unwrap_or(last);
+                    }
+                    last
+                })),
+                ..WriterHooks::default()
+            }
         }
     }
 }

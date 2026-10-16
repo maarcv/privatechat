@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
-use privatechat_core::Frame;
+use privatechat_core::{Error, Frame, relay};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::auth::{AuthState, Verdict};
@@ -20,6 +20,7 @@ use crate::frames::{self, ErrorCode};
 use crate::http::Shared;
 use crate::hub::Encoded;
 use crate::store::reader::read_page;
+use crate::store::writer::WriteRequest;
 
 /// How often the deadline task wakes, in real time (spec 032 R14).
 pub(crate) const TICK: Duration = Duration::from_millis(100);
@@ -212,22 +213,30 @@ impl Connection {
                     .auth
                     .on_subscribe(&pk_ch, ttl_seconds, &sig, hosts, now)
                 {
-                    Ok(verdicts) => self.answer(verdicts, since).await,
+                    Ok(verdicts) => self.answer(verdicts, ttl_seconds, since).await,
                     Err(_) => Flow::Close(INTERNAL_ERROR),
                 }
             }
-            // Spec 030 R11 stores a publish; until then it changes nothing.
-            Ok(Frame::Publish { .. }) => Flow::Continue,
+            Ok(Frame::Publish {
+                channel_id,
+                client_ref,
+                blob,
+            }) => self.publish(channel_id, client_ref, blob),
             // A frame no client sends, or none at all.
             Ok(_) | Err(_) => Flow::Close(POLICY_VIOLATION),
         }
     }
 
     /// The frames of `verdicts`, in order (spec 031 R5, R6).
-    async fn answer(&mut self, verdicts: Vec<Verdict>, since: Option<u64>) -> Flow {
+    async fn answer(
+        &mut self,
+        verdicts: Vec<Verdict>,
+        ttl_seconds: u32,
+        since: Option<u64>,
+    ) -> Flow {
         for verdict in verdicts {
             let flow = match verdict {
-                Verdict::Accept { channel_id } => self.accept(channel_id, since),
+                Verdict::Accept { channel_id } => self.accept(channel_id, ttl_seconds, since),
                 Verdict::NonceExpired { channel_id, hello } => {
                     let error = frames::error(ErrorCode::NonceExpired, Some(channel_id), None);
                     match self.enqueue(&error) {
@@ -256,8 +265,11 @@ impl Connection {
 
     /// An accepted channel: registered as catching up before anything is
     /// read (R7), or nothing at all when it is already here (R9).
-    fn accept(&mut self, channel_id: [u8; 16], since: Option<u64>) -> Flow {
-        let registered = self.shared.hub().subscribe(self.id, channel_id);
+    fn accept(&mut self, channel_id: [u8; 16], ttl_seconds: u32, since: Option<u64>) -> Flow {
+        let registered = self
+            .shared
+            .hub()
+            .subscribe(self.id, channel_id, ttl_seconds);
         let Some(generation) = registered else {
             return Flow::Continue;
         };
@@ -271,6 +283,32 @@ impl Connection {
             done: false,
         });
         Flow::Continue
+    }
+
+    /// A `publish`: refused at once, in the order of R11, or handed to the
+    /// writer with the subscription's TTL; its `ack` or the writer's refusal
+    /// comes back through the hub (R12).
+    fn publish(&mut self, channel_id: [u8; 16], client_ref: [u8; 16], blob: Vec<u8>) -> Flow {
+        let refuse = |code| frames::error(code, Some(channel_id), Some(client_ref));
+        let Some(ttl_seconds) = self.shared.hub().ttl_seconds(self.id, &channel_id) else {
+            return self.enqueue(&refuse(ErrorCode::NotSubscribed));
+        };
+        match relay::check_blob(&blob, &channel_id) {
+            Ok(()) => {}
+            Err(Error::Internal) => return Flow::Close(INTERNAL_ERROR),
+            Err(_) => return self.enqueue(&refuse(ErrorCode::BadBlob)),
+        }
+        let request = WriteRequest {
+            connection: self.id,
+            client_ref,
+            channel_id,
+            ttl_seconds,
+            blob,
+        };
+        match self.shared.writer.submit(request) {
+            Ok(()) => Flow::Continue,
+            Err(refusal) => self.enqueue(&refuse(ErrorCode::from(refusal))),
+        }
     }
 
     /// One step of the catch-up of the next subscription in turn: one backlog
