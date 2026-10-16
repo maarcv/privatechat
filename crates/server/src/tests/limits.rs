@@ -140,6 +140,19 @@ async fn s033_t02_r02_subscribe_gap() {
     send(&mut client, &forged).await;
     refused(&mut client, "bad_auth", channel(), None).await;
     assert!(matches!(receive(&mut client).await, Received::Close(1008)));
+
+    // Past the first-subscribe deadline, a subscribe too soon gets no
+    // refusal, only the close of spec 031 R7.
+    let mut client = connect(server.address).await;
+    hello(&mut client).await;
+    clock.advance_mono(59_500);
+    send(&mut client, &forged).await;
+    refused(&mut client, "bad_auth", channel(), None).await;
+    // 60 001 ms after the hello, 501 ms after the last subscribe. The tick
+    // may close first; either way no `rate_limited` comes.
+    clock.advance_mono(501);
+    send(&mut client, &forged).await;
+    assert!(matches!(receive(&mut client).await, Received::Close(1008)));
 }
 
 /// A `subscribe` of the `n`th key under `nonce`, and its `channel_id`.

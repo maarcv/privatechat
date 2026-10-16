@@ -215,6 +215,11 @@ impl Connection {
                 since,
             }) => {
                 let now = self.shared.clock.mono_ms();
+                // Past the first-subscribe deadline nothing is answered, not
+                // even a refusal of spec 033 (spec 031 R7).
+                if self.auth.deadline_passed(now) {
+                    return Flow::Close(POLICY_VIOLATION);
+                }
                 if let Some(flow) = self.limit_subscribe(&pk_ch, ttl_seconds, now).await {
                     return flow;
                 }
