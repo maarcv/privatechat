@@ -2,6 +2,32 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BJ
+
+**2026-10-16 — Audit BJ, the code audit of slice (c) of spec 030-ws-protocol (branch `030-c-hub`): R7–R10, R15, R16, the hub of subscriptions (`hub.rs`) that hands the writer's results to each connection's queue, the catch-up of `connection.rs` (backlog pages in turn, live pushes held, `ok` under the hub's lock), the queue bound of spec 033 R5, the disconnect and the internal errors. Six rounds of three passes.** One High (a stale catch-up step acting for a new subscription), one push that could be lost past a dropped frame, one rule of R8 that let a flood end another channel (the human's decision), the rest the order of frames, memory held during a close, and tests.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BJ1 | A catch-up step of a subscription ended by R8 and subscribed again acted for the new one (A, B) | High | A generation per subscription; every step checks it under the hub's lock |
+| BJ2 | Held pushes reached the queue before `ok` and could repeat backlog rows (A, B) | Medium | After the backlog the held pushes past its last push go out in chunks of 256 KiB, still counted; once subscribed, a floor drops a push the backlog already sent |
+| BJ3 | After an overflow drop, later frames still entered the queue, so a push past the dropped one moved the client's cursor over it (B, round 2) | Medium | Nothing is queued once a frame is dropped; `write_queued` closes 1013 at once, and the tick checks it too so a busy socket cannot put it off (round 4) |
+| BJ4 | A frame of the client waited a random number of backlog pages: the select polled its branches at random (C, round 2) | Medium | A biased select: the tick, the socket, the queue, then the catch-up |
+| BJ5 | The nonce, the queue and the catch-ups lived on while the close frame was written (A, rounds 2 and 3) | Medium | The registration and then the connection's state are dropped before the close |
+| BJ6 | The frame bound of R8 ended the subscription holding the most bytes, so a flood of small pushes on two channels ended a third of a few large blobs (B, round 3) | Low | R8 amended by the human's decision BJ-D-1 |
+| BJ7 | The verdict frames bypassed the queue that R10 counts them in (A, round 2) | Low | They go through the queue; a verdict close writes the queue first |
+| BJ8 | T16's hook failed before any `relay` call, so a libsodium failure turned `bad_auth` would pass (A, round 3) | Low | A hook per `relay` call of `AuthState` and `s030_t16_r16_relay_failures` |
+| BJ9 | The tests missed held pushes after a non-empty backlog, the floor, the chunks, the bounds at their edges and when both are passed, the bound chosen by bytes, the overflow, an empty entry left in the channels index, the fan-out to two subscribers, a second subscribe mid backlog, the queue before a page, the expiry edge and the clamp of `since` (A, C, every round) | Medium | A test each; `store_many` waits for the hub's count, since the writer hands a transaction over after its commit |
+| BJ10 | `Hub::ttl_seconds` and the subscription's TTL landed a slice early behind a module-wide `allow(dead_code)` (A, C) | Low | Removed; slice (d) adds them with R11 |
+| BJ11 | `bound_holds` looped though one end always restores both bounds; the catch-up flushed the queue and checked its end twice; six copies of one test fixture (C, rounds 3 and 5) | Low | One pass, with the argument in its doc; the biased select writes the queue; one `committed()` fixture |
+| BJ12 | The queue lets 257 frames wait unwritten, the one being written not counted (A, round 6) | Low | Owed by spec 033 R5 in its slice (a), which counts it with the byte bound; the constant's doc says so |
+| BJ13 | A steady flood near a member's bandwidth on a channel catching up puts off its `ok` (B, round 5) | Far-fetched | None: the same flood on a subscribed channel closes with 1013, and the publish limits of spec 033 bound it |
+| BJ14 | Some T07 tests plant rows rather than storing them through the writer (A, round 4) | Far-fetched | None: the backlog reads them with the same SQL |
+| BJ15 | Untested defence in depth: the tick's overflow check, `flush` through `write_queued` after an overflow, `Hub::end` on an `ok` that cannot be encoded, the registration dropped before a stalled close, the tick before the socket in the select (C) | Far-fetched | None: each needs a client that keeps its socket always ready, an overflow and a third failure at once, or a stalled close, and changes only when a bounded connection closes |
+
+**BJ-D-1 (the human's decision, 2026-10-16).** When the held pushes of one connection pass a bound, the subscription ended is the one holding the most of the bound passed: the most bytes past 4 MiB, else the most pushes past 256. Three advisors escalated it, as it amends an accepted requirement; of the three options put (this rule, the largest share of either bound, leaving R8 as written), the human chose this one. R8, the Limits row, Security (the residual case of an intruder spreading over several channels), T08 and `docs/spec.md` §6 say so.
+
+The T07 clause of a publish during a catch-up and the T15 clause of a publish whose connection closes before the commit come with R11 in slice (d). The interim 30 s bound on a write stays until spec 033 R5. The audit ends with round 6: pass B found nothing, pass A a test edge, an Interface row and the frame owed by spec 033, pass C test gaps, all closed with no change to production code. The pull request is about 1 850 net lines, 1 060 of them tests.
+
 ## Audit BI
 
 **2026-10-16 — Audit BI, the code audit of slice (b) of spec 030-ws-protocol (branch `030-b-ws`): R3–R6, the route and the upgrade (`http.rs`), one task per WebSocket that sends the `hello`, reads frames and answers each `subscribe` with the verdicts of spec 031 (`connection.rs`), the fixed error texts (`frames.rs`), and the server-wide deadline task of spec 032 R14. Two rounds of three passes.** No defect a client can use against another; the findings were close codes, empty bodies, a write that could stall the task, and tests.

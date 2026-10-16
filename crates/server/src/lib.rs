@@ -34,6 +34,9 @@ mod frames;
 #[allow(dead_code, reason = "reached from the binary, spec 035-server-ops")]
 mod http;
 
+#[allow(dead_code, reason = "reached from the binary, spec 035-server-ops")]
+mod hub;
+
 #[allow(
     dead_code,
     reason = "reached through the connections, spec 030-ws-protocol"
