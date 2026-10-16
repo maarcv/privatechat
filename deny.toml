@@ -28,13 +28,16 @@ multiple-versions = "warn"
 wildcards = "deny"
 # No cryptographic primitive or randomness source outside libsodium (AGENTS 2).
 # `rand`, `rand_core`, `rand_chacha` and `rand_xorshift` may only come in pulled
-# by `proptest` in dev-dependencies, and `getrandom` and `fastrand` only under
+# by `proptest` in dev-dependencies, `rand` also by `tungstenite` in the server
+# (spec 030 R1), and `getrandom` and `fastrand` only under
 # those or under `tempfile`, which `proptest` uses to name the files of a
 # failed-case persistence run. None of them reaches `core`. `minisign-verify`
 # (Ed25519 and BLAKE2b in Rust) comes only through the build script of
 # `libsodium-sys-stable`, which checks the signature of the archive it unpacks.
 deny = [
-  { crate = "rand", wrappers = ["proptest", "rand_chacha", "rand_xorshift"] },
+  # `tungstenite` draws the masks of client frames, which the server never sends
+  # (spec 030-ws-protocol R1).
+  { crate = "rand", wrappers = ["proptest", "rand_chacha", "rand_xorshift", "tungstenite"] },
   { crate = "rand_chacha", wrappers = ["proptest", "rand"] },
   { crate = "rand_xorshift", wrappers = ["proptest"] },
   { crate = "fastrand", wrappers = ["tempfile"] },
@@ -73,7 +76,12 @@ deny = [
   { crate = "crypto_secretbox" },
   { crate = "crypto_box" },
   { crate = "blake3" },
-  { crate = "sha1" },
+  # The WebSocket handshake of RFC 6455 hashes `Sec-WebSocket-Key` with SHA-1,
+  # which protects nothing here; no other crate may bring it in (spec 030 R1).
+  { crate = "sha1", wrappers = ["axum", "tungstenite"] },
+  # SHA-1 under its other names, which no wrapper lets in.
+  { crate = "sha1_smol" },
+  { crate = "sha-1" },
   { crate = "md5" },
   { crate = "pbkdf2" },
   { crate = "scrypt" },

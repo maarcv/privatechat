@@ -37,6 +37,7 @@ jobs:
           - frame_decode
           - session_on_frame
           - relay_verify_subscribe
+          - relay_check_blob
     steps:
       - uses: actions/checkout@v7
       - name: s016_t09_r09_install_nightly_and_cargo_fuzz

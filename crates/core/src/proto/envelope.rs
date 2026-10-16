@@ -344,20 +344,10 @@ struct Envelope<'a> {
 }
 
 impl<'a> Envelope<'a> {
-    /// Step 1: the length class, then the version, then the channel (R2).
+    /// Step 1 (`check_shape`), then the regions of the blob (R2).
     fn parse(blob: &'a [u8], channel: &ChannelId) -> Result<Envelope<'a>, Error> {
+        check_shape(blob, channel)?;
         let len = blob.len();
-        let padded = len.checked_sub(BLOB_OVERHEAD).ok_or(Error::BadLength)?;
-        if !is_padded_len(padded) {
-            return Err(Error::BadLength);
-        }
-        if blob.first() != Some(&PROTO_V1) {
-            return Err(Error::UnsupportedVersion);
-        }
-        // The id is public, but one rule beats a judgement call (AGENTS 22).
-        if !crypto::ct_eq(region(blob, CHANNEL_ID_RANGE)?, &channel.0) {
-            return Err(Error::WrongChannel);
-        }
         // The regions cannot fail after the length class; still `BadLength`.
         let signature_at = len.checked_sub(SIGNATURE_LEN).ok_or(Error::BadLength)?;
         let bytes = |range: Range<usize>| blob.get(range).ok_or(Error::BadLength);
@@ -370,6 +360,33 @@ impl<'a> Envelope<'a> {
             signed: bytes(0..signature_at)?,
         })
     }
+}
+
+/// Step 1 of `docs/spec.md` §4: the length class, then the version, then
+/// the channel (R2). The one check of a blob's shape: `verify` starts with it,
+/// and the server runs it alone before it stores a blob (spec 030-ws-protocol
+/// R2).
+///
+/// # Errors
+///
+/// `BadLength`, `UnsupportedVersion` or `WrongChannel`, the first that
+/// applies.
+pub(crate) fn check_shape(blob: &[u8], channel: &ChannelId) -> Result<(), Error> {
+    let padded = blob
+        .len()
+        .checked_sub(BLOB_OVERHEAD)
+        .ok_or(Error::BadLength)?;
+    if !is_padded_len(padded) {
+        return Err(Error::BadLength);
+    }
+    if blob.first() != Some(&PROTO_V1) {
+        return Err(Error::UnsupportedVersion);
+    }
+    // The id is public, but one rule beats a judgement call (AGENTS 22).
+    if !crypto::ct_eq(region(blob, CHANNEL_ID_RANGE)?, &channel.0) {
+        return Err(Error::WrongChannel);
+    }
+    Ok(())
 }
 
 /// A fixed region of a blob whose length step 1 checked.
