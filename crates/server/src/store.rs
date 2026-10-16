@@ -19,8 +19,8 @@ const AUTO_VACUUM_INCREMENTAL: i64 = 2;
 /// How long a connection waits for a lock before it fails (R2).
 const BUSY_TIMEOUT: Duration = Duration::from_millis(5_000);
 
-/// The tables and indexes of a new file, created in one transaction with the
-/// `meta` row and `user_version` (R1).
+/// The tables and indexes of a new file and its `meta` row, created in one
+/// transaction with `user_version` (R1).
 const SCHEMA: &str = "
     CREATE TABLE messages(
         server_id BLOB PRIMARY KEY CHECK (length(server_id) = 16),
@@ -36,7 +36,6 @@ const SCHEMA: &str = "
     INSERT INTO meta(id, last_received_at) VALUES (0, 0);
     CREATE INDEX messages_by_channel ON messages(channel_id, received_at);
     CREATE INDEX messages_by_expiry ON messages(expires_at);
-    PRAGMA user_version = 1;
 ";
 
 /// Opens the writer's connection to `db`, creating the file when it is new,
@@ -92,6 +91,9 @@ pub(crate) fn open_writer(db: &Path) -> Result<Connection, StartError> {
             .map_err(|_| refused(DbCause::Open))?;
         transaction
             .execute_batch(SCHEMA)
+            .map_err(|_| refused(DbCause::Open))?;
+        transaction
+            .pragma_update(None, "user_version", USER_VERSION)
             .map_err(|_| refused(DbCause::Open))?;
         transaction.commit().map_err(|_| refused(DbCause::Open))?;
     }
