@@ -11,39 +11,53 @@ use privatechat_core::testing::subscribe_credential;
 use privatechat_core::{Frame, relay};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::frame::Frame as RawFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::{Data, OpCode};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use crate::clock::ManualClock;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use super::TestDir;
+use crate::clock::{Clock, ManualClock};
 use crate::connection::spawn_deadline_task;
 use crate::frames::{self, ErrorCode};
 use crate::http::{MAX_MESSAGE, Shared, router};
 
-type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
+pub(super) type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-const HOST: &str = "chat.example.org";
-const K_CH: [u8; 32] = [0x40; 32];
-const DAY: u32 = 86_400;
+pub(super) const HOST: &str = "chat.example.org";
+pub(super) const K_CH: [u8; 32] = [0x40; 32];
+pub(super) const DAY: u32 = 86_400;
 
-/// A server on a free port of 127.0.0.1, with `clock`.
-async fn start(clock: &Arc<ManualClock>) -> SocketAddr {
-    let (ticks, _) = broadcast::channel(16);
-    let shared = Arc::new(Shared {
-        clock: clock.clone(),
-        hosts: vec![HOST.to_owned()],
-        ticks: ticks.clone(),
-    });
-    spawn_deadline_task(ticks);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    tokio::spawn(axum::serve(listener, router(shared)).into_future());
-    address
+/// A server on a free port of 127.0.0.1, with `clock` and a database of its
+/// own, gone with it.
+pub(super) struct Server {
+    pub(super) address: SocketAddr,
+    pub(super) shared: Arc<Shared>,
+    _dir: TestDir,
 }
 
-async fn connect(address: SocketAddr) -> Client {
+/// Every test server gets a directory of its own.
+static SERVERS: AtomicUsize = AtomicUsize::new(0);
+
+pub(super) async fn start(clock: &Arc<ManualClock>) -> Server {
+    let n = SERVERS.fetch_add(1, Ordering::SeqCst);
+    let dir = TestDir::new(&format!("ws{n}"));
+    let clock: Arc<dyn Clock> = clock.clone();
+    let shared = Shared::open(&dir.db(), clock, vec![HOST.to_owned()], 1 << 40).unwrap();
+    spawn_deadline_task(shared.ticks.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(axum::serve(listener, router(shared.clone())).into_future());
+    Server {
+        address,
+        shared,
+        _dir: dir,
+    }
+}
+
+pub(super) async fn connect(address: SocketAddr) -> Client {
     let (client, _) = tokio_tungstenite::connect_async(format!("ws://{address}/"))
         .await
         .unwrap();
@@ -52,13 +66,13 @@ async fn connect(address: SocketAddr) -> Client {
 
 /// What the client receives next.
 #[derive(Debug)]
-enum Received {
+pub(super) enum Received {
     Frame(Frame),
     Close(u16),
     Nothing,
 }
 
-async fn receive(client: &mut Client) -> Received {
+pub(super) async fn receive(client: &mut Client) -> Received {
     loop {
         let next = tokio::time::timeout(Duration::from_secs(10), client.next()).await;
         match next {
@@ -75,14 +89,14 @@ async fn receive(client: &mut Client) -> Received {
 }
 
 /// What the client receives within `ms` of real time, if anything.
-async fn receive_within(client: &mut Client, ms: u64) -> Received {
+pub(super) async fn receive_within(client: &mut Client, ms: u64) -> Received {
     tokio::time::timeout(Duration::from_millis(ms), receive(client))
         .await
         .unwrap_or(Received::Nothing)
 }
 
 /// The nonce of the client's first frame, which must be the `hello`.
-async fn hello(client: &mut Client) -> [u8; 32] {
+pub(super) async fn hello(client: &mut Client) -> [u8; 32] {
     let received = receive(client).await;
     let nonce = match &received {
         Received::Frame(Frame::Hello {
@@ -95,14 +109,14 @@ async fn hello(client: &mut Client) -> [u8; 32] {
     nonce.unwrap_or_default()
 }
 
-async fn send(client: &mut Client, frame: &Frame) {
+pub(super) async fn send(client: &mut Client, frame: &Frame) {
     client
         .send(Message::Binary(frame.encode().unwrap().into()))
         .await
         .unwrap();
 }
 
-fn subscribe(nonce: &[u8; 32], host: &str) -> Frame {
+pub(super) fn subscribe(nonce: &[u8; 32], host: &str) -> Frame {
     let (pk_ch, sig) = subscribe_credential(K_CH, DAY, nonce, host).unwrap();
     Frame::Subscribe {
         pk_ch,
@@ -112,7 +126,7 @@ fn subscribe(nonce: &[u8; 32], host: &str) -> Frame {
     }
 }
 
-fn channel() -> [u8; 16] {
+pub(super) fn channel() -> [u8; 16] {
     let (pk_ch, _) = subscribe_credential(K_CH, DAY, &[0; 32], HOST).unwrap();
     relay::channel_id(&pk_ch, DAY).unwrap()
 }
@@ -169,7 +183,8 @@ const UPGRADE: &str = "upgrade: websocket\r\nconnection: upgrade\r\nsec-websocke
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s030_t03_r03_route_and_origin() {
-    let address = start(&Arc::new(ManualClock::new(0))).await;
+    let server = start(&Arc::new(ManualClock::new(0))).await;
+    let address = server.address;
     let empty = "content-length: 0";
     let head = raw(
         address,
@@ -225,7 +240,8 @@ async fn s030_t03_r03_route_and_origin() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s030_t04_r04_message_size() {
-    let address = start(&Arc::new(ManualClock::new(0))).await;
+    let server = start(&Arc::new(ManualClock::new(0))).await;
+    let address = server.address;
     // 70 000 bytes are read, and fail to decode as a frame.
     let mut client = connect(address).await;
     hello(&mut client).await;
@@ -272,7 +288,8 @@ async fn s030_t04_r04_message_size() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s030_t05_r05_hello_first() {
-    let address = start(&Arc::new(ManualClock::new(0))).await;
+    let server = start(&Arc::new(ManualClock::new(0))).await;
+    let address = server.address;
     let mut client = connect(address).await;
     let nonce = hello(&mut client).await;
     assert_ne!(nonce, [0; 32]);
@@ -281,7 +298,8 @@ async fn s030_t05_r05_hello_first() {
 #[tokio::test(flavor = "multi_thread")]
 async fn s030_t06_r06_bad_frames_close() {
     let clock = Arc::new(ManualClock::new(0));
-    let address = start(&clock).await;
+    let server = start(&clock).await;
+    let address = server.address;
     let push = Frame::Push {
         channel_id: [1; 16],
         server_id: [2; 16],
@@ -365,7 +383,8 @@ async fn s030_t06_r06_bad_frames_close() {
 #[tokio::test(flavor = "multi_thread")]
 async fn spec_031_verdicts_on_the_wire() {
     let clock = Arc::new(ManualClock::new(0));
-    let address = start(&clock).await;
+    let server = start(&clock).await;
+    let address = server.address;
 
     // A ping is answered, and the connection goes on.
     let mut client = connect(address).await;
@@ -410,10 +429,20 @@ async fn spec_031_verdicts_on_the_wire() {
     );
     let fresh = hello(&mut client).await;
     assert_ne!(fresh, nonce);
-    send(&mut client, &subscribe(&fresh, HOST)).await;
+    // The new nonce opens another channel (this one is already subscribed,
+    // and a second subscribe of it gets nothing, R9).
+    let (pk_ch, sig) = subscribe_credential([0x41; 32], DAY, &fresh, HOST).unwrap();
+    let other = Frame::Subscribe {
+        pk_ch,
+        ttl_seconds: DAY,
+        sig,
+        since: Some(0),
+    };
+    send(&mut client, &other).await;
     let received = receive(&mut client).await;
+    let expected = relay::channel_id(&pk_ch, DAY).unwrap();
     assert!(
-        matches!(&received, Received::Frame(Frame::Ok { .. })),
+        matches!(&received, Received::Frame(Frame::Ok { channel_id }) if *channel_id == expected),
         "{received:?}"
     );
 }

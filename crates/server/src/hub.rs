@@ -1,0 +1,328 @@
+//! The subscriptions of every connection, per channel (spec 030-ws-protocol
+//! R7–R10, R12, R15): the single path from the writer's results to a
+//! connection's queue. A subscription catches up before it is subscribed,
+//! and the live pushes of its channel are held for it meanwhile, in order,
+//! within one bound per connection.
+
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use axum::body::Bytes;
+use privatechat_core::Frame;
+use tokio::sync::mpsc;
+
+use crate::frames::{self, ErrorCode};
+use crate::store::writer::WriteOutcome;
+
+/// The most pushes all the catching-up subscriptions of one connection may
+/// hold before their `ok` (R8).
+pub(crate) const HOLD_FRAMES: usize = 256;
+
+/// The most blob bytes they may hold (R8).
+pub(crate) const HOLD_BYTES: usize = 4 * 1024 * 1024;
+
+/// A frame encoded once, shared by every queue and hold it enters.
+pub(crate) type Encoded = Bytes;
+
+/// A live push held for a catching-up subscription.
+struct Held {
+    received_at: u64,
+    frame: Encoded,
+    blob_bytes: usize,
+}
+
+/// Where a subscription stands.
+enum Stage {
+    /// Its backlog is being sent; the live pushes of its channel wait here.
+    CatchingUp { held: VecDeque<Held>, bytes: usize },
+    /// Its `ok` is queued: live pushes go straight to the queue.
+    Subscribed,
+}
+
+/// One subscription of one connection.
+struct Subscription {
+    ttl_seconds: u32,
+    stage: Stage,
+}
+
+/// What the hub keeps of a connection: its queue and whether it overflowed.
+struct Connection {
+    queue: mpsc::Sender<Encoded>,
+    /// Set when its queue could not take a frame: the connection closes
+    /// (spec 033-rate-limit-quotas R5).
+    overflowed: Arc<AtomicBool>,
+    subscriptions: HashMap<[u8; 16], Subscription>,
+}
+
+/// Every subscription, by connection; the channels index them.
+#[derive(Default)]
+pub(crate) struct Hub {
+    connections: HashMap<u64, Connection>,
+    channels: HashMap<[u8; 16], Vec<u64>>,
+}
+
+/// What `subscribe` did.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Registered {
+    /// A new subscription, catching up.
+    CatchingUp,
+    /// The channel was already subscribed or catching up here (R9).
+    Already,
+}
+
+/// What a catching-up subscription does next (R7, R8).
+pub(crate) enum Next {
+    /// Its held pushes, past its last backlog push, to write now.
+    Held(Vec<Encoded>),
+    /// Its `ok` is queued and it is subscribed.
+    Subscribed,
+    /// It is gone: ended by R8, or the connection left.
+    Gone,
+}
+
+impl Hub {
+    /// A connection and its queue.
+    pub(crate) fn connect(
+        &mut self,
+        id: u64,
+        queue: mpsc::Sender<Encoded>,
+        overflowed: Arc<AtomicBool>,
+    ) {
+        self.connections.insert(
+            id,
+            Connection {
+                queue,
+                overflowed,
+                subscriptions: HashMap::new(),
+            },
+        );
+    }
+
+    /// Forgets the connection and every subscription of it (R15).
+    pub(crate) fn disconnect(&mut self, id: u64) {
+        if let Some(connection) = self.connections.remove(&id) {
+            for channel_id in connection.subscriptions.keys() {
+                self.forget_channel(channel_id, id);
+            }
+        }
+    }
+
+    /// Registers an accepted subscription as catching up, before any stored
+    /// blob is read (R7), unless the channel is already here (R9).
+    pub(crate) fn subscribe(
+        &mut self,
+        id: u64,
+        channel_id: [u8; 16],
+        ttl_seconds: u32,
+    ) -> Registered {
+        let Some(connection) = self.connections.get_mut(&id) else {
+            return Registered::Already;
+        };
+        if connection.subscriptions.contains_key(&channel_id) {
+            return Registered::Already;
+        }
+        connection.subscriptions.insert(
+            channel_id,
+            Subscription {
+                ttl_seconds,
+                stage: Stage::CatchingUp {
+                    held: VecDeque::new(),
+                    bytes: 0,
+                },
+            },
+        );
+        self.channels.entry(channel_id).or_default().push(id);
+        Registered::CatchingUp
+    }
+
+    /// The TTL of a channel subscribed or catching up on this connection.
+    pub(crate) fn ttl_seconds(&self, id: u64, channel_id: &[u8; 16]) -> Option<u32> {
+        self.connections
+            .get(&id)?
+            .subscriptions
+            .get(channel_id)
+            .map(|subscription| subscription.ttl_seconds)
+    }
+
+    /// Whether the subscription is still catching up (R8 may have ended it).
+    pub(crate) fn is_catching_up(&self, id: u64, channel_id: &[u8; 16]) -> bool {
+        matches!(
+            self.connections
+                .get(&id)
+                .and_then(|connection| connection.subscriptions.get(channel_id)),
+            Some(Subscription {
+                stage: Stage::CatchingUp { .. },
+                ..
+            })
+        )
+    }
+
+    /// After the backlog, whose last push was at `after` (`None` for none):
+    /// the held pushes past it, or, when none is left, the `ok` queued and the
+    /// subscription marked subscribed, in this one step under the lock (R7,
+    /// R8).
+    pub(crate) fn after_backlog(
+        &mut self,
+        id: u64,
+        channel_id: [u8; 16],
+        after: Option<u64>,
+    ) -> Next {
+        let Some(connection) = self.connections.get_mut(&id) else {
+            return Next::Gone;
+        };
+        let Some(subscription) = connection.subscriptions.get_mut(&channel_id) else {
+            return Next::Gone;
+        };
+        let Stage::CatchingUp { held, bytes } = &mut subscription.stage else {
+            return Next::Gone;
+        };
+        if !held.is_empty() {
+            let pushes: Vec<Encoded> = held
+                .drain(..)
+                .filter(|push| after.is_none_or(|after| push.received_at > after))
+                .map(|push| push.frame)
+                .collect();
+            *bytes = 0;
+            if !pushes.is_empty() {
+                return Next::Held(pushes);
+            }
+        }
+        let ok = Frame::Ok { channel_id }.encode().map(Encoded::from);
+        match ok {
+            Ok(frame) => {
+                subscription.stage = Stage::Subscribed;
+                queue(connection, frame);
+                Next::Subscribed
+            }
+            Err(_) => Next::Gone,
+        }
+    }
+
+    /// The results of one transaction of the writer, in its order: each
+    /// stored blob pushed to every subscription of its channel, held for
+    /// those catching up (R8, R12).
+    pub(crate) fn on_commit(&mut self, outcomes: Vec<WriteOutcome>) {
+        for outcome in outcomes {
+            let Ok(row) = outcome.result else {
+                continue;
+            };
+            let blob_bytes = row.blob.len();
+            let push = Frame::Push {
+                channel_id: outcome.channel_id,
+                server_id: row.server_id,
+                received_at: row.received_at,
+                blob: row.blob,
+            };
+            let Ok(frame) = push.encode() else {
+                continue;
+            };
+            let frame = Encoded::from(frame);
+            let subscribers = self
+                .channels
+                .get(&outcome.channel_id)
+                .cloned()
+                .unwrap_or_default();
+            for id in subscribers {
+                self.push(id, outcome.channel_id, row.received_at, &frame, blob_bytes);
+            }
+        }
+    }
+
+    /// One push for one subscription.
+    fn push(
+        &mut self,
+        id: u64,
+        channel_id: [u8; 16],
+        received_at: u64,
+        frame: &Encoded,
+        blob_bytes: usize,
+    ) {
+        let Some(connection) = self.connections.get_mut(&id) else {
+            return;
+        };
+        let Some(subscription) = connection.subscriptions.get_mut(&channel_id) else {
+            return;
+        };
+        match &mut subscription.stage {
+            Stage::Subscribed => queue(connection, frame.clone()),
+            Stage::CatchingUp { held, bytes } => {
+                held.push_back(Held {
+                    received_at,
+                    frame: frame.clone(),
+                    blob_bytes,
+                });
+                *bytes = bytes.saturating_add(blob_bytes);
+                self.bound_holds(id);
+            }
+        }
+    }
+
+    /// Ends the subscription holding the most bytes, alone, while the holds of
+    /// one connection pass `HOLD_FRAMES` or `HOLD_BYTES` (R8).
+    fn bound_holds(&mut self, id: u64) {
+        loop {
+            let Some(connection) = self.connections.get_mut(&id) else {
+                return;
+            };
+            let (mut frames, mut bytes) = (0usize, 0usize);
+            let mut largest: Option<([u8; 16], usize)> = None;
+            for (channel_id, subscription) in &connection.subscriptions {
+                if let Stage::CatchingUp {
+                    held,
+                    bytes: held_bytes,
+                } = &subscription.stage
+                {
+                    frames = frames.saturating_add(held.len());
+                    bytes = bytes.saturating_add(*held_bytes);
+                    if largest.is_none_or(|(_, most)| *held_bytes > most) {
+                        largest = Some((*channel_id, *held_bytes));
+                    }
+                }
+            }
+            if frames <= HOLD_FRAMES && bytes <= HOLD_BYTES {
+                return;
+            }
+            let Some((channel_id, _)) = largest else {
+                return;
+            };
+            connection.subscriptions.remove(&channel_id);
+            let error = frames::error(ErrorCode::RateLimited, Some(channel_id), None).encode();
+            if let Ok(error) = error {
+                queue(connection, Encoded::from(error));
+            }
+            self.forget_channel(&channel_id, id);
+        }
+    }
+
+    fn forget_channel(&mut self, channel_id: &[u8; 16], id: u64) {
+        if let Some(ids) = self.channels.get_mut(channel_id) {
+            ids.retain(|other| *other != id);
+            if ids.is_empty() {
+                self.channels.remove(channel_id);
+            }
+        }
+    }
+
+    /// The subscriptions the hub holds of a connection, for the tests of R15.
+    #[cfg(test)]
+    pub(crate) fn subscriptions_of(&self, id: u64) -> usize {
+        self.connections
+            .get(&id)
+            .map_or(0, |connection| connection.subscriptions.len())
+            .saturating_add(
+                self.channels
+                    .values()
+                    .filter(|ids| ids.contains(&id))
+                    .count(),
+            )
+    }
+}
+
+/// Puts `frame` in the connection's queue; a full queue marks it for closing
+/// (spec 033-rate-limit-quotas R5) and drops the frame.
+fn queue(connection: &Connection, frame: Encoded) {
+    if connection.queue.try_send(frame).is_err() {
+        connection.overflowed.store(true, Ordering::SeqCst);
+    }
+}

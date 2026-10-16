@@ -7,6 +7,7 @@
 )]
 
 mod auth;
+mod catch_up;
 mod store;
 mod ws;
 
