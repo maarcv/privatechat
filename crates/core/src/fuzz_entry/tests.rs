@@ -544,23 +544,20 @@ fn s031_t11_r11_seed_reaches_verify() {
     .concat();
     assert_eq!(
         relay_verify_subscribe_verdict(&seed),
-        Ok(vector.expected("channel_id").array())
+        Some(Ok(vector.expected("channel_id").array()))
     );
     let mut flipped = seed.clone();
     flipped[36] ^= 0x01;
     assert_eq!(
         relay_verify_subscribe_verdict(&flipped),
-        Err(Error::BadSignature)
+        Some(Err(Error::BadSignature))
     );
-    assert_eq!(
-        relay_verify_subscribe_verdict(&seed[..131]),
-        Err(Error::BadPayload)
-    );
+    assert_eq!(relay_verify_subscribe_verdict(&seed[..131]), None);
     // The second host is `example.org`, tried after the input's.
     let mut other = seed[..132].to_vec();
     other.extend_from_slice(b"not-the-host");
     assert_eq!(
         relay_verify_subscribe_verdict(&other),
-        Err(Error::BadSignature)
+        Some(Err(Error::BadSignature))
     );
 }

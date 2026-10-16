@@ -261,24 +261,25 @@ pub(crate) fn session_on_frame_verdict(data: &[u8]) -> Result<(Vec<Event>, Optio
 /// spec 011 R5 bounds a host below it.
 const MAX_FUZZ_HOST: usize = 250;
 
-/// The verdict of `relay_verify_subscribe`: the `channel_id` it opens.
-pub(crate) fn relay_verify_subscribe_verdict(data: &[u8]) -> Result<[u8; 16], Error> {
-    let (pk_ch, rest) = data.split_first_chunk::<32>().ok_or(Error::BadPayload)?;
-    let (ttl_seconds, rest) = rest.split_first_chunk::<4>().ok_or(Error::BadPayload)?;
-    let (sig, rest) = rest.split_first_chunk::<64>().ok_or(Error::BadPayload)?;
-    let (server_nonce, host) = rest.split_first_chunk::<32>().ok_or(Error::BadPayload)?;
+/// The verdict of `relay_verify_subscribe`: the `channel_id` it opens, or
+/// `None` for an input shorter than its layout.
+pub(crate) fn relay_verify_subscribe_verdict(data: &[u8]) -> Option<Result<[u8; 16], Error>> {
+    let (pk_ch, rest) = data.split_first_chunk::<32>()?;
+    let (ttl_seconds, rest) = rest.split_first_chunk::<4>()?;
+    let (sig, rest) = rest.split_first_chunk::<64>()?;
+    let (server_nonce, host) = rest.split_first_chunk::<32>()?;
     let host = host.get(..MAX_FUZZ_HOST).unwrap_or(host);
     let hosts = [
         String::from_utf8_lossy(host).into_owned(),
         "example.org".to_owned(),
     ];
-    relay::verify_subscribe(
+    Some(relay::verify_subscribe(
         pk_ch,
         u32::from_be_bytes(*ttl_seconds),
         sig,
         server_nonce,
         &hosts,
-    )
+    ))
 }
 
 /// `verify`, then `open`, in the channel `ctx`.

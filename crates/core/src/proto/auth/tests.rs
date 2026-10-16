@@ -169,10 +169,8 @@ fn s031_t02_r02_auth_message() {
 /// two ends of the TTL give two.
 #[test]
 fn s031_t03_r03_channel_id() {
-    let short = vectors::load("031", "auth_ttl_60");
-    let long = vectors::load("031", "auth_ttl_2592000");
-    for vector in [&short, &long] {
-        let sent = sent(vector);
+    for vector in positives() {
+        let sent = sent(&vector);
         let k_ch = vector.input("k_ch").array();
         let config = Config::from_parts(
             Secret::from_bytes(k_ch),
@@ -182,15 +180,31 @@ fn s031_t03_r03_channel_id() {
             0,
         )
         .unwrap();
+        let expected: [u8; 16] = vector.expected("channel_id").array();
+        assert_eq!(config.channel_id(), expected, "{}", vector.name());
         assert_eq!(
             relay::channel_id(&sent.pk_ch, sent.ttl_seconds),
-            Ok(config.channel_id())
+            Ok(expected),
+            "{}",
+            vector.name()
         );
     }
     assert_ne!(
-        short.expected("channel_id").bytes(),
-        long.expected("channel_id").bytes()
+        vectors::load("031", "auth_ttl_60")
+            .expected("channel_id")
+            .bytes(),
+        vectors::load("031", "auth_ttl_2592000")
+            .expected("channel_id")
+            .bytes()
     );
+}
+
+/// The positive vectors of `031.json`.
+fn positives() -> Vec<Vector> {
+    vectors::all("031")
+        .into_iter()
+        .filter(|vector| vector.kind() == Kind::Positive)
+        .collect()
 }
 
 /// Spec 031, R4: the hosts are tried in order, and their number and the TTL
@@ -219,6 +233,10 @@ fn s031_t04_r04_verify_subscribe() {
     let nine: Vec<String> = (0..9).map(|_| host("chat.example.org")).collect();
     assert_eq!(check(&nine), Err(Error::BadConfig));
     assert_eq!(check(&nine[..8]), Ok(id));
+    for vector in positives() {
+        let expected: [u8; 16] = vector.expected("channel_id").array();
+        assert_eq!(verify(&sent(&vector)), Ok(expected), "{}", vector.name());
+    }
     for vector in vectors::all("031")
         .iter()
         .filter(|vector| vector.kind() == Kind::Negative)
@@ -259,8 +277,12 @@ fn s031_t01_r01_new_nonce() {
 /// Any URL of the grammar of spec 011 R5.
 fn server_urls() -> impl Strategy<Value = String> {
     let port = proptest::option::of(1u16..=65_535);
-    let tls = ("[a-z0-9.-]{1,60}", port.clone())
+    // Up to the 250 bytes a host can have in the 256 of a URL (spec 011 R5).
+    let tls = ("[a-z0-9.-]{1,250}", port.clone())
         .prop_filter("no implied port", |(_, port)| *port != Some(443))
+        .prop_filter("within the URL bound", |(host, port)| {
+            with_port(format!("wss://{host}"), *port).len() <= 256
+        })
         .prop_map(|(host, port)| with_port(format!("wss://{host}"), port));
     let onion = ("[a-z2-7]{56}", port)
         .prop_filter("no implied port", |(_, port)| *port != Some(80))
