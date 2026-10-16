@@ -258,7 +258,7 @@ pub(crate) fn session_on_frame_verdict(data: &[u8]) -> Result<(Vec<Event>, Optio
 }
 
 /// The most host bytes `relay_verify_subscribe` reads: the URL grammar of
-/// spec 011 R5 bounds a host below it.
+/// spec 011 R5 bounds a host to it.
 const MAX_FUZZ_HOST: usize = 250;
 
 /// The verdict of `relay_verify_subscribe`: the `channel_id` it opens, or

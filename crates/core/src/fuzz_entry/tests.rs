@@ -586,6 +586,12 @@ fn s031_t11_r11_seed_reaches_verify() {
         relay_verify_subscribe_verdict(&layout(&sig, &long.as_bytes()[..249])),
         Some(Err(Error::BadSignature))
     );
+    // A short host is the input's own.
+    let sig = signed_for("h");
+    assert_eq!(
+        relay_verify_subscribe_verdict(&layout(&sig, b"h")),
+        channel_id
+    );
     let sig = signed_for("example.org");
     assert_eq!(
         relay_verify_subscribe_verdict(&layout(&sig, b"not-the-host")),

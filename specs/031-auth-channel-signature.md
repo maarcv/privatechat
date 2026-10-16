@@ -121,7 +121,7 @@ The subscription signature is `sign_detached(sk_ch, auth_message(…))`, compute
 - T08 (covers R8): `s031_t08_r08_hosts_from_config`: configured URLs `wss://chat.example.org` and `ws://<56 chars>.onion` → a signature over either host is accepted; over `chat.example.org:9001` → `BadAuth`; `AuthState::on_subscribe` takes no request header, so the `Host` header cannot reach it; `url_host` of `wss://h:9001` → `h`, and of `wss://h/` → `BadConfig`.
 - T09 (covers R9): `s031_t09_r09_nothing_kept`: after an accepted subscribe, the `Debug` of `AuthState` and of the subscription contains neither `pk_ch` nor `sig` in hex.
 - T10 (covers R10): `s031_t10_r10_vectors_reproduced`: every vector of `031.json` is reproduced by `auth_message`, `relay::channel_id` and `verify_subscribe`; the CI step of spec 015 regenerates `031.json` byte for byte.
-- T11 (covers R11): `s031_t11_r11_round_trip_and_fuzz`: the proptest of R11; `scripts/check_fuzz_targets.sh` lists `relay_verify_subscribe`; its seeds reach `verify_detached`.
+- T11 (covers R11): `s031_t11_r11_round_trip_and_fuzz`: the proptest of R11; `scripts/check_fuzz_targets.sh` lists `relay_verify_subscribe`; the seed of each signature vector reaches `verify_detached`, and the two of a TTL out of range stop at `BadConfig`.
 
 ## Vectors
 
@@ -167,3 +167,4 @@ None.
 - 2026-10-09 `ChannelId::derive` (R3) written by slice (b1) of spec 028-session-sans-io, whose test server derives `channel_id` through it, and `Config` too; its tests stay this spec's
 - 2026-10-15 amended after audit BB (`docs/audit-log.md`, BB-D-11): R10 names how the client path is covered, through the shared `auth_message` and spec 028's `s028_t06_r06_subscribe_contents_and_pacing`; R11 names the `fuzz_entry` function and its `_verdict` (spec 016 R2, R7)
 - 2026-10-16 Vectors: `auth_ttl_ends` split into `auth_ttl_60` and `auth_ttl_2592000`, one vector per TTL like the negatives and the schema of `specs/vectors/README.md`; T03 names the check (after the advisor, three passes, unanimous)
+- 2026-10-16 T11 worded after audit BF: the seeds of a TTL out of range stop before the signature
