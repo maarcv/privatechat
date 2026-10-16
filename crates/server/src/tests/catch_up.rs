@@ -212,7 +212,8 @@ async fn s030_t07_r07_backlog_then_ok() {
         }
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
-    clock.advance(60_001);
+    // Exactly to its `expires_at`: `expires_at > now` no longer holds.
+    clock.advance(60_000);
 
     let mut client = connect(server.address).await;
     let nonce = hello(&mut client).await;

@@ -79,6 +79,7 @@ crates/server/src/hub.rs                          subscriptions per channel, hel
 crates/server/src/frames.rs                       the fixed error texts (R13)
 crates/server/src/tests/ws.rs                     s030_* server tests of the route, the handshake and the frames, over a real socket
 crates/server/src/tests/catch_up.rs               s030_* server tests of the subscriptions, the catch-up and the disconnect, over a real socket and over the hub
+crates/server/src/tests/auth.rs                   also `s030_t16_r16_relay_failures`, each `relay` call of `AuthState` made to fail (R16)
 ```
 
 ```rust
@@ -165,5 +166,5 @@ None.
 - 2026-10-09 amended after audit AJ (`docs/audit-log.md`): R14 and T14 leave out `ok_unknown_key`, a decode case whose extra key no encoder writes
 - 2026-10-15 amended after audit BB (`docs/audit-log.md`, BB-D-11): the Limits row says a blob above 64 673 B fails frame decoding and closes with 1008, as `frames.rs` does; Security says the echo acknowledges nothing (spec 021 R13); R2 names the `fuzz_entry` function and its `_verdict` (spec 016 R2, R7)
 - 2026-10-16 R3 worded after audit BI: the path and the method are checked before the `Origin`, the `Origin` before the upgrade, and a `GET /` that is not an upgrade gets the empty 404; T03 checks the non-upgrade `GET /` and `HEAD /`, T04 a text frame that is not UTF-8
-- 2026-10-16 Interface after audit BJ: the tests of the catch-up in `tests/catch_up.rs`, the test hooks in `http.rs`
+- 2026-10-16 Interface after audit BJ: the tests of the catch-up in `tests/catch_up.rs`, the test hooks in `http.rs`, T16's `relay` failures in `tests/auth.rs`
 - 2026-10-16 R8 amended after audit BJ (`docs/audit-log.md`, BJ-D-1, the human's decision): the bound passed chooses the subscription ended, the most bytes past 4 MiB, else the most pushes past 256; the Limits row, Security and T08 with it

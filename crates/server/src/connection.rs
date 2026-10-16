@@ -30,8 +30,10 @@ pub(crate) const TICK: Duration = Duration::from_millis(100);
 /// stops reading cannot hold the task, the first-subscribe deadline included.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// The frames of the queue the hub fills for a connection; spec
-/// 033-rate-limit-quotas R5 adds its byte bound.
+/// The frames of the queue the hub fills for a connection. The frame the task
+/// has taken and is writing is not counted, so 257 can wait unwritten; spec
+/// 033-rate-limit-quotas R5, in its slice (a), counts it and adds the byte
+/// bound.
 pub(crate) const QUEUE_FRAMES: usize = 256;
 
 /// The close codes the server sends (RFC 6455 §7.4.1).
