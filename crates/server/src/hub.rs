@@ -141,7 +141,8 @@ impl Hub {
         Some(generation)
     }
 
-    /// The TTL of a channel subscribed or catching up on this connection.
+    /// The TTL of a channel subscribed or catching up on this connection,
+    /// which its publishes take (R11, the next slice).
     pub(crate) fn ttl_seconds(&self, id: u64, channel_id: &[u8; 16]) -> Option<u32> {
         self.connections
             .get(&id)?

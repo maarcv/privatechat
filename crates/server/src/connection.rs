@@ -147,6 +147,16 @@ impl Connection {
         loop {
             let catching_up = !self.catching.is_empty();
             let flow = tokio::select! {
+                // In this order: the tick first, so that neither the client
+                // nor the queue puts off a close; the catch-up, always ready,
+                // last, so that a frame already read or queued is never left
+                // behind a page.
+                biased;
+                tick = ticks.recv() => match tick {
+                    // A lagging receiver missed ticks, which only delays the check.
+                    Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => self.on_tick(),
+                    Err(broadcast::error::RecvError::Closed) => Flow::Gone,
+                },
                 message = self.socket.recv() => match message {
                     None | Some(Ok(Message::Close(_))) => Flow::Gone,
                     Some(Ok(Message::Binary(bytes))) => self.on_frame(&bytes).await,
@@ -157,11 +167,6 @@ impl Connection {
                 frame = self.queue.recv() => match frame {
                     Some(frame) => self.write_queued(frame).await,
                     None => Flow::Gone,
-                },
-                tick = ticks.recv() => match tick {
-                    // A lagging receiver missed ticks, which only delays the check.
-                    Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => self.on_tick(),
-                    Err(broadcast::error::RecvError::Closed) => Flow::Gone,
                 },
                 () = std::future::ready(()), if catching_up => self.catch_up().await,
             };

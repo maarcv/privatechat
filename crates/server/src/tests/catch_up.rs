@@ -3,7 +3,7 @@
 //! queue bound, the disconnect and the internal errors.
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -18,7 +18,6 @@ use super::ws::{
     start, subscribe,
 };
 use crate::clock::ManualClock;
-use std::sync::atomic::AtomicBool;
 
 use tokio::sync::mpsc;
 
@@ -470,9 +469,9 @@ async fn s030_t08_r08_hold_bound_ends_one_subscription() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s030_t08_r08_hold_bound_is_inclusive() {
-    // 256 pushes, and blobs of 4 193 536 bytes (frames of more than 4 MiB):
-    // both within the bound, nothing ended.
-    for (count, bytes) in [(256u16, 1_185usize), (256, 16_381)] {
+    // 256 pushes, and 256 blobs of 16 KiB, exactly 4 MiB: both within the
+    // bound, nothing ended.
+    for (count, bytes) in [(256u16, 1_185usize), (256, 16_384)] {
         let clock = Arc::new(ManualClock::new(T0));
         let server = start(&clock).await;
         plant(&server, channel(), 10, 1_185, T0 - 1_000, T0 + 3_600_000);
@@ -524,6 +523,7 @@ fn s030_t08_r08_hold_bound_ends_the_largest_only() {
         "{error:?}"
     );
     assert!(queue.try_recv().is_err(), "one error only");
+    assert_eq!(hub.subscriptions_of(1), 2, "the ended one still indexed");
     assert_eq!(hub.after_backlog(1, other_channel(), small, None).len(), 57);
 }
 
@@ -800,5 +800,84 @@ fn s030_t08_r08_a_stale_step_does_not_act() {
     assert!(
         !hub.is_catching_up(1, &channel(), second),
         "the second is subscribed"
+    );
+}
+
+/// One stored blob of `bytes` bytes, as the writer hands it to the hub.
+fn committed(channel_id: [u8; 16], k: u64, bytes: usize) -> WriteOutcome {
+    WriteOutcome {
+        connection: 9,
+        client_ref: [0; 16],
+        channel_id,
+        result: Ok(Row {
+            server_id: [u8::try_from(k % 256).unwrap(); 16],
+            received_at: T0 + k,
+            blob: vec![1; bytes],
+        }),
+    }
+}
+
+#[test]
+fn s030_t08_r08_floor_after_ok() {
+    // The last backlog push reaches the hub after `ok`: dropped; the next
+    // one goes to the queue.
+    let mut hub = Hub::default();
+    let (sender, mut queue) = mpsc::channel(QUEUE_FRAMES);
+    hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
+    let first = generation(hub.subscribe(1, channel(), DAY));
+    assert!(
+        hub.after_backlog(1, channel(), first, Some(T0 + 5))
+            .is_empty()
+    );
+    let ok = queue.try_recv().map(|bytes| Frame::decode(&bytes));
+    assert!(matches!(ok, Ok(Ok(Frame::Ok { .. }))), "{ok:?}");
+    hub.on_commit(vec![
+        committed(channel(), 5, 1_185),
+        committed(channel(), 6, 1_185),
+    ]);
+    let push = queue.try_recv().map(|bytes| Frame::decode(&bytes));
+    assert!(
+        matches!(push, Ok(Ok(Frame::Push { received_at, .. })) if received_at == T0 + 6),
+        "{push:?}"
+    );
+    assert!(queue.try_recv().is_err(), "the last backlog push twice");
+}
+
+#[test]
+fn s030_t08_r08_held_in_chunks() {
+    // 40 held pushes of 16 KiB: chunks of at most 256 KiB, then `ok`.
+    let mut hub = Hub::default();
+    let (sender, mut queue) = mpsc::channel(QUEUE_FRAMES);
+    hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
+    let first = generation(hub.subscribe(1, channel(), DAY));
+    hub.on_commit((0..40).map(|k| committed(channel(), k, 16_384)).collect());
+    for expected in [16, 16, 8] {
+        assert_eq!(hub.after_backlog(1, channel(), first, None).len(), expected);
+        assert!(hub.is_catching_up(1, &channel(), first));
+        assert!(queue.try_recv().is_err(), "`ok` before the held pushes");
+    }
+    assert!(hub.after_backlog(1, channel(), first, None).is_empty());
+    assert!(!hub.is_catching_up(1, &channel(), first));
+    assert!(queue.try_recv().is_ok(), "no `ok`");
+}
+
+#[test]
+fn s030_t08_r08_handed_out_bytes_leave_the_bound() {
+    // 200 held pushes of 16 KiB, one chunk handed out, 60 more: 244 held,
+    // 3 997 696 bytes, within the bound.
+    let mut hub = Hub::default();
+    let (sender, _queue) = mpsc::channel(QUEUE_FRAMES);
+    hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
+    let first = generation(hub.subscribe(1, channel(), DAY));
+    hub.on_commit((0..200).map(|k| committed(channel(), k, 16_384)).collect());
+    assert_eq!(hub.after_backlog(1, channel(), first, None).len(), 16);
+    hub.on_commit(
+        (200..260)
+            .map(|k| committed(channel(), k, 16_384))
+            .collect(),
+    );
+    assert!(
+        hub.is_catching_up(1, &channel(), first),
+        "ended within the bound"
     );
 }

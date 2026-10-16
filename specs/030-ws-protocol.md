@@ -73,8 +73,7 @@ crates/core/src/relay.rs                          check_blob (R2); specs 031 and
 crates/core/src/relay/tests.rs                    s030_* core tests
 crates/core/fuzz/fuzz_targets/relay_check_blob.rs
 crates/server/src/main.rs                         wiring only; spec 035 owns start-up and shutdown
-crates/server/src/http.rs                         also `Shared` and its `cfg(test)` hooks, used by the tests of specs 030, 033 and 035: a pause of the socket writes, a pause before a catch-up's `ok`, a count of the backlog reads, a failing read and failing `relay` calls
-crates/server/src/http.rs                         the route, the Origin and path checks, the upgrade (R3, R4)
+crates/server/src/http.rs                         the route, the Origin and path checks, the upgrade (R3, R4); `Shared` and its `cfg(test)` hooks, used by the tests of specs 030, 033 and 035: a pause of the socket writes, a pause before a catch-up's `ok`, a count of the backlog reads, a failing read and failing `relay` calls
 crates/server/src/connection.rs                   one task per socket: frames in, frames out, catch-up (R5–R11, R15, R16)
 crates/server/src/hub.rs                          subscriptions per channel, held pushes, fan-out in order (R8, R12)
 crates/server/src/frames.rs                       the fixed error texts (R13)
