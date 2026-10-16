@@ -70,7 +70,7 @@ const WORD_INDEX_MASK: u16 = 0x07ff;
 const MAX_DRAWN_PASSWORD: usize = 62;
 
 /// The TTL range, 1 minute to 30 days (R4, ADR 0014).
-const TTL_SECONDS: RangeInclusive<u32> = 60..=2_592_000;
+pub(crate) const TTL_SECONDS: RangeInclusive<u32> = 60..=2_592_000;
 
 /// The keys of the record, `docs/spec.md` §5 (R1).
 const KEY_CONFIG_VERSION: u8 = 0;

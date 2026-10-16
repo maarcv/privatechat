@@ -123,6 +123,11 @@ fn s027_t16_r16_items_for_other_crates() {
     let _: fn(&Frame) -> Result<Vec<u8>, Error> = Frame::encode;
     let _: fn(&[u8]) -> Result<Frame, Error> = Frame::decode;
     let _: fn() -> Result<[u8; 16], Error> = relay::new_server_id;
+    let _: fn() -> Result<[u8; 32], Error> = relay::new_nonce;
+    let _: fn(&[u8; 32], u32) -> Result<[u8; 16], Error> = relay::channel_id;
+    let _: fn(&[u8; 32], u32, &[u8; 64], &[u8; 32], &[String]) -> Result<[u8; 16], Error> =
+        relay::verify_subscribe;
+    let _: fn(&str) -> Result<String, Error> = relay::url_host;
     let _: [usize; 3] = [MAX_STATE_FILE, MAX_SETTINGS_FILE, MAX_LOG_ENTRY];
     let _: u64 = MAX_LOG_LEN;
 }

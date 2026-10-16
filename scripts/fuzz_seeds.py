@@ -84,7 +84,22 @@ TARGETS: dict[str, tuple[str, Callable[[dict], bool], Seed]] = {
                         lambda v: times(v) + CHANNEL_SERVER_ID + field(v, "blob")),
     "frame_decode": ("028", lambda v: True, lambda v: field(v, "frame")),
     "session_on_frame": ("028 013", lambda v: True, lambda v: framed(session_frame(v))),
+    "relay_verify_subscribe": ("031", lambda v: True, lambda v: subscribe_seed(v)),
 }
+
+
+def url_host(server_url: bytes) -> bytes:
+    """The host of a URL of spec 011 R5: between the scheme and the optional port."""
+    rest = server_url.split(b"://", 1)[1]
+    return rest.rsplit(b":", 1)[0] if b":" in rest else rest
+
+
+def subscribe_seed(v: dict) -> bytes:
+    """A 031 vector as the server checks it (spec 031 R11): `pk_ch ‖ BE32(ttl_seconds) ‖ sig ‖
+    server_nonce ‖ host`, the host of its configured URL."""
+    ttl = v["inputs"]["ttl_seconds"].to_bytes(4, "big")
+    return (field(v, "pk_ch") + ttl + field(v, "sig") + field(v, "server_nonce")
+            + url_host(field(v, "server_url")))
 
 
 def framed(frame: bytes) -> bytes:
@@ -155,6 +170,9 @@ def read_back(target: str, seed: bytes) -> dict[str, bytes]:
     if target == "receive_signed":
         return {"counter": seed[:8], "nonce": seed[8:32], "received_at": seed[32:40],
                 "now": seed[40:48], "padded": seed[48:]}
+    if target == "relay_verify_subscribe":
+        return {"pk_ch": seed[:32], "ttl_seconds": seed[32:36], "sig": seed[36:100],
+                "server_nonce": seed[100:132], "host": seed[132:]}
     return {"whole": seed}
 
 
@@ -185,6 +203,13 @@ def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
         return {"counter": field(v, "counter"), "nonce": field(v, "nonce"),
                 "received_at": field(v, "received_at"), "now": field(v, "now"),
                 "padded": field(v, "padded")}
+    if target == "relay_verify_subscribe":
+        # Written out apart from `subscribe_seed`: the host is the URL's after its scheme.
+        url = field(v, "server_url").decode("ascii")
+        host = url.split("//", 1)[1].split(":")[0]
+        return {"pk_ch": field(v, "pk_ch"), "ttl_seconds": v["inputs"]["ttl_seconds"].to_bytes(4, "big"),
+                "sig": field(v, "sig"), "server_nonce": field(v, "server_nonce"),
+                "host": host.encode("ascii")}
     whole = {"config_parse": "record", "config_parse_qr": "qr", "payload_decode": "payload",
              "verify_qr_parse": "qr", "state_decode": "record", "log_record_decode": "record",
              "settings_decode": "record", "frame_decode": "frame"}[target]
@@ -196,7 +221,8 @@ def vector_fields(target: str, v: dict) -> dict[str, bytes | None]:
 SEED_COUNTS = {"record_decode": 31, "config_parse": 27, "config_parse_qr": 32,
                "payload_decode": 17, "receive": 30, "receive_signed": 18, "verify_qr_parse": 6,
                "state_decode": 2, "log_record_decode": 4, "settings_decode": 2,
-               "channel_decrypt": 30, "frame_decode": 14, "session_on_frame": 44}
+               "channel_decrypt": 30, "frame_decode": 14, "session_on_frame": 44,
+               "relay_verify_subscribe": 11}
 
 
 def check_s016_t08_r08_corpus_is_seeded() -> None:

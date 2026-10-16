@@ -480,7 +480,7 @@ fn release_order(channel: &Channel, now: u64) -> u64 {
 }
 
 /// The `subscribe` of `channel` under `server_nonce` (R6).
-fn subscribe(channel: &Channel, server_nonce: &[u8; 32]) -> Result<Vec<u8>, Error> {
+pub(crate) fn subscribe(channel: &Channel, server_nonce: &[u8; 32]) -> Result<Vec<u8>, Error> {
     let config = channel.config();
     let (pk_ch, sk_ch) = config.channel_keypair()?;
     let message = auth_message(

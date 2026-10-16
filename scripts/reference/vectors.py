@@ -38,7 +38,7 @@ WORD_LIST = ROOT / "crates" / "core" / "src" / "proto" / "bip39_english.txt"
 WORD_LIST_SHA256 = "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"  # 011 R17
 
 PROTO_VERSION = 1
-FORMAT_SPECS = ("011", "012", "013", "014", "017", "020", "028")
+FORMAT_SPECS = ("011", "012", "013", "014", "017", "020", "028", "031")
 KINDS = ("positive", "negative")
 SOURCES = ("published", "derived", "pinned")
 # The fields whose strings are text; every other string is hexadecimal (R1).
@@ -1425,6 +1425,91 @@ def frames_section_028() -> list[dict]:
 
 
 SECTIONS["028"] = frames_section_028
+
+
+# --- Spec 031: the subscription signature -------------------------------------------
+
+AUTH_TAG = b"privatechat/auth/v1"  # docs/spec.md §4, 031 R2
+
+
+def url_host(server_url: str) -> str:
+    """The host of a URL of the grammar of 011 R5: between the scheme and the optional port."""
+    rest = server_url.split("://", 1)[1]
+    return rest.rsplit(":", 1)[0] if ":" in rest else rest
+
+
+def auth_message(server_nonce: bytes, channel_id: bytes, ttl_seconds: int, host: str) -> bytes:
+    """`AUTH_TAG ‖ server_nonce ‖ channel_id ‖ BE32(ttl_seconds) ‖ host` (031 R2)."""
+    return AUTH_TAG + server_nonce + channel_id + struct.pack(">I", ttl_seconds) + host.encode("ascii")
+
+
+def check_s031_t10_r10_section_produces_031_json() -> list[dict]:
+    """The vectors of spec 031: each positive with its `channel_id`, host, message and
+    signature; each negative the server's inputs of a `subscribe` it refuses, with the error of
+    `verify_subscribe` and the `channel_id` the server names in its answer."""
+    k_ch = bytes(range(0x40, 0x60))
+    nonce = bytes(range(0xa0, 0xc0))
+    other_nonce = bytes(range(0xc0, 0xe0))
+    seed = kdf_derive(k_ch, CHANNEL_AUTH_CONTEXT)
+
+    def signed(server_url: str, ttl_seconds: int, server_nonce: bytes = nonce) -> dict:
+        """What the client sends for this channel and URL, and what it signed."""
+        pk_ch, channel_id = channel_identity(k_ch, ttl_seconds)
+        host = url_host(server_url)
+        message = auth_message(server_nonce, channel_id, ttl_seconds, host)
+        return {"pk_ch": pk_ch, "channel_id": channel_id, "host": host, "message": message,
+                "sig": ed25519_sign(seed, message)}
+
+    def raw(name: str, kind: str, origin: str, inputs: dict, expected: dict) -> dict:
+        return {"name": name, "kind": kind, "source": "derived", "origin": f"spec 031: {origin}",
+                "inputs": inputs, "expected": expected}
+
+    def positive(name: str, origin: str, server_url: str, ttl_seconds: int) -> dict:
+        sent = signed(server_url, ttl_seconds)
+        inputs = {"k_ch": k_ch, "server_url": server_url.encode("ascii"),
+                  "ttl_seconds": ttl_seconds, "server_nonce": nonce, "pk_ch": sent["pk_ch"],
+                  "sig": sent["sig"]}
+        expected = {"channel_id": sent["channel_id"], "host": sent["host"].encode("ascii"),
+                    "message": sent["message"]}
+        return raw(name, kind="positive", origin=origin, inputs=inputs, expected=expected)
+
+    def negative(name: str, origin: str, sent: dict, ttl_seconds: int, server_nonce: bytes,
+                 server_url: str, error: str) -> dict:
+        _, channel_id = channel_identity(k_ch, ttl_seconds)
+        inputs = {"server_url": server_url.encode("ascii"), "ttl_seconds": ttl_seconds,
+                  "server_nonce": server_nonce, "pk_ch": sent["pk_ch"], "sig": sent["sig"]}
+        return raw(name, "negative", origin, inputs, {"error": error, "channel_id": channel_id})
+
+    url, onion = "wss://chat.example.org", f"ws://{ONION_HOST}"
+    reference = signed(url, 86_400)
+    with_port = signed(url + ":9001", 86_400)
+    require(with_port["sig"] == reference["sig"], "031: the port is not signed")
+    flipped = {**reference, "sig": bytes([reference["sig"][0] ^ 0x01]) + reference["sig"][1:]}
+    signed_60 = signed(url, 60)
+    vectors = [
+        positive("auth_reference", "the reference subscribe", url, 86_400),
+        positive("auth_url_with_port", "the same channel with a port", url + ":9001", 86_400),
+        positive("auth_onion_ws", "a ws:// onion URL (ADR 0038)", onion, 86_400),
+        positive("auth_ttl_60", "the shortest TTL", url, 60),
+        positive("auth_ttl_2592000", "the longest TTL", url, 2_592_000),
+        negative("auth_wrong_host", "signed for chat.example.org, checked for another host",
+                 reference, 86_400, nonce, "wss://other.example.org", "BadSignature"),
+        negative("auth_wrong_nonce", "signed under another nonce", reference, 86_400,
+                 other_nonce, url, "BadSignature"),
+        negative("auth_flipped_sig", "auth_reference with the first bit of sig flipped",
+                 flipped, 86_400, nonce, url, "BadSignature"),
+        negative("auth_other_ttl", "signed for TTL 60, sent with TTL 61", signed_60, 61, nonce,
+                 url, "BadSignature"),
+        negative("auth_ttl_59", "a TTL under the range", signed(url, 59), 59, nonce, url,
+                 "BadConfig"),
+        negative("auth_ttl_2592001", "a TTL over the range", signed(url, 2_592_001), 2_592_001,
+                 nonce, url, "BadConfig"),
+    ]
+    require(len({v["inputs"]["pk_ch"] for v in vectors}) == 1, "031: one channel key pair")
+    return vectors
+
+
+SECTIONS["031"] = check_s031_t10_r10_section_produces_031_json
 
 
 def words() -> list[str]:

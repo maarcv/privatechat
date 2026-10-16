@@ -22,6 +22,7 @@ const FILES: &[(&str, &str)] = &[
     ("017", include_str!("../../../specs/vectors/017.json")),
     ("020", include_str!("../../../specs/vectors/020.json")),
     ("028", include_str!("../../../specs/vectors/028.json")),
+    ("031", include_str!("../../../specs/vectors/031.json")),
 ];
 
 /// Where a vector's values come from (`specs/vectors/README.md`).

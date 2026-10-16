@@ -18,6 +18,7 @@ use crate::proto::fingerprint;
 use crate::proto::payload::{MAX_BLOCKS, PAD_BLOCK, Payload};
 use crate::proto::record::UnknownKeys;
 use crate::proto::record::test_schema::{TypesRecord, decode_test_record};
+use crate::relay;
 use crate::session::channel::{Channel, Received};
 use crate::session::connection::{Event, Session};
 use crate::session::frames::Frame;
@@ -115,6 +116,13 @@ pub fn frame_decode(data: &[u8]) {
 /// `channel_decrypt` (R3).
 pub fn session_on_frame(data: &[u8]) {
     let _ = session_on_frame_verdict(data);
+}
+
+/// `relay_verify_subscribe`: a `subscribe` as the server checks it, `pk_ch`
+/// (32) ‖ BE32(`ttl_seconds`) ‖ `sig` (64) ‖ `server_nonce` (32) ‖ host,
+/// against that host and `example.org` (spec 031-auth-channel-signature R11).
+pub fn relay_verify_subscribe(data: &[u8]) {
+    let _ = relay_verify_subscribe_verdict(data);
 }
 
 /// The verdict of `record_decode`; `None` for an input with no policy byte.
@@ -247,6 +255,30 @@ pub(crate) fn session_on_frame_verdict(data: &[u8]) -> Result<(Vec<Event>, Optio
     }
     let cursor = channels.first().and_then(Channel::cursor);
     Ok((events, cursor))
+}
+
+/// The most host bytes `relay_verify_subscribe` reads: the URL grammar of
+/// spec 011 R5 bounds a host below it.
+const MAX_FUZZ_HOST: usize = 250;
+
+/// The verdict of `relay_verify_subscribe`: the `channel_id` it opens.
+pub(crate) fn relay_verify_subscribe_verdict(data: &[u8]) -> Result<[u8; 16], Error> {
+    let (pk_ch, rest) = data.split_first_chunk::<32>().ok_or(Error::BadPayload)?;
+    let (ttl_seconds, rest) = rest.split_first_chunk::<4>().ok_or(Error::BadPayload)?;
+    let (sig, rest) = rest.split_first_chunk::<64>().ok_or(Error::BadPayload)?;
+    let (server_nonce, host) = rest.split_first_chunk::<32>().ok_or(Error::BadPayload)?;
+    let host = host.get(..MAX_FUZZ_HOST).unwrap_or(host);
+    let hosts = [
+        String::from_utf8_lossy(host).into_owned(),
+        "example.org".to_owned(),
+    ];
+    relay::verify_subscribe(
+        pk_ch,
+        u32::from_be_bytes(*ttl_seconds),
+        sig,
+        server_nonce,
+        &hosts,
+    )
 }
 
 /// `verify`, then `open`, in the channel `ctx`.

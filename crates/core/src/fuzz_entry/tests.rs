@@ -7,8 +7,8 @@ use proptest::prelude::{ProptestConfig, any, proptest};
 use super::{
     QR_CHANNEL, config_parse_qr_verdict, config_parse_verdict, frame_decode_verdict,
     log_record_decode_verdict, payload_decode_verdict, receive_signed_verdict, receive_verdict,
-    record_decode_verdict, session_on_frame_verdict, settings_decode_verdict, state_decode_verdict,
-    verify_qr_parse_verdict,
+    record_decode_verdict, relay_verify_subscribe_verdict, session_on_frame_verdict,
+    settings_decode_verdict, state_decode_verdict, verify_qr_parse_verdict,
 };
 use crate::Error;
 use crate::crypto::{self, Nonce, PublicKey, Secret};
@@ -25,8 +25,9 @@ const FUZZ_MANIFEST: &str = include_str!("../../fuzz/Cargo.toml");
 const FUZZ_WORKFLOW: &str = include_str!("../../../../.github/workflows/fuzz.yml");
 
 /// The targets of R2: three added by spec 020-store-files, one by spec
-/// 021-channel-session, the last two by spec 028-session-sans-io.
-const TARGETS: [&str; 13] = [
+/// 021-channel-session, two by spec 028-session-sans-io and the last by spec
+/// 031-auth-channel-signature.
+const TARGETS: [&str; 14] = [
     "record_decode",
     "config_parse",
     "config_parse_qr",
@@ -40,6 +41,7 @@ const TARGETS: [&str; 13] = [
     "channel_decrypt",
     "frame_decode",
     "session_on_frame",
+    "relay_verify_subscribe",
 ];
 
 /// The config of `text_k1`, built here apart from `fuzz_entry`, so that an
@@ -523,5 +525,42 @@ fn s028_t03_r03_session_on_frame_reads_frames() {
     assert_eq!(
         session_on_frame_verdict(&framed(&push)).unwrap().1,
         Some(received_at)
+    );
+}
+
+/// Spec 031, R11: the seed of `auth_reference`, in the target's layout,
+/// reaches `verify_detached` and opens the vector's channel; a flipped
+/// signature reaches it and fails there; a short input stops before.
+#[test]
+fn s031_t11_r11_seed_reaches_verify() {
+    let vector = crate::vectors::load("031", "auth_reference");
+    let seed = [
+        vector.input("pk_ch").bytes(),
+        &vector.input("ttl_seconds").number().to_be_bytes(),
+        vector.input("sig").bytes(),
+        vector.input("server_nonce").bytes(),
+        vector.expected("host").bytes(),
+    ]
+    .concat();
+    assert_eq!(
+        relay_verify_subscribe_verdict(&seed),
+        Ok(vector.expected("channel_id").array())
+    );
+    let mut flipped = seed.clone();
+    flipped[36] ^= 0x01;
+    assert_eq!(
+        relay_verify_subscribe_verdict(&flipped),
+        Err(Error::BadSignature)
+    );
+    assert_eq!(
+        relay_verify_subscribe_verdict(&seed[..131]),
+        Err(Error::BadPayload)
+    );
+    // The second host is `example.org`, tried after the input's.
+    let mut other = seed[..132].to_vec();
+    other.extend_from_slice(b"not-the-host");
+    assert_eq!(
+        relay_verify_subscribe_verdict(&other),
+        Err(Error::BadSignature)
     );
 }
