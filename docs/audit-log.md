@@ -2,6 +2,20 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BH
+
+**2026-10-16 — Audit BH, the code audit of slice (a) of spec 030-ws-protocol (branch `030-a-check-blob`): R1, the `deny.toml` wrappers of `sha1` and `rand` for the server's WebSocket and the CI step `s030_t01_r01_deny_wrappers`; R2, `relay::check_blob` through `envelope::check_shape`, now the one step `verify` starts with, and the fuzz target `relay_check_blob`. Two rounds of three passes.** No defect in `check_blob` or in the refactor of `verify`. The CI step failed open when `cargo tree` could not name a crate; the other findings were tests and the text of specs 000 and 042 and of AGENTS 2.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BH1 | The deny-wrapper step passed when `cargo tree` failed, as with two versions of `rand` in the lock (A, B, C) | Medium | Cargo's errors kept; only "did not match any packages" is empty; `-e normal,build --all-features --target all --depth 1`; crate names with capitals |
+| BH2 | Spec 000 R8, the header of `deny.toml` and AGENTS 2 still said `rand` comes only under `proptest`, and spec 042 R2 listed as the host's own the wrappers the root now has (A, rounds 1 and 2) | Low | Each names the exception of spec 030 R1, with History lines in specs 000 and 042 |
+| BH3 | SHA-1 under the names `sha1_smol` and `sha-1` was not banned (B, round 2) | Low | Banned outright; spec 000 T08 names them |
+| BH4 | The order of the three checks, the version byte in the flip proptest, and a channel other than zeros in the seed test were untested or rarely drawn (C) | Low | `s030_t02_r02_check_order`; the regions drawn equally; a flipped channel |
+| BH5 | The seed layout of `fuzz_seeds.py` is checked against itself, not against `fuzz_entry.rs` (C) | Far-fetched | None: it needs two matching edits, and every target shares the design |
+
+The audit ends with round 2: passes A and B found Low points, now fixed, and pass C nothing. The pull request is about 330 net lines.
+
 ## Audit BG
 
 **2026-10-16 — Audit BG, the code audit of slice (b) of spec 031-auth-channel-signature (branch `031-b-auth`), the server half: `AuthState`, one per connection, with its nonces, failed attempts and first-subscribe deadline, over a monotonic `now` and no socket; and `testing::subscribe_credential`, which signs as the session does for the server's tests. Two rounds of three passes.** One defect: a `subscribe` after the first-subscribe deadline could still be accepted when the caller checked the deadline less often than the client subscribed. The rest were test gaps.
