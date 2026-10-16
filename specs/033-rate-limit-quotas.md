@@ -87,6 +87,7 @@ pub(crate) const WRITE_TIMEOUT_MS: u64 = 30_000;
 pub(crate) const SEND_QUEUE_FRAMES: usize = 256;
 pub(crate) const SEND_QUEUE_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const IP_TABLE_MAX: usize = 65_536;
+pub(crate) const CHANNEL_WINDOW_MS: u64 = 60_000;   // R6
 
 pub(crate) struct ChannelLimits { pub(crate) publish_per_min: u32, pub(crate) bytes_per_min: u64,
                                   pub(crate) max_blobs: u32, pub(crate) max_bytes: u64 }
@@ -115,7 +116,7 @@ pub(crate) struct IpTable { /* Mutex<HashMap<IpKey, Entry>>: IPv4 by address, IP
 
 ## Public API changes
 
-None in `core`. `docs/spec.md` §6, brought up to date when this spec is accepted: the per-connection values are fixed and the channel, IP and global values are configurable; the server's publish window is 57 000 ms; the ping rule counts write progress, and a write stuck for 30 s drops the connection; the per-IP rules count every open connection, key IPv6 by /64 and /48, use the canonical address, add a byte budget per address and one for the onion listener, answer HTTP 429 (not "close"), apply on the main listener and not on the onion listener (replacing "not applied to connections from `127.0.0.1`", ADR 0038); a full IP table admits new addresses under the caps; each listener has its own connection caps, answered with HTTP 503.
+None in `core`. `docs/spec.md` §6, brought up to date when this spec is accepted: the per-connection values are fixed and the channel, IP and global values are configurable; the server's publish window is 57 000 ms; the ping rule counts write progress, and a write stuck for 30 s drops the connection; the channel's retention is checked before its rate; the per-IP rules count every open connection, key IPv6 by /64 and /48, use the canonical address, add a byte budget per address and one for the onion listener, answer HTTP 429 (not "close"), apply on the main listener and not on the onion listener (replacing "not applied to connections from `127.0.0.1`", ADR 0038); a full IP table admits new addresses under the caps; each listener has its own connection caps, answered with HTTP 503.
 
 ## Test cases
 
@@ -167,3 +168,4 @@ None.
 - 2026-10-16 R2 and R3 worded after audit BL (`docs/audit-log.md`, BL4): the limits run before the checks of spec 031 R5; past the first-subscribe deadline of spec 031 R7 a subscribe closes the connection with no frame, as spec 031 T07 says
 - 2026-10-16 T05 worded after audit BM (`docs/audit-log.md`, BM6): the blobs come through `Writer::submit`, as publishers' would, since the hook that pauses the subscriber's writes pauses theirs too
 - 2026-10-16 R7 and T07 amended after audit BN (`docs/audit-log.md`, BN-D-1, the human's decision): R7 is checked before R6, so a blob both would refuse gets `channel_quota`
+- 2026-10-16 Interface and Public API changes after audit BN: `CHANNEL_WINDOW_MS`, and `docs/spec.md` §6 says the retention is checked before the rate
