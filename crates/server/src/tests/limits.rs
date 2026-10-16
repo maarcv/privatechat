@@ -352,6 +352,24 @@ async fn s033_t04_r04_ping_pong() {
     assert!(matches!(ping, Some(Message::Ping(_))), "{ping:?}");
     assert!(matches!(receive(&mut client).await, Received::Close(1001)));
 
+    // A client that sends pings of its own but reads nothing: its pings are
+    // no pong, and it is closed all the same.
+    let clock = Arc::new(ManualClock::new(T0));
+    let (server, mut client) = subscriber(&clock).await;
+    clock.advance_mono(PING_INTERVAL_MS);
+    ticks().await;
+    futures_util::SinkExt::send(&mut client, Message::Ping(Vec::new().into()))
+        .await
+        .unwrap();
+    ticks().await;
+    clock.advance_mono(PONG_TIMEOUT_MS);
+    ticks().await;
+    assert_eq!(
+        server.shared.hub().subscriptions(0),
+        0,
+        "a ping taken for a pong"
+    );
+
     // A ping sent late, its 30 000 ms counted from when it was due.
     let clock = Arc::new(ManualClock::new(T0));
     let (server, _client) = subscriber(&clock).await;
