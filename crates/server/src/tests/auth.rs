@@ -7,7 +7,7 @@
 use privatechat_core::testing::subscribe_credential;
 use privatechat_core::{Frame, relay};
 
-use crate::auth::{AuthState, Verdict};
+use crate::auth::{AuthState, RelayCall, Verdict};
 
 /// The `k_ch` of every vector of `031.json`.
 const K_CH: [u8; 32] = [
@@ -370,4 +370,39 @@ fn s031_t09_r09_nothing_kept() {
         assert!(!shown.contains(&as_hex), "{shown}");
         assert!(!shown.contains(as_decimal.trim_end_matches(']')), "{shown}");
     }
+}
+
+#[test]
+fn s030_t16_r16_relay_failures() {
+    // Each `relay` call of a `subscribe`, failing as `Internal`: the
+    // subscribe fails, whatever the verdict would have been.
+    let fails = |state: &mut AuthState, subscribe: &Subscribe, now: u64| {
+        state
+            .on_subscribe(
+                &subscribe.pk_ch,
+                subscribe.ttl_seconds,
+                &subscribe.sig,
+                &hosts(),
+                now,
+            )
+            .is_err()
+    };
+    for call in [RelayCall::ChannelId, RelayCall::Verify] {
+        let (mut state, hello) = AuthState::new(0).unwrap();
+        state.fail_relay(Some(call));
+        assert!(
+            fails(&mut state, &signed(&nonce_of(&hello), HOST), 1),
+            "{call:?}"
+        );
+    }
+    // The nonce of a new `hello`, once the first is past its lifetime.
+    let (mut state, nonce) = accepted();
+    state.fail_relay(Some(RelayCall::NewNonce));
+    assert!(fails(&mut state, &signed(&nonce, HOST), 60_001));
+    // The check under the previous nonce, of a subscribe that fails under
+    // the latest.
+    let (mut state, nonce) = accepted();
+    assert!(expired_hello(&check(&mut state, &signed(&nonce, HOST), &hosts(), 60_001)).is_some());
+    state.fail_relay(Some(RelayCall::VerifyPrevious));
+    assert!(fails(&mut state, &signed(&[9; 32], HOST), 61_000));
 }

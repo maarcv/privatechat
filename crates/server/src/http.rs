@@ -162,7 +162,8 @@ pub(crate) mod test {
         /// While `true`, no catch-up goes past its backlog (to its held
         /// pushes or its `ok`).
         pub(crate) catch_up_paused: watch::Sender<bool>,
-        /// A `relay` call of a `subscribe` fails as `Internal`.
+        /// The first `relay` call of a `subscribe` fails as `Internal`; the
+        /// others are made to fail in the tests of `AuthState`.
         pub(crate) fail_relay: AtomicBool,
     }
 

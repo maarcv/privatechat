@@ -109,7 +109,8 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
     #[cfg(test)]
     let auth = {
         let mut auth = auth;
-        auth.fail_relay(shared.hooks.fail_relay.load(Ordering::SeqCst));
+        let failing = shared.hooks.fail_relay.load(Ordering::SeqCst);
+        auth.fail_relay(failing.then_some(crate::auth::RelayCall::ChannelId));
         auth
     };
     let id = shared.next_connection();
@@ -136,13 +137,18 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
     // Forgotten at once, not after the close frame has been sent (R15):
     // the hub's registration, and the nonce, the queue and the catch-ups.
     drop(_registration);
-    let Connection { mut socket, .. } = connection;
+    let mut socket = connection.into_socket();
     if let Flow::Close(code) = flow {
         close(&mut socket, code).await;
     }
 }
 
 impl Connection {
+    /// Its socket, the rest of its state dropped here.
+    fn into_socket(self) -> WebSocket {
+        self.socket
+    }
+
     async fn serve(&mut self, ticks: &mut broadcast::Receiver<()>) -> Flow {
         loop {
             let catching_up = !self.catching.is_empty();

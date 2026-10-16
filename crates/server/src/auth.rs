@@ -54,9 +54,20 @@ pub(crate) struct AuthState {
     first_hello_at: u64,
     failed: u8,
     accepted_any: bool,
-    /// The `relay` calls of `on_subscribe` fail as `Internal` (spec 030 T16).
+    /// The `relay` call of `on_subscribe` that fails as `Internal` (spec
+    /// 030 T16).
     #[cfg(test)]
-    fail_relay: bool,
+    fail_relay: Option<RelayCall>,
+}
+
+/// The `relay` calls of `on_subscribe`, which the tests of spec 030 T16 make
+/// fail one at a time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RelayCall {
+    ChannelId,
+    NewNonce,
+    Verify,
+    VerifyPrevious,
 }
 
 /// No nonce in the output: a `Debug` reaches no log, but a nonce never
@@ -90,7 +101,7 @@ impl AuthState {
             failed: 0,
             accepted_any: false,
             #[cfg(test)]
-            fail_relay: false,
+            fail_relay: None,
         };
         Ok((state, hello(nonce)))
     }
@@ -114,21 +125,19 @@ impl AuthState {
         if self.deadline_passed(now) {
             return Ok(vec![Verdict::Close]);
         }
-        #[cfg(test)]
-        if self.fail_relay {
-            return Err(Error::Internal);
-        }
-        let channel_id = relay::channel_id(pk_ch, ttl_seconds)?;
+        let channel_id = self.relay(RelayCall::ChannelId, relay::channel_id(pk_ch, ttl_seconds))?;
         if now.saturating_sub(self.hello_at) > NONCE_LIFETIME_MS {
+            let nonce = self.relay(RelayCall::NewNonce, relay::new_nonce())?;
             self.previous = Some(self.nonce);
-            self.nonce = relay::new_nonce()?;
+            self.nonce = nonce;
             self.hello_at = now;
             return Ok(vec![Verdict::NonceExpired {
                 channel_id,
                 hello: hello(self.nonce),
             }]);
         }
-        let verdict = match relay::verify_subscribe(pk_ch, ttl_seconds, sig, &self.nonce, hosts) {
+        let verified = relay::verify_subscribe(pk_ch, ttl_seconds, sig, &self.nonce, hosts);
+        let verdict = match self.relay(RelayCall::Verify, verified) {
             Ok(channel_id) => {
                 self.accepted_any = true;
                 return Ok(vec![Verdict::Accept { channel_id }]);
@@ -170,17 +179,30 @@ impl AuthState {
         if now.saturating_sub(self.hello_at) > PREVIOUS_NONCE_MS {
             return Ok(false);
         }
-        match relay::verify_subscribe(pk_ch, ttl_seconds, sig, &previous, hosts) {
+        let verified = relay::verify_subscribe(pk_ch, ttl_seconds, sig, &previous, hosts);
+        match self.relay(RelayCall::VerifyPrevious, verified) {
             Ok(_) => Ok(true),
             Err(Error::BadSignature) => Ok(false),
             Err(error) => Err(error),
         }
     }
 
-    /// Makes the `relay` calls of `on_subscribe` fail (spec 030 T16).
+    /// The result of the `relay` call `call`: in the tests, `Internal` when
+    /// it is the one made to fail (spec 030 T16).
+    fn relay<T>(&self, call: RelayCall, result: Result<T, Error>) -> Result<T, Error> {
+        #[cfg(test)]
+        if self.fail_relay == Some(call) {
+            return Err(Error::Internal);
+        }
+        #[cfg(not(test))]
+        let _ = call;
+        result
+    }
+
+    /// Makes the `relay` call `call` of `on_subscribe` fail (spec 030 T16).
     #[cfg(test)]
-    pub(crate) fn fail_relay(&mut self, fail: bool) {
-        self.fail_relay = fail;
+    pub(crate) fn fail_relay(&mut self, call: Option<RelayCall>) {
+        self.fail_relay = call;
     }
 
     /// Whether the connection has gone `FIRST_SUBSCRIBE_MS` since its first
