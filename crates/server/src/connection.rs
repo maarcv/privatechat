@@ -19,6 +19,12 @@ use crate::http::Shared;
 /// How often the deadline task wakes, in real time (spec 032 R14).
 const TICK: Duration = Duration::from_millis(100);
 
+/// How long one write may take before the connection is dropped. Until spec
+/// 033-rate-limit-quotas R5 measures the pending write on the monotonic clock
+/// from the deadline task, this bounds it in real time, so that a peer that
+/// stops reading cannot hold the task, the first-subscribe deadline included.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// The close codes the server sends (RFC 6455 §7.4.1).
 const UNSUPPORTED_DATA: u16 = 1003;
 const POLICY_VIOLATION: u16 = 1008;
@@ -42,6 +48,8 @@ pub(crate) fn spawn_deadline_task(ticks: broadcast::Sender<()>) -> tokio::task::
 enum Flow {
     Continue,
     Close(u16),
+    /// The socket failed: nothing more can be said on it (spec 030 R15).
+    Gone,
 }
 
 /// The connection of `socket`, until either side closes it.
@@ -51,9 +59,10 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
         close(&mut socket, INTERNAL_ERROR).await;
         return;
     };
-    if let Flow::Close(code) = send(&mut socket, &hello).await {
-        close(&mut socket, code).await;
-        return;
+    match send(&mut socket, &hello).await {
+        Flow::Continue => {}
+        Flow::Close(code) => return close(&mut socket, code).await,
+        Flow::Gone => return,
     }
     loop {
         let flow = tokio::select! {
@@ -62,7 +71,10 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
                 Some(Ok(Message::Binary(bytes))) => on_frame(&mut socket, &mut auth, &shared, &bytes).await,
                 Some(Ok(Message::Text(_))) => Flow::Close(UNSUPPORTED_DATA),
                 Some(Ok(Message::Ping(_) | Message::Pong(_))) => Flow::Continue,
-                Some(Err(error)) => if is_too_big(error) { Flow::Close(TOO_BIG) } else { return },
+                Some(Err(error)) => match read_error(error) {
+                    Some(code) => Flow::Close(code),
+                    None => return,
+                },
             },
             tick = ticks.recv() => match tick {
                 // A lagging receiver missed ticks, which only delays the check.
@@ -76,19 +88,23 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
                 Err(broadcast::error::RecvError::Closed) => return,
             },
         };
-        if let Flow::Close(code) = flow {
-            close(&mut socket, code).await;
-            return;
+        match flow {
+            Flow::Continue => {}
+            Flow::Close(code) => return close(&mut socket, code).await,
+            Flow::Gone => return,
         }
     }
 }
 
-/// Whether a read failed on a message or frame past `MAX_MESSAGE` (R4).
-fn is_too_big(error: axum::Error) -> bool {
-    matches!(
-        error.into_inner().downcast_ref::<tungstenite::Error>(),
-        Some(tungstenite::Error::Capacity(_))
-    )
+/// The close a failed read gets: 1009 past `MAX_MESSAGE`, 1003 for text
+/// that is not UTF-8, which tungstenite refuses before it is a message (R4);
+/// any other failure ends the connection with no close.
+fn read_error(error: axum::Error) -> Option<u16> {
+    match error.into_inner().downcast_ref::<tungstenite::Error>() {
+        Some(tungstenite::Error::Capacity(_)) => Some(TOO_BIG),
+        Some(tungstenite::Error::Utf8(_)) => Some(UNSUPPORTED_DATA),
+        _ => None,
+    }
 }
 
 /// One binary message from the client (R6).
@@ -128,7 +144,7 @@ async fn answer(socket: &mut WebSocket, verdicts: Vec<Verdict>) -> Flow {
                 let error = frames::error(ErrorCode::NonceExpired, Some(channel_id), None);
                 match send(socket, &error).await {
                     Flow::Continue => send(socket, &hello).await,
-                    closed @ Flow::Close(_) => closed,
+                    stopped => stopped,
                 }
             }
             Verdict::BadTtl { channel_id } => {
@@ -147,22 +163,22 @@ async fn answer(socket: &mut WebSocket, verdicts: Vec<Verdict>) -> Flow {
             }
             Verdict::Close => Flow::Close(POLICY_VIOLATION),
         };
-        if let Flow::Close(code) = flow {
-            return Flow::Close(code);
+        if !matches!(flow, Flow::Continue) {
+            return flow;
         }
     }
     Flow::Continue
 }
 
 /// Writes `frame`; a frame that cannot be encoded closes with 1011, and a
-/// socket that fails closes with nothing more to say.
+/// socket that fails or stalls past `WRITE_TIMEOUT` is gone.
 async fn send(socket: &mut WebSocket, frame: &Frame) -> Flow {
     let Ok(bytes) = frame.encode() else {
         return Flow::Close(INTERNAL_ERROR);
     };
-    match socket.send(Message::Binary(bytes.into())).await {
-        Ok(()) => Flow::Continue,
-        Err(_) => Flow::Close(INTERNAL_ERROR),
+    match tokio::time::timeout(WRITE_TIMEOUT, socket.send(Message::Binary(bytes.into()))).await {
+        Ok(Ok(())) => Flow::Continue,
+        Ok(Err(_)) | Err(_) => Flow::Gone,
     }
 }
 
@@ -173,5 +189,5 @@ async fn close(socket: &mut WebSocket, code: u16) {
         code,
         reason: "".into(),
     };
-    let _ = socket.send(Message::Close(Some(frame))).await;
+    let _ = tokio::time::timeout(WRITE_TIMEOUT, socket.send(Message::Close(Some(frame)))).await;
 }

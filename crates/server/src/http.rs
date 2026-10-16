@@ -57,7 +57,8 @@ async fn upgrade(
             .max_message_size(MAX_MESSAGE)
             .max_frame_size(MAX_MESSAGE)
             .on_upgrade(move |socket| connection::run(socket, shared)),
-        Err(rejection) => rejection.into_response(),
+        // Not an upgrade: nothing is served, and no text names the framework.
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
 

@@ -13,6 +13,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::frame::Frame as RawFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::{Data, OpCode};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use crate::clock::ManualClock;
@@ -69,6 +71,13 @@ async fn receive(client: &mut Client) -> Received {
             _ => return Received::Nothing,
         }
     }
+}
+
+/// What the client receives within `ms` of real time, if anything.
+async fn receive_within(client: &mut Client, ms: u64) -> Received {
+    tokio::time::timeout(Duration::from_millis(ms), receive(client))
+        .await
+        .unwrap_or(Received::Nothing)
 }
 
 /// The nonce of the client's first frame, which must be the `hello`.
@@ -132,6 +141,11 @@ const UPGRADE: &str = "upgrade: websocket\r\nconnection: upgrade\r\nsec-websocke
 async fn s030_t03_r03_route_and_origin() {
     let address = start(&Arc::new(ManualClock::new(0))).await;
     let empty = "content-length: 0";
+    let plain = raw(address, "GET / HTTP/1.1\r\nhost: h\r\n\r\n").await;
+    assert!(
+        plain.starts_with("http/1.1 404") && plain.contains(empty),
+        "{plain}"
+    );
     let other_path = raw(address, "GET /x HTTP/1.1\r\nhost: h\r\n\r\n").await;
     assert!(
         other_path.starts_with("http/1.1 404") && other_path.contains(empty),
@@ -187,6 +201,12 @@ async fn s030_t04_r04_message_size() {
     let mut client = connect(address).await;
     hello(&mut client).await;
     client.send(Message::Text("hello".into())).await.unwrap();
+    assert!(matches!(receive(&mut client).await, Received::Close(1003)));
+    // Nor text that is not even UTF-8.
+    let mut client = connect(address).await;
+    hello(&mut client).await;
+    let frame = RawFrame::message(vec![0xff, 0xfe], OpCode::Data(Data::Text), true);
+    client.send(Message::Frame(frame)).await.unwrap();
     assert!(matches!(receive(&mut client).await, Received::Close(1003)));
 }
 
@@ -250,12 +270,16 @@ async fn s030_t06_r06_bad_frames_close() {
     );
 
     // No accepted subscribe for 60 001 ms of the manual clock, moved in steps
-    // of 1 000 ms: closed with 1008 and no frame.
+    // of 1 000 ms while the client reads: nothing before 60 001 ms, then a
+    // close with 1008 and no frame.
     let mut client = connect(address).await;
     hello(&mut client).await;
     for _ in 0..60 {
         clock.advance(1_000);
-        tokio::time::sleep(Duration::from_millis(2)).await;
+        assert!(matches!(
+            receive_within(&mut client, 150).await,
+            Received::Nothing
+        ));
     }
     clock.advance(1);
     assert!(matches!(receive(&mut client).await, Received::Close(1008)));
