@@ -844,6 +844,45 @@ fn s030_t08_r08_bytes_passed_first() {
     );
 }
 
+#[test]
+fn s030_t08_r08_both_bounds_bytes_first() {
+    // 195 small pushes on one channel and 61 large on another hold 256
+    // frames and 4 176 128 bytes; one more large push passes both bounds,
+    // and the channel holding the most bytes ends.
+    let mut hub = Hub::default();
+    let (sender, mut queue) = mpsc::channel(QUEUE_FRAMES);
+    hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
+    let large = generation(hub.subscribe(1, channel(), DAY));
+    let small = generation(hub.subscribe(1, other_channel(), DAY));
+    let outcome = |channel_id: [u8; 16], k: u64, bytes: usize| WriteOutcome {
+        connection: 9,
+        client_ref: [0; 16],
+        channel_id,
+        result: Ok(Row {
+            server_id: [u8::try_from(k % 256).unwrap(); 16],
+            received_at: T0 + k,
+            blob: vec![1; bytes],
+        }),
+    };
+    let mut outcomes: Vec<WriteOutcome> = (0..61).map(|k| outcome(channel(), k, 64_673)).collect();
+    outcomes.extend((61..256).map(|k| outcome(other_channel(), k, 1_185)));
+    outcomes.push(outcome(channel(), 256, 64_673));
+    hub.on_commit(outcomes);
+    assert!(
+        !hub.is_catching_up(1, &channel(), large),
+        "the most bytes ended"
+    );
+    assert!(
+        hub.is_catching_up(1, &other_channel(), small),
+        "the most pushes kept"
+    );
+    let error = queue.try_recv().map(|bytes| Frame::decode(&bytes));
+    assert!(
+        matches!(&error, Ok(Ok(Frame::Error { code, channel_id, .. })) if code == "rate_limited" && *channel_id == Some(channel())),
+        "{error:?}"
+    );
+}
+
 /// The generation of a new subscription; `None` fails the test.
 fn generation(registered: Option<u64>) -> u64 {
     assert!(registered.is_some(), "not a new subscription");
