@@ -22,6 +22,10 @@ pub(crate) const HOLD_FRAMES: usize = 256;
 /// The most blob bytes they may hold (R8).
 pub(crate) const HOLD_BYTES: usize = 4 * 1024 * 1024;
 
+/// The most blob bytes of held pushes handed out at once, like a backlog
+/// page; the rest stay held and counted (R8).
+const HELD_CHUNK_BYTES: usize = 256 * 1024;
+
 /// A frame encoded once, shared by every queue and hold it enters.
 pub(crate) type Encoded = Bytes;
 
@@ -36,12 +40,16 @@ struct Held {
 enum Stage {
     /// Its backlog is being sent; the live pushes of its channel wait here.
     CatchingUp { held: VecDeque<Held>, bytes: usize },
-    /// Its `ok` is queued: live pushes go straight to the queue.
-    Subscribed,
+    /// Its `ok` is queued: live pushes go straight to the queue, but for
+    /// those its backlog already sent, at or below `floor` (R8).
+    Subscribed { floor: Option<u64> },
 }
 
 /// One subscription of one connection.
 struct Subscription {
+    /// Which subscription of the channel on this connection this is: a step
+    /// of an earlier one, ended by R8, must not act for it.
+    generation: u64,
     ttl_seconds: u32,
     stage: Stage,
 }
@@ -60,13 +68,14 @@ struct Connection {
 pub(crate) struct Hub {
     connections: HashMap<u64, Connection>,
     channels: HashMap<[u8; 16], Vec<u64>>,
+    next_generation: u64,
 }
 
 /// What `subscribe` did.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Registered {
-    /// A new subscription, catching up.
-    CatchingUp,
+    /// A new subscription, catching up, of this generation.
+    CatchingUp(u64),
     /// The channel was already subscribed or catching up here (R9).
     Already,
 }
@@ -122,9 +131,12 @@ impl Hub {
         if connection.subscriptions.contains_key(&channel_id) {
             return Registered::Already;
         }
+        let generation = self.next_generation;
+        self.next_generation = self.next_generation.saturating_add(1);
         connection.subscriptions.insert(
             channel_id,
             Subscription {
+                generation,
                 ttl_seconds,
                 stage: Stage::CatchingUp {
                     held: VecDeque::new(),
@@ -133,7 +145,7 @@ impl Hub {
             },
         );
         self.channels.entry(channel_id).or_default().push(id);
-        Registered::CatchingUp
+        Registered::CatchingUp(generation)
     }
 
     /// The TTL of a channel subscribed or catching up on this connection.
@@ -146,15 +158,16 @@ impl Hub {
     }
 
     /// Whether the subscription is still catching up (R8 may have ended it).
-    pub(crate) fn is_catching_up(&self, id: u64, channel_id: &[u8; 16]) -> bool {
+    pub(crate) fn is_catching_up(&self, id: u64, channel_id: &[u8; 16], generation: u64) -> bool {
         matches!(
             self.connections
                 .get(&id)
                 .and_then(|connection| connection.subscriptions.get(channel_id)),
             Some(Subscription {
+                generation: current,
                 stage: Stage::CatchingUp { .. },
                 ..
-            })
+            }) if *current == generation
         )
     }
 
@@ -166,6 +179,7 @@ impl Hub {
         &mut self,
         id: u64,
         channel_id: [u8; 16],
+        generation: u64,
         after: Option<u64>,
     ) -> Next {
         let Some(connection) = self.connections.get_mut(&id) else {
@@ -174,24 +188,36 @@ impl Hub {
         let Some(subscription) = connection.subscriptions.get_mut(&channel_id) else {
             return Next::Gone;
         };
+        if subscription.generation != generation {
+            return Next::Gone;
+        }
         let Stage::CatchingUp { held, bytes } = &mut subscription.stage else {
             return Next::Gone;
         };
-        if !held.is_empty() {
-            let pushes: Vec<Encoded> = held
-                .drain(..)
-                .filter(|push| after.is_none_or(|after| push.received_at > after))
-                .map(|push| push.frame)
-                .collect();
-            *bytes = 0;
-            if !pushes.is_empty() {
-                return Next::Held(pushes);
+        // One chunk at a time, the rest still held and counted; pushes at
+        // or below the last backlog push are dropped as already sent.
+        let mut pushes = Vec::new();
+        let mut chunk = 0usize;
+        while let Some(push) = held.front() {
+            if !pushes.is_empty() && chunk.saturating_add(push.blob_bytes) > HELD_CHUNK_BYTES {
+                break;
             }
+            let Some(push) = held.pop_front() else {
+                break;
+            };
+            *bytes = bytes.saturating_sub(push.blob_bytes);
+            if after.is_none_or(|after| push.received_at > after) {
+                chunk = chunk.saturating_add(push.blob_bytes);
+                pushes.push(push.frame);
+            }
+        }
+        if !pushes.is_empty() {
+            return Next::Held(pushes);
         }
         let ok = Frame::Ok { channel_id }.encode().map(Encoded::from);
         match ok {
             Ok(frame) => {
-                subscription.stage = Stage::Subscribed;
+                subscription.stage = Stage::Subscribed { floor: after };
                 queue(connection, frame);
                 Next::Subscribed
             }
@@ -245,7 +271,12 @@ impl Hub {
             return;
         };
         match &mut subscription.stage {
-            Stage::Subscribed => queue(connection, frame.clone()),
+            Stage::Subscribed { floor } => {
+                // A blob the backlog read before the writer reached the hub.
+                if floor.is_none_or(|floor| received_at > floor) {
+                    queue(connection, frame.clone());
+                }
+            }
             Stage::CatchingUp { held, bytes } => {
                 held.push_back(Held {
                     received_at,

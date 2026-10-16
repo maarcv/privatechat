@@ -18,7 +18,13 @@ use super::ws::{
     start, subscribe,
 };
 use crate::clock::ManualClock;
-use crate::store::writer::WriteRequest;
+use std::sync::atomic::AtomicBool;
+
+use tokio::sync::mpsc;
+
+use crate::connection::QUEUE_FRAMES;
+use crate::hub::{HOLD_FRAMES, Hub, Next, Registered};
+use crate::store::writer::{Row, WriteOutcome, WriteRequest};
 
 /// A wall clock of this century, which every planted blob outlives.
 const T0: u64 = 1_800_000_000_000;
@@ -64,6 +70,52 @@ fn store(server: &Server, channel_id: [u8; 16], n: u16, bytes: usize) {
             blob: vec![channel_id[0]; bytes],
         })
         .unwrap();
+}
+
+/// `n` blobs of `bytes` bytes stored through the writer, in order, and
+/// waited for: their `received_at` run from the clock's wall reading on.
+async fn store_many(server: &Server, channel_id: [u8; 16], n: u16, bytes: usize) {
+    let before = count(server, channel_id);
+    for k in 0..n {
+        loop {
+            let mut client_ref = [0; 16];
+            client_ref[..2].copy_from_slice(&k.to_be_bytes());
+            let request = WriteRequest {
+                connection: u64::MAX,
+                client_ref,
+                channel_id,
+                ttl_seconds: DAY,
+                blob: vec![channel_id[0]; bytes],
+            };
+            if server.shared.writer.submit(request).is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+    for _ in 0..6_000 {
+        if count(server, channel_id) == before + u64::from(n) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        count(server, channel_id),
+        before + u64::from(n),
+        "not stored in 60 s"
+    );
+}
+
+fn count(server: &Server, channel_id: [u8; 16]) -> u64 {
+    let connection = Connection::open(server.shared.db_path()).unwrap();
+    let rows: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM messages WHERE channel_id = ?1",
+            [&channel_id[..]],
+            |row| row.get(0),
+        )
+        .unwrap();
+    u64::try_from(rows).unwrap()
 }
 
 /// A second channel, of another key.
@@ -130,20 +182,30 @@ async fn backlog(client: &mut Client, channel_id: [u8; 16]) -> Vec<u64> {
 async fn s030_t07_r07_backlog_then_ok() {
     let clock = Arc::new(ManualClock::new(T0));
     let server = start(&clock).await;
-    let alive = T0 + 3_600_000;
-    plant(&server, channel(), 1_200, 1_185, T0 - 1_200, alive);
-    // An expired blob of the channel, never sent.
-    plant(&server, channel(), 1, 1_185, T0 - 5_000, T0);
+    // With the clock stopped, the writer gives them T0, T0 + 1, ...
+    store_many(&server, channel(), 1_200, 1_185).await;
+    // One more blob, with a TTL the clock then passes: never sent.
+    let short = WriteRequest {
+        connection: u64::MAX,
+        client_ref: [9; 16],
+        channel_id: channel(),
+        ttl_seconds: 60,
+        blob: vec![1; 1_185],
+    };
+    server.shared.writer.submit(short).unwrap();
+    for _ in 0..500 {
+        if count(&server, channel()) == 1_201 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    clock.advance(60_001);
 
     let mut client = connect(server.address).await;
     let nonce = hello(&mut client).await;
-    send(
-        &mut client,
-        &subscribe_since(&nonce, Some(T0 - 1_200 + 100)),
-    )
-    .await;
+    send(&mut client, &subscribe_since(&nonce, Some(T0 + 100))).await;
     let times = backlog(&mut client, channel()).await;
-    assert_eq!(times, (T0 - 1_100..T0).collect::<Vec<_>>());
+    assert_eq!(times, (T0 + 100..T0 + 1_200).collect::<Vec<_>>());
 
     let mut client = connect(server.address).await;
     let nonce = hello(&mut client).await;
@@ -191,8 +253,7 @@ async fn s030_t07_r07_pages_and_turns() {
     }
     assert_eq!(order.len(), 80);
     // Once both catch up, they take their pages in turn: while both have
-    // pushes left, no channel sends more than two pages (8 pushes) in a row,
-    // the other's empty last read or held step coming between.
+    // pushes left, no channel sends more than one page (4 pushes) in a row.
     let first_other = order
         .iter()
         .position(|is_first| !is_first)
@@ -211,7 +272,7 @@ async fn s030_t07_r07_pages_and_turns() {
             1
         };
         previous = Some(*is_first);
-        assert!(run <= 8, "a run of {run} pushes of one channel");
+        assert!(run <= 4, "a run of {run} pushes of one channel");
         if *is_first {
             left_first -= 1;
         } else {
@@ -352,14 +413,7 @@ async fn s030_t09_r09_second_subscribe_ignored() {
 async fn s030_t10_r10_backlog_outside_queue() {
     let clock = Arc::new(ManualClock::new(T0));
     let server = start(&clock).await;
-    plant(
-        &server,
-        channel(),
-        1_000,
-        64_673,
-        T0 - 2_000,
-        T0 + 3_600_000,
-    );
+    store_many(&server, channel(), 1_000, 64_673).await;
     let mut client = connect(server.address).await;
     let nonce = hello(&mut client).await;
     send(&mut client, &subscribe_since(&nonce, None)).await;
@@ -429,4 +483,84 @@ async fn s030_t16_r16_internal_error_closes() {
     let nonce = hello(&mut client).await;
     send(&mut client, &subscribe_since(&nonce, None)).await;
     assert!(matches!(receive(&mut client).await, Received::Close(1011)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s030_t08_r08_held_before_ok() {
+    let clock = Arc::new(ManualClock::new(T0));
+    let server = start(&clock).await;
+    let mut client = connect(server.address).await;
+    let nonce = hello(&mut client).await;
+    // The backlog is empty and read; the catch-up waits before its `ok`.
+    server.shared.hooks.catch_up_paused.send_replace(true);
+    send(&mut client, &subscribe_since(&nonce, None)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    store_many(&server, channel(), 10, 1_185).await;
+    server.shared.hooks.catch_up_paused.send_replace(false);
+    // All of them, before `ok`, the backlog having been empty.
+    let times = backlog(&mut client, channel()).await;
+    assert_eq!(times, (T0..T0 + 10).collect::<Vec<_>>());
+
+    // After `ok`, live pushes beyond the hold bound end nothing.
+    for round in 0..2u64 {
+        store_many(&server, channel(), 200, 1_185).await;
+        for k in 0..200 {
+            let received = receive(&mut client).await;
+            let expected = T0 + 10 + round * 200 + k;
+            assert!(
+                matches!(&received, Received::Frame(Frame::Push { received_at, .. }) if *received_at == expected),
+                "{received:?}"
+            );
+        }
+    }
+}
+
+/// The generation of a new subscription; `Already` fails the test.
+fn generation(registered: Registered) -> u64 {
+    let generation = match registered {
+        Registered::CatchingUp(generation) => Some(generation),
+        Registered::Already => None,
+    };
+    assert!(generation.is_some(), "not a new subscription");
+    generation.unwrap_or_default()
+}
+
+#[test]
+fn s030_t08_r08_a_stale_step_does_not_act() {
+    // A subscription ended by R8 and subscribed again: a step of the first
+    // still waiting its turn finds the generation changed, and the second
+    // streams its own backlog.
+    let mut hub = Hub::default();
+    let (sender, _queue) = mpsc::channel(QUEUE_FRAMES);
+    hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
+    let first = generation(hub.subscribe(1, channel(), DAY));
+    let flood: Vec<WriteOutcome> = (0..=u64::try_from(HOLD_FRAMES).unwrap())
+        .map(|k| WriteOutcome {
+            connection: 9,
+            client_ref: [0; 16],
+            channel_id: channel(),
+            result: Ok(Row {
+                server_id: [u8::try_from(k % 256).unwrap(); 16],
+                received_at: T0 + k,
+                blob: vec![1; 1_185],
+            }),
+        })
+        .collect();
+    hub.on_commit(flood);
+    assert!(
+        !hub.is_catching_up(1, &channel(), first),
+        "ended by the hold bound"
+    );
+    let second = generation(hub.subscribe(1, channel(), DAY));
+    assert_ne!(first, second);
+    assert!(!hub.is_catching_up(1, &channel(), first));
+    assert!(matches!(
+        hub.after_backlog(1, channel(), first, None),
+        Next::Gone
+    ));
+    assert!(hub.is_catching_up(1, &channel(), second));
+    assert!(matches!(
+        hub.after_backlog(1, channel(), second, None),
+        Next::Subscribed
+    ));
 }

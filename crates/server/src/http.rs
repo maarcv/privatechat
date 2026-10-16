@@ -159,6 +159,9 @@ pub(crate) mod test {
         pub(crate) writes_paused: watch::Sender<bool>,
         /// `read_page` fails.
         pub(crate) fail_reads: AtomicBool,
+        /// While `true`, no catch-up goes past its backlog (to its held
+        /// pushes or its `ok`).
+        pub(crate) catch_up_paused: watch::Sender<bool>,
         /// A `relay` call of a `subscribe` fails as `Internal`.
         pub(crate) fail_relay: AtomicBool,
     }
@@ -169,6 +172,7 @@ pub(crate) mod test {
                 reads: AtomicUsize::new(0),
                 writes_paused: watch::channel(false).0,
                 fail_reads: AtomicBool::new(false),
+                catch_up_paused: watch::channel(false).0,
                 fail_relay: AtomicBool::new(false),
             }
         }

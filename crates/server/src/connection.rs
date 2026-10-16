@@ -65,6 +65,9 @@ enum Flow {
 /// A subscription whose backlog is being streamed (R7).
 struct CatchUp {
     channel_id: [u8; 16],
+    /// The subscription it streams; a step of an earlier one, ended by R8,
+    /// finds the hub's generation changed and stops.
+    generation: u64,
     /// The next `received_at` to read from.
     from: u64,
     /// The `received_at` of the last backlog push sent, if any.
@@ -103,6 +106,12 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
         close(&mut socket, INTERNAL_ERROR).await;
         return;
     };
+    #[cfg(test)]
+    let auth = {
+        let mut auth = auth;
+        auth.fail_relay(shared.hooks.fail_relay.load(Ordering::SeqCst));
+        auth
+    };
     let id = shared.next_connection();
     let (sender, queue) = mpsc::channel(QUEUE_FRAMES);
     let overflowed = Arc::new(AtomicBool::new(false));
@@ -124,6 +133,8 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
         Flow::Continue => connection.serve(&mut ticks).await,
         stopped => stopped,
     };
+    // Forgotten at once, not after the close frame has been sent (R15).
+    drop(_registration);
     if let Flow::Close(code) = flow {
         close(&mut connection.socket, code).await;
     }
@@ -177,10 +188,6 @@ impl Connection {
                 sig,
                 since,
             }) => {
-                #[cfg(test)]
-                if self.shared.hooks.fail_relay.load(Ordering::SeqCst) {
-                    return Flow::Close(INTERNAL_ERROR);
-                }
                 let now = self.shared.clock.mono_ms();
                 let hosts = &self.shared.hosts;
                 match self
@@ -235,18 +242,18 @@ impl Connection {
     /// An accepted channel: registered as catching up before anything is
     /// read (R7), or nothing at all when it is already here (R9).
     fn accept(&mut self, channel_id: [u8; 16], ttl_seconds: u32, since: Option<u64>) -> Flow {
-        if self
+        let registered = self
             .shared
             .hub()
-            .subscribe(self.id, channel_id, ttl_seconds)
-            == Registered::Already
-        {
+            .subscribe(self.id, channel_id, ttl_seconds);
+        let Registered::CatchingUp(generation) = registered else {
             return Flow::Continue;
-        }
+        };
         // `since` past the server's clock reads as now (R7).
         let now = self.shared.clock.wall_ms();
         self.catching.push_back(CatchUp {
             channel_id,
+            generation,
             from: since.unwrap_or(0).min(now),
             last: None,
             done: false,
@@ -267,7 +274,11 @@ impl Connection {
         let Some(mut step) = self.catching.pop_front() else {
             return Flow::Continue;
         };
-        if !self.shared.hub().is_catching_up(self.id, &step.channel_id) {
+        if !self
+            .shared
+            .hub()
+            .is_catching_up(self.id, &step.channel_id, step.generation)
+        {
             // Ended by R8: its stream stops, and nothing more of it is sent.
             return Flow::Continue;
         }
@@ -278,7 +289,11 @@ impl Connection {
         };
         // Over once its `ok` is queued or the subscription ended; in turn
         // again otherwise.
-        let over = step.done && !self.shared.hub().is_catching_up(self.id, &step.channel_id);
+        let over = step.done
+            && !self
+                .shared
+                .hub()
+                .is_catching_up(self.id, &step.channel_id, step.generation);
         if matches!(flow, Flow::Continue) && !over {
             self.catching.push_back(step);
         }
@@ -322,10 +337,15 @@ impl Connection {
 
     /// After the backlog: the held pushes, or the `ok` (R7, R8).
     async fn after_backlog(&mut self, step: &CatchUp) -> Flow {
-        let next = self
-            .shared
-            .hub()
-            .after_backlog(self.id, step.channel_id, step.last);
+        #[cfg(test)]
+        {
+            let mut paused = self.shared.hooks.catch_up_paused.subscribe();
+            let _ = paused.wait_for(|paused| !paused).await;
+        }
+        let next =
+            self.shared
+                .hub()
+                .after_backlog(self.id, step.channel_id, step.generation, step.last);
         let Next::Held(pushes) = next else {
             return Flow::Continue;
         };

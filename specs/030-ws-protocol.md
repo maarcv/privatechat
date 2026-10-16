@@ -73,11 +73,13 @@ crates/core/src/relay.rs                          check_blob (R2); specs 031 and
 crates/core/src/relay/tests.rs                    s030_* core tests
 crates/core/fuzz/fuzz_targets/relay_check_blob.rs
 crates/server/src/main.rs                         wiring only; spec 035 owns start-up and shutdown
+crates/server/src/http.rs                         also `Shared` and its `cfg(test)` hooks, used by the tests of specs 030, 033 and 035: a pause of the socket writes, a pause before a catch-up's `ok`, a count of the backlog reads, a failing read and failing `relay` calls
 crates/server/src/http.rs                         the route, the Origin and path checks, the upgrade (R3, R4)
-crates/server/src/connection.rs                   one task per socket: frames in, frames out, catch-up (R5–R11, R15, R16); a `cfg(test)` hook that pauses its socket writes, used by the tests of specs 030, 033 and 035
+crates/server/src/connection.rs                   one task per socket: frames in, frames out, catch-up (R5–R11, R15, R16)
 crates/server/src/hub.rs                          subscriptions per channel, held pushes, fan-out in order (R8, R12)
 crates/server/src/frames.rs                       the fixed error texts (R13)
-crates/server/src/tests/ws.rs                     s030_* server tests, over a real socket
+crates/server/src/tests/ws.rs                     s030_* server tests of the route, the handshake and the frames, over a real socket
+crates/server/src/tests/catch_up.rs               s030_* server tests of the subscriptions, the catch-up and the disconnect, over a real socket and over the hub
 ```
 
 ```rust
@@ -164,3 +166,4 @@ None.
 - 2026-10-09 amended after audit AJ (`docs/audit-log.md`): R14 and T14 leave out `ok_unknown_key`, a decode case whose extra key no encoder writes
 - 2026-10-15 amended after audit BB (`docs/audit-log.md`, BB-D-11): the Limits row says a blob above 64 673 B fails frame decoding and closes with 1008, as `frames.rs` does; Security says the echo acknowledges nothing (spec 021 R13); R2 names the `fuzz_entry` function and its `_verdict` (spec 016 R2, R7)
 - 2026-10-16 R3 worded after audit BI: the path and the method are checked before the `Origin`, the `Origin` before the upgrade, and a `GET /` that is not an upgrade gets the empty 404; T03 checks the non-upgrade `GET /` and `HEAD /`, T04 a text frame that is not UTF-8
+- 2026-10-16 Interface after audit BJ: the tests of the catch-up in `tests/catch_up.rs`, the test hooks in `http.rs`

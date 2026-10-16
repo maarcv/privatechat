@@ -54,6 +54,9 @@ pub(crate) struct AuthState {
     first_hello_at: u64,
     failed: u8,
     accepted_any: bool,
+    /// The `relay` calls of `on_subscribe` fail as `Internal` (spec 030 T16).
+    #[cfg(test)]
+    fail_relay: bool,
 }
 
 /// No nonce in the output: a `Debug` reaches no log, but a nonce never
@@ -86,6 +89,8 @@ impl AuthState {
             first_hello_at: now,
             failed: 0,
             accepted_any: false,
+            #[cfg(test)]
+            fail_relay: false,
         };
         Ok((state, hello(nonce)))
     }
@@ -108,6 +113,10 @@ impl AuthState {
         // is answered past the deadline, whatever the task's period (R7).
         if self.deadline_passed(now) {
             return Ok(vec![Verdict::Close]);
+        }
+        #[cfg(test)]
+        if self.fail_relay {
+            return Err(Error::Internal);
         }
         let channel_id = relay::channel_id(pk_ch, ttl_seconds)?;
         if now.saturating_sub(self.hello_at) > NONCE_LIFETIME_MS {
@@ -166,6 +175,12 @@ impl AuthState {
             Err(Error::BadSignature) => Ok(false),
             Err(error) => Err(error),
         }
+    }
+
+    /// Makes the `relay` calls of `on_subscribe` fail (spec 030 T16).
+    #[cfg(test)]
+    pub(crate) fn fail_relay(&mut self, fail: bool) {
+        self.fail_relay = fail;
     }
 
     /// Whether the connection has gone `FIRST_SUBSCRIBE_MS` since its first
