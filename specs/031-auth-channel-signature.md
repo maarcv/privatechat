@@ -113,7 +113,7 @@ The subscription signature is `sign_detached(sk_ch, auth_message(…))`, compute
 
 - T01 (covers R1): `s031_t01_r01_nonce_lifetime`, over `AuthState`: the first `hello` carries 32 random bytes, and two states get different nonces; a `subscribe` signed with it 59 999 ms later → `Accept`; 60 001 ms later → `NonceExpired` naming the channel, with a `hello` of a different nonce; a `subscribe` signed with the old nonce after that → `NonceExpired` with a `hello` repeating the new nonce, and the failed count unchanged; a `subscribe` signed with the old nonce 10 001 ms after the new `hello` → `BadAuth`, and still `BadAuth` when a repeat `hello` was sent at 9 000 ms; a `subscribe` signed with a nonce older than the previous one → `BadAuth`.
 - T02 (covers R2): `s031_t02_r02_auth_message`: `auth_message` of `auth_reference` equals the vector's `message`; `AUTH_TAG` is 19 bytes and equals the §4 literal; the subscribe that spec 028 R6 builds for the vector's config and nonce carries the vector's `sig` (Ed25519 is deterministic).
-- T03 (covers R3): `s031_t03_r03_channel_id`: `relay::channel_id` of each positive vector equals its `channel_id` and `Config::channel_id()` of the same config.
+- T03 (covers R3): `s031_t03_r03_channel_id`: `relay::channel_id` of each positive vector equals its `channel_id` and `Config::channel_id()` of the same config; `auth_ttl_60` and `auth_ttl_2592000` give different `channel_id`s.
 - T04 (covers R4): `s031_t04_r04_verify_subscribe`: every positive of `031.json` → `Ok(channel_id)`; `auth_ttl_59` and `auth_ttl_2592001` → `BadConfig` before any signature check; `auth_wrong_host`, `auth_wrong_nonce`, `auth_flipped_sig` and `auth_other_ttl` → `BadSignature`; the host matching only the third of three configured hosts → `Ok`; nine hosts, or none → `BadConfig`.
 - T05 (covers R5): `s031_t05_r05_verdicts`, over `AuthState`: a valid `subscribe` → `Accept` with the vector's `channel_id`; each negative vector → the verdict of the table "Vectors" naming the vector's `channel_id`; an expired nonce with a bad signature too → `NonceExpired` (the age is checked first).
 - T06 (covers R6): `s031_t06_r06_three_failures_close`, over `AuthState`: two `BadAuth` and one `NonceExpired` → no `Close`; a third `BadAuth` → `BadAuth` then `Close`; `BadTtl`, `BadAuth`, `BadTtl` → `Close` after the third. Spec 030's socket tests check that `Close` becomes status 1008.
@@ -132,7 +132,7 @@ The subscription signature is `sign_detached(sk_ch, auth_message(…))`, compute
 | `auth_reference` | positive | `pk_ch`, `channel_id`, `host`, `message`, `sig` for `wss://chat.example.org`, TTL 86 400 |
 | `auth_url_with_port` | positive | the same channel on `wss://chat.example.org:9001`: `host` is `chat.example.org`, and the signature equals `auth_reference`'s |
 | `auth_onion_ws` | positive | a `ws://` onion URL (ADR 0038): the host is the onion name |
-| `auth_ttl_ends` | positive | TTL 60 and 2 592 000, two different `channel_id`s |
+| `auth_ttl_60`, `auth_ttl_2592000` | positive | TTL 60 and 2 592 000, two different `channel_id`s |
 | `auth_wrong_host` | negative | `BadSignature` (`bad_auth`) |
 | `auth_wrong_nonce` | negative | `BadSignature` (`bad_auth`) |
 | `auth_flipped_sig` | negative | `BadSignature` (`bad_auth`) |
@@ -166,3 +166,4 @@ None.
 - 2026-10-09 `AUTH_TAG` and `auth_message` (R2) written by slice (b1) of spec 028-session-sans-io, whose R6 signs them; their tests and `031.json` stay this spec's; R2's amendment of 028 R6 applied
 - 2026-10-09 `ChannelId::derive` (R3) written by slice (b1) of spec 028-session-sans-io, whose test server derives `channel_id` through it, and `Config` too; its tests stay this spec's
 - 2026-10-15 amended after audit BB (`docs/audit-log.md`, BB-D-11): R10 names how the client path is covered, through the shared `auth_message` and spec 028's `s028_t06_r06_subscribe_contents_and_pacing`; R11 names the `fuzz_entry` function and its `_verdict` (spec 016 R2, R7)
+- 2026-10-16 Vectors: `auth_ttl_ends` split into `auth_ttl_60` and `auth_ttl_2592000`, one vector per TTL like the negatives and the schema of `specs/vectors/README.md`; T03 names the check (after the advisor, three passes, unanimous)
