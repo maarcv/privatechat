@@ -214,6 +214,20 @@ fn s032_t06_r06_received_at_order() {
     assert_eq!(received_at(&harness.store(request(4, 1, 60))), T0 + 4);
     drop(harness);
 
+    // The same with the table emptied, as a purge would leave it: `last`
+    // lives in `meta`, not in the rows.
+    Connection::open(dir.db())
+        .unwrap()
+        .execute("DELETE FROM messages", [])
+        .unwrap();
+    let harness = Harness::new(&dir.db(), &clock, Hooks::default());
+    assert_eq!(received_at(&harness.store(request(9, 1, 60))), T0 + 5);
+    drop(harness);
+    Connection::open(dir.db())
+        .unwrap()
+        .execute("DELETE FROM messages", [])
+        .unwrap();
+
     // A used `server_id` refuses its request alone.
     let ids = Arc::new(Mutex::new(vec![[2; 16], [1; 16], [1; 16]]));
     let source = ids.clone();
@@ -237,7 +251,7 @@ fn s032_t06_r06_received_at_order() {
         results,
         [Ok([1; 16]), Err(Refusal::ServerFull), Ok([2; 16])]
     );
-    assert_eq!(received_at(&batch[2]), T0 + 6);
+    assert_eq!(received_at(&batch[2]), T0 + 7);
 }
 
 #[test]
