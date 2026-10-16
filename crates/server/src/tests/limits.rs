@@ -7,6 +7,7 @@ use privatechat_core::testing::subscribe_credential;
 use privatechat_core::{Frame, relay};
 
 use super::catch_up::{T0, backlog, subscribe_since};
+use super::publish::{blob_of, client_ref, hold_writer, publish, refused};
 use super::ws::{
     Client, DAY, HOST, Received, channel, connect, hello, receive, receive_within, send, start,
     subscribe,
@@ -15,33 +16,11 @@ use crate::clock::ManualClock;
 use crate::limits::{
     CONN_PUBLISH_MAX, CONN_PUBLISH_WINDOW_MS, MAX_SUBSCRIPTIONS, SUBSCRIBE_GAP_MS,
 };
-
-fn client_ref(n: u16) -> [u8; 16] {
-    let mut client_ref = [0; 16];
-    client_ref[..2].copy_from_slice(&n.to_be_bytes());
-    client_ref
-}
+use crate::store::writer::WriteRequest;
 
 /// A `publish` of a blob of the smallest size on the test channel.
-fn publish(n: u16) -> Frame {
-    let mut blob = vec![1; 1_185];
-    blob[1..17].copy_from_slice(&channel());
-    Frame::Publish {
-        channel_id: channel(),
-        client_ref: client_ref(n),
-        blob,
-    }
-}
-
-/// The next frame is the `error` `code` naming `channel_id` and, for a
-/// `publish`, its `client_ref`.
-async fn refused(client: &mut Client, code: &str, channel_id: [u8; 16], by: Option<[u8; 16]>) {
-    let received = receive(client).await;
-    assert!(
-        matches!(&received, Received::Frame(Frame::Error { code: got, channel_id: Some(of), client_ref, .. })
-            if got == code && *of == channel_id && *client_ref == by),
-        "{received:?}"
-    );
+fn on_channel(n: u16) -> Frame {
+    publish(channel(), n, blob_of(channel(), 1))
 }
 
 /// `n` `ack`s, each with its echo, in any order of the two kinds.
@@ -75,10 +54,10 @@ async fn s033_t01_r01_connection_publish_rate() {
 
     let max = u16::try_from(CONN_PUBLISH_MAX).unwrap();
     for n in 0..max {
-        send(&mut client, &publish(n)).await;
+        send(&mut client, &on_channel(n)).await;
     }
     acked(&mut client, CONN_PUBLISH_MAX).await;
-    send(&mut client, &publish(max)).await;
+    send(&mut client, &on_channel(max)).await;
     refused(
         &mut client,
         "rate_limited",
@@ -89,7 +68,7 @@ async fn s033_t01_r01_connection_publish_rate() {
 
     // At the edge of the window the first 30 still count.
     clock.advance_mono(CONN_PUBLISH_WINDOW_MS);
-    send(&mut client, &publish(max + 1)).await;
+    send(&mut client, &on_channel(max + 1)).await;
     refused(
         &mut client,
         "rate_limited",
@@ -101,10 +80,10 @@ async fn s033_t01_r01_connection_publish_rate() {
     // Past it, 30 more: the two refused did not count.
     clock.advance_mono(1);
     for n in 0..max {
-        send(&mut client, &publish(100 + n)).await;
+        send(&mut client, &on_channel(100 + n)).await;
     }
     acked(&mut client, CONN_PUBLISH_MAX).await;
-    send(&mut client, &publish(200)).await;
+    send(&mut client, &on_channel(200)).await;
     refused(
         &mut client,
         "rate_limited",
@@ -112,6 +91,61 @@ async fn s033_t01_r01_connection_publish_rate() {
         Some(client_ref(200)),
     )
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s033_t01_r01_writer_refusal_not_counted() {
+    // A publish the writer's full queue refuses was not handed: 30 more fit
+    // in the window afterwards.
+    let clock = Arc::new(ManualClock::new(T0));
+    let server = start(&clock).await;
+    let mut client = connect(server.address).await;
+    let nonce = hello(&mut client).await;
+    send(&mut client, &subscribe_since(&nonce, None)).await;
+    assert!(backlog(&mut client, channel()).await.is_empty());
+    let held = hold_writer(&server).await;
+    loop {
+        let filler = WriteRequest {
+            connection: u64::MAX,
+            client_ref: [0; 16],
+            channel_id: [7; 16],
+            ttl_seconds: DAY,
+            blob: vec![1; 1_185],
+        };
+        if server.shared.writer.submit(filler).is_err() {
+            break;
+        }
+    }
+    send(&mut client, &on_channel(0)).await;
+    refused(&mut client, "rate_limited", channel(), Some(client_ref(0))).await;
+    drop(held);
+    // Let the writer empty its queue.
+    let mut free = false;
+    for _ in 0..500 {
+        if server
+            .shared
+            .writer
+            .submit(WriteRequest {
+                connection: u64::MAX,
+                client_ref: [0; 16],
+                channel_id: [7; 16],
+                ttl_seconds: DAY,
+                blob: vec![1; 1_185],
+            })
+            .is_ok()
+        {
+            free = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(free, "the writer never took a request again");
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let max = u16::try_from(CONN_PUBLISH_MAX).unwrap();
+    for n in 1..=max {
+        send(&mut client, &on_channel(n)).await;
+    }
+    acked(&mut client, CONN_PUBLISH_MAX).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -126,6 +160,11 @@ async fn s033_t02_r02_subscribe_gap() {
     refused(&mut client, "bad_auth", channel(), None).await;
     // 999 ms later: refused before any check, not a failed attempt.
     clock.advance_mono(SUBSCRIBE_GAP_MS - 1);
+    send(&mut client, &forged).await;
+    refused(&mut client, "rate_limited", channel(), None).await;
+    // The refused one counts too: 1 499 ms after the checked one, 500 ms
+    // after it, still too soon.
+    clock.advance_mono(500);
     send(&mut client, &forged).await;
     refused(&mut client, "rate_limited", channel(), None).await;
     // 1 000 ms after that one: checked, the second failure, not the third.
@@ -182,8 +221,16 @@ async fn s033_t03_r03_sixteen_channels() {
         assert!(backlog(&mut client, channel_id).await.is_empty());
         clock.advance_mono(SUBSCRIBE_GAP_MS);
     }
-    // A second subscribe of a channel held, with 16 held: ignored.
-    send(&mut client, &keyed(0, &nonce).0).await;
+    // A second subscribe of a channel held, with 16 held: ignored; and
+    // again at once, refused by R2, not closed.
+    let (held, held_id) = keyed(0, &nonce);
+    send(&mut client, &held).await;
+    assert!(matches!(
+        receive_within(&mut client, 300).await,
+        Received::Nothing
+    ));
+    send(&mut client, &held).await;
+    refused(&mut client, "rate_limited", held_id, None).await;
     assert!(matches!(
         receive_within(&mut client, 300).await,
         Received::Nothing

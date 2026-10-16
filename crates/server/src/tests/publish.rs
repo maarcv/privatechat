@@ -40,21 +40,21 @@ fn subscribe_third(nonce: &[u8; 32]) -> Frame {
     }
 }
 
-fn client_ref(n: u16) -> [u8; 16] {
+pub(super) fn client_ref(n: u16) -> [u8; 16] {
     let mut client_ref = [0; 16];
     client_ref[..2].copy_from_slice(&n.to_be_bytes());
     client_ref
 }
 
 /// A blob of the smallest size that `check_blob` takes for `channel_id`.
-fn blob_of(channel_id: [u8; 16], fill: u8) -> Vec<u8> {
+pub(super) fn blob_of(channel_id: [u8; 16], fill: u8) -> Vec<u8> {
     let mut blob = vec![fill; 1_185];
     blob[0] = 1;
     blob[1..17].copy_from_slice(&channel_id);
     blob
 }
 
-fn publish(channel_id: [u8; 16], n: u16, blob: Vec<u8>) -> Frame {
+pub(super) fn publish(channel_id: [u8; 16], n: u16, blob: Vec<u8>) -> Frame {
     Frame::Publish {
         channel_id,
         client_ref: client_ref(n),
@@ -64,7 +64,7 @@ fn publish(channel_id: [u8; 16], n: u16, blob: Vec<u8>) -> Frame {
 
 /// The writer held before its next batch, and released when this drops, so
 /// that a failing test fails rather than waits on the writer's thread.
-struct HeldWriter(Arc<Pause>);
+pub(super) struct HeldWriter(Arc<Pause>);
 
 impl Drop for HeldWriter {
     fn drop(&mut self) {
@@ -72,7 +72,7 @@ impl Drop for HeldWriter {
     }
 }
 
-async fn hold_writer(server: &Server) -> HeldWriter {
+pub(super) async fn hold_writer(server: &Server) -> HeldWriter {
     let pause = server.shared.hooks.writer_pause.clone();
     let holding = pause.clone();
     tokio::task::spawn_blocking(move || holding.hold())
@@ -110,12 +110,18 @@ async fn frames(client: &mut Client, n: usize) -> Vec<Frame> {
     frames
 }
 
-/// The next frame of `client` is the `error` `code` naming both fields.
-async fn refused(client: &mut Client, code: &str, channel_id: [u8; 16], n: u16) {
+/// The next frame is the `error` `code` naming `channel_id` and, for a
+/// `publish`, its `client_ref`.
+pub(super) async fn refused(
+    client: &mut Client,
+    code: &str,
+    channel_id: [u8; 16],
+    by: Option<[u8; 16]>,
+) {
     let received = receive(client).await;
     assert!(
-        matches!(&received, Received::Frame(Frame::Error { code: got, channel_id: Some(of), client_ref: Some(by), .. })
-            if got == code && *of == channel_id && *by == client_ref(n)),
+        matches!(&received, Received::Frame(Frame::Error { code: got, channel_id: Some(of), client_ref, .. })
+            if got == code && *of == channel_id && *client_ref == by),
         "{received:?}"
     );
 }
@@ -132,17 +138,35 @@ async fn s030_t11_r11_publish_refusals() {
         &publish(other_channel(), 1, blob_of(other_channel(), 1)),
     )
     .await;
-    refused(&mut client, "not_subscribed", other_channel(), 1).await;
+    refused(
+        &mut client,
+        "not_subscribed",
+        other_channel(),
+        Some(client_ref(1)),
+    )
+    .await;
     // A bad blob on a channel not subscribed: `not_subscribed` comes first.
     let mut short = blob_of(other_channel(), 1);
     short.pop();
     send(&mut client, &publish(other_channel(), 6, short)).await;
-    refused(&mut client, "not_subscribed", other_channel(), 6).await;
+    refused(
+        &mut client,
+        "not_subscribed",
+        other_channel(),
+        Some(client_ref(6)),
+    )
+    .await;
     // A channel subscribed on another connection only: `not_subscribed`.
     let mut stranger = connect(server.address).await;
     hello(&mut stranger).await;
     send(&mut stranger, &publish(channel(), 7, blob_of(channel(), 7))).await;
-    refused(&mut stranger, "not_subscribed", channel(), 7).await;
+    refused(
+        &mut stranger,
+        "not_subscribed",
+        channel(),
+        Some(client_ref(7)),
+    )
+    .await;
 
     let mut short = blob_of(channel(), 2);
     short.pop();
@@ -150,7 +174,7 @@ async fn s030_t11_r11_publish_refusals() {
     version_2[0] = 2;
     for (n, blob) in [(2, short), (3, version_2), (4, blob_of(other_channel(), 4))] {
         send(&mut client, &publish(channel(), n, blob)).await;
-        refused(&mut client, "bad_blob", channel(), n).await;
+        refused(&mut client, "bad_blob", channel(), Some(client_ref(n))).await;
     }
 
     // The writer stopped and its queue full.
@@ -168,7 +192,7 @@ async fn s030_t11_r11_publish_refusals() {
         }
     }
     send(&mut client, &publish(channel(), 5, blob_of(channel(), 5))).await;
-    refused(&mut client, "rate_limited", channel(), 5).await;
+    refused(&mut client, "rate_limited", channel(), Some(client_ref(5))).await;
     drop(held);
 
     assert!(matches!(
@@ -424,9 +448,15 @@ async fn s030_t13_r13_frames_sent() {
         &publish(other_channel(), 2, blob_of(other_channel(), 2)),
     )
     .await;
-    refused(&mut client, "not_subscribed", other_channel(), 2).await;
+    refused(
+        &mut client,
+        "not_subscribed",
+        other_channel(),
+        Some(client_ref(2)),
+    )
+    .await;
     send(&mut client, &publish(channel(), 3, vec![1; 1_185])).await;
-    refused(&mut client, "bad_blob", channel(), 3).await;
+    refused(&mut client, "bad_blob", channel(), Some(client_ref(3))).await;
     // No `error` above carried `unsupported_version` or a text of its own:
     // `receive` checks every one against the table of R13.
 }
