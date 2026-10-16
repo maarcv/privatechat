@@ -2,6 +2,28 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BC
+
+**2026-10-16 — Audit BC, the code audit of slice (a) of spec 032-storage-ttl (branch `032-a-open`): R1–R3, the database's schema, pragmas and start-up checks; R14, the server's `Clock`; R15, `relay::new_server_id`. Two rounds of three passes.** No production defect of weight. Round 1 found that a version-0 file refused for its vacuum mode had already been switched to WAL, and nine surviving mutants of 31; round 2 found one constant written twice and four surviving mutants of 27, all test gaps, now killed.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BC1 | T02 checked the writer's pragmas on a new file only, so a writer that set them only on a new file passed (C) | Medium | T02 reopens the writer and checks them again |
+| BC2 | T15 passed a counter as `server_id` (C) | Medium | 64 ids: every byte position takes two values, two ids share under 8 bytes |
+| BC3 | A refused version-0 file was switched to WAL before its vacuum mode was read back (A, B, C) | Low | `check_vacuum` before the journal is set; T03 checks the file keeps `delete` |
+| BC4 | A failure to set WAL was reported as `JournalMode`, which the doc reserves for the read-back (C) | Low | `Open` |
+| BC5 | Nothing tested that the schema is one transaction (C) | Low | T03 plants a half schema: refused, nothing kept |
+| BC6 | T14 passed a `SystemClock::mono_ms` that returned 0 or the wall reading (C) | Low | It starts under 60 s and moves on its own |
+| BC7 | T01 left the 17-byte `channel_id`, the NULL columns and `last_received_at` untested (C, round 2) | Low | Each refused in T01 |
+| BC8 | `user_version` 1 was written in the schema text and in the constant (A, round 2) | Low | Set from `USER_VERSION` in the same transaction |
+| BC9 | T03 tested the vacuum check with `NONE` only, and the WAL check with `delete` only (C, round 2) | Low | A version-1 file turned to `FULL`, and `:memory:` |
+| BC10 | R1 lets `server_id` be NULL, and a 16-character text pass its `CHECK` (A, round 2) | Far-fetched | None: the writer binds 16 bytes and nothing else inserts |
+| BC11 | A version-1 file with an altered schema (a trigger) is accepted (B) | Far-fetched | None: whoever can write the file can copy the blobs; §2's malicious server |
+| BC12 | Two server processes on one file are not refused (B) | Far-fetched | None: operator error; R3 names no lock |
+| BC13 | A `file:` path is read as a URI, and the files are created `0644` (B) | Far-fetched | None: the operator sets the path; the image runs as its own user (spec 034) |
+
+The audit ends with round 2: passes A and B found only far-fetched points, pass C test gaps, now closed. The pull request is about 800 net lines, 390 of them tests, and this entry (round 2 of A): R1–R3 are one block, and the tests are not trimmed. `cargo deny` fails on `mvp` since every `zip` 8.x, a build dependency of `libsodium-sys-stable`, was yanked upstream; the human chose to wait for an upstream on `zip` 9 and keep the phase 3 slices on stacked branches until then.
+
 ## Audit BB
 
 **2026-10-15 — Audit BB, a whole-project audit of everything done up to the close of phase 2 (`mvp` at 2f5dbd2): specs 000–028 against their code, the accepted specs 030–066 against what is implemented, and `docs/spec.md`, the threat model, `AGENTS.md`, the README, the skills and the landing against each other.** Round 1 had eight passes in parallel: A1 conformance of phases 0–1, A2 of 020–024, A3 of 025–028 and of the core's API against what 030–056 call; B1 the adversary on the crypto core, B2 on the session and the store; C1 quality and 43 hand mutants of `core`, C2 of `store`, the fuzz crate, the scripts and the CI (25 mutants); D the coherence of the specification set. Rounds 2–6 had three passes each (A, B, C) on the whole change, rounds 7–13 on the text each previous round changed. No production defect of the core or the store was found; the core's API is what specs 030–056 call. The fixes landed in five pull requests: `bb-docs`, `bb-skills`, `bb-specs`, `bb-core`, `bb-store`.

@@ -19,7 +19,7 @@ use crate::vectors::{self, Kind};
 /// cannot walk the directory: a new file is added to this list by hand, in
 /// the order of `git ls-files`, and `scripts/check_core_sources.sh` fails CI
 /// when the list and the tracked files differ.
-const SOURCES: [(&str, &str); 123] = [
+const SOURCES: [(&str, &str); 124] = [
     ("crypto.rs", include_str!("../crypto.rs")),
     ("crypto/ffi.rs", include_str!("ffi.rs")),
     ("crypto/secret.rs", include_str!("secret.rs")),
@@ -147,6 +147,7 @@ const SOURCES: [(&str, &str); 123] = [
         include_str!("../proto/record/tests.rs"),
     ),
     ("proto/wordlist.rs", include_str!("../proto/wordlist.rs")),
+    ("relay.rs", include_str!("../relay.rs")),
     ("session.rs", include_str!("../session.rs")),
     ("session/channel.rs", include_str!("../session/channel.rs")),
     (

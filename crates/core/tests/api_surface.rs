@@ -11,7 +11,7 @@ use privatechat_core::{
     Device, DeviceStatus, DirName, Error, Event, ExportedFile, Fingerprint, Frame, Gap, Imported,
     LogRecord, MAX_LOG_ENTRY, MAX_LOG_LEN, MAX_SETTINGS_FILE, MAX_STATE_FILE, Message, OldKey,
     Peer, PeerId, Route, Sent, Settings, SettingsView, StorageKey, Store, StoreError, Vault,
-    WriteBatch, dir_name, generate_storage_key, init, probe_hello,
+    WriteBatch, dir_name, generate_storage_key, init, probe_hello, relay,
 };
 
 /// Spec 027, R16: the free functions and the constant of the boundary.
@@ -122,6 +122,7 @@ fn s027_t16_r16_items_for_other_crates() {
     let _: fn(&StorageKey, &[u8; 16]) -> Result<DirName, StoreError> = dir_name;
     let _: fn(&Frame) -> Result<Vec<u8>, Error> = Frame::encode;
     let _: fn(&[u8]) -> Result<Frame, Error> = Frame::decode;
+    let _: fn() -> Result<[u8; 16], Error> = relay::new_server_id;
     let _: [usize; 3] = [MAX_STATE_FILE, MAX_SETTINGS_FILE, MAX_LOG_ENTRY];
     let _: u64 = MAX_LOG_LEN;
 }

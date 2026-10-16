@@ -8,11 +8,27 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Blind mailbox with TTL: relays opaque blobs per channel over WebSocket (docs/spec.md §6)."
 
+[lib]
+name = "privatechat_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "privatechat-server"
 path = "src/main.rs"
 
 [dependencies]
+# `relay` and `Frame` are the server's only contact with the protocol (AGENTS 2).
+# A version as well as the path, so `cargo deny` does not take it for a wildcard.
+privatechat-core = { path = "../core", version = "0.0.0" }
+# The blob table (spec 032-storage-ttl, docs/spec.md §6 "Storage"). `bundled`
+# compiles the SQLite the crate ships, so every host runs the same engine; the
+# default features (a statement cache and a WebAssembly build) are not needed.
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+
+[features]
+# `ManualClock` and the test hooks, for the integration tests of spec
+# 035-server-ops; off in every shipped build (spec 035 R10).
+test-support = []
 
 [dev-dependencies]
 
