@@ -1,6 +1,6 @@
 # 032 — Server storage: one SQLite table, one writer, and the TTL purge
 
-Status: accepted
+Status: implemented
 Phase: 3
 Related ADRs: 0009, 0014, 0022
 Depends on: 010-primitives-wrapper, 027-core-api
@@ -67,9 +67,10 @@ This spec is that storage, implemented first in phase 3 (see the order in spec 0
 crates/core/src/relay.rs             new_server_id (R15); specs 030 and 031 add their items
 crates/server/src/clock.rs           Clock, SystemClock, ManualClock (R14)
 crates/server/src/store.rs           open, pragmas, schema and the start-up checks (R1–R3)
-crates/server/src/store/writer.rs    the writer thread, batches, received_at, purge, counters (R4–R8, R10, R11)
+crates/server/src/store/writer.rs    the writer thread, batches, received_at (R4–R8)
+crates/server/src/store/writer/purge.rs   the purge and the counters, run by the writer (R10, R11)
 crates/server/src/store/reader.rs    read_page and the read pool (R9)
-crates/server/src/tests/store.rs     s032_* tests, with ManualClock and a temporary directory, no socket
+crates/server/src/tests/store.rs     s032_* tests, with ManualClock and a temporary directory, no socket; store/writer.rs, store/purge.rs and store/reader.rs beside it
 ```
 
 ```rust
@@ -95,7 +96,10 @@ impl Writer {
     pub(crate) fn submit(&self, request: WriteRequest) -> Result<(), Refusal>;   // try_send: RateLimited when full
     pub(crate) fn finish(self) -> oneshot::Receiver<()>;   // spec 035 R7: answer what is queued, checkpoint, close
 }
+impl Drop for Writer { /* closes the queue and waits for the thread: the tests' teardown; the server awaits finish */ }
 pub(crate) struct StoreError(rusqlite::Error);   // a failed read; spec 030 R7 closes the connection with 1011
+pub(crate) struct ReadPool { /* 4 read-only connections, a tokio Semaphore of 4 permits */ }
+impl ReadPool { pub(crate) fn open(db: &Path) -> Result<ReadPool, StoreError>; }
 pub(crate) async fn read_page(pool: &ReadPool, channel_id: [u8; 16], from: u64, now: u64) -> Result<Vec<Row>, StoreError>;
 ```
 
@@ -126,7 +130,7 @@ The writer's channel is `std::sync::mpsc::sync_channel(1024)`. `try_send` never 
 - T06 (covers R6): `s032_t06_r06_received_at_order`: with the clock stopped, three blobs in one transaction → `received_at` t, t + 1, t + 2; the clock set back an hour → still increasing; a restart with the clock a day behind → the next `received_at` is the previous maximum + 1; the same after a restart whose start-up purge emptied the table; `expires_at = wall + ttl_seconds × 1000` even when `received_at` runs ahead of the clock; a `new_server_id` hook returning a used id → that request `ServerFull`, the others of the batch stored.
 - T07 (covers R7): `s032_t07_r07_report_after_commit`: `on_commit` is called after the commit and never before it (a hook between insert and commit sees no call), with one `WriteOutcome` per request in processing order carrying its connection and `client_ref`; `PRAGMA max_page_count` lowered to force `SQLITE_FULL` → every request of the batch `ServerFull`, the next batch stored once it is raised; a failure with `SQLITE_BUSY` → `RateLimited`; after each failed batch, the counters still equal a `GROUP BY` and the next `received_at` is unchanged.
 - T08 (covers R8): `s032_t08_r08_disk_quota`: `max_db_bytes` below the live size → `ServerFull`, nothing inserted; after a purge frees the rows, with the file still as large → stored again.
-- T09 (covers R9): `s032_t09_r09_read_page`: 1 200 rows of 1 185 bytes of one channel and 50 of another → pages of 500, 500 and 200 in order, none of the other channel; 40 rows of 64 673 bytes → ten pages of 4; a row with `expires_at = now` → not returned; eight concurrent reads → all complete, never more than 4 connections open.
+- T09 (covers R9): `s032_t09_r09_read_page`: 1 200 rows of 500 bytes of one channel and 50 of another → pages of 500, 500 and 200 in order, none of the other channel; 1 200 rows of 1 185 bytes → pages of 221 (261 885 bytes) five times, then 95; 40 rows of 64 673 bytes → ten pages of 4; a row with `expires_at = now` → not returned; eight concurrent reads → all complete, never more than 4 connections open.
 - T10 (covers R10): `s032_t10_r10_purge`: 2 500 expired rows and 10 live ones → after `Writer::spawn` returns, 10 rows remain, deleted in rounds of 1 000, 1 000 and 500; `freelist_count` drops after the vacuum; the `-wal` file is empty after the checkpoint; the manual clock moved 60 000 ms → a second purge at the next wake.
 - T11 (covers R11): `s032_t11_r11_counters`: counters equal a `GROUP BY` after inserts and a purge; after a restart they are rebuilt equal; a channel purged to zero rows has no entry.
 - T12 (covers R12): a CI step named `s032_t12_r12_no_copy`: `crates/server/src` contains none of `backup`, `VACUUM INTO`, `trace(`, `profile(` in a `rusqlite` call.
@@ -166,3 +170,6 @@ None.
 - 2026-09-27 amended by spec 061-threat-review R2 (`docs/audit-log.md`, "Audit O"): the clock-step residual worded "documented residual"
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): a later server upgrades `user_version` in place in one transaction; the power-failure loss worded as a documented residual
 - 2026-09-28 accepted (Marc Vilardebó)
+- 2026-10-16 T09 amended in slice (c), after the advisor (audit BE): its clause of 500 rows uses rows of 500 bytes, since 500 rows of 1 185 bytes pass R9's 256 KiB, which 1 185-byte rows reach at 221; a clause with rows of 1 185 bytes added
+- 2026-10-16 Interface, after audits BD and BE: the purge and the counters in `store/writer/purge.rs`; `Writer`'s `Drop`; `ReadPool`
+- 2026-10-16 implemented (audits BC, BD and BE, `docs/audit-log.md`)

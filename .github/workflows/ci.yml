@@ -81,6 +81,15 @@ jobs:
       - name: s020_t23_r23_io_in_one_module
         # Every system call of store in crates/store/src/fs.rs; the script tests itself first.
         run: scripts/check_store_io.sh
+      - name: s032_t12_r12_no_copy
+        # The server copies no blob: no backup, `VACUUM INTO`, `ATTACH`, serialisation,
+        # extension, SQL trace or profile, in its code or as a feature of `rusqlite` (spec 032 R12).
+        run: |
+          if grep -rniE 'backup|VACUUM INTO|\.trace\(|\.profile\(|ATTACH|serialize|load_extension' crates/server/src; then exit 1; fi
+          # `VACUUM` and `INTO` split over two lines or two literals.
+          if grep -rzniE 'VACUUM[^A-Za-z0-9_]{1,20}INTO' crates/server/src; then exit 1; fi
+          features="$(cargo tree -p privatechat-server -e features -i rusqlite --prefix none)"
+          if printf '%s\n' "$features" | grep -E 'rusqlite feature "(backup|trace|hooks|preupdate_hook|session|serialize|load_extension)"'; then exit 1; fi
       - name: s020_t31_r31_golden_files_unchanged
         # The golden files of spec 020 are never regenerated (R31).
         run: cd crates/store/tests/golden/v1 && sha256sum -c SHA256SUMS
