@@ -171,6 +171,12 @@ const UPGRADE: &str = "upgrade: websocket\r\nconnection: upgrade\r\nsec-websocke
 async fn s030_t03_r03_route_and_origin() {
     let address = start(&Arc::new(ManualClock::new(0))).await;
     let empty = "content-length: 0";
+    let head = raw(
+        address,
+        &format!("HEAD / HTTP/1.1\r\nhost: h\r\norigin: https://example.org\r\n{UPGRADE}\r\n"),
+    )
+    .await;
+    assert!(head.starts_with("http/1.1 404"), "{head}");
     let plain = raw(address, "GET / HTTP/1.1\r\nhost: h\r\n\r\n").await;
     assert!(
         plain.starts_with("http/1.1 404") && plain.contains(empty),

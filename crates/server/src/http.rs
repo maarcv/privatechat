@@ -33,7 +33,8 @@ pub(crate) struct Shared {
 /// The router of `Shared`.
 pub(crate) fn router(shared: Arc<Shared>) -> Router {
     Router::new()
-        .route("/", get(upgrade).fallback(not_found))
+        // axum's `get` also answers `HEAD`, which must get the 404 too.
+        .route("/", get(upgrade).head(not_found).fallback(not_found))
         .fallback(not_found)
         .with_state(shared)
 }
