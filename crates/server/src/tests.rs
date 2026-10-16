@@ -8,6 +8,7 @@
 
 mod auth;
 mod catch_up;
+mod publish;
 mod store;
 mod ws;
 

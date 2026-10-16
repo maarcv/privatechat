@@ -26,11 +26,18 @@ use crate::hub::{Encoded, HOLD_FRAMES, Hub};
 use crate::store::writer::{Row, WriteOutcome, WriteRequest};
 
 /// A wall clock of this century, which every planted blob outlives.
-const T0: u64 = 1_800_000_000_000;
+pub(super) const T0: u64 = 1_800_000_000_000;
 
 /// Inserts `n` blobs of `bytes` bytes into `channel_id`, by hand, with
 /// `received_at` from `first` on and the given `expires_at`.
-fn plant(server: &Server, channel_id: [u8; 16], n: u64, bytes: usize, first: u64, expires_at: u64) {
+pub(super) fn plant(
+    server: &Server,
+    channel_id: [u8; 16],
+    n: u64,
+    bytes: usize,
+    first: u64,
+    expires_at: u64,
+) {
     let db = server.shared.db_path();
     let mut connection = Connection::open(db).unwrap();
     let transaction = connection.transaction().unwrap();
@@ -55,7 +62,7 @@ fn plant(server: &Server, channel_id: [u8; 16], n: u64, bytes: usize, first: u64
 }
 
 /// A blob stored through the writer, as a `publish` of another connection.
-fn store(server: &Server, channel_id: [u8; 16], n: u16, bytes: usize) {
+pub(super) fn store(server: &Server, channel_id: [u8; 16], n: u16, bytes: usize) {
     let mut client_ref = [0; 16];
     client_ref[..2].copy_from_slice(&n.to_be_bytes());
     server
@@ -73,7 +80,7 @@ fn store(server: &Server, channel_id: [u8; 16], n: u16, bytes: usize) {
 
 /// `n` blobs of `bytes` bytes stored through the writer, in order, and
 /// waited for: their `received_at` run from the clock's wall reading on.
-async fn store_many(server: &Server, channel_id: [u8; 16], n: u16, bytes: usize) {
+pub(super) async fn store_many(server: &Server, channel_id: [u8; 16], n: u16, bytes: usize) {
     // Waits for the hub, not the database: the writer hands a transaction
     // to the hub after it commits.
     let before = server.shared.hub().committed(&channel_id);
@@ -105,7 +112,7 @@ async fn store_many(server: &Server, channel_id: [u8; 16], n: u16, bytes: usize)
 }
 
 /// The rows of `channel_id` in the database.
-fn count(server: &Server, channel_id: [u8; 16]) -> u64 {
+pub(super) fn count(server: &Server, channel_id: [u8; 16]) -> u64 {
     let connection = Connection::open(server.shared.db_path()).unwrap();
     let rows: i64 = connection
         .query_row(
@@ -132,9 +139,9 @@ fn committed(channel_id: [u8; 16], k: u64, bytes: usize) -> WriteOutcome {
 }
 
 /// A second channel, of another key.
-const K_OTHER: [u8; 32] = [0x41; 32];
+pub(super) const K_OTHER: [u8; 32] = [0x41; 32];
 
-fn subscribe_other(nonce: &[u8; 32]) -> Frame {
+pub(super) fn subscribe_other(nonce: &[u8; 32]) -> Frame {
     let (pk_ch, sig) = subscribe_credential(K_OTHER, DAY, nonce, HOST).unwrap();
     Frame::Subscribe {
         pk_ch,
@@ -144,12 +151,12 @@ fn subscribe_other(nonce: &[u8; 32]) -> Frame {
     }
 }
 
-fn other_channel() -> [u8; 16] {
+pub(super) fn other_channel() -> [u8; 16] {
     let (pk_ch, _) = subscribe_credential(K_OTHER, DAY, &[0; 32], HOST).unwrap();
     relay::channel_id(&pk_ch, DAY).unwrap()
 }
 
-fn subscribe_since(nonce: &[u8; 32], since: Option<u64>) -> Frame {
+pub(super) fn subscribe_since(nonce: &[u8; 32], since: Option<u64>) -> Frame {
     match subscribe(nonce, HOST) {
         Frame::Subscribe {
             pk_ch,
@@ -168,7 +175,7 @@ fn subscribe_since(nonce: &[u8; 32], since: Option<u64>) -> Frame {
 
 /// The `received_at` of every push the client receives until the `ok` of
 /// `channel_id`, which must come; any other frame fails.
-async fn backlog(client: &mut Client, channel_id: [u8; 16]) -> Vec<u64> {
+pub(super) async fn backlog(client: &mut Client, channel_id: [u8; 16]) -> Vec<u64> {
     let mut times = Vec::new();
     loop {
         match receive(client).await {
@@ -513,8 +520,8 @@ fn s030_t08_r08_hold_bound_ends_the_largest_only() {
     let mut hub = Hub::default();
     let (sender, mut queue) = mpsc::channel(QUEUE_FRAMES);
     hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
-    let large = generation(hub.subscribe(1, channel()));
-    let small = generation(hub.subscribe(1, other_channel()));
+    let large = generation(hub.subscribe(1, channel(), DAY));
+    let small = generation(hub.subscribe(1, other_channel(), DAY));
     let mut outcomes: Vec<WriteOutcome> = (0..57)
         .map(|k| committed(other_channel(), k, 1_185))
         .collect();
@@ -620,7 +627,7 @@ fn s030_t10_r10_nothing_queued_past_a_drop() {
     let (sender, mut queue) = mpsc::channel(1);
     let overflowed = Arc::new(AtomicBool::new(false));
     hub.connect(1, sender, overflowed.clone());
-    let subscription = generation(hub.subscribe(1, channel()));
+    let subscription = generation(hub.subscribe(1, channel(), DAY));
     assert!(
         hub.after_backlog(1, channel(), subscription, None)
             .is_empty()
@@ -790,9 +797,9 @@ fn s030_t08_r08_the_bound_passed_chooses() {
     let mut hub = Hub::default();
     let (sender, _queue) = mpsc::channel(QUEUE_FRAMES);
     hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
-    let first = generation(hub.subscribe(1, channel()));
-    let second = generation(hub.subscribe(1, other_channel()));
-    let large = generation(hub.subscribe(1, third));
+    let first = generation(hub.subscribe(1, channel(), DAY));
+    let second = generation(hub.subscribe(1, other_channel(), DAY));
+    let large = generation(hub.subscribe(1, third, DAY));
     let mut outcomes: Vec<WriteOutcome> = (0..17).map(|k| committed(third, k, 64_673)).collect();
     outcomes.extend((17..137).map(|k| committed(channel(), k, 1_185)));
     outcomes.extend((137..257).map(|k| committed(other_channel(), k, 1_185)));
@@ -813,8 +820,8 @@ fn s030_t08_r08_bytes_passed_first() {
     let mut hub = Hub::default();
     let (sender, _queue) = mpsc::channel(QUEUE_FRAMES);
     hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
-    let large = generation(hub.subscribe(1, channel()));
-    let many = generation(hub.subscribe(1, other_channel()));
+    let large = generation(hub.subscribe(1, channel(), DAY));
+    let many = generation(hub.subscribe(1, other_channel(), DAY));
     let mut outcomes: Vec<WriteOutcome> = (0..100)
         .map(|k| committed(other_channel(), k, 1_185))
         .collect();
@@ -838,8 +845,8 @@ fn s030_t08_r08_both_bounds_bytes_first() {
     let mut hub = Hub::default();
     let (sender, mut queue) = mpsc::channel(QUEUE_FRAMES);
     hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
-    let large = generation(hub.subscribe(1, channel()));
-    let small = generation(hub.subscribe(1, other_channel()));
+    let large = generation(hub.subscribe(1, channel(), DAY));
+    let small = generation(hub.subscribe(1, other_channel(), DAY));
     let mut outcomes: Vec<WriteOutcome> =
         (0..61).map(|k| committed(channel(), k, 64_673)).collect();
     outcomes.extend((61..256).map(|k| committed(other_channel(), k, 1_185)));
@@ -870,7 +877,7 @@ fn s030_t08_r08_every_subscriber() {
     for id in [1, 2] {
         let (sender, queue) = mpsc::channel(QUEUE_FRAMES);
         hub.connect(id, sender, Arc::new(AtomicBool::new(false)));
-        generations.push(generation(hub.subscribe(id, channel())));
+        generations.push(generation(hub.subscribe(id, channel(), DAY)));
         queues.push(queue);
     }
     hub.on_commit(vec![committed(channel(), 0, 1_185)]);
@@ -904,7 +911,7 @@ fn s030_t08_r08_a_stale_step_does_not_act() {
     let mut hub = Hub::default();
     let (sender, _queue) = mpsc::channel(QUEUE_FRAMES);
     hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
-    let first = generation(hub.subscribe(1, channel()));
+    let first = generation(hub.subscribe(1, channel(), DAY));
     let flood: Vec<WriteOutcome> = (0..=u64::try_from(HOLD_FRAMES).unwrap())
         .map(|k| committed(channel(), k, 1_185))
         .collect();
@@ -914,7 +921,7 @@ fn s030_t08_r08_a_stale_step_does_not_act() {
         "ended by the hold bound"
     );
     assert_eq!(hub.indexed_channels(), 0, "an empty entry left");
-    let second = generation(hub.subscribe(1, channel()));
+    let second = generation(hub.subscribe(1, channel(), DAY));
     assert_ne!(first, second);
     assert!(!hub.is_catching_up(1, &channel(), first));
     assert!(hub.after_backlog(1, channel(), first, None).is_empty());
@@ -936,7 +943,7 @@ fn s030_t08_r08_floor_after_ok() {
     let mut hub = Hub::default();
     let (sender, mut queue) = mpsc::channel(QUEUE_FRAMES);
     hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
-    let first = generation(hub.subscribe(1, channel()));
+    let first = generation(hub.subscribe(1, channel(), DAY));
     assert!(
         hub.after_backlog(1, channel(), first, Some(T0 + 5))
             .is_empty()
@@ -961,7 +968,7 @@ fn s030_t08_r08_held_in_chunks() {
     let mut hub = Hub::default();
     let (sender, mut queue) = mpsc::channel(QUEUE_FRAMES);
     hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
-    let first = generation(hub.subscribe(1, channel()));
+    let first = generation(hub.subscribe(1, channel(), DAY));
     hub.on_commit((0..40).map(|k| committed(channel(), k, 16_384)).collect());
     for expected in [16, 16, 8] {
         assert_eq!(hub.after_backlog(1, channel(), first, None).len(), expected);
@@ -980,7 +987,7 @@ fn s030_t08_r08_handed_out_bytes_leave_the_bound() {
     let mut hub = Hub::default();
     let (sender, _queue) = mpsc::channel(QUEUE_FRAMES);
     hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
-    let first = generation(hub.subscribe(1, channel()));
+    let first = generation(hub.subscribe(1, channel(), DAY));
     hub.on_commit((0..200).map(|k| committed(channel(), k, 16_384)).collect());
     assert_eq!(hub.after_backlog(1, channel(), first, None).len(), 16);
     hub.on_commit(

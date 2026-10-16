@@ -64,6 +64,41 @@ pub(super) async fn connect(address: SocketAddr) -> Client {
     client
 }
 
+/// Every error code the server sends and its fixed text (R13).
+pub(super) const ERRORS: [(ErrorCode, &str, &str); 8] = [
+    (
+        ErrorCode::BadAuth,
+        "bad_auth",
+        "subscription signature rejected",
+    ),
+    (
+        ErrorCode::NonceExpired,
+        "nonce_expired",
+        "server nonce expired",
+    ),
+    (ErrorCode::BadTtl, "bad_ttl", "ttl out of range"),
+    (
+        ErrorCode::NotSubscribed,
+        "not_subscribed",
+        "channel not subscribed on this connection",
+    ),
+    (ErrorCode::BadBlob, "bad_blob", "blob rejected"),
+    (ErrorCode::RateLimited, "rate_limited", "rate limited"),
+    (ErrorCode::ChannelQuota, "channel_quota", "channel full"),
+    (ErrorCode::ServerFull, "server_full", "server full"),
+];
+
+/// Spec 030 R13 on every frame a test receives: an `error` carries the fixed
+/// text of its code, and never `unsupported_version`.
+fn check_r13(frame: &Frame) {
+    if let Frame::Error { code, message, .. } = frame {
+        let known = ERRORS
+            .iter()
+            .any(|(_, name, text)| name == code && text == message);
+        assert!(known, "an error of code {code:?} and text {message:?}");
+    }
+}
+
 /// What the client receives next.
 #[derive(Debug)]
 pub(super) enum Received {
@@ -77,7 +112,9 @@ pub(super) async fn receive(client: &mut Client) -> Received {
         let next = tokio::time::timeout(Duration::from_secs(10), client.next()).await;
         match next {
             Ok(Some(Ok(Message::Binary(bytes)))) => {
-                return Received::Frame(Frame::decode(&bytes).unwrap());
+                let frame = Frame::decode(&bytes).unwrap();
+                check_r13(&frame);
+                return Received::Frame(frame);
             }
             Ok(Some(Ok(Message::Close(frame)))) => {
                 return Received::Close(frame.map_or(0, |frame| u16::from(frame.code)));
@@ -449,29 +486,7 @@ async fn spec_031_verdicts_on_the_wire() {
 
 #[test]
 fn error_codes_and_texts() {
-    let table = [
-        (
-            ErrorCode::BadAuth,
-            "bad_auth",
-            "subscription signature rejected",
-        ),
-        (
-            ErrorCode::NonceExpired,
-            "nonce_expired",
-            "server nonce expired",
-        ),
-        (ErrorCode::BadTtl, "bad_ttl", "ttl out of range"),
-        (
-            ErrorCode::NotSubscribed,
-            "not_subscribed",
-            "channel not subscribed on this connection",
-        ),
-        (ErrorCode::BadBlob, "bad_blob", "blob rejected"),
-        (ErrorCode::RateLimited, "rate_limited", "rate limited"),
-        (ErrorCode::ChannelQuota, "channel_quota", "channel full"),
-        (ErrorCode::ServerFull, "server_full", "server full"),
-    ];
-    for (code, name, text) in table {
+    for (code, name, text) in ERRORS {
         assert_eq!((code.code(), code.message()), (name, text));
         assert!(text.is_ascii() && text.len() <= 256);
     }

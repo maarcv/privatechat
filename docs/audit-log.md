@@ -2,6 +2,22 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BK
+
+**2026-10-16 — Audit BK, the code audit of slice (d) of spec 030-ws-protocol (branch `030-d-publish`): R11–R14, a `publish` refused at once in R11's order or stored with the subscription's TTL, its `ack` or the writer's refusal through the hub before its echo, the frames the server builds and their bytes against `028.json`, and the publish clauses of T07 and T15; specs 030 and 031 marked implemented. Two rounds of three passes.** No defect in the production code; the findings were tests that did not pin what R11, R12 and T14 say.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BK1 | Nothing tested that the stored blob takes the subscription's TTL, that a channel still catching up takes a publish, R11's order, or that `not_subscribed` is per connection (C, rounds 1 and 2) | Medium | `s030_t11_r11_publish_takes_the_ttl` with a TTL of 60 s, `s030_t11_r11_publish_while_catching_up`, a bad blob on a channel not subscribed, and a channel subscribed on another connection only |
+| BK2 | T07's publish clause published before the catch-up began (A) | Medium | It publishes once a backlog push has come; the `ack` and its echo come together before the catch-ups end, the place within the pages being set by the socket buffers, while `queue_before_the_next_page` pins the queue before each page |
+| BK3 | T12's writer refusal was answered alone, not among `ack`s (A) | Low | Three publishes in one batch, the middle one refused through a `repeat_after` hook: `ack`, push, `error`, `ack`, push |
+| BK4 | T14 retyped the vectors' fields and left out three `hello`s its wording covered (A) | Low | The fields read from each vector's `expected`; T14 and Vectors leave out the `hello`s of other version lists, which the server never builds |
+| BK5 | Backlog pushes were built apart from `frames::push` (A) | Low | Built by it |
+| BK6 | A test holding the writer hung on failure, and T13 asserted a constant of the test (C) | Low | A guard releases the writer; the assertion removed, `receive` checking every `error` |
+| BK7 | A backlog copy of a client's own publish can come before its `ack`, the writer committing before the hub hears of it (B, A round 2) | Far-fetched | None: only a client publishing before its `ok` reaches it, which spec 028 R14 rules out, and spec 021 R13 makes that copy `Replay` |
+
+The limit refusals of spec 033 in R11 come with spec 033, whose R1 and R12 check before the writer, at the place `Connection::publish` leaves for them. The pull request is about 790 net lines, 650 of them tests.
+
 ## Audit BJ
 
 **2026-10-16 — Audit BJ, the code audit of slice (c) of spec 030-ws-protocol (branch `030-c-hub`): R7–R10, R15, R16, the hub of subscriptions (`hub.rs`) that hands the writer's results to each connection's queue, the catch-up of `connection.rs` (backlog pages in turn, live pushes held, `ok` under the hub's lock), the queue bound of spec 033 R5, the disconnect and the internal errors. Six rounds of three passes.** One High (a stale catch-up step acting for a new subscription), one push that could be lost past a dropped frame, one rule of R8 that let a flood end another channel (the human's decision), the rest the order of frames, memory held during a close, and tests.

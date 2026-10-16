@@ -1,6 +1,6 @@
 # 030 — WebSocket protocol: the server's connections, subscriptions, order and fan-out
 
-Status: accepted
+Status: implemented
 Phase: 3
 Related ADRs: 0010, 0014, 0017, 0020, 0022, 0023, 0038
 Depends on: 013-wire-message, 016-fuzz-harness, 027-core-api, 028-session-sans-io, 031-auth-channel-signature, 032-storage-ttl
@@ -73,13 +73,14 @@ crates/core/src/relay.rs                          check_blob (R2); specs 031 and
 crates/core/src/relay/tests.rs                    s030_* core tests
 crates/core/fuzz/fuzz_targets/relay_check_blob.rs
 crates/server/src/main.rs                         wiring only; spec 035 owns start-up and shutdown
-crates/server/src/http.rs                         the route, the Origin and path checks, the upgrade (R3, R4); `Shared` and its `cfg(test)` hooks, used by the tests of specs 030, 033 and 035: a pause of the socket writes, a pause before a catch-up's `ok`, a count of the backlog reads, a failing read and failing `relay` calls
+crates/server/src/http.rs                         the route, the Origin and path checks, the upgrade (R3, R4); `Shared` and its `cfg(test)` hooks, used by the tests of specs 030, 033 and 035: a pause of the socket writes, a pause before a catch-up's `ok`, a count of the backlog reads, a failing read and failing `relay` calls, a pause of the writer and a `server_id` it refuses
 crates/server/src/connection.rs                   one task per socket: frames in, frames out, catch-up (R5–R11, R15, R16)
 crates/server/src/hub.rs                          subscriptions per channel, held pushes, fan-out in order (R8, R12)
-crates/server/src/frames.rs                       the fixed error texts (R13)
+crates/server/src/frames.rs                       the frames the server builds: `ok`, `ack`, `push`, `error` with its fixed text (R13, R14)
 crates/server/src/tests/ws.rs                     s030_* server tests of the route, the handshake and the frames, over a real socket
 crates/server/src/tests/catch_up.rs               s030_* server tests of the subscriptions, the catch-up and the disconnect, over a real socket and over the hub
 crates/server/src/tests/auth.rs                   also `s030_t16_r16_relay_failures`, each `relay` call of `AuthState` made to fail (R16)
+crates/server/src/tests/publish.rs                s030_* server tests of the publish, the ack and the fan-out, the frames sent and their bytes, over a real socket (R11–R14, and the publish clauses of T07 and T15)
 ```
 
 ```rust
@@ -128,13 +129,13 @@ Dependencies of `privatechat-server` added by this spec, each justified in its p
 - T11 (covers R11): `s030_t11_r11_publish_refusals`: a `publish` on a channel not subscribed → `not_subscribed` naming the `channel_id` and `client_ref`; a blob of 1 184 bytes, of version 2 or of another channel → `bad_blob` naming both; with the writer's queue filled by a test hook → `rate_limited` naming both; nothing stored in each case.
 - T12 (covers R12): `s030_t12_r12_ack_and_fan_out`, with the channel limits of spec 033 raised: three connections on one channel, one publishes → `ack` on the publisher, then a `push` to all three, the publisher included, with the same `server_id` and `received_at`; four publishers interleaving 25 blobs each → every connection sees the same `received_at` order; one connection publishing 30 blobs → 30 `ack`s in the order sent, each before its own echo; a writer refusal → its `error` with both fields, in order among the `ack`s.
 - T13 (covers R13): `s030_t13_r13_frames_sent`: over a run of T07–T12 every frame received decodes as one of the seven types, every `error.message` equals the text of its code, and no `error` carries `unsupported_version`.
-- T14 (covers R14): `s030_t14_r14_frames_match_vectors`: the server's encoder, given the fields of each positive server-direction frame of `028.json` other than `ok_unknown_key`, writes the vector's bytes.
+- T14 (covers R14): `s030_t14_r14_frames_match_vectors`: the server's encoder, given the fields of each positive server-direction frame of `028.json` other than `ok_unknown_key` and the `hello`s of other version lists (`hello_nine_versions`, `hello_no_version`, `hello_without_1`), which the server never builds, read from the vector's `expected`, writes the vector's bytes.
 - T15 (covers R15): `s030_t15_r15_disconnect_forgets`: after a client closes, the hub holds no subscription of that connection; a publish whose connection closes before the commit → stored, pushed to the other subscriber, no `ack`.
 - T16 (covers R16): `s030_t16_r16_internal_error_closes`: a `cfg(test)` hook that fails `read_page` during a backlog → close 1011; a hook in the server's wrapper around the `relay` calls, compiled only under `cfg(test)`, that returns `Internal` → close 1011, no `error` frame.
 
 ## Vectors
 
-No new vector file. The server reproduces the positive server-direction frames of `028.json` other than `ok_unknown_key` (T14), and `check_blob` reproduces the length, version and channel rows of `013.json` (T02).
+No new vector file. The server reproduces the positive server-direction frames of `028.json` that it builds: all but `ok_unknown_key` and the `hello`s of other version lists (T14), and `check_blob` reproduces the length, version and channel rows of `013.json` (T02).
 
 ## Acceptance criterion
 
@@ -168,3 +169,5 @@ None.
 - 2026-10-16 R3 worded after audit BI: the path and the method are checked before the `Origin`, the `Origin` before the upgrade, and a `GET /` that is not an upgrade gets the empty 404; T03 checks the non-upgrade `GET /` and `HEAD /`, T04 a text frame that is not UTF-8
 - 2026-10-16 Interface after audit BJ: the tests of the catch-up in `tests/catch_up.rs`, the test hooks in `http.rs`, T16's `relay` failures in `tests/auth.rs`
 - 2026-10-16 R8 amended after audit BJ (`docs/audit-log.md`, BJ-D-1, the human's decision): the bound passed chooses the subscription ended, the most bytes past 4 MiB, else the most pushes past 256; the Limits row, Security and T08 with it
+- 2026-10-16 Interface after slice (d): the publish tests in `tests/publish.rs`, the frame builders in `frames.rs`, the writer's test hooks in `http.rs`
+- 2026-10-16 T14 and Vectors after audit BK: the `hello`s of other version lists are left out with `ok_unknown_key`, since the server builds only `[1]`, and the fields are read from the vector's `expected`

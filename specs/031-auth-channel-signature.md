@@ -1,6 +1,6 @@
 # 031 — Subscription authentication with the channel signature
 
-Status: accepted
+Status: implemented
 Phase: 3
 Related ADRs: 0010, 0014, 0022, 0038
 Depends on: 010-primitives-wrapper, 011-config-format, 015-test-vectors, 016-fuzz-harness, 027-core-api, 028-session-sans-io
