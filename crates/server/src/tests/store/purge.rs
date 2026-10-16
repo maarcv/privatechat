@@ -415,3 +415,30 @@ fn s032_t07_r07_a_failed_commit_leaves_the_counters() {
     assert!(harness.store(request(1, 1, 60)).result.is_err());
     assert_eq!(next_step(&steps), before);
 }
+
+#[test]
+fn s032_t10_r10_a_failed_round_still_vacuums() {
+    let dir = TestDir::new("s032_t10_failed_round");
+    let clock = Arc::new(ManualClock::new(T0));
+    drop(Harness::new(&dir.db(), &clock, Hooks::default()));
+    plant(&dir.db(), 1, 2_500, 1_185, T0 - 1, 0);
+    // The second round meets a row it cannot delete and fails whole.
+    Connection::open(dir.db())
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER refuse BEFORE DELETE ON messages \
+             WHEN old.received_at = 1500 BEGIN SELECT RAISE(ABORT, 'no'); END;",
+        )
+        .unwrap();
+    let rounds = Arc::new(Mutex::new(Vec::new()));
+    let hooks = Hooks {
+        purge_round: rounds_hook(&rounds),
+        ..Hooks::default()
+    };
+    let _harness = Harness::new(&dir.db(), &clock, hooks);
+    assert_eq!(*rounds.lock().unwrap(), [1_000]);
+    assert_eq!(count(&dir.db()), 1_500);
+    // The first round's pages are given back and the WAL emptied anyway.
+    assert_eq!(pragma(&dir.db(), "freelist_count"), 0);
+    assert_eq!(wal_len(&dir.db()), 0);
+}

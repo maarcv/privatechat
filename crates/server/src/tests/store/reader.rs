@@ -126,3 +126,25 @@ fn s032_t09_r09_pool_of_four() {
         assert_eq!(waiting.await.unwrap().unwrap().len(), 221);
     });
 }
+
+#[test]
+fn s032_t09_r09_a_failed_read_gives_its_connection_back() {
+    let dir = TestDir::new("s032_t09_failed");
+    database(&dir);
+    plant(&dir.db(), 1, 1, 1_185, T0 + 3_600_000, 0);
+    // A `received_at` that is not an integer: the read of channel 9 fails.
+    rusqlite::Connection::open(dir.db())
+        .unwrap()
+        .execute(
+            "INSERT INTO messages VALUES (zeroblob(16), ?1, 'x', ?2, x'00')",
+            (&[9u8; 16][..], i64::try_from(T0 + 3_600_000).unwrap()),
+        )
+        .unwrap();
+    let pool = ReadPool::open(&dir.db()).unwrap();
+    let runtime = runtime();
+    for _ in 0..=POOL_SIZE {
+        assert!(runtime.block_on(read_page(&pool, [9; 16], 0, T0)).is_err());
+    }
+    let page = runtime.block_on(read_page(&pool, [1; 16], 0, T0)).unwrap();
+    assert_eq!(page.len(), 1);
+}

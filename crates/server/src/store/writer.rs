@@ -271,7 +271,9 @@ impl WriterThread {
         }
     }
 
-    /// Runs the purge of R10 on the wall clock's `now`.
+    /// Runs the purge of R10 on the wall clock's `now`. A failure is left
+    /// to the next purge; its error is for the log of spec 035-server-ops R4,
+    /// which names each database error by its code.
     fn purge(&mut self) -> Result<(), rusqlite::Error> {
         self.last_purge = self.clock.mono_ms();
         let hooks = &mut self.hooks;
