@@ -184,6 +184,11 @@ impl Connection {
     }
 
     fn on_tick(&self) -> Flow {
+        // `write_queued` closes first, unless a client that keeps its socket
+        // busy keeps the queue from being polled: the tick comes before it.
+        if self.overflowed.load(Ordering::SeqCst) {
+            return Flow::Close(TRY_AGAIN_LATER);
+        }
         if self.auth.deadline_passed(self.shared.clock.mono_ms()) {
             return Flow::Close(POLICY_VIOLATION);
         }

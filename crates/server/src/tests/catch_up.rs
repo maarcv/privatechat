@@ -303,7 +303,8 @@ async fn s030_t07_r07_pages_and_turns() {
 #[tokio::test(flavor = "multi_thread")]
 async fn s030_t07_r07_queue_before_the_next_page() {
     // A live push of a subscribed channel, queued while a backlog page is
-    // being written, goes out before the next page.
+    // being written, goes out before the next page. The clause of T07 with a
+    // publish (its `ack` and echo) comes with R11 in slice (d).
     let clock = Arc::new(ManualClock::new(T0));
     let server = start(&clock).await;
     plant(&server, channel(), 40, 64_673, T0 - 100, T0 + 3_600_000);
@@ -489,8 +490,8 @@ async fn s030_t08_r08_hold_bound_is_inclusive() {
 
 #[test]
 fn s030_t08_r08_hold_bound_ends_the_largest_only() {
-    // Two subscriptions catching up on one connection: past the bound, the
-    // one holding the most bytes ends, alone.
+    // Two subscriptions catching up on one connection: past the frame bound,
+    // the one holding the most pushes ends, alone.
     let mut hub = Hub::default();
     let (sender, mut queue) = mpsc::channel(QUEUE_FRAMES);
     hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
@@ -570,7 +571,7 @@ async fn s030_t09_r09_second_subscribe_mid_backlog() {
 #[tokio::test(flavor = "multi_thread")]
 async fn s030_t10_r10_overflow_closes_1013() {
     // A subscribed connection that writes nothing while more than a queue of
-    // pushes come: closed with 1013 at the next tick.
+    // pushes come: closed with 1013 before anything past the dropped frame.
     let clock = Arc::new(ManualClock::new(T0));
     let server = start(&clock).await;
     let mut client = connect(server.address).await;
@@ -681,6 +682,8 @@ async fn s030_t10_r10_backlog_outside_queue() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s030_t15_r15_disconnect_forgets() {
+    // The clause of T15 with a publish whose connection closes before the
+    // commit comes with R11 in slice (d).
     let clock = Arc::new(ManualClock::new(T0));
     let server = start(&clock).await;
     let mut client = connect(server.address).await;
@@ -805,6 +808,40 @@ fn s030_t08_r08_the_bound_passed_chooses() {
         !hub.is_catching_up(1, &other_channel(), second),
     ];
     assert_eq!(ended.iter().filter(|ended| **ended).count(), 1, "{ended:?}");
+}
+
+#[test]
+fn s030_t08_r08_bytes_passed_first() {
+    // One channel of 65 large blobs passes 4 MiB while another holds more
+    // pushes but fewer bytes: the one holding the most bytes ends.
+    let mut hub = Hub::default();
+    let (sender, _queue) = mpsc::channel(QUEUE_FRAMES);
+    hub.connect(1, sender, Arc::new(AtomicBool::new(false)));
+    let large = generation(hub.subscribe(1, channel(), DAY));
+    let many = generation(hub.subscribe(1, other_channel(), DAY));
+    let outcome = |channel_id: [u8; 16], k: u64, bytes: usize| WriteOutcome {
+        connection: 9,
+        client_ref: [0; 16],
+        channel_id,
+        result: Ok(Row {
+            server_id: [u8::try_from(k % 256).unwrap(); 16],
+            received_at: T0 + k,
+            blob: vec![1; bytes],
+        }),
+    };
+    let mut outcomes: Vec<WriteOutcome> = (0..100)
+        .map(|k| outcome(other_channel(), k, 1_185))
+        .collect();
+    outcomes.extend((100..165).map(|k| outcome(channel(), k, 64_673)));
+    hub.on_commit(outcomes);
+    assert!(
+        !hub.is_catching_up(1, &channel(), large),
+        "the most bytes ended"
+    );
+    assert!(
+        hub.is_catching_up(1, &other_channel(), many),
+        "the most pushes kept"
+    );
 }
 
 /// The generation of a new subscription; `None` fails the test.
