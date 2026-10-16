@@ -31,6 +31,8 @@ pub mod fuzz_entry;
 
 mod proto;
 
+pub mod relay;
+
 mod session;
 
 mod storage;
