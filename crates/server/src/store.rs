@@ -3,6 +3,8 @@
 //! (R1–R3). The writer that inserts and purges, and the reads, are the
 //! submodules of the later slices. Nothing here copies a blob anywhere (R12).
 
+pub(crate) mod writer;
+
 use std::path::Path;
 use std::time::Duration;
 

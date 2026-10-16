@@ -2,6 +2,25 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BD
+
+**2026-10-16 — Audit BD, the code audit of slice (b) of spec 032-storage-ttl (branch `032-b-writer`): R4–R8, the writer thread, its batches, `received_at`, the commit and the live-size quota. Three rounds of three passes.** No production defect an adversary reaches. Round 1 found T07's whole-batch refusals untested on batches of more than one, and five surviving mutants of 20; round 2 a restart over an emptied table untested and four of 24; round 3 nothing in A and B and two surviving mutants of 40, all closed.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BD1 | T07 refused only batches of one, so an insert reported `Ok` from a rolled-back batch passed; T05 did not check `connection` (A) | Medium | Three requests per failing batch through a re-armable pause; every outcome field checked |
+| BD2 | `self.last` moved before the commit survived (C) | Medium | `s032_t07_r07_failed_commit_keeps_last`: a hook rolls back so that `COMMIT` fails |
+| BD3 | A restart over a table the purge emptied was untested, so `last` read from the rows passed (A and C, round 2) | Medium | T06 empties the table before a restart; slice (c) does it with a real purge |
+| BD4 | R8's "at least", its free pages and its `page_size` were untested (A, C) | Low | The quota at the live size and one byte above, and free pages left out |
+| BD5 | An idle writer that stopped, a drop that did not join, the stored columns and the reported `Row` were untested (C, rounds 1 and 2) | Low | A test each |
+| BD6 | A `meta` value at the integer limit, and one that cannot be read, were untested (C, round 3) | Low | A test each: `server_full`, and a refused start |
+| BD7 | T04 and `Pause::hold` hung instead of failing (C) | Low | The pause is released before asserting; `hold` waits 30 s at most |
+| BD8 | `Writer`'s `Drop` was not in the Interface (A, round 2) | Low | Added to spec 032's Interface, with slice (c) |
+| BD9 | A forward step of the wall clock stays in `last` for its length after it is corrected (B) | Far-fetched | None: the documented residual; spec 034 R7 asks for time sync that slews |
+| BD10 | A `ROLLBACK` that itself fails would leave the writer inside a transaction (B, round 2) | Far-fetched | None: no input reaches it |
+
+The audit ends with round 3: passes A and B found nothing, pass C test gaps, now closed. Slice (b) is about 1 000 net lines, 600 of them tests (`insert` takes five parameters, one over the guide, to keep the working copy apart from the thread); the tests are not trimmed.
+
 ## Audit BC
 
 **2026-10-16 — Audit BC, the code audit of slice (a) of spec 032-storage-ttl (branch `032-a-open`): R1–R3, the database's schema, pragmas and start-up checks; R14, the server's `Clock`; R15, `relay::new_server_id`. Two rounds of three passes.** No production defect of weight. Round 1 found that a version-0 file refused for its vacuum mode had already been switched to WAL, and nine surviving mutants of 31; round 2 found one constant written twice and four surviving mutants of 27, all test gaps, now killed.
