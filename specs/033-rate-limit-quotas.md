@@ -22,8 +22,8 @@ Some of these numbers are part of the protocol, because the client of spec 028-s
 **Per connection (fixed: the client paces against them)**
 
 - R1 The server MUST refuse a `publish` with `error{rate_limited, channel_id, client_ref}` when 30 `publish`es of the same connection were handed to the writer within the preceding 57 000 ms of its clock. A refused `publish` does not count. The client keeps to 30 in any 60 000 ms (spec 028-session-sans-io R15), and the 3 000 ms difference absorbs network jitter.
-- R2 A `subscribe` that arrives less than 1 000 ms after the previous `subscribe` of the same connection MUST get `error{rate_limited, channel_id}`, with `channel_id` from `relay::channel_id`, before any check of spec 031-auth-channel-signature. It is not a failed attempt (spec 031 R6).
-- R3 A `subscribe` for a channel not yet subscribed or catching up, on a connection that already holds 16 subscriptions, MUST get `error{rate_limited, channel_id}` and then a close with status 1008, before any check of spec 031.
+- R2 A `subscribe` that arrives less than 1 000 ms after the previous `subscribe` of the same connection MUST get `error{rate_limited, channel_id}`, with `channel_id` from `relay::channel_id`, before any check of spec 031-auth-channel-signature R5 (past the first-subscribe deadline of spec 031 R7 the connection is closed with no frame). It is not a failed attempt (spec 031 R6).
+- R3 A `subscribe` for a channel not yet subscribed or catching up, on a connection that already holds 16 subscriptions, MUST get `error{rate_limited, channel_id}` and then a close with status 1008, before any check of spec 031 R5.
 - R4 The server MUST send a WebSocket ping every 30 000 ms. It MUST close the connection with status 1001 when a ping has waited 30 000 ms, counted from when it was due, with no pong and with no write to the socket other than the ping itself completing in that time. A slow link that keeps taking frames is not closed for a pong stuck behind them.
 - R5 When a frame counted by spec 030-ws-protocol R10 would take a connection's queue of frames not yet written past 256 frames or 4 MiB, the server MUST close that connection with status 1013 and drop the frame, since the client resumes from its cursor. A single write or flush to a socket that is still pending 30 000 ms after it started MUST drop the TCP connection with no close frame; progress within the write does not restart that time.
 
@@ -164,3 +164,4 @@ None.
 - 2026-09-27 amended by spec 061-threat-review R2 (`docs/audit-log.md`, "Audit O"): the onion-budget residual worded "documented residual"
 - 2026-09-28 accepted (Marc Vilardebó)
 - 2026-10-15 amended after audit BB round 4 (`docs/audit-log.md`, BB-R4B-4): Security says an address is kept 60 s after its last new connection or its last publish, as R9 does
+- 2026-10-16 R2 and R3 worded after audit BL (`docs/audit-log.md`, BL4): the limits run before the checks of spec 031 R5; past the first-subscribe deadline of spec 031 R7 a subscribe closes the connection with no frame, as spec 031 T07 says
