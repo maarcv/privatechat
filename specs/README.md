@@ -31,7 +31,7 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 028 | 028-session-sans-io | 2 | implemented |
 | 030 | 030-ws-protocol | 3 | accepted |
 | 031 | 031-auth-channel-signature | 3 | accepted |
-| 032 | 032-storage-ttl | 3 | accepted |
+| 032 | 032-storage-ttl | 3 | implemented |
 | 033 | 033-rate-limit-quotas | 3 | accepted |
 | 034 | 034-docker | 3 | accepted |
 | 035 | 035-server-ops | 3 | accepted |

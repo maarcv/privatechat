@@ -1,6 +1,8 @@
 //! Spec 032-storage-ttl: the database, the writer, the reads and the purge,
 //! driven through the writer and the reader alone.
 
+mod purge;
+mod reader;
 mod writer;
 
 use std::path::Path;

@@ -7,6 +7,7 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use rusqlite::Connection;
 
+use super::purge::Counters;
 use super::{Clock, OnCommit, StartError, Writer};
 
 /// A pause the test releases, and can set again once the writer has
@@ -55,12 +56,18 @@ impl Pause {
 
 pub(crate) type ConnectionHook = Box<dyn FnMut(&Connection) + Send>;
 
+pub(crate) type StepHook = Box<dyn FnMut(&Connection, &Counters) + Send>;
+
 #[derive(Default)]
 pub(crate) struct Hooks {
     pub(crate) pause: Option<Arc<Pause>>,
     pub(crate) before_transaction: Option<ConnectionHook>,
     pub(crate) before_commit: Option<ConnectionHook>,
     pub(crate) server_id: Option<Box<dyn FnMut() -> [u8; 16] + Send>>,
+    /// Hears how many rows each purge round deleted.
+    pub(crate) purge_round: Option<Box<dyn FnMut(usize) + Send>>,
+    /// Sees the connection and the counters after each batch and each purge.
+    pub(crate) after_step: Option<StepHook>,
 }
 
 impl super::Hooks {
@@ -85,6 +92,18 @@ impl super::Hooks {
     pub(super) fn before_commit(&mut self, connection: &Connection) {
         if let Some(hook) = &mut self.test.before_commit {
             hook(connection);
+        }
+    }
+
+    pub(super) fn purge_round(&mut self, rows: usize) {
+        if let Some(hook) = &mut self.test.purge_round {
+            hook(rows);
+        }
+    }
+
+    pub(super) fn after_step(&mut self, connection: &Connection, counters: &Counters) {
+        if let Some(hook) = &mut self.test.after_step {
+            hook(connection, counters);
         }
     }
 

@@ -24,6 +24,10 @@ privatechat-core = { path = "../core", version = "0.0.0" }
 # compiles the SQLite the crate ships, so every host runs the same engine; the
 # default features (a statement cache and a WebAssembly build) are not needed.
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+# The backlog reads run on the blocking pool, off the async threads (spec
+# 032-storage-ttl R9), and `Writer::finish` answers on a oneshot; spec
+# 030-ws-protocol adds the features of the network.
+tokio = { version = "1.53.1", default-features = false, features = ["rt", "sync"] }
 
 [features]
 # `ManualClock` and the test hooks, for the integration tests of spec

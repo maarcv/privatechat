@@ -11,7 +11,9 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use rusqlite::{Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior};
+use tokio::sync::oneshot;
 
+use self::purge::{Counters, PURGE_INTERVAL_MS, Usage};
 use super::{open_writer, refused};
 use crate::clock::Clock;
 use crate::{DbCause, StartError};
@@ -100,6 +102,7 @@ impl Writer {
         hooks: Hooks,
     ) -> Result<Writer, StartError> {
         let connection = open_writer(db)?;
+        // `last` is read before the purge, which may leave the table empty (R6).
         let last = read_last(&connection).map_err(|_| refused(DbCause::Open))?;
         let (sender, receiver) = mpsc::sync_channel(QUEUE_LEN);
         let mut thread = WriterThread {
@@ -108,8 +111,17 @@ impl Writer {
             on_commit,
             max_db_bytes,
             last,
+            counters: Counters::new(),
+            last_purge: 0,
             hooks,
         };
+        // The first purge, then the counters of what it left (R10, R11).
+        thread.purge().map_err(|_| refused(DbCause::Open))?;
+        thread.counters =
+            purge::count_all(&thread.connection).map_err(|_| refused(DbCause::Open))?;
+        thread
+            .hooks
+            .after_step(&thread.connection, &thread.counters);
         let handle = std::thread::Builder::new()
             .name("writer".to_owned())
             .spawn(move || thread.run(&receiver))
@@ -130,6 +142,30 @@ impl Writer {
         sender.try_send(request).map_err(|error| match error {
             TrySendError::Full(_) | TrySendError::Disconnected(_) => Refusal::RateLimited,
         })
+    }
+}
+
+impl Writer {
+    /// Stops taking requests, stores and answers those already queued,
+    /// empties the WAL and closes the database; the receiver hears when that
+    /// is done (spec 035-server-ops R7).
+    pub(crate) fn finish(mut self) -> oneshot::Receiver<()> {
+        let (done, finished) = oneshot::channel();
+        drop(self.sender.take());
+        let thread = self.thread.take();
+        // A thread of its own, so that no async task blocks on the join.
+        let waiter = std::thread::Builder::new()
+            .name("writer-finish".to_owned())
+            .spawn(move || {
+                if let Some(thread) = thread {
+                    let _ = thread.join();
+                }
+                let _ = done.send(());
+            });
+        // Without a thread to wait, the receiver hears its sender dropped,
+        // which also ends the wait.
+        drop(waiter);
+        finished
     }
 }
 
@@ -174,6 +210,10 @@ struct WriterThread {
     max_db_bytes: u64,
     /// The largest `received_at` ever committed (R6).
     last: u64,
+    /// The rows of each channel, as committed (R11).
+    counters: Counters,
+    /// The monotonic reading of the last purge (R10, R14).
+    last_purge: u64,
     hooks: Hooks,
 }
 
@@ -181,10 +221,23 @@ impl WriterThread {
     fn run(&mut self, receiver: &Receiver<WriteRequest>) {
         loop {
             self.hooks.wait_while_paused();
+            if self.clock.mono_ms().saturating_sub(self.last_purge) >= PURGE_INTERVAL_MS {
+                // A purge that fails leaves its rows to the next one.
+                let _ = self.purge();
+                self.hooks.after_step(&self.connection, &self.counters);
+            }
             let first = match receiver.recv_timeout(WAKE) {
                 Ok(first) => first,
                 Err(RecvTimeoutError::Timeout) => continue,
-                Err(RecvTimeoutError::Disconnected) => return,
+                Err(RecvTimeoutError::Disconnected) => {
+                    // The queue is closed and empty: leave nothing in the WAL.
+                    let _ = self.connection.query_row(
+                        "PRAGMA wal_checkpoint(TRUNCATE)",
+                        [],
+                        |_| Ok(()),
+                    );
+                    return;
+                }
             };
             let mut batch = vec![first];
             while batch.len() < MAX_BATCH {
@@ -194,8 +247,21 @@ impl WriterThread {
                 }
             }
             let outcomes = self.store(batch);
+            self.hooks.after_step(&self.connection, &self.counters);
             (self.on_commit)(outcomes);
         }
+    }
+
+    /// Runs the purge of R10 on the wall clock's `now`.
+    fn purge(&mut self) -> Result<(), rusqlite::Error> {
+        self.last_purge = self.clock.mono_ms();
+        let hooks = &mut self.hooks;
+        purge::purge(
+            &self.connection,
+            self.clock.wall_ms(),
+            &mut self.counters,
+            &mut |rows| hooks.purge_round(rows),
+        )
     }
 
     /// Stores one batch in one transaction and returns its outcomes (R5–R8).
@@ -229,15 +295,17 @@ impl WriterThread {
     }
 
     /// Inserts every request of the batch in one transaction, with a working
-    /// copy of `last` that replaces the stored one only on commit (R6, R7).
+    /// copy of `last` and of the counters that replaces the stored values
+    /// only on commit (R6, R7, R11).
     fn insert_all(&mut self, batch: &[WriteRequest]) -> Result<Vec<Stored>, rusqlite::Error> {
         self.hooks.before_transaction(&self.connection);
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut last = Last {
-            value: self.last,
+        let mut working = Working {
+            last: self.last,
             stored: None,
+            added: Counters::new(),
         };
         let mut results = Vec::with_capacity(batch.len());
         for request in batch {
@@ -245,11 +313,11 @@ impl WriterThread {
                 &transaction,
                 &*self.clock,
                 &mut self.hooks,
-                &mut last,
+                &mut working,
                 request,
             )?);
         }
-        if let Some(stored) = last.stored {
+        if let Some(stored) = working.stored {
             transaction.execute(
                 "UPDATE meta SET last_received_at = ?1 WHERE id = 0",
                 [stored],
@@ -257,7 +325,10 @@ impl WriterThread {
         }
         self.hooks.before_commit(&transaction);
         transaction.commit()?;
-        self.last = last.value;
+        self.last = working.last;
+        for (channel_id, usage) in working.added {
+            purge::add(&mut self.counters, channel_id, usage);
+        }
         Ok(results)
     }
 }
@@ -265,11 +336,12 @@ impl WriterThread {
 /// The `server_id` and `received_at` of a stored request, or its refusal.
 type Stored = Result<([u8; 16], u64), Refusal>;
 
-/// The working copy of `last` of one transaction, and its value as stored
-/// once an insert moved it (R6, R7).
-struct Last {
-    value: u64,
+/// The working copy of one transaction (R7): `last`, its value as stored
+/// once an insert moved it, and the rows it added to each channel.
+struct Working {
+    last: u64,
     stored: Option<i64>,
+    added: Counters,
 }
 
 /// Inserts one request, returning its `server_id` and `received_at`, or
@@ -279,11 +351,11 @@ fn insert(
     transaction: &Transaction<'_>,
     clock: &dyn Clock,
     hooks: &mut Hooks,
-    last: &mut Last,
+    working: &mut Working,
     request: &WriteRequest,
 ) -> Result<Stored, rusqlite::Error> {
     let wall = clock.wall_ms();
-    let Some(times) = times(wall, last.value, request.ttl_seconds) else {
+    let Some(times) = times(wall, working.last, request.ttl_seconds) else {
         return Ok(Err(Refusal::ServerFull));
     };
     let Some(server_id) = hooks.server_id() else {
@@ -304,8 +376,14 @@ fn insert(
             "INSERT INTO messages(server_id, channel_id, received_at, expires_at, blob) VALUES (?1, ?2, ?3, ?4, ?5)",
             (&server_id[..], &request.channel_id[..], times.received_at, times.expires_at, &request.blob),
         )?;
-    last.value = times.received;
-    last.stored = Some(times.received_at);
+    working.last = times.received;
+    working.stored = Some(times.received_at);
+    let bytes = u64::try_from(request.blob.len()).unwrap_or(u64::MAX);
+    purge::add(
+        &mut working.added,
+        request.channel_id,
+        Usage { blobs: 1, bytes },
+    );
     Ok(Ok((server_id, times.received)))
 }
 
@@ -355,7 +433,13 @@ impl Hooks {
     fn server_id(&mut self) -> Option<[u8; 16]> {
         privatechat_core::relay::new_server_id().ok()
     }
+
+    fn purge_round(&mut self, _: usize) {}
+
+    fn after_step(&mut self, _: &Connection, _: &Counters) {}
 }
+
+pub(crate) mod purge;
 
 #[cfg(test)]
 pub(crate) mod test;

@@ -17,23 +17,28 @@ use crate::store::writer::{MAX_BATCH, QUEUE_LEN, Refusal, WriteOutcome, WriteReq
 use crate::{DbCause, StartError, StartReason};
 
 /// Far above any test database.
-const NO_QUOTA: u64 = 1 << 40;
+pub(super) const NO_QUOTA: u64 = 1 << 40;
 
-const T0: u64 = 1_800_000_000_000;
+pub(super) const T0: u64 = 1_800_000_000_000;
 
 /// A writer under test and the outcomes of its transactions, one `Vec` per
 /// transaction.
-struct Harness {
-    writer: Writer,
-    outcomes: Receiver<Vec<WriteOutcome>>,
+pub(super) struct Harness {
+    pub(super) writer: Writer,
+    pub(super) outcomes: Receiver<Vec<WriteOutcome>>,
 }
 
 impl Harness {
-    fn new(db: &Path, clock: &Arc<ManualClock>, hooks: Hooks) -> Harness {
+    pub(super) fn new(db: &Path, clock: &Arc<ManualClock>, hooks: Hooks) -> Harness {
         Harness::with_quota(db, clock, hooks, NO_QUOTA)
     }
 
-    fn with_quota(db: &Path, clock: &Arc<ManualClock>, hooks: Hooks, max_db_bytes: u64) -> Harness {
+    pub(super) fn with_quota(
+        db: &Path,
+        clock: &Arc<ManualClock>,
+        hooks: Hooks,
+        max_db_bytes: u64,
+    ) -> Harness {
         let (sender, outcomes) = mpsc::channel();
         let on_commit = Box::new(move |batch| {
             let _ = sender.send(batch);
@@ -44,12 +49,12 @@ impl Harness {
     }
 
     /// The outcomes of the next transaction.
-    fn next(&self) -> Vec<WriteOutcome> {
+    pub(super) fn next(&self) -> Vec<WriteOutcome> {
         self.outcomes.recv_timeout(Duration::from_secs(30)).unwrap()
     }
 
     /// Submits one request and returns its outcome.
-    fn store(&self, request: WriteRequest) -> WriteOutcome {
+    pub(super) fn store(&self, request: WriteRequest) -> WriteOutcome {
         self.writer.submit(request).unwrap();
         let mut batch = self.next();
         assert_eq!(batch.len(), 1);
@@ -58,7 +63,7 @@ impl Harness {
 }
 
 /// Request `n` of connection `n % 7`, on channel `[channel; 16]`.
-fn request(n: u16, channel: u8, ttl_seconds: u32) -> WriteRequest {
+pub(super) fn request(n: u16, channel: u8, ttl_seconds: u32) -> WriteRequest {
     let mut client_ref = [0; 16];
     client_ref[..2].copy_from_slice(&n.to_be_bytes());
     WriteRequest {
@@ -70,11 +75,11 @@ fn request(n: u16, channel: u8, ttl_seconds: u32) -> WriteRequest {
     }
 }
 
-fn received_at(outcome: &WriteOutcome) -> u64 {
+pub(super) fn received_at(outcome: &WriteOutcome) -> u64 {
     outcome.result.as_ref().unwrap().received_at
 }
 
-fn count(db: &Path) -> i64 {
+pub(super) fn count(db: &Path) -> i64 {
     let connection = Connection::open(db).unwrap();
     connection
         .query_row("SELECT count(*) FROM messages", [], |row| row.get(0))
@@ -579,4 +584,37 @@ fn s032_t06_r06_unreadable_last_refuses_the_start() {
             reason: StartReason::Database(DbCause::Open)
         })
     ));
+}
+
+/// `Writer::finish`, which spec 035-server-ops R7 awaits at shutdown.
+#[test]
+fn writer_finish_stores_the_queue_and_empties_the_wal() {
+    let dir = TestDir::new("s032_finish");
+    let clock = Arc::new(ManualClock::new(T0));
+    let pause = Pause::paused();
+    let hooks = Hooks {
+        pause: Some(pause.clone()),
+        ..Hooks::default()
+    };
+    let harness = Harness::new(&dir.db(), &clock, hooks);
+    for n in 0..10 {
+        harness.writer.submit(request(n, 1, 60)).unwrap();
+    }
+    let Harness { writer, outcomes } = harness;
+    let finished = writer.finish();
+    pause.release();
+    tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap()
+        .block_on(finished)
+        .unwrap();
+    let stored: usize = outcomes.try_iter().map(|batch| batch.len()).sum();
+    assert_eq!(stored, 10);
+    assert_eq!(count(&dir.db()), 10);
+    let mut wal = dir.db().into_os_string();
+    wal.push("-wal");
+    assert_eq!(
+        std::fs::metadata(wal).map_or(0, |metadata| metadata.len()),
+        0
+    );
 }
