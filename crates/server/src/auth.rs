@@ -122,6 +122,8 @@ impl AuthState {
     ) -> Result<Vec<Verdict>, Error> {
         // Checked here as well as by the deadline task, so that no subscribe
         // is answered past the deadline, whatever the task's period (R7).
+        // The connection checks it first too, before the limits of spec 033;
+        // this copy keeps `AuthState` whole for its own tests.
         if self.deadline_passed(now) {
             return Ok(vec![Verdict::Close]);
         }

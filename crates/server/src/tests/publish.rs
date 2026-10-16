@@ -18,6 +18,7 @@ use super::ws::{
 use crate::auth;
 use crate::clock::ManualClock;
 use crate::frames::{self, ErrorCode};
+use crate::limits::{CONN_PUBLISH_WINDOW_MS, SUBSCRIBE_GAP_MS};
 use crate::store::writer::test::Pause;
 use crate::store::writer::{Row, WriteRequest};
 
@@ -39,21 +40,21 @@ fn subscribe_third(nonce: &[u8; 32]) -> Frame {
     }
 }
 
-fn client_ref(n: u16) -> [u8; 16] {
+pub(super) fn client_ref(n: u16) -> [u8; 16] {
     let mut client_ref = [0; 16];
     client_ref[..2].copy_from_slice(&n.to_be_bytes());
     client_ref
 }
 
 /// A blob of the smallest size that `check_blob` takes for `channel_id`.
-fn blob_of(channel_id: [u8; 16], fill: u8) -> Vec<u8> {
+pub(super) fn blob_of(channel_id: [u8; 16], fill: u8) -> Vec<u8> {
     let mut blob = vec![fill; 1_185];
     blob[0] = 1;
     blob[1..17].copy_from_slice(&channel_id);
     blob
 }
 
-fn publish(channel_id: [u8; 16], n: u16, blob: Vec<u8>) -> Frame {
+pub(super) fn publish(channel_id: [u8; 16], n: u16, blob: Vec<u8>) -> Frame {
     Frame::Publish {
         channel_id,
         client_ref: client_ref(n),
@@ -63,7 +64,7 @@ fn publish(channel_id: [u8; 16], n: u16, blob: Vec<u8>) -> Frame {
 
 /// The writer held before its next batch, and released when this drops, so
 /// that a failing test fails rather than waits on the writer's thread.
-struct HeldWriter(Arc<Pause>);
+pub(super) struct HeldWriter(Arc<Pause>);
 
 impl Drop for HeldWriter {
     fn drop(&mut self) {
@@ -71,13 +72,32 @@ impl Drop for HeldWriter {
     }
 }
 
-async fn hold_writer(server: &Server) -> HeldWriter {
+pub(super) async fn hold_writer(server: &Server) -> HeldWriter {
     let pause = server.shared.hooks.writer_pause.clone();
     let holding = pause.clone();
     tokio::task::spawn_blocking(move || holding.hold())
         .await
         .unwrap();
     HeldWriter(pause)
+}
+
+/// Fills the queue of the held writer with blobs of `channel_id`, as other
+/// connections would, and returns how many it took.
+pub(super) fn fill_writer(server: &Server, channel_id: [u8; 16]) -> u64 {
+    let mut taken = 0;
+    loop {
+        let filler = WriteRequest {
+            connection: u64::MAX,
+            client_ref: [0; 16],
+            channel_id,
+            ttl_seconds: DAY,
+            blob: vec![1; 1_185],
+        };
+        if server.shared.writer.submit(filler).is_err() {
+            return taken;
+        }
+        taken += 1;
+    }
 }
 
 /// A client subscribed to the test channel, its empty backlog read.
@@ -109,12 +129,18 @@ async fn frames(client: &mut Client, n: usize) -> Vec<Frame> {
     frames
 }
 
-/// The next frame of `client` is the `error` `code` naming both fields.
-async fn refused(client: &mut Client, code: &str, channel_id: [u8; 16], n: u16) {
+/// The next frame is the `error` `code` naming `channel_id` and, for a
+/// `publish`, its `client_ref`.
+pub(super) async fn refused(
+    client: &mut Client,
+    code: &str,
+    channel_id: [u8; 16],
+    by: Option<[u8; 16]>,
+) {
     let received = receive(client).await;
     assert!(
-        matches!(&received, Received::Frame(Frame::Error { code: got, channel_id: Some(of), client_ref: Some(by), .. })
-            if got == code && *of == channel_id && *by == client_ref(n)),
+        matches!(&received, Received::Frame(Frame::Error { code: got, channel_id: Some(of), client_ref, .. })
+            if got == code && *of == channel_id && *client_ref == by),
         "{received:?}"
     );
 }
@@ -131,17 +157,35 @@ async fn s030_t11_r11_publish_refusals() {
         &publish(other_channel(), 1, blob_of(other_channel(), 1)),
     )
     .await;
-    refused(&mut client, "not_subscribed", other_channel(), 1).await;
+    refused(
+        &mut client,
+        "not_subscribed",
+        other_channel(),
+        Some(client_ref(1)),
+    )
+    .await;
     // A bad blob on a channel not subscribed: `not_subscribed` comes first.
     let mut short = blob_of(other_channel(), 1);
     short.pop();
     send(&mut client, &publish(other_channel(), 6, short)).await;
-    refused(&mut client, "not_subscribed", other_channel(), 6).await;
+    refused(
+        &mut client,
+        "not_subscribed",
+        other_channel(),
+        Some(client_ref(6)),
+    )
+    .await;
     // A channel subscribed on another connection only: `not_subscribed`.
     let mut stranger = connect(server.address).await;
     hello(&mut stranger).await;
     send(&mut stranger, &publish(channel(), 7, blob_of(channel(), 7))).await;
-    refused(&mut stranger, "not_subscribed", channel(), 7).await;
+    refused(
+        &mut stranger,
+        "not_subscribed",
+        channel(),
+        Some(client_ref(7)),
+    )
+    .await;
 
     let mut short = blob_of(channel(), 2);
     short.pop();
@@ -149,25 +193,14 @@ async fn s030_t11_r11_publish_refusals() {
     version_2[0] = 2;
     for (n, blob) in [(2, short), (3, version_2), (4, blob_of(other_channel(), 4))] {
         send(&mut client, &publish(channel(), n, blob)).await;
-        refused(&mut client, "bad_blob", channel(), n).await;
+        refused(&mut client, "bad_blob", channel(), Some(client_ref(n))).await;
     }
 
     // The writer stopped and its queue full.
     let held = hold_writer(&server).await;
-    loop {
-        let filler = WriteRequest {
-            connection: u64::MAX,
-            client_ref: [0; 16],
-            channel_id: other_channel(),
-            ttl_seconds: DAY,
-            blob: vec![1; 1_185],
-        };
-        if server.shared.writer.submit(filler).is_err() {
-            break;
-        }
-    }
+    fill_writer(&server, other_channel());
     send(&mut client, &publish(channel(), 5, blob_of(channel(), 5))).await;
-    refused(&mut client, "rate_limited", channel(), 5).await;
+    refused(&mut client, "rate_limited", channel(), Some(client_ref(5))).await;
     drop(held);
 
     assert!(matches!(
@@ -372,7 +405,9 @@ async fn s030_t12_r12_ack_and_fan_out() {
     assert_eq!(refs, (0..30).map(client_ref).collect::<Vec<_>>());
 
     // A refusal of the writer, in one batch with a publish before and after
-    // it: its `error`, with both fields, between their `ack`s.
+    // it: its `error`, with both fields, between their `ack`s; past the
+    // window of spec 033 R1 for the 30 above.
+    clock.advance_mono(CONN_PUBLISH_WINDOW_MS + 1);
     let held = hold_writer(&server).await;
     for n in 100..103 {
         send(&mut client, &publish(channel(), n, blob_of(channel(), 8))).await;
@@ -410,6 +445,7 @@ async fn s030_t13_r13_frames_sent() {
     let nonce = hello(&mut client).await;
     send(&mut client, &subscribe(&[9; 32], HOST)).await;
     refused_subscribe(&mut client).await;
+    clock.advance_mono(SUBSCRIBE_GAP_MS);
     send(&mut client, &subscribe_since(&nonce, None)).await;
     assert!(backlog(&mut client, channel()).await.is_empty());
     send(&mut client, &publish(channel(), 1, blob_of(channel(), 1))).await;
@@ -420,9 +456,15 @@ async fn s030_t13_r13_frames_sent() {
         &publish(other_channel(), 2, blob_of(other_channel(), 2)),
     )
     .await;
-    refused(&mut client, "not_subscribed", other_channel(), 2).await;
+    refused(
+        &mut client,
+        "not_subscribed",
+        other_channel(),
+        Some(client_ref(2)),
+    )
+    .await;
     send(&mut client, &publish(channel(), 3, vec![1; 1_185])).await;
-    refused(&mut client, "bad_blob", channel(), 3).await;
+    refused(&mut client, "bad_blob", channel(), Some(client_ref(3))).await;
     // No `error` above carried `unsupported_version` or a text of its own:
     // `receive` checks every one against the table of R13.
 }
@@ -538,7 +580,15 @@ async fn s030_t07_r07_publish_during_catch_up() {
     send(&mut client, &subscribe_third(&nonce)).await;
     assert!(backlog(&mut client, third_channel()).await.is_empty());
 
+    // Each subscribe past the gap of spec 033 R2, the first catching up.
+    clock.advance_mono(SUBSCRIBE_GAP_MS);
     send(&mut client, &subscribe_since(&nonce, None)).await;
+    let earlier = receive(&mut client).await;
+    assert!(
+        matches!(earlier, Received::Frame(Frame::Push { .. })),
+        "{earlier:?}"
+    );
+    clock.advance_mono(SUBSCRIBE_GAP_MS);
     send(&mut client, &subscribe_other(&nonce)).await;
     // The catch-up under way: a backlog push received, then the writes
     // paused within a page while the publish comes.
@@ -556,7 +606,7 @@ async fn s030_t07_r07_publish_during_catch_up() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     server.shared.hooks.pause_writes(false);
 
-    let (mut oks, mut pages, mut ack_at, mut echo_at) = (0, 1usize, None, None);
+    let (mut oks, mut pages, mut ack_at, mut echo_at) = (0, 2usize, None, None);
     while oks < 2 {
         match receive(&mut client).await {
             Received::Frame(Frame::Push { channel_id, .. }) if channel_id == third_channel() => {

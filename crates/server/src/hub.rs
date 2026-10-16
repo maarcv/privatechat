@@ -142,6 +142,13 @@ impl Hub {
         Some(generation)
     }
 
+    /// How many channels are subscribed or catching up on this connection.
+    pub(crate) fn subscriptions(&self, id: u64) -> usize {
+        self.connections
+            .get(&id)
+            .map_or(0, |connection| connection.subscriptions.len())
+    }
+
     /// The TTL of a channel subscribed or catching up on this connection.
     pub(crate) fn ttl_seconds(&self, id: u64, channel_id: &[u8; 16]) -> Option<u32> {
         self.connections

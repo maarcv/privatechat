@@ -23,6 +23,7 @@ use crate::clock::{Clock, ManualClock};
 use crate::connection::spawn_deadline_task;
 use crate::frames::{self, ErrorCode};
 use crate::http::{MAX_MESSAGE, Shared, router};
+use crate::limits::SUBSCRIBE_GAP_MS;
 
 pub(super) type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -384,6 +385,8 @@ async fn s030_t06_r06_bad_frames_close() {
                 if code == "bad_auth" && *channel_id == Some(channel())),
             "{received:?}"
         );
+        // Past the gap between two `subscribe`s (spec 033 R2).
+        clock.advance_mono(SUBSCRIBE_GAP_MS);
     }
     assert!(matches!(receive(&mut client).await, Received::Close(1008)));
 
@@ -456,7 +459,7 @@ async fn spec_031_verdicts_on_the_wire() {
 
     // Past 60 000 ms an accepted connection's nonce expires: the `error`,
     // then a `hello` with a new nonce, which then opens the channel.
-    clock.advance(1);
+    clock.advance(SUBSCRIBE_GAP_MS);
     send(&mut client, &subscribe(&nonce, HOST)).await;
     let received = receive(&mut client).await;
     assert!(
@@ -468,6 +471,7 @@ async fn spec_031_verdicts_on_the_wire() {
     assert_ne!(fresh, nonce);
     // The new nonce opens another channel (this one is already subscribed,
     // and a second subscribe of it gets nothing, R9).
+    clock.advance(SUBSCRIBE_GAP_MS);
     let (pk_ch, sig) = subscribe_credential([0x41; 32], DAY, &fresh, HOST).unwrap();
     let other = Frame::Subscribe {
         pk_ch,

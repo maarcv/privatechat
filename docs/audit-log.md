@@ -2,6 +2,22 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BL
+
+**2026-10-16 — Audit BL, the code audit of the first half of slice (a) of spec 033-rate-limit-quotas (branch `033-a1-rates`): R1–R3, the publishes of one connection per 57 000 ms, one `subscribe` per 1 000 ms before the checks of spec 031, and sixteen channels then a close, with the tests of spec 030 spacing their `subscribe`s. Two rounds of three passes.** No defect a client can use; the findings were two edges where two rules meet, the wording of R2 and R3, and tests.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BL1 | A 17th channel that also came too soon got R2's refusal and no close (A) | Low | One refusal, then the close of R3 |
+| BL2 | Past the first-subscribe deadline of spec 031 R7, a `subscribe` too soon got R2's refusal before the close (B) | Low | The connection checks the deadline first and closes with no frame |
+| BL3 | Nothing tested that a writer refusal is not counted in R1, that a refused `subscribe` moves R2's gap, that a held channel too soon is refused at sixteen, or that R3 runs before spec 031 (A, C) | Medium | A test each; T03's 17th is forged |
+| BL4 | R2 and R3 said "before any check of spec 031", against R7's close with no frame (A, round 2) | Low | R2 and R3 run before the checks of spec 031 R5; R2 names the close past R7's deadline |
+| BL5 | Test helpers written twice, a writer filler three times, and a fixed sleep for the writer to drain (C) | Low | Shared from `tests/publish.rs`; the drain awaited on the hub's count |
+| BL6 | An honest client's publishes or `subscribe`s can bunch up behind a long write, since the server measures when it handles the frame (B) | Far-fetched | None: nothing is lost, the client waits and retries (spec 028 R16), and availability is outside the model |
+| BL7 | The deadline is checked by the connection and again by `AuthState` (C) | Far-fetched | None: the second copy keeps `AuthState` whole for its own tests, as its comment says |
+
+R4 and R5 (the ping, the queue's byte bound and the write deadline on the monotonic clock) come in the second half of slice (a). The pull request is about 430 net lines, 300 of them tests.
+
 ## Audit BK
 
 **2026-10-16 — Audit BK, the code audit of slice (d) of spec 030-ws-protocol (branch `030-d-publish`): R11–R14, a `publish` refused at once in R11's order or stored with the subscription's TTL, its `ack` or the writer's refusal through the hub before its echo, the frames the server builds and their bytes against `028.json`, and the publish clauses of T07 and T15; specs 030 and 031 marked implemented. Two rounds of three passes.** No defect in the production code; the findings were tests that did not pin what R11, R12 and T14 say.
