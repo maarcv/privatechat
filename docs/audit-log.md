@@ -2,6 +2,23 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BI
+
+**2026-10-16 — Audit BI, the code audit of slice (b) of spec 030-ws-protocol (branch `030-b-ws`): R3–R6, the route and the upgrade (`http.rs`), one task per WebSocket that sends the `hello`, reads frames and answers each `subscribe` with the verdicts of spec 031 (`connection.rs`), the fixed error texts (`frames.rs`), and the server-wide deadline task of spec 032 R14. Two rounds of three passes.** No defect a client can use against another; the findings were close codes, empty bodies, a write that could stall the task, and tests.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BI1 | A write that never completed held the task, the first-subscribe deadline and the close (B) | Medium | Every write and the close bounded by 30 s of real time, a failed or stalled write ends the task with no further frame; spec 033 R5 replaces the bound with its deadline on the monotonic clock |
+| BI2 | Text that is not UTF-8 dropped the socket without the 1003 of R4 (A) | Medium | `read_error` closes it with 1003 |
+| BI3 | T06 never read while the clock moved, so an early close passed (A, C) | Medium | It reads at every step and expects the close at the next tick |
+| BI4 | The message and frame limits, the `nonce_expired` order on the wire, the subscribe's clock, a ping, three server frames sent by a client, and the error texts were untested (C) | Medium | A test each |
+| BI5 | A `GET /` that is not an upgrade answered axum's text, and `HEAD /` with an `Origin` 403 (B, C, round 2) | Low | Both get the empty 404; R3, `docs/spec.md` §6 and T03 say the path and the method are checked first, then the `Origin`, then the upgrade |
+| BI6 | The tick's 100 ms was not pinned (C, round 2) | Low | `s032_t14_r14_deadline_tick` |
+| BI7 | Two extra tests carried T numbers of other behaviour (A, round 2) | Low | Named as extras; slice (d) adds T13 as the spec writes it |
+| BI8 | tungstenite's `log` calls would print frame payloads through a `log` bridge (B) | Far-fetched | None: spec 035 builds `tracing-subscriber` without `tracing-log`, so no logger hears them |
+
+The audit ends with round 2: passes A and B found Low points, now fixed, and pass C test gaps, now closed; the 30 s bound's own test waits for spec 033 R5. Until slices (c) and (d), an accepted `subscribe` gets `ok` at once and a `publish` is ignored. The pull request is about 800 net lines, 450 of them tests.
+
 ## Audit BH
 
 **2026-10-16 — Audit BH, the code audit of slice (a) of spec 030-ws-protocol (branch `030-a-check-blob`): R1, the `deny.toml` wrappers of `sha1` and `rand` for the server's WebSocket and the CI step `s030_t01_r01_deny_wrappers`; R2, `relay::check_blob` through `envelope::check_shape`, now the one step `verify` starts with, and the fuzz target `relay_check_blob`. Two rounds of three passes.** No defect in `check_blob` or in the refactor of `verify`. The CI step failed open when `cargo tree` could not name a crate; the other findings were tests and the text of specs 000 and 042 and of AGENTS 2.

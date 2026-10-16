@@ -447,3 +447,9 @@ fn error_codes_and_texts() {
         assert!(text.is_ascii() && text.len() <= 256);
     }
 }
+
+/// Spec 032-storage-ttl R14: the deadline task wakes every 100 ms of real time.
+#[test]
+fn s032_t14_r14_deadline_tick() {
+    assert_eq!(crate::connection::TICK, Duration::from_millis(100));
+}

@@ -37,6 +37,7 @@ pub(crate) fn router(shared: Arc<Shared>) -> Router {
     Router::new()
         // axum's `get` also answers `HEAD`, which must get the 404 too.
         .route("/", get(upgrade).head(not_found).fallback(not_found))
+        // Written out, so that the empty 404 does not rest on axum's default.
         .fallback(not_found)
         .with_state(shared)
 }

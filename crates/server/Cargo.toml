@@ -31,8 +31,8 @@ tokio = { version = "1.53.1", default-features = false, features = ["rt", "rt-mu
 # The HTTP route and the WebSocket upgrade (spec 030 R3); HTTP/1 only, no
 # default feature (no tracing, no JSON, no form).
 axum = { version = "0.8.9", default-features = false, features = ["ws", "http1", "tokio"] }
-# Only to recognise `Error::Capacity` behind `axum::Error` and close with 1009
-# (spec 030 R4), at the version axum pins: 0.30 would bring `rand` 0.10, and
+# Only to recognise `Error::Capacity` and `Error::Utf8` behind `axum::Error`
+# and close with 1009 or 1003 (spec 030 R4), at the version axum pins: 0.30 would bring `rand` 0.10, and
 # with it the banned `chacha20`.
 tungstenite = { version = "0.29.0", default-features = false }
 

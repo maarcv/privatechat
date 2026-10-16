@@ -17,7 +17,7 @@ use crate::frames::{self, ErrorCode};
 use crate::http::Shared;
 
 /// How often the deadline task wakes, in real time (spec 032 R14).
-const TICK: Duration = Duration::from_millis(100);
+pub(crate) const TICK: Duration = Duration::from_millis(100);
 
 /// How long one write may take before the connection is dropped. Until spec
 /// 033-rate-limit-quotas R5 measures the pending write on the monotonic clock
