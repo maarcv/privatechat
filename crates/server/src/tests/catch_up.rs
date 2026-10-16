@@ -18,7 +18,7 @@ use super::ws::{
     start, subscribe,
 };
 use crate::clock::ManualClock;
-use crate::limits::{SEND_QUEUE_BYTES, SEND_QUEUE_FRAMES, SUBSCRIBE_GAP_MS};
+use crate::limits::{SEND_QUEUE_FRAMES, SUBSCRIBE_GAP_MS};
 
 use tokio::sync::mpsc;
 
@@ -682,26 +682,6 @@ fn s030_t10_r10_an_answer_counts() {
         queued += 1;
     }
     assert_eq!(queued, SEND_QUEUE_FRAMES);
-}
-
-#[test]
-fn s033_t05_r05_queue_bytes() {
-    // 4 MiB of frames waiting, exactly, fit; one byte more overflows; a frame
-    // written makes room again (spec 033-rate-limit-quotas R5).
-    let mut hub = Hub::default();
-    let (sender, _queue) = mpsc::channel(SEND_QUEUE_FRAMES);
-    let pending = Arc::new(Pending::default());
-    hub.connect(1, sender, pending.clone());
-    let frame = Encoded::from(vec![0; SEND_QUEUE_BYTES / 64]);
-    for _ in 0..64 {
-        hub.enqueue(1, frame.clone());
-    }
-    assert!(!pending.overflowed(), "4 MiB fit");
-    pending.written(frame.len());
-    hub.enqueue(1, frame.clone());
-    assert!(!pending.overflowed(), "a frame written made room");
-    hub.enqueue(1, Encoded::from_static(b"x"));
-    assert!(pending.overflowed(), "one byte past 4 MiB");
 }
 
 #[tokio::test(flavor = "multi_thread")]

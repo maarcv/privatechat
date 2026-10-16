@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use tokio::net::TcpSocket;
+use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
 use privatechat_core::testing::subscribe_credential;
@@ -18,6 +19,7 @@ use super::ws::{
     subscribe,
 };
 use crate::clock::ManualClock;
+use crate::hub::{Encoded, Hub, Pending};
 use crate::limits::{
     CONN_PUBLISH_MAX, CONN_PUBLISH_WINDOW_MS, MAX_SUBSCRIPTIONS, PING_INTERVAL_MS, PONG_TIMEOUT_MS,
     SEND_QUEUE_BYTES, SEND_QUEUE_FRAMES, SUBSCRIBE_GAP_MS, WRITE_TIMEOUT_MS, pong_overdue,
@@ -529,4 +531,24 @@ async fn s033_t05_r05_send_queue_and_write_deadline() {
     };
     assert!(pushes < 40, "all {pushes} pushes came");
     assert!(!matches!(end, Some(Message::Close(_))), "{end:?}");
+}
+
+#[test]
+fn s033_t05_r05_queue_bytes() {
+    // 4 MiB of frames waiting, exactly, fit; one byte more overflows; a frame
+    // written makes room again (spec 033-rate-limit-quotas R5).
+    let mut hub = Hub::default();
+    let (sender, _queue) = mpsc::channel(SEND_QUEUE_FRAMES);
+    let pending = Arc::new(Pending::default());
+    hub.connect(1, sender, pending.clone());
+    let frame = Encoded::from(vec![0; SEND_QUEUE_BYTES / 64]);
+    for _ in 0..64 {
+        hub.enqueue(1, frame.clone());
+    }
+    assert!(!pending.overflowed(), "4 MiB fit");
+    pending.written(frame.len());
+    hub.enqueue(1, frame.clone());
+    assert!(!pending.overflowed(), "a frame written made room");
+    hub.enqueue(1, Encoded::from_static(b"x"));
+    assert!(pending.overflowed(), "one byte past 4 MiB");
 }
