@@ -82,14 +82,14 @@ fn s032_t09_r09_read_page() {
 
 #[test]
 fn s032_t09_r09_pool_of_four() {
+    assert_eq!(POOL_SIZE, 4);
     let dir = TestDir::new("s032_t09_pool");
     database(&dir);
     plant(&dir.db(), 1, 2_000, 1_185, T0 + 3_600_000, 0);
     let pool = Arc::new(ReadPool::open(&dir.db()).unwrap());
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .max_blocking_threads(16)
-        .build()
-        .unwrap();
+    let runtime = runtime();
+
+    // Eight reads at once all complete.
     let pages = runtime.block_on(async {
         let reads: Vec<_> = (0..8u64)
             .map(|k| {
@@ -104,6 +104,21 @@ fn s032_t09_r09_pool_of_four() {
         pages
     });
     assert!(pages.iter().all(|page| page.len() == 221));
-    assert!(pool.most_out() <= POOL_SIZE);
-    assert!(pool.most_out() >= 1);
+
+    // With the four connections taken, a fifth read waits, and goes on when
+    // one comes back.
+    runtime.block_on(async {
+        let held = pool.permits().clone().acquire_many_owned(4).await.unwrap();
+        assert_eq!(pool.permits().available_permits(), 0);
+        let waiting = {
+            let pool = pool.clone();
+            tokio::spawn(async move { read_page(&pool, [1; 16], 0, T0).await })
+        };
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        assert!(!waiting.is_finished());
+        drop(held);
+        assert_eq!(waiting.await.unwrap().unwrap().len(), 221);
+    });
 }

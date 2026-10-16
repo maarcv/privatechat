@@ -78,6 +78,21 @@ pub(crate) fn purge(
     counters: &mut Counters,
     on_round: &mut dyn FnMut(usize),
 ) -> Result<(), rusqlite::Error> {
+    let deleted = delete_expired(connection, now, counters, on_round);
+    // Even after a failed round, the rounds before it are committed: their
+    // pages are given back and their WAL frames emptied now, not a purge later.
+    let vacuumed = vacuum_and_checkpoint(connection);
+    deleted.and(vacuumed)
+}
+
+/// The rounds of `DELETE … RETURNING`, until one deletes fewer than
+/// `PURGE_ROUND` rows (R10, R11).
+fn delete_expired(
+    connection: &Connection,
+    now: u64,
+    counters: &mut Counters,
+    on_round: &mut dyn FnMut(usize),
+) -> Result<(), rusqlite::Error> {
     let now = i64::try_from(now).unwrap_or(i64::MAX);
     let limit = i64::try_from(PURGE_ROUND).unwrap_or(i64::MAX);
     let mut statement = connection.prepare(
@@ -94,9 +109,13 @@ pub(crate) fn purge(
         }
         on_round(deleted.len());
         if deleted.len() < PURGE_ROUND {
-            break;
+            return Ok(());
         }
     }
+}
+
+/// Gives free pages back to the file system and empties the WAL (R10, R13).
+fn vacuum_and_checkpoint(connection: &Connection) -> Result<(), rusqlite::Error> {
     let mut vacuum = connection.prepare(&format!("PRAGMA incremental_vacuum({VACUUM_PAGES})"))?;
     let mut steps = vacuum.query([])?;
     while steps.next()?.is_some() {}

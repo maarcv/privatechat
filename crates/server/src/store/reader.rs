@@ -3,9 +3,10 @@
 //! bytes so that a reader never holds more than one page of blobs.
 
 use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use rusqlite::Connection;
+use tokio::sync::Semaphore;
 
 use super::open_reader;
 use super::writer::Row;
@@ -23,17 +24,12 @@ pub(crate) const PAGE_BYTES: usize = 256 * 1024;
 #[derive(Debug)]
 pub(crate) struct StoreError(rusqlite::Error);
 
-/// The pool of read-only connections (R9).
+/// The pool of read-only connections (R9). A read waits for a permit in
+/// async code, never on a blocking thread, so a read that is waiting holds
+/// no thread and a read dropped while waiting leaves no work behind.
 pub(crate) struct ReadPool {
-    shared: Arc<Shared>,
-}
-
-struct Shared {
-    idle: Mutex<Vec<Connection>>,
-    returned: Condvar,
-    /// The most connections ever out of the pool at once.
-    #[cfg(test)]
-    most_out: std::sync::atomic::AtomicUsize,
+    permits: Arc<Semaphore>,
+    idle: Arc<Mutex<Vec<Connection>>>,
 }
 
 impl ReadPool {
@@ -48,50 +44,15 @@ impl ReadPool {
             .collect::<Result<Vec<_>, _>>()
             .map_err(StoreError)?;
         Ok(ReadPool {
-            shared: Arc::new(Shared {
-                idle: Mutex::new(idle),
-                returned: Condvar::new(),
-                #[cfg(test)]
-                most_out: std::sync::atomic::AtomicUsize::new(0),
-            }),
+            permits: Arc::new(Semaphore::new(POOL_SIZE)),
+            idle: Arc::new(Mutex::new(idle)),
         })
     }
 
-    /// The most connections that were ever in use at once.
+    /// The permits, for a test that holds them.
     #[cfg(test)]
-    pub(crate) fn most_out(&self) -> usize {
-        self.shared
-            .most_out
-            .load(std::sync::atomic::Ordering::SeqCst)
-    }
-}
-
-impl Shared {
-    /// Takes a connection, waiting for one when all are in use.
-    fn take(&self) -> Connection {
-        let mut idle = self.idle.lock().unwrap_or_else(PoisonError::into_inner);
-        loop {
-            if let Some(connection) = idle.pop() {
-                #[cfg(test)]
-                self.most_out.fetch_max(
-                    POOL_SIZE.saturating_sub(idle.len()),
-                    std::sync::atomic::Ordering::SeqCst,
-                );
-                return connection;
-            }
-            idle = self
-                .returned
-                .wait(idle)
-                .unwrap_or_else(PoisonError::into_inner);
-        }
-    }
-
-    fn give_back(&self, connection: Connection) {
-        self.idle
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .push(connection);
-        self.returned.notify_one();
+    pub(crate) fn permits(&self) -> &Arc<Semaphore> {
+        &self.permits
     }
 }
 
@@ -109,21 +70,37 @@ pub(crate) async fn read_page(
     from: u64,
     now: u64,
 ) -> Result<Vec<Row>, StoreError> {
-    let shared = pool.shared.clone();
+    // A permit stands for one idle connection, so the pop below finds one.
+    let permit = pool
+        .permits
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|_| aborted())?;
+    let idle = pool.idle.clone();
     let read = tokio::task::spawn_blocking(move || {
-        let connection = shared.take();
-        let page = query_page(&connection, channel_id, from, now);
-        shared.give_back(connection);
+        let _permit = permit;
+        let connection = idle
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .pop()
+            .ok_or_else(aborted)?;
+        let page = query_page(&connection, channel_id, from, now).map_err(StoreError);
+        idle.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(connection);
         page
     });
-    match read.await {
-        Ok(page) => page.map_err(StoreError),
-        // The closure never panics; a runtime shutting down cancels it.
-        Err(_) => Err(StoreError(rusqlite::Error::SqliteFailure(
-            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ABORT),
-            None,
-        ))),
-    }
+    // The closure never panics; a runtime shutting down cancels it.
+    read.await.map_err(|_| aborted())?
+}
+
+/// A read that did not run: the pool closed, or the runtime shut down.
+fn aborted() -> StoreError {
+    StoreError(rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ABORT),
+        None,
+    ))
 }
 
 fn query_page(
