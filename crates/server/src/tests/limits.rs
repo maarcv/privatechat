@@ -7,7 +7,7 @@ use privatechat_core::testing::subscribe_credential;
 use privatechat_core::{Frame, relay};
 
 use super::catch_up::{T0, backlog, subscribe_since};
-use super::publish::{blob_of, client_ref, hold_writer, publish, refused};
+use super::publish::{blob_of, client_ref, fill_writer, hold_writer, publish, refused};
 use super::ws::{
     Client, DAY, HOST, Received, channel, connect, hello, receive, receive_within, send, start,
     subscribe,
@@ -16,7 +16,6 @@ use crate::clock::ManualClock;
 use crate::limits::{
     CONN_PUBLISH_MAX, CONN_PUBLISH_WINDOW_MS, MAX_SUBSCRIPTIONS, SUBSCRIBE_GAP_MS,
 };
-use crate::store::writer::WriteRequest;
 
 /// A `publish` of a blob of the smallest size on the test channel.
 fn on_channel(n: u16) -> Frame {
@@ -104,43 +103,20 @@ async fn s033_t01_r01_writer_refusal_not_counted() {
     send(&mut client, &subscribe_since(&nonce, None)).await;
     assert!(backlog(&mut client, channel()).await.is_empty());
     let held = hold_writer(&server).await;
-    loop {
-        let filler = WriteRequest {
-            connection: u64::MAX,
-            client_ref: [0; 16],
-            channel_id: [7; 16],
-            ttl_seconds: DAY,
-            blob: vec![1; 1_185],
-        };
-        if server.shared.writer.submit(filler).is_err() {
-            break;
-        }
-    }
+    let filled = fill_writer(&server, [7; 16]);
     send(&mut client, &on_channel(0)).await;
     refused(&mut client, "rate_limited", channel(), Some(client_ref(0))).await;
     drop(held);
-    // Let the writer empty its queue.
-    let mut free = false;
-    for _ in 0..500 {
-        if server
-            .shared
-            .writer
-            .submit(WriteRequest {
-                connection: u64::MAX,
-                client_ref: [0; 16],
-                channel_id: [7; 16],
-                ttl_seconds: DAY,
-                blob: vec![1; 1_185],
-            })
-            .is_ok()
-        {
-            free = true;
+    // Until the writer has stored every filler and its queue is empty.
+    let mut drained = false;
+    for _ in 0..3_000 {
+        if server.shared.hub().committed(&[7; 16]) == filled {
+            drained = true;
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
-    assert!(free, "the writer never took a request again");
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(drained, "the writer did not store its queue in 30 s");
     let max = u16::try_from(CONN_PUBLISH_MAX).unwrap();
     for n in 1..=max {
         send(&mut client, &on_channel(n)).await;

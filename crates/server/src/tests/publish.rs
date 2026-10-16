@@ -81,6 +81,25 @@ pub(super) async fn hold_writer(server: &Server) -> HeldWriter {
     HeldWriter(pause)
 }
 
+/// Fills the queue of the held writer with blobs of `channel_id`, as other
+/// connections would, and returns how many it took.
+pub(super) fn fill_writer(server: &Server, channel_id: [u8; 16]) -> u64 {
+    let mut taken = 0;
+    loop {
+        let filler = WriteRequest {
+            connection: u64::MAX,
+            client_ref: [0; 16],
+            channel_id,
+            ttl_seconds: DAY,
+            blob: vec![1; 1_185],
+        };
+        if server.shared.writer.submit(filler).is_err() {
+            return taken;
+        }
+        taken += 1;
+    }
+}
+
 /// A client subscribed to the test channel, its empty backlog read.
 async fn subscribed(server: &Server) -> Client {
     let mut client = connect(server.address).await;
@@ -179,18 +198,7 @@ async fn s030_t11_r11_publish_refusals() {
 
     // The writer stopped and its queue full.
     let held = hold_writer(&server).await;
-    loop {
-        let filler = WriteRequest {
-            connection: u64::MAX,
-            client_ref: [0; 16],
-            channel_id: other_channel(),
-            ttl_seconds: DAY,
-            blob: vec![1; 1_185],
-        };
-        if server.shared.writer.submit(filler).is_err() {
-            break;
-        }
-    }
+    fill_writer(&server, other_channel());
     send(&mut client, &publish(channel(), 5, blob_of(channel(), 5))).await;
     refused(&mut client, "rate_limited", channel(), Some(client_ref(5))).await;
     drop(held);
