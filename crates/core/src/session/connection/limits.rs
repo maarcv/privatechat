@@ -218,8 +218,8 @@ impl Session {
     }
 
     /// Whether the channel publishes nothing at `now`: a `channel_quota`
-    /// of it, or a `rate_limited` or `server_full` of the connection, less
-    /// than a minute ago. A pause recorded later than `now`, which only a
+    /// or a `rate_limited` naming an entry of it, or a `rate_limited` naming
+    /// nothing or a `server_full` of the connection, less than a minute ago. A pause recorded later than `now`, which only a
     /// clock set back gives, counts as past.
     pub(super) fn is_paused(&self, channel_id: &[u8; 16], now: u64) -> bool {
         let within = |since: u64| now.checked_sub(since).is_some_and(|age| age < PAUSE_MS);

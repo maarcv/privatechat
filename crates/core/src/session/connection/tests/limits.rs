@@ -298,7 +298,8 @@ fn s028_t16_r16_error_codes() {
     // for a minute, with no event, the other still does at once (spec 033
     // R6, a flooded channel).
     let (mut channels, mut session, sent) = two_subscribed();
-    let slow = error_frame("rate_limited", Some(first), Some(sent));
+    // The entry's channel wins over the one the error names.
+    let slow = error_frame("rate_limited", Some(second), Some(sent));
     let step = session.on_frame(&slow, &mut channels, T0 + 1_200);
     assert!(step.events.is_empty());
     channels[0].encrypt("more", None, T0 + 1_200).unwrap();
