@@ -110,9 +110,9 @@ fn s028_t15_r15_publish_rate() {
 /// ends a `subscribe`: the named entry leaves the in-flight set, held
 /// until the minute it was published in ends; `bad_auth`
 /// and `bad_ttl` refuse the named channel for the connection;
-/// `channel_quota` pauses the channel of the entry, the named one, or
-/// every one; a `rate_limited` naming an entry, or nothing, and
-/// `server_full` pause every channel; a `rate_limited` naming a subscribed
+/// `channel_quota` and a `rate_limited` naming an entry pause the channel
+/// of the entry, the named one, or every one; a `rate_limited` naming
+/// nothing and `server_full` pause every channel; a `rate_limited` naming a subscribed
 /// channel, `not_subscribed` and an unnamed refusal ask for a new
 /// connection; `unsupported_version` is R2's; another code does nothing.
 #[test]
@@ -294,9 +294,32 @@ fn s028_t16_r16_error_codes() {
     session.on_frame(&ok(first), &mut channels, T0 + 2_000);
     assert_eq!(published(&mut session).len(), 1);
 
-    // `rate_limited` naming an entry, or nothing, and `server_full`: no
-    // channel publishes for a minute; an entry named leaves the in-flight
-    // set and is published again after it.
+    // `rate_limited` naming the entry: its channel alone publishes nothing
+    // for a minute, with no event, the other still does at once (spec 033
+    // R6, a flooded channel).
+    let (mut channels, mut session, sent) = two_subscribed();
+    let slow = error_frame("rate_limited", Some(first), Some(sent));
+    let step = session.on_frame(&slow, &mut channels, T0 + 1_200);
+    assert!(step.events.is_empty());
+    channels[0].encrypt("more", None, T0 + 1_200).unwrap();
+    session.after_send(first, &mut channels, T0 + 1_200);
+    assert_eq!(published(&mut session), []);
+    let other = channels[1].encrypt("other", None, T0 + 1_300).unwrap();
+    session.after_send(second, &mut channels, T0 + 1_300);
+    assert_eq!(published(&mut session), [other]);
+    let (held, _) = tick_until(
+        &mut session,
+        &mut channels,
+        T0 + 1_300,
+        T0 + 1_200 + MINUTE - 1,
+    );
+    assert_eq!(held, []);
+    session.on_tick(&mut channels, T0 + 1_200 + MINUTE);
+    assert_eq!(published(&mut session).len(), 2);
+
+    // `rate_limited` naming nothing, and `server_full`: no channel
+    // publishes for a minute; an entry named leaves the in-flight set and is
+    // published again after it.
     let busy = || {
         vec![Event::ServerFull {
             connection: CONNECTION,
@@ -304,7 +327,6 @@ fn s028_t16_r16_error_codes() {
     };
     for (code, named, events) in [
         ("server_full", false, busy()),
-        ("rate_limited", true, vec![]),
         ("rate_limited", false, vec![]),
         ("server_full", true, busy()),
     ] {

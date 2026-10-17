@@ -23,8 +23,7 @@ use crate::clock::{Clock, ManualClock};
 use crate::connection::spawn_deadline_task;
 use crate::frames::{self, ErrorCode};
 use crate::http::{MAX_MESSAGE, Shared, router};
-use crate::limits::ChannelLimits;
-use crate::limits::SUBSCRIBE_GAP_MS;
+use crate::limits::{ChannelLimits, SUBSCRIBE_GAP_MS};
 
 pub(super) type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
 

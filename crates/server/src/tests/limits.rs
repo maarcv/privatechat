@@ -18,7 +18,7 @@ use super::publish::{blob_of, client_ref, fill_writer, hold_writer, publish, ref
 use super::store::writer::{Harness, NO_QUOTA, request as writer_request};
 use super::ws::{
     Client, DAY, HOST, Received, channel, connect, hello, receive, receive_within, send, start,
-    subscribe,
+    start_with, subscribe,
 };
 use crate::clock::ManualClock;
 use crate::hub::{Encoded, Hub, Pending};
@@ -720,6 +720,43 @@ fn s033_t06_r06_channel_rate() {
     requests.push(writer_request(max, 5, DAY));
     let batch = one_transaction(&harness, &pause, requests);
     assert!(batch.iter().all(|outcome| outcome.result.is_ok()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s033_t06_r06_over_a_socket() {
+    // A server whose channels take one blob a minute: the second publish of
+    // the channel, from another connection, is refused naming both fields.
+    let clock = Arc::new(ManualClock::new(T0));
+    let limits = ChannelLimits {
+        publish_per_min: 1,
+        ..ChannelLimits::RAISED
+    };
+    let server = start_with(&clock, limits).await;
+    let mut first = connect(server.address).await;
+    let nonce = hello(&mut first).await;
+    send(&mut first, &subscribe_since(&nonce, None)).await;
+    assert!(backlog(&mut first, channel()).await.is_empty());
+    let mut second = connect(server.address).await;
+    let nonce = hello(&mut second).await;
+    send(&mut second, &subscribe_since(&nonce, None)).await;
+    assert!(backlog(&mut second, channel()).await.is_empty());
+    send(&mut first, &on_channel(1)).await;
+    let acked = receive(&mut first).await;
+    assert!(
+        matches!(acked, Received::Frame(Frame::Ack { .. })),
+        "{acked:?}"
+    );
+    send(&mut second, &on_channel(2)).await;
+    let mut refusal = receive(&mut second).await;
+    // The first one's echo may come first.
+    if matches!(refusal, Received::Frame(Frame::Push { .. })) {
+        refusal = receive(&mut second).await;
+    }
+    assert!(
+        matches!(&refusal, Received::Frame(Frame::Error { code, channel_id: Some(of), client_ref: Some(by), .. })
+            if code == "rate_limited" && *of == channel() && *by == client_ref(2)),
+        "{refusal:?}"
+    );
 }
 
 #[test]

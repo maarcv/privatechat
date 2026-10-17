@@ -407,26 +407,28 @@ fn refusal(
     let channel_id = request.channel_id;
     let bytes = u64::try_from(request.blob.len()).unwrap_or(u64::MAX);
     let ours = working.added.get(&channel_id).copied();
-    let sum = |usages: &mut dyn Iterator<Item = Usage>| {
-        usages.fold(Usage::default(), |sum, usage| Usage {
-            blobs: sum.blobs.saturating_add(usage.blobs),
-            bytes: sum.bytes.saturating_add(usage.bytes),
-        })
-    };
-    let held = sum(&mut counters.get(&channel_id).copied().into_iter().chain(ours));
+    let held = total(counters.get(&channel_id).copied().into_iter().chain(ours));
     if held.blobs >= u64::from(limits.max_blobs)
         || held.bytes.saturating_add(bytes) > limits.max_bytes
     {
         return Some(Refusal::ChannelQuota);
     }
     let window = windows.get(&channel_id).into_iter().flatten();
-    let recent = sum(&mut window.map(|(_, usage)| *usage).chain(ours));
+    let recent = total(window.map(|(_, usage)| *usage).chain(ours));
     if recent.blobs >= u64::from(limits.publish_per_min)
         || recent.bytes.saturating_add(bytes) > limits.bytes_per_min
     {
         return Some(Refusal::RateLimited);
     }
     None
+}
+
+/// The blobs and bytes of `usages` together.
+fn total(usages: impl Iterator<Item = Usage>) -> Usage {
+    usages.fold(Usage::default(), |sum, usage| Usage {
+        blobs: sum.blobs.saturating_add(usage.blobs),
+        bytes: sum.bytes.saturating_add(usage.bytes),
+    })
 }
 
 /// What each channel inserted within the window of spec 033 R6: the
