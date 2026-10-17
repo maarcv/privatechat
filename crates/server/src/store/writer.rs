@@ -8,6 +8,7 @@ pub(crate) mod purge;
 #[cfg(test)]
 pub(crate) mod test;
 
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -20,6 +21,7 @@ use tokio::sync::oneshot;
 use self::purge::{Counters, PURGE_INTERVAL_MS, Usage};
 use super::{open_writer, refused};
 use crate::clock::Clock;
+use crate::limits::{CHANNEL_WINDOW_MS, ChannelLimits};
 use crate::{DbCause, StartError};
 
 /// Requests waiting for the writer; one more is refused (R4).
@@ -94,8 +96,9 @@ impl Writer {
         clock: Arc<dyn Clock>,
         on_commit: OnCommit,
         max_db_bytes: u64,
+        limits: ChannelLimits,
     ) -> Result<Writer, StartError> {
-        Writer::start(db, clock, on_commit, max_db_bytes, Hooks::default())
+        Writer::start(db, clock, on_commit, max_db_bytes, limits, Hooks::default())
     }
 
     fn start(
@@ -103,6 +106,7 @@ impl Writer {
         clock: Arc<dyn Clock>,
         on_commit: OnCommit,
         max_db_bytes: u64,
+        limits: ChannelLimits,
         hooks: Hooks,
     ) -> Result<Writer, StartError> {
         let connection = open_writer(db)?;
@@ -114,6 +118,8 @@ impl Writer {
             clock,
             on_commit,
             max_db_bytes,
+            limits,
+            windows: HashMap::new(),
             last,
             counters: Counters::new(),
             last_purge: 0,
@@ -227,6 +233,12 @@ struct WriterThread {
     clock: Arc<dyn Clock>,
     on_commit: OnCommit,
     max_db_bytes: u64,
+    /// The limits of a channel (spec 033-rate-limit-quotas R6, R7).
+    limits: ChannelLimits,
+    /// What each channel inserted within the last `CHANNEL_WINDOW_MS`, as
+    /// committed: the monotonic time of each commit and the blobs and bytes
+    /// it inserted (spec 033 R6). A channel with none has no entry.
+    windows: Windows,
     /// The largest `received_at` ever committed (R6).
     last: u64,
     /// The rows of each channel, as committed (R11).
@@ -287,6 +299,16 @@ impl WriterThread {
 
     /// Stores one batch in one transaction and returns its outcomes (R5–R8).
     fn store(&mut self, batch: Vec<WriteRequest>) -> Vec<WriteOutcome> {
+        let now = self.clock.mono_ms();
+        self.windows.retain(|_, window| {
+            while window
+                .front()
+                .is_some_and(|(at, _)| now.saturating_sub(*at) > CHANNEL_WINDOW_MS)
+            {
+                window.pop_front();
+            }
+            !window.is_empty()
+        });
         let results = if self.is_full() {
             vec![Err(Refusal::ServerFull); batch.len()]
         } else {
@@ -330,13 +352,24 @@ impl WriterThread {
         };
         let mut results = Vec::with_capacity(batch.len());
         for request in batch {
-            results.push(insert(
-                &transaction,
-                &*self.clock,
-                &mut self.hooks,
-                &mut working,
+            let refused = refusal(
+                &self.limits,
+                &self.windows,
+                &self.counters,
+                &working,
                 request,
-            )?);
+            );
+            let stored = match refused {
+                Some(refusal) => Err(refusal),
+                None => insert(
+                    &transaction,
+                    &*self.clock,
+                    &mut self.hooks,
+                    &mut working,
+                    request,
+                )?,
+            };
+            results.push(stored);
         }
         if let Some(stored) = working.stored {
             transaction.execute(
@@ -347,12 +380,60 @@ impl WriterThread {
         self.hooks.before_commit(&transaction);
         transaction.commit()?;
         self.last = working.last;
+        let now = self.clock.mono_ms();
         for (channel_id, usage) in working.added {
             purge::add(&mut self.counters, channel_id, usage);
+            self.windows
+                .entry(channel_id)
+                .or_default()
+                .push_back((now, usage));
         }
         Ok(results)
     }
 }
+
+/// The refusal of spec 033-rate-limit-quotas `request` gets before it is
+/// inserted, counting what this transaction inserted already: first what
+/// its channel holds (R7), which outlasts the window and tells the member
+/// the channel is full, then its channel's inserts within
+/// `CHANNEL_WINDOW_MS` (R6). Stored blobs are never deleted to make room.
+fn refusal(
+    limits: &ChannelLimits,
+    windows: &Windows,
+    counters: &Counters,
+    working: &Working,
+    request: &WriteRequest,
+) -> Option<Refusal> {
+    let channel_id = request.channel_id;
+    let bytes = u64::try_from(request.blob.len()).unwrap_or(u64::MAX);
+    let ours = working.added.get(&channel_id).copied();
+    let held = total(counters.get(&channel_id).copied().into_iter().chain(ours));
+    if held.blobs >= u64::from(limits.max_blobs)
+        || held.bytes.saturating_add(bytes) > limits.max_bytes
+    {
+        return Some(Refusal::ChannelQuota);
+    }
+    let window = windows.get(&channel_id).into_iter().flatten();
+    let recent = total(window.map(|(_, usage)| *usage).chain(ours));
+    if recent.blobs >= u64::from(limits.publish_per_min)
+        || recent.bytes.saturating_add(bytes) > limits.bytes_per_min
+    {
+        return Some(Refusal::RateLimited);
+    }
+    None
+}
+
+/// The blobs and bytes of `usages` together.
+fn total(usages: impl Iterator<Item = Usage>) -> Usage {
+    usages.fold(Usage::default(), |sum, usage| Usage {
+        blobs: sum.blobs.saturating_add(usage.blobs),
+        bytes: sum.bytes.saturating_add(usage.bytes),
+    })
+}
+
+/// What each channel inserted within the window of spec 033 R6: the
+/// monotonic time of each commit and what it inserted.
+type Windows = HashMap<[u8; 16], VecDeque<(u64, Usage)>>;
 
 /// The `server_id` and `received_at` of a stored request, or its refusal.
 type Stored = Result<([u8; 16], u64), Refusal>;

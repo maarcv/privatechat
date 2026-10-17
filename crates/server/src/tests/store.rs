@@ -3,7 +3,7 @@
 
 mod purge;
 mod reader;
-mod writer;
+pub(super) mod writer;
 
 use std::path::Path;
 

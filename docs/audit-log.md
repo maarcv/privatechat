@@ -2,6 +2,26 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BN
+
+**2026-10-17 — Audit BN, the code audit of slice (b) of spec 033-rate-limit-quotas (branch `033-b-channel`): R6 and R7, the writer refusing an insert past its channel's 120 blobs or 4 MiB within 60 000 ms, or past the 20 000 blobs or 64 MiB the channel holds, counting the blobs of the same transaction; `ChannelLimits` through `Writer::spawn` and `Shared::open`. Three rounds of three passes.** No defect in the writer's checks; two decisions of the human, one of which changes how the client of spec 028 answers a `rate_limited`, and tests.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BN1 | R6 and R7 both said MUST when one blob broke both, and the code answered `rate_limited` (A, round 1) | Low | The human's decision BN-D-1: R7 first, so the member is told the channel is full |
+| BN2 | R6's `rate_limited` made the client of spec 028 R16 stop publishing on every channel of the connection: an intruder keeping one channel at its rate stalled a member's other channels again and again (B, round 2) | Medium | The human's decision BN-D-2: a `rate_limited` naming a `client_ref` pauses only that entry's channel, or the named channel, or else every channel; spec 028 R16 and T16 amended |
+| BN3 | T06 did not pin the defaults of the table or use three connections; the bytes of one transaction, exactly 4 MiB, a rolled-back commit, only its own channel, real limits over a socket, and the fallbacks of the client's new pause were untested (A, C) | Medium | A test each |
+| BN4 | `Working::inserted` repeated `Working::added`; a closure over a type-erased iterator (C) | Low | One window entry per channel and commit, from what the transaction added; a plain `total` |
+| BN5 | `docs/spec.md` §6, R7's reason, the Interface and two client comments behind the decisions (A, B) | Low | Worded after them; `CHANNEL_WINDOW_MS` in the Interface |
+| BN6 | The window prune walks every channel active in the last minute on each batch (B) | Far-fetched | None: the cost falls as batches grow under load, and the entries are fewer than the counters |
+| BN7 | Under a server-wide refusal, the client now backs off one channel at a time, up to 16 refused publishes a minute instead of one (B, round 3) | Far-fetched | None: still within spec 028 R15's 30 a minute, which spec 033 R1 already admits |
+
+**BN-D-1 (the human's decision, 2026-10-16).** When a blob breaks both R6 and R7, it gets `channel_quota`: of "channel full wins" and "too fast wins", the human chose the first, which all three advisors recommended. R7, T07 and `docs/spec.md` §6 say so.
+
+**BN-D-2 (the human's decision, 2026-10-17).** A `rate_limited` naming a `client_ref` pauses only that entry's channel at the client, with no event, so that a channel an intruder floods under R6 does not stop the member's other channels. Of the three options put (the client pausing that channel, the server answering `channel_quota`, or dropping the promise), the human chose the first, which two of the three advisors recommended. Spec 028 R16 and T16 say so; the frames and the codes are unchanged.
+
+The configuration of the limits (R11) comes with slice (c) and spec 035. The pull request is about 560 net lines, 410 of them tests.
+
 ## Audit BM
 
 **2026-10-16 — Audit BM, the code audit of the second half of slice (a) of spec 033-rate-limit-quotas (branch `033-a2-deadlines`): R4 and R5, a ping every 30 000 ms of the monotonic clock and a close with 1001 when it waits with no pong and no write completing, the queue of a connection bounded at 256 frames and 4 MiB not yet written, the frame being written included, and a write still pending 30 000 ms after it began dropping the connection with no close frame. Three rounds of three passes.** One High (the pings starved during a catch-up), one memory bound that tungstenite's pongs went around, and tests.

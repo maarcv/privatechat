@@ -30,7 +30,7 @@ Some of these numbers are part of the protocol, because the client of spec 028-s
 **Per channel (configurable)**
 
 - R6 Before inserting a blob, the writer of spec 032-storage-ttl R5 MUST refuse it with `rate_limited` when its channel has had `channel_publish_per_min` blobs inserted within the preceding 60 000 ms, counting those already inserted by the same transaction (spec 032 R7), or when those blobs' bytes plus this one would exceed `channel_bytes_per_min`.
-- R7 Before inserting a blob, the writer MUST refuse it with `channel_quota` when the counters of spec 032 R11, with the blobs already inserted by the same transaction, plus this blob would exceed `channel_max_blobs` blobs or `channel_max_bytes` bytes. Stored blobs are never deleted to make room.
+- R7 Before inserting a blob, the writer MUST refuse it with `channel_quota` when the counters of spec 032 R11, with the blobs already inserted by the same transaction, plus this blob would exceed `channel_max_blobs` blobs or `channel_max_bytes` bytes. Stored blobs are never deleted to make room. R7 is checked before R6: a blob both would refuse gets `channel_quota`, which tells the member the channel is full (`Event::ChannelFull`, spec 028-session-sans-io R16), where `rate_limited` would pause it silently.
 
 **Per IP and global (configurable)**
 
@@ -87,6 +87,7 @@ pub(crate) const WRITE_TIMEOUT_MS: u64 = 30_000;
 pub(crate) const SEND_QUEUE_FRAMES: usize = 256;
 pub(crate) const SEND_QUEUE_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const IP_TABLE_MAX: usize = 65_536;
+pub(crate) const CHANNEL_WINDOW_MS: u64 = 60_000;   // R6
 
 pub(crate) struct ChannelLimits { pub(crate) publish_per_min: u32, pub(crate) bytes_per_min: u64,
                                   pub(crate) max_blobs: u32, pub(crate) max_bytes: u64 }
@@ -115,7 +116,7 @@ pub(crate) struct IpTable { /* Mutex<HashMap<IpKey, Entry>>: IPv4 by address, IP
 
 ## Public API changes
 
-None in `core`. `docs/spec.md` §6, brought up to date when this spec is accepted: the per-connection values are fixed and the channel, IP and global values are configurable; the server's publish window is 57 000 ms; the ping rule counts write progress, and a write stuck for 30 s drops the connection; the per-IP rules count every open connection, key IPv6 by /64 and /48, use the canonical address, add a byte budget per address and one for the onion listener, answer HTTP 429 (not "close"), apply on the main listener and not on the onion listener (replacing "not applied to connections from `127.0.0.1`", ADR 0038); a full IP table admits new addresses under the caps; each listener has its own connection caps, answered with HTTP 503.
+None in `core`. `docs/spec.md` §6, brought up to date when this spec is accepted: the per-connection values are fixed and the channel, IP and global values are configurable; the server's publish window is 57 000 ms; the ping rule counts write progress, and a write stuck for 30 s drops the connection; the channel's retention is checked before its rate; the per-IP rules count every open connection, key IPv6 by /64 and /48, use the canonical address, add a byte budget per address and one for the onion listener, answer HTTP 429 (not "close"), apply on the main listener and not on the onion listener (replacing "not applied to connections from `127.0.0.1`", ADR 0038); a full IP table admits new addresses under the caps; each listener has its own connection caps, answered with HTTP 503.
 
 ## Test cases
 
@@ -125,7 +126,7 @@ None in `core`. `docs/spec.md` §6, brought up to date when this spec is accepte
 - T04 (covers R4): `s033_t04_r04_ping_pong`: a ping arrives every 30 000 ms of the manual clock; a client that stops answering and reading → closed 30 000 ms after the unanswered ping, with status 1001; a client that reads steadily but slowly behind a large backlog and whose pong comes late → not closed.
 - T05 (covers R5): `s033_t05_r05_send_queue_and_write_deadline`, with the `cfg(test)` hook of spec 030 that pauses a connection's socket writes (the kernel would otherwise take megabytes first): with the channel limits raised, the clock stopped and a subscriber whose writes are paused, 257 blobs of 1 185 bytes committed to the channel through `Writer::submit`, as nine publishers would within R1 → 1013 at the 257th waiting frame, and 65 blobs of 64 673 bytes → 1013 past 4 MiB; its backlog alone never closes it (spec 030 T10); a connection whose writes are paused mid-frame → the TCP connection dropped with no close frame 30 000 ms of the monotonic clock after that write began.
 - T06 (covers R6): `s033_t06_r06_channel_rate`: three connections on one channel, 121 publishes within 60 000 ms → the 121st `rate_limited`; blobs of 64 673 bytes → refused once the next would pass 4 MiB within the window; 60 001 ms later → accepted.
-- T07 (covers R7): `s033_t07_r07_channel_quota`: with `channel_max_blobs = 5`, the sixth → `channel_quota`, also when all six arrive in one transaction, and the first five still served; after the purge removes two → two more accepted; `channel_max_bytes` behaves the same way on bytes.
+- T07 (covers R7): `s033_t07_r07_channel_quota`: with `channel_max_blobs = 5`, the sixth → `channel_quota`, also when all six arrive in one transaction, and the first five still served; after the purge removes two → two more accepted; `channel_max_bytes` behaves the same way on bytes, also within one transaction; with `channel_publish_per_min = 5` as well, the sixth blob within 60 000 ms → `channel_quota`, not `rate_limited`.
 - T08 (covers R8): `s033_t08_r08_ip_limits`: 20 unauthenticated connections from one address → the 21st gets 429 and no upgrade; one of them subscribes → a new one is accepted; 60 connections in a minute → the 61st gets 429; with `ip_connections = 3`, three subscribed connections → the fourth gets 429; two IPv6 addresses of one /64 share one count; `::ffff:1.2.3.4` and `1.2.3.4` share one count; five /64s of one /48 at `ip_unauth_connections` each → the /48 count refuses past `ip48_unauth_connections` (80), and a configuration with `ip48_unauth_connections = 200` → accepted up to 100; a table filled with 65 536 IPv4 addresses → a new IPv4 address is accepted without an entry, up to `max_unauth_connections`, and a known one is still checked; one /48 cycling through fresh /64s → a 257th /64 gets 429 (`ip48_subnets`), it cannot fill the table, and none of its connections gets past the /48's caps.
 - T09 (covers R9): `s033_t09_r09_ip_forgotten`: after every connection of an address closes and 60 001 ms pass, the table has no entry for it; no connection state other than the table holds the address; a connection on the onion listener creates no entry.
 - T10 (covers R10): `s033_t10_r10_listener_caps`: with `max_connections = 2` and `onion_max_connections = 1`, two main connections → a third main gets 503, and one onion connection is still accepted; a second onion connection → 503 while the main listener still accepts after one closes; `max_unauth_connections = 2` → the third unauthenticated connection of a listener gets 503.
@@ -166,3 +167,6 @@ None.
 - 2026-10-15 amended after audit BB round 4 (`docs/audit-log.md`, BB-R4B-4): Security says an address is kept 60 s after its last new connection or its last publish, as R9 does
 - 2026-10-16 R2 and R3 worded after audit BL (`docs/audit-log.md`, BL4): the limits run before the checks of spec 031 R5; past the first-subscribe deadline of spec 031 R7 a subscribe closes the connection with no frame, as spec 031 T07 says
 - 2026-10-16 T05 worded after audit BM (`docs/audit-log.md`, BM6): the blobs come through `Writer::submit`, as publishers' would, since the hook that pauses the subscriber's writes pauses theirs too
+- 2026-10-16 R7 and T07 amended after audit BN (`docs/audit-log.md`, BN-D-1, the human's decision): R7 is checked before R6, so a blob both would refuse gets `channel_quota`
+- 2026-10-16 Interface and Public API changes after audit BN: `CHANNEL_WINDOW_MS`, and `docs/spec.md` §6 says the retention is checked before the rate
+- 2026-10-17 R7's reason for checking it before R6 worded after spec 028 R16 was amended (BN-D-2): the full channel is told, where `rate_limited` pauses it silently

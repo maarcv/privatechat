@@ -50,12 +50,22 @@ impl Session {
         match code {
             CODE_NONCE_EXPIRED => self.nonce_expired(channel_id, now, step),
             CODE_BAD_AUTH | CODE_BAD_TTL => self.refuse(channel_id, step),
-            CODE_CHANNEL_QUOTA => self.channel_full(flight, channel_id, now, step),
+            CODE_CHANNEL_QUOTA => {
+                for channel in self.pause(flight, channel_id, now) {
+                    step.events.push(Event::ChannelFull { channel });
+                }
+            }
             CODE_RATE_LIMITED => match (channel_id, client_ref) {
                 (Some(channel_id), None) => {
                     self.subscribe_again(channel_id, channels, now, step);
                 }
-                _ => self.paused_all = Some(now),
+                // A publish refused: its channel alone waits, so that a
+                // channel an intruder floods does not stop the others
+                // (spec 033-rate-limit-quotas R6).
+                (_, Some(_)) => {
+                    self.pause(flight, channel_id, now);
+                }
+                (None, None) => self.paused_all = Some(now),
             },
             CODE_SERVER_FULL => {
                 self.paused_all = Some(now);
@@ -99,30 +109,29 @@ impl Session {
         }
     }
 
-    /// `channel_quota`: the channel of the named entry, or the named
-    /// channel, or else every channel of the session publishes nothing for
-    /// a minute, each with `Event::ChannelFull`; a channel not of the
-    /// session is ignored.
-    fn channel_full(
+    /// `channel_quota`, or a `rate_limited` naming an entry: the channel of
+    /// the named entry, or the named channel, or else every channel of the
+    /// session publishes nothing for a minute; a channel not of the session
+    /// is ignored. Returns the channels paused.
+    fn pause(
         &mut self,
         flight: Option<Flight>,
         channel_id: Option<[u8; 16]>,
         now: u64,
-        step: &mut Step,
-    ) {
-        let paused = match (flight, channel_id) {
+    ) -> Vec<[u8; 16]> {
+        let named = match (flight, channel_id) {
             (Some(flight), _) => vec![flight.channel],
             (None, Some(channel_id)) => vec![channel_id],
             (None, None) => self.channel_ids.clone(),
         };
-        for channel_id in paused {
-            if self.channel_ids.contains(&channel_id) {
-                self.paused.insert(channel_id, now);
-                step.events.push(Event::ChannelFull {
-                    channel: channel_id,
-                });
-            }
+        let paused: Vec<[u8; 16]> = named
+            .into_iter()
+            .filter(|channel_id| self.channel_ids.contains(channel_id))
+            .collect();
+        for channel_id in &paused {
+            self.paused.insert(*channel_id, now);
         }
+        paused
     }
 
     /// `bad_auth` or `bad_ttl`: the named channel is not subscribed again
@@ -209,8 +218,8 @@ impl Session {
     }
 
     /// Whether the channel publishes nothing at `now`: a `channel_quota`
-    /// of it, or a `rate_limited` or `server_full` of the connection, less
-    /// than a minute ago. A pause recorded later than `now`, which only a
+    /// or a `rate_limited` naming an entry of it, or a `rate_limited` naming
+    /// nothing or a `server_full` of the connection, less than a minute ago. A pause recorded later than `now`, which only a
     /// clock set back gives, counts as past.
     pub(super) fn is_paused(&self, channel_id: &[u8; 16], now: u64) -> bool {
         let within = |since: u64| now.checked_sub(since).is_some_and(|age| age < PAUSE_MS);

@@ -23,7 +23,7 @@ use crate::clock::{Clock, ManualClock};
 use crate::connection::spawn_deadline_task;
 use crate::frames::{self, ErrorCode};
 use crate::http::{MAX_MESSAGE, Shared, router};
-use crate::limits::SUBSCRIBE_GAP_MS;
+use crate::limits::{ChannelLimits, SUBSCRIBE_GAP_MS};
 
 pub(super) type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -43,10 +43,15 @@ pub(super) struct Server {
 static SERVERS: AtomicUsize = AtomicUsize::new(0);
 
 pub(super) async fn start(clock: &Arc<ManualClock>) -> Server {
+    start_with(clock, ChannelLimits::RAISED).await
+}
+
+/// A server whose channels have `limits`.
+pub(super) async fn start_with(clock: &Arc<ManualClock>, limits: ChannelLimits) -> Server {
     let n = SERVERS.fetch_add(1, Ordering::SeqCst);
     let dir = TestDir::new(&format!("ws{n}"));
     let clock: Arc<dyn Clock> = clock.clone();
-    let shared = Shared::open(&dir.db(), clock, vec![HOST.to_owned()], 1 << 40).unwrap();
+    let shared = Shared::open(&dir.db(), clock, vec![HOST.to_owned()], 1 << 40, limits).unwrap();
     spawn_deadline_task(shared.ticks.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();

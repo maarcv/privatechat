@@ -131,7 +131,7 @@ pub(crate) struct Session {
     /// The channels the `Device` marks `write_failed`, frozen on every
     /// connection until it clears them (R5, R10).
     write_failed: BTreeSet<[u8; 16]>,
-    /// When each channel's `channel_quota` came (R16).
+    /// When each channel's `channel_quota`, or `rate_limited` naming an entry, came (R16).
     paused: BTreeMap<[u8; 16], u64>,
     /// When the latest `rate_limited` or `server_full` that stops every
     /// channel came (R16).

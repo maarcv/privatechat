@@ -5,6 +5,47 @@
 
 use std::collections::VecDeque;
 
+/// The limits of one channel, which the operator may change (R6, R7, R11;
+/// spec 035-server-ops), checked by the writer before each insert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ChannelLimits {
+    /// Blobs inserted per 60 000 ms (R6).
+    pub(crate) publish_per_min: u32,
+    /// Bytes inserted per 60 000 ms (R6).
+    pub(crate) bytes_per_min: u64,
+    /// Blobs held (R7).
+    pub(crate) max_blobs: u32,
+    /// Bytes held (R7).
+    pub(crate) max_bytes: u64,
+}
+
+impl Default for ChannelLimits {
+    /// The defaults of the table "Limits".
+    fn default() -> ChannelLimits {
+        ChannelLimits {
+            publish_per_min: 120,
+            bytes_per_min: 4 * 1024 * 1024,
+            max_blobs: 20_000,
+            max_bytes: 64 * 1024 * 1024,
+        }
+    }
+}
+
+impl ChannelLimits {
+    /// No limit a test reaches, for the tests of other rules ("with the
+    /// channel limits raised").
+    #[cfg(test)]
+    pub(crate) const RAISED: ChannelLimits = ChannelLimits {
+        publish_per_min: u32::MAX,
+        bytes_per_min: u64::MAX,
+        max_blobs: u32::MAX,
+        max_bytes: u64::MAX,
+    };
+}
+
+/// The window of R6: what a channel inserted within it counts.
+pub(crate) const CHANNEL_WINDOW_MS: u64 = 60_000;
+
 /// The most `publish`es one connection hands to the writer within
 /// `CONN_PUBLISH_WINDOW_MS` (R1).
 pub(crate) const CONN_PUBLISH_MAX: usize = 30;

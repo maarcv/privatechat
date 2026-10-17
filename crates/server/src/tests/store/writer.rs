@@ -12,20 +12,21 @@ use rusqlite::Connection;
 use super::super::TestDir;
 use super::plant_version;
 use crate::clock::{Clock, ManualClock};
+use crate::limits::ChannelLimits;
 use crate::store::writer::test::{Hooks, Pause, spawn};
 use crate::store::writer::{MAX_BATCH, QUEUE_LEN, Refusal, WriteOutcome, WriteRequest, Writer};
 use crate::{DbCause, StartError, StartReason};
 
 /// Far above any test database.
-const NO_QUOTA: u64 = 1 << 40;
+pub(in crate::tests) const NO_QUOTA: u64 = 1 << 40;
 
 pub(super) const T0: u64 = 1_800_000_000_000;
 
 /// A writer under test and the outcomes of its transactions, one `Vec` per
 /// transaction.
-pub(super) struct Harness {
-    pub(super) writer: Writer,
-    pub(super) outcomes: Receiver<Vec<WriteOutcome>>,
+pub(in crate::tests) struct Harness {
+    pub(in crate::tests) writer: Writer,
+    pub(in crate::tests) outcomes: Receiver<Vec<WriteOutcome>>,
 }
 
 impl Harness {
@@ -39,22 +40,33 @@ impl Harness {
         hooks: Hooks,
         max_db_bytes: u64,
     ) -> Harness {
+        Harness::with_limits(db, clock, hooks, max_db_bytes, ChannelLimits::RAISED)
+    }
+
+    /// A writer whose channels have `limits` (spec 033-rate-limit-quotas).
+    pub(in crate::tests) fn with_limits(
+        db: &Path,
+        clock: &Arc<ManualClock>,
+        hooks: Hooks,
+        max_db_bytes: u64,
+        limits: ChannelLimits,
+    ) -> Harness {
         let (sender, outcomes) = mpsc::channel();
         let on_commit = Box::new(move |batch| {
             let _ = sender.send(batch);
         });
         let clock: Arc<dyn Clock> = clock.clone();
-        let writer = spawn(db, clock, on_commit, max_db_bytes, hooks).unwrap();
+        let writer = spawn(db, clock, on_commit, max_db_bytes, limits, hooks).unwrap();
         Harness { writer, outcomes }
     }
 
     /// The outcomes of the next transaction.
-    pub(super) fn next(&self) -> Vec<WriteOutcome> {
+    pub(in crate::tests) fn next(&self) -> Vec<WriteOutcome> {
         self.outcomes.recv_timeout(Duration::from_secs(30)).unwrap()
     }
 
     /// Submits one request and returns its outcome.
-    pub(super) fn store(&self, request: WriteRequest) -> WriteOutcome {
+    pub(in crate::tests) fn store(&self, request: WriteRequest) -> WriteOutcome {
         self.writer.submit(request).unwrap();
         let mut batch = self.next();
         assert_eq!(batch.len(), 1);
@@ -63,7 +75,7 @@ impl Harness {
 }
 
 /// Request `n` of connection `n % 7`, on channel `[channel; 16]`.
-pub(super) fn request(n: u16, channel: u8, ttl_seconds: u32) -> WriteRequest {
+pub(in crate::tests) fn request(n: u16, channel: u8, ttl_seconds: u32) -> WriteRequest {
     let mut client_ref = [0; 16];
     client_ref[..2].copy_from_slice(&n.to_be_bytes());
     WriteRequest {
@@ -96,6 +108,7 @@ fn s032_t03_r03_spawn_refuses() {
         clock,
         Box::new(|_| {}),
         NO_QUOTA,
+        ChannelLimits::RAISED,
         Hooks::default(),
     );
     assert!(matches!(
@@ -330,7 +343,15 @@ fn s032_t07_r07_report_after_commit() {
         counter.fetch_add(1, Ordering::SeqCst);
         let _ = sender.send(batch);
     });
-    let writer = spawn(&dir.db(), clock.clone(), on_commit, NO_QUOTA, hooks).unwrap();
+    let writer = spawn(
+        &dir.db(),
+        clock.clone(),
+        on_commit,
+        NO_QUOTA,
+        ChannelLimits::RAISED,
+        hooks,
+    )
+    .unwrap();
     let harness = Harness { writer, outcomes };
 
     let first = harness.store(request(1, 1, 60));
@@ -576,6 +597,7 @@ fn s032_t06_r06_unreadable_last_refuses_the_start() {
         clock,
         Box::new(|_| {}),
         NO_QUOTA,
+        ChannelLimits::RAISED,
         Hooks::default(),
     );
     assert!(matches!(
