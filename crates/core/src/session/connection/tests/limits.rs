@@ -317,6 +317,32 @@ fn s028_t16_r16_error_codes() {
     session.on_tick(&mut channels, T0 + 1_200 + MINUTE);
     assert_eq!(published(&mut session).len(), 2);
 
+    // An entry not in flight: the named channel alone, or, naming none,
+    // every channel.
+    let unknown = ClientRef { bytes: [9; 16] };
+    let (mut channels, mut session, _) = two_subscribed();
+    let named = error_frame("rate_limited", Some(first), Some(unknown));
+    assert!(
+        session
+            .on_frame(&named, &mut channels, T0 + 1_200)
+            .events
+            .is_empty()
+    );
+    let other = channels[1].encrypt("other", None, T0 + 1_300).unwrap();
+    session.after_send(second, &mut channels, T0 + 1_300);
+    assert_eq!(published(&mut session), [other]);
+    let (mut channels, mut session, _) = two_subscribed();
+    let unnamed = error_frame("rate_limited", None, Some(unknown));
+    assert!(
+        session
+            .on_frame(&unnamed, &mut channels, T0 + 1_200)
+            .events
+            .is_empty()
+    );
+    channels[1].encrypt("other", None, T0 + 1_300).unwrap();
+    session.after_send(second, &mut channels, T0 + 1_300);
+    assert_eq!(published(&mut session), []);
+
     // `rate_limited` naming nothing, and `server_full`: no channel
     // publishes for a minute; an entry named leaves the in-flight set and is
     // published again after it.
@@ -795,7 +821,7 @@ fn s028_t14_r14_paused_channel_expires() {
         let sent = channels[0].encrypt("hi", None, T0).unwrap();
         let mut session = subscribed(&mut channels, T0);
         assert_eq!(published(&mut session), [sent]);
-        // Out of flight, and every channel paused, again and again.
+        // Out of flight, and its channel paused, again and again.
         let stale = T0 + 86_400_000 + 360_001;
         for at in [T0 + 100, stale - 30_000] {
             let renewed = error_frame("rate_limited", None, Some(sent));
