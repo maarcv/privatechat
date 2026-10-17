@@ -394,9 +394,9 @@ impl WriterThread {
 
 /// The refusal of spec 033-rate-limit-quotas `request` gets before it is
 /// inserted, counting what this transaction inserted already: first what
-/// its channel holds (R7), which outlasts the window and pauses that channel
-/// alone at the client, then its channel's inserts within `CHANNEL_WINDOW_MS`
-/// (R6). Stored blobs are never deleted to make room.
+/// its channel holds (R7), which outlasts the window and tells the member
+/// the channel is full, then its channel's inserts within
+/// `CHANNEL_WINDOW_MS` (R6). Stored blobs are never deleted to make room.
 fn refusal(
     limits: &ChannelLimits,
     windows: &Windows,

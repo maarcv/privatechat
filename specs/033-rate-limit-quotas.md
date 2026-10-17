@@ -30,7 +30,7 @@ Some of these numbers are part of the protocol, because the client of spec 028-s
 **Per channel (configurable)**
 
 - R6 Before inserting a blob, the writer of spec 032-storage-ttl R5 MUST refuse it with `rate_limited` when its channel has had `channel_publish_per_min` blobs inserted within the preceding 60 000 ms, counting those already inserted by the same transaction (spec 032 R7), or when those blobs' bytes plus this one would exceed `channel_bytes_per_min`.
-- R7 Before inserting a blob, the writer MUST refuse it with `channel_quota` when the counters of spec 032 R11, with the blobs already inserted by the same transaction, plus this blob would exceed `channel_max_blobs` blobs or `channel_max_bytes` bytes. Stored blobs are never deleted to make room. R7 is checked before R6: a blob both would refuse gets `channel_quota`, which pauses only its channel at the client (spec 028-session-sans-io R16), where `rate_limited` would stop every channel of the connection for a minute.
+- R7 Before inserting a blob, the writer MUST refuse it with `channel_quota` when the counters of spec 032 R11, with the blobs already inserted by the same transaction, plus this blob would exceed `channel_max_blobs` blobs or `channel_max_bytes` bytes. Stored blobs are never deleted to make room. R7 is checked before R6: a blob both would refuse gets `channel_quota`, which tells the member the channel is full (`Event::ChannelFull`, spec 028-session-sans-io R16), where `rate_limited` would pause it silently.
 
 **Per IP and global (configurable)**
 
@@ -169,3 +169,4 @@ None.
 - 2026-10-16 T05 worded after audit BM (`docs/audit-log.md`, BM6): the blobs come through `Writer::submit`, as publishers' would, since the hook that pauses the subscriber's writes pauses theirs too
 - 2026-10-16 R7 and T07 amended after audit BN (`docs/audit-log.md`, BN-D-1, the human's decision): R7 is checked before R6, so a blob both would refuse gets `channel_quota`
 - 2026-10-16 Interface and Public API changes after audit BN: `CHANNEL_WINDOW_MS`, and `docs/spec.md` §6 says the retention is checked before the rate
+- 2026-10-17 R7's reason for checking it before R6 worded after spec 028 R16 was amended (BN-D-2): the full channel is told, where `rate_limited` pauses it silently
