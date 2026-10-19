@@ -17,11 +17,12 @@ use privatechat_core::{Error, Frame, relay};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::auth::{AuthState, Verdict};
+use crate::clock::Clock;
 use crate::frames::{self, ErrorCode};
 use crate::http::Shared;
 use crate::hub::{Encoded, Pending};
 use crate::limits::{
-    Admission, MAX_SUBSCRIPTIONS, PING_INTERVAL_MS, PublishWindow, SEND_QUEUE_FRAMES,
+    Admission, Gate, MAX_SUBSCRIPTIONS, PING_INTERVAL_MS, PublishWindow, SEND_QUEUE_FRAMES,
     SUBSCRIBE_GAP_MS, WRITE_TIMEOUT_MS, pong_overdue,
 };
 use crate::store::reader::read_page;
@@ -41,14 +42,18 @@ const TRY_AGAIN_LATER: u16 = 1013;
 /// The one server-wide deadline task: a tick to every connection every 100 ms
 /// of real time, each of which then checks its own deadlines (spec 032 R14),
 /// and the sweep of the IP table (spec 033 R9).
-pub(crate) fn spawn_deadline_task(shared: Arc<Shared>) -> tokio::task::JoinHandle<()> {
+pub(crate) fn spawn_deadline_task(
+    ticks: broadcast::Sender<()>,
+    gate: Arc<Gate>,
+    clock: Arc<dyn Clock>,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(TICK);
         loop {
             interval.tick().await;
-            shared.gate.forget(shared.clock.mono_ms());
+            gate.forget(clock.mono_ms());
             // No connection listening is no reason to stop.
-            let _ = shared.ticks.send(());
+            let _ = ticks.send(());
         }
     })
 }

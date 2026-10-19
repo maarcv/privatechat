@@ -65,7 +65,11 @@ pub(super) async fn start_limited(
     let clock: Arc<dyn Clock> = clock.clone();
     let hosts = vec![HOST.to_owned()];
     let shared = Shared::open(&dir.db(), clock, hosts, 1 << 40, limits, connections).unwrap();
-    spawn_deadline_task(shared.clone());
+    spawn_deadline_task(
+        shared.ticks.clone(),
+        shared.gate.clone(),
+        shared.clock.clone(),
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let main = router(shared.clone(), Listener::Main);

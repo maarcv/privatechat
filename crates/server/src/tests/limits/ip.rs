@@ -131,6 +131,44 @@ fn s033_t08_r08_ip_limits() {
     held.iter_mut().for_each(Admission::authenticate);
     let _more = admit_n(&gate, v6(1, 2, 1), 10, 0);
     assert_eq!(refused(&gate, v6(1, 3, 1), 0), Some(Refused::Address));
+
+    // A value of 0 refuses the first connection of a new entry too.
+    for zero in [
+        ConnectionLimits {
+            ip_connections: 0,
+            ..limits
+        },
+        ConnectionLimits {
+            ip_new_per_min: 0,
+            ..limits
+        },
+    ] {
+        let gate = Gate::new(zero);
+        assert_eq!(refused(&gate, ip("192.0.2.1"), 0), Some(Refused::Address));
+        assert_eq!(refused(&gate, v6(1, 1, 1), 0), Some(Refused::Address));
+    }
+    for zero in [
+        ConnectionLimits {
+            ip48_unauth_connections: 0,
+            ..limits
+        },
+        ConnectionLimits {
+            ip48_subnets: 0,
+            ..limits
+        },
+    ] {
+        let gate = Gate::new(zero);
+        assert_eq!(refused(&gate, v6(1, 1, 1), 0), Some(Refused::Address));
+        assert_eq!(gate.entries(), 0);
+    }
+    // A new /64 of a known /48 starts a count of its own.
+    let gate = Gate::new(ConnectionLimits {
+        ip_unauth_connections: 1,
+        ..limits
+    });
+    let _held = admit_n(&gate, v6(1, 1, 1), 1, 0);
+    let _held = admit_n(&gate, v6(1, 2, 1), 1, 0);
+    assert_eq!(gate.entries(), 3);
 }
 
 #[test]
@@ -175,18 +213,30 @@ fn s033_t08_r08_full_table() {
 #[test]
 fn s033_t08_r08_one_site_cycling_subnets() {
     let limits = ConnectionLimits::default();
+    // Each connection closed at once: only its `opened` keeps its /64, and
+    // the /48 has nothing open, so `ip48_subnets` alone refuses.
     let gate = Gate::new(limits);
-    let mut held = Vec::new();
     for subnet in 0..256 {
-        held.extend(admit_n(&gate, v6(9, subnet, 1), 1, 0));
-        // Its connections subscribe, so that only the subnets bound it.
-        held.iter_mut().for_each(Admission::authenticate);
+        drop(admit_n(&gate, v6(9, subnet, 1), 1, 0));
     }
     // A 257th /64 refused: the /48 holds 1 + 256 entries.
     assert_eq!(refused(&gate, v6(9, 256, 1), 0), Some(Refused::Address));
     assert_eq!(gate.entries(), 257);
-    // Its open connections stay under `ip48_connections`.
-    assert_eq!(refused(&gate, v6(9, 0, 1), 0), Some(Refused::Address));
+    // A /64 it already holds is still admitted.
+    let _held = admit_n(&gate, v6(9, 0, 1), 1, 0);
+
+    // Held open and subscribed, its connections stay under
+    // `ip48_connections`.
+    let gate = Gate::new(ConnectionLimits {
+        ip48_subnets: u32::MAX,
+        ..limits
+    });
+    let mut held = Vec::new();
+    for subnet in 0..256 {
+        held.extend(admit_n(&gate, v6(9, subnet, 1), 1, 0));
+        held.iter_mut().for_each(Admission::authenticate);
+    }
+    assert_eq!(refused(&gate, v6(9, 256, 1), 0), Some(Refused::Address));
 }
 
 /// Waits up to 5 s of real time for `condition`.

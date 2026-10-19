@@ -180,3 +180,4 @@ None.
 - 2026-10-16 R7 and T07 amended after audit BN (`docs/audit-log.md`, BN-D-1, the human's decision): R7 is checked before R6, so a blob both would refuse gets `channel_quota`
 - 2026-10-16 Interface and Public API changes after audit BN: `CHANNEL_WINDOW_MS`, and `docs/spec.md` §6 says the retention is checked before the rate
 - 2026-10-17 R7's reason for checking it before R6 worded after spec 028 R16 was amended (BN-D-2): the full channel is told, where `rate_limited` pauses it silently
+- 2026-10-19 Interface after slice (c1) and audit BO (`docs/audit-log.md`, BO2): `Gate`, `Admission`, `Listener`, `Refused`, `IpTable` private; the listener caps checked before the table, and a full table counts a new /64 of a known /48 in the /48 alone (advisors)

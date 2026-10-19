@@ -220,6 +220,31 @@ enum Key {
     Subnet([u8; 8]),
 }
 
+/// Whether one more connection of `key`, which counts `counts`, stays
+/// within the bounds of R8.
+fn within(key: Key, counts: &Counts, limits: &ConnectionLimits) -> bool {
+    match key {
+        Key::Site(_) => {
+            counts.open < limits.ip48_connections && counts.unauth < limits.ip48_unauth_connections
+        }
+        Key::V4(_) | Key::Subnet(_) => {
+            counts.open < limits.ip_connections
+                && counts.unauth < limits.ip_unauth_connections
+                && counts.opened < limits.ip_new_per_min
+        }
+    }
+}
+
+/// The bounds of R8 on the first connection of a new entry, which a value
+/// of 0 refuses.
+fn check_new(key: Key, limits: &ConnectionLimits) -> Result<(), Refused> {
+    if within(key, &Counts::default(), limits) {
+        Ok(())
+    } else {
+        Err(Refused::Address)
+    }
+}
+
 struct Node {
     key: Key,
     /// The /48 of a /64.
@@ -255,7 +280,10 @@ impl IpTable {
             IpAddr::V4(v4) => match self.ids.get(&Key::V4(v4)).copied() {
                 Some(id) => self.check(id, limits).map(|()| id)?,
                 None if self.nodes.len() >= IP_TABLE_MAX => return Ok(None),
-                None => self.insert(Key::V4(v4), None),
+                None => {
+                    check_new(Key::V4(v4), limits)?;
+                    self.insert(Key::V4(v4), None)
+                }
             },
             IpAddr::V6(v6) => {
                 let [a, b, c, d, e, f, g, h, ..] = v6.octets();
@@ -263,6 +291,11 @@ impl IpTable {
                 let Some(site) = self.ids.get(&Key::Site([a, b, c, d, e, f])).copied() else {
                     if self.nodes.len().saturating_add(2) > IP_TABLE_MAX {
                         return Ok(None);
+                    }
+                    check_new(Key::Site([a, b, c, d, e, f]), limits)?;
+                    check_new(subnet, limits)?;
+                    if limits.ip48_subnets == 0 {
+                        return Err(Refused::Address);
                     }
                     let site = self.insert(Key::Site([a, b, c, d, e, f]), None);
                     let id = self.insert(subnet, Some(site));
@@ -278,10 +311,17 @@ impl IpTable {
                     {
                         return Err(Refused::Address);
                     }
-                    // A full table still checks a known /48, and counts the
-                    // connection there with no /64 of its own.
-                    None if self.nodes.len() >= IP_TABLE_MAX => site,
-                    None => self.insert(subnet, Some(site)),
+                    None => {
+                        check_new(subnet, limits)?;
+                        if self.nodes.len() >= IP_TABLE_MAX {
+                            // A full table still checks a known /48, and
+                            // counts the connection there with no /64 of
+                            // its own.
+                            site
+                        } else {
+                            self.insert(subnet, Some(site))
+                        }
+                    }
                 }
             }
         };
@@ -291,25 +331,9 @@ impl IpTable {
 
     /// The bounds of R8 on one more connection of `id`.
     fn check(&self, id: u64, limits: &ConnectionLimits) -> Result<(), Refused> {
-        let Some(node) = self.node(id) else {
-            return Ok(());
-        };
-        let counts = &node.counts;
-        let within = match node.key {
-            Key::Site(_) => {
-                counts.open < limits.ip48_connections
-                    && counts.unauth < limits.ip48_unauth_connections
-            }
-            Key::V4(_) | Key::Subnet(_) => {
-                counts.open < limits.ip_connections
-                    && counts.unauth < limits.ip_unauth_connections
-                    && counts.opened < limits.ip_new_per_min
-            }
-        };
-        if within {
-            Ok(())
-        } else {
-            Err(Refused::Address)
+        match self.node(id) {
+            Some(node) if !within(node.key, &node.counts, limits) => Err(Refused::Address),
+            _ => Ok(()),
         }
     }
 
