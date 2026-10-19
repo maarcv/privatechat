@@ -287,17 +287,20 @@ impl IpTable {
             },
             IpAddr::V6(v6) => {
                 let [a, b, c, d, e, f, g, h, ..] = v6.octets();
-                let subnet = Key::Subnet([a, b, c, d, e, f, g, h]);
-                let Some(site) = self.ids.get(&Key::Site([a, b, c, d, e, f])).copied() else {
+                let (site_key, subnet) = (
+                    Key::Site([a, b, c, d, e, f]),
+                    Key::Subnet([a, b, c, d, e, f, g, h]),
+                );
+                let Some(site) = self.ids.get(&site_key).copied() else {
                     if self.nodes.len().saturating_add(2) > IP_TABLE_MAX {
                         return Ok(None);
                     }
-                    check_new(Key::Site([a, b, c, d, e, f]), limits)?;
+                    check_new(site_key, limits)?;
                     check_new(subnet, limits)?;
                     if limits.ip48_subnets == 0 {
                         return Err(Refused::Address);
                     }
-                    let site = self.insert(Key::Site([a, b, c, d, e, f]), None);
+                    let site = self.insert(site_key, None);
                     let id = self.insert(subnet, Some(site));
                     self.count(id, now);
                     return Ok(Some(id));
@@ -312,17 +315,11 @@ impl IpTable {
                     {
                         return Err(Refused::Address);
                     }
-                    None => {
-                        check_new(subnet, limits)?;
-                        if self.nodes.len() >= IP_TABLE_MAX {
-                            // A full table still checks a known /48, and
-                            // counts the connection there with no /64 of
-                            // its own.
-                            site
-                        } else {
-                            self.insert(subnet, Some(site))
-                        }
-                    }
+                    // A full table still checks a known /48, and counts the
+                    // connection there with no /64 of its own. A fresh /64
+                    // passed `check_new` when its /48 was created.
+                    None if self.nodes.len() >= IP_TABLE_MAX => site,
+                    None => self.insert(subnet, Some(site)),
                 }
             }
         };

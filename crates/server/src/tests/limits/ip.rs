@@ -84,7 +84,9 @@ fn s033_t08_r08_ip_limits() {
         drop(admit_n(&gate, address, 1, k));
     }
     assert_eq!(refused(&gate, address, 60_000), Some(Refused::Address));
-    assert!(refused(&gate, address, 60_001).is_none());
+    // The window slides: one leaves it, one more fits.
+    drop(admit_n(&gate, address, 1, 60_001));
+    assert_eq!(refused(&gate, address, 60_001), Some(Refused::Address));
 
     // With `ip_connections = 3`, three subscribed connections hold it.
     let gate = Gate::new(ConnectionLimits {
@@ -95,6 +97,16 @@ fn s033_t08_r08_ip_limits() {
     for admission in &mut held {
         admission.authenticate();
     }
+    assert_eq!(refused(&gate, address, 0), Some(Refused::Address));
+
+    // A subscribed connection that closes gives back no unauthenticated
+    // slot of its address.
+    let gate = Gate::new(limits);
+    let _held = admit_n(&gate, address, 19, 0);
+    let mut one = admit_n(&gate, address, 1, 0);
+    one[0].authenticate();
+    drop(one);
+    let _last = admit_n(&gate, address, 1, 0);
     assert_eq!(refused(&gate, address, 0), Some(Refused::Address));
 
     // Two addresses of one /64 share one count; so do `::ffff:1.2.3.4` and
@@ -211,13 +223,19 @@ fn s033_t08_r08_full_table() {
     assert_eq!(refused(&gate, v6(7, 2, 1), 0), Some(Refused::Address));
     assert_eq!(refused(&gate, v6(7, 0, 1), 0), Some(Refused::Address));
 
-    // Past the listener's cap, an address with no entry is refused.
-    let gate = Gate::new(ConnectionLimits {
-        max_unauth_connections: 2,
+    // Entry-less connections count toward the listener's cap: two more
+    // fit, the third is refused.
+    let gate_full = Gate::new(ConnectionLimits {
+        max_unauth_connections: u32::try_from(IP_TABLE_MAX).unwrap() + 2,
         ..limits
     });
-    let _held = admit_n(&gate, ipv4(1), 2, 0);
-    assert_eq!(refused(&gate, ipv4(2), 0), Some(Refused::Listener));
+    let mut full = Vec::new();
+    for k in 0..IP_TABLE_MAX {
+        full.extend(admit_n(&gate_full, ipv4(k), 1, 0));
+    }
+    let _more = admit_n(&gate_full, ipv4(IP_TABLE_MAX), 2, 0);
+    let fresh = ipv4(IP_TABLE_MAX + 1);
+    assert_eq!(refused(&gate_full, fresh, 0), Some(Refused::Listener));
 }
 
 #[test]
@@ -262,7 +280,26 @@ fn s033_t10_r10_unauthenticated_cap() {
     a[0].authenticate();
     drop(a);
     let _c = admit_n(&gate, ip("192.0.2.3"), 1, 0);
+    let entries = gate.entries();
     assert_eq!(refused(&gate, ip("192.0.2.4"), 0), Some(Refused::Listener));
+    // A 503 counts nowhere, and comes before an address's 429.
+    assert_eq!(gate.entries(), entries);
+    assert_eq!(refused(&gate, ip("192.0.2.3"), 0), Some(Refused::Listener));
+    let gate_v4 = Gate::new(ConnectionLimits {
+        max_unauth_connections: 2,
+        ip_unauth_connections: 1,
+        ..ConnectionLimits::default()
+    });
+    let _one = admit_n(&gate_v4, ip("192.0.2.1"), 1, 0);
+    assert_eq!(
+        refused(&gate_v4, ip("192.0.2.1"), 0),
+        Some(Refused::Address)
+    );
+    let _two = admit_n(&gate_v4, ip("192.0.2.2"), 1, 0);
+    assert_eq!(
+        refused(&gate_v4, ip("192.0.2.1"), 0),
+        Some(Refused::Listener)
+    );
     // The onion listener's count is its own.
     let _onion = gate.admit(Listener::Onion, None, 0).unwrap();
 }
@@ -325,6 +362,29 @@ async fn s033_t08_r08_over_a_socket() {
     // Another address has a count of its own.
     server.shared.hooks.set_peer(ip("192.0.2.9"));
     held.push(connect(server.address).await);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s033_t08_r08_refused_before_counted() {
+    // A request the route refuses is never counted: with one new
+    // connection a minute, a 403 leaves room for the upgrade after it.
+    let clock = Arc::new(ManualClock::new(T0));
+    let one = ConnectionLimits {
+        ip_new_per_min: 1,
+        ..ConnectionLimits::default()
+    };
+    let server = server(&clock, one).await;
+    let origin = format!("GET / HTTP/1.1\r\nhost: h\r\norigin: https://x\r\n{UPGRADE}\r\n");
+    let answer = raw(server.address, &origin).await;
+    assert!(answer.starts_with("http/1.1 403"), "{answer}");
+    let not_upgrade = raw(server.address, "GET / HTTP/1.1\r\nhost: h\r\n\r\n").await;
+    assert!(not_upgrade.starts_with("http/1.1 404"), "{not_upgrade}");
+    assert_eq!(server.shared.gate.entries(), 0);
+    let _client = connect(server.address).await;
+    assert_eq!(
+        status(server.address).await,
+        "http/1.1 429 too many requests"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
