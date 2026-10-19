@@ -1,5 +1,5 @@
-//! Spec 033-rate-limit-quotas R8–R11: the caps of each listener and the
-//! IP table, on the `Gate` alone and over real sockets.
+//! Spec 033-rate-limit-quotas R8–R12: the caps of each listener, the IP
+//! table and the byte budgets, on the `Gate` alone and over real sockets.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -657,7 +657,8 @@ async fn s033_t12_r12_ingest_budgets() {
     let clock = Arc::new(ManualClock::new(T0));
     let budgets = ConnectionLimits {
         ip_bytes_per_min: 200_000,
-        onion_bytes_per_min: 200_000,
+        // Three blobs exactly, so that a byte more counted refuses the third.
+        onion_bytes_per_min: 3 * 64_673,
         ..ConnectionLimits::default()
     };
     let server = server(&clock, budgets).await;
@@ -744,8 +745,36 @@ fn s033_t12_r12_budgets_on_the_gate() {
     assert_eq!(spend(&onion[1], 40, 0), Some(Ok(())));
     // The window slides at 60 000 ms, the forgotten bytes giving room back.
     assert_eq!(spend(&v4[0], 1, 60_000), None);
+    assert_eq!(spend(&onion[1], 1, 60_000), None);
     assert_eq!(spend(&v4[0], 300, 60_001), Some(Ok(())));
     assert_eq!(spend(&onion[0], 100, 60_001), Some(Ok(())));
+}
+
+#[test]
+fn s033_t12_r12_full_table() {
+    let limits = ConnectionLimits {
+        max_unauth_connections: u32::MAX,
+        max_connections: u32::MAX,
+        ip_bytes_per_min: 300,
+        ..ConnectionLimits::default()
+    };
+    let gate = Gate::new(limits);
+    let ipv4 = |n: usize| Some(IpAddr::V4(Ipv4Addr::from(u32::try_from(n).unwrap())));
+    let _site = admit_n(&gate, v6(7, 0, 1), 1, 0);
+    let mut held = Vec::new();
+    let mut n = 0;
+    while gate.entries() < IP_TABLE_MAX {
+        held.extend(admit_n(&gate, ipv4(n), 1, 0));
+        n += 1;
+    }
+    // A new /64 counted in its /48 alone still has its address's budget.
+    let counted_in_site = admit_n(&gate, v6(7, 1, 1), 1, 0);
+    let ok = || Ok::<(), ()>(());
+    assert_eq!(counted_in_site[0].publish(300, 0, ok), Some(Ok(())));
+    assert_eq!(counted_in_site[0].publish(1, 0, ok), None);
+    // A new address with no entry has none: R10 alone bounds it.
+    let entry_less = admit_n(&gate, ipv4(n), 1, 0);
+    assert_eq!(entry_less[0].publish(1_000, 0, ok), Some(Ok(())));
 }
 
 #[test]
@@ -754,14 +783,12 @@ fn s033_t09_r09_kept_while_published() {
     // removed after.
     let gate = Gate::new(ConnectionLimits::default());
     let admission = admit_n(&gate, v6(1, 1, 1), 1, 0);
-    gate.forget(60_001);
-    assert_eq!(
-        admission[0].publish(10, 30_000, || Ok::<(), ()>(())),
-        Some(Ok(()))
-    );
+    let ok = || Ok::<(), ()>(());
+    assert_eq!(admission[0].publish(10, 60_001, ok), Some(Ok(())));
     drop(admission);
-    gate.forget(90_000);
+    // Closed, and opened past the window: only its bytes keep it.
+    gate.forget(120_001);
     assert_eq!(gate.entries(), 2);
-    gate.forget(90_001);
+    gate.forget(120_002);
     assert_eq!(gate.entries(), 0);
 }

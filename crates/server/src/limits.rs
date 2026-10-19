@@ -380,20 +380,21 @@ impl IpTable {
 
     /// Whether `bytes` more from `id` stay within R12: those of its address
     /// within `ip_bytes_per_min`, and those of its /48 within
-    /// `ip48_bytes_per_min`.
+    /// `ip48_bytes_per_min`. A connection a full table counts in its /48
+    /// alone has its address's budget on the /48's bytes, which hold its
+    /// own.
     fn allows(&self, id: u64, bytes: u64, limits: &ConnectionLimits) -> bool {
-        let within = |node: &Node| {
-            let max = match node.key {
-                Key::Site(_) => limits.ip48_bytes_per_min,
-                Key::V4(_) | Key::Subnet(_) => limits.ip_bytes_per_min,
-            };
-            node.counts.bytes.saturating_add(bytes) <= max
-        };
         let Some(node) = self.nodes.get(&id) else {
             return true;
         };
-        let site = node.parent.and_then(|parent| self.nodes.get(&parent));
-        within(node) && site.is_none_or(within)
+        let site = match node.key {
+            Key::Site(_) => Some(node),
+            Key::V4(_) | Key::Subnet(_) => node.parent.and_then(|parent| self.nodes.get(&parent)),
+        };
+        node.counts.bytes.saturating_add(bytes) <= limits.ip_bytes_per_min
+            && site.is_none_or(|site| {
+                site.counts.bytes.saturating_add(bytes) <= limits.ip48_bytes_per_min
+            })
     }
 
     /// `bytes` handed to the writer at `now` from `id`, in it and its /48.
@@ -582,6 +583,8 @@ impl Gate {
     pub(crate) fn forget(&self, now: u64) {
         let mut state = self.lock();
         state.table.forget(now);
+        // `Admission::publish` forgets them too; this frees their memory
+        // when no onion connection publishes.
         state.onion_bytes.forget(now);
     }
 
