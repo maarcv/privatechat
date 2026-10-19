@@ -17,32 +17,20 @@
     )
 )]
 
-#[allow(
-    dead_code,
-    reason = "reached through the connections, spec 030-ws-protocol"
-)]
 mod auth;
-
+mod client_addr;
 mod clock;
-
-#[allow(dead_code, reason = "reached from the binary, spec 035-server-ops")]
+mod config;
 mod connection;
-
-#[allow(dead_code, reason = "reached from the binary, spec 035-server-ops")]
 mod frames;
-
-#[allow(dead_code, reason = "reached from the binary, spec 035-server-ops")]
 mod http;
-
-#[allow(dead_code, reason = "reached from the binary, spec 035-server-ops")]
 mod hub;
-
-#[allow(dead_code, reason = "reached from the binary, spec 035-server-ops")]
 mod limits;
+mod serve;
 
 #[allow(
     dead_code,
-    reason = "reached through the connections, spec 030-ws-protocol"
+    reason = "`Writer::finish` and a read error's cause, reached by the shutdown and the log of spec 035-server-ops R7 and R4"
 )]
 mod store;
 
@@ -52,6 +40,8 @@ mod tests;
 #[cfg(any(test, feature = "test-support"))]
 pub use clock::ManualClock;
 pub use clock::{Clock, SystemClock};
+pub use config::{ConfigError, Settings};
+pub use serve::{Bound, Outcome, bind};
 
 /// Why the server did not start (spec 035-server-ops R8, R10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

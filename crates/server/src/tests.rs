@@ -9,6 +9,7 @@
 mod auth;
 mod catch_up;
 mod limits;
+mod ops;
 mod publish;
 mod store;
 mod ws;
