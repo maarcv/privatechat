@@ -493,6 +493,15 @@ struct OnionBytes {
 }
 
 impl OnionBytes {
+    fn allows(&self, bytes: u64, limits: &ConnectionLimits) -> bool {
+        self.total.saturating_add(bytes) <= limits.onion_bytes_per_min
+    }
+
+    fn publish(&mut self, bytes: u64, now: u64) {
+        self.total = self.total.saturating_add(bytes);
+        self.recent.push_back((now, bytes));
+    }
+
     fn forget(&mut self, now: u64) {
         while let Some(&(at, bytes)) = self.recent.front() {
             if now.saturating_sub(at) <= ADDRESS_WINDOW_MS {
@@ -641,9 +650,7 @@ impl Admission {
         state.table.forget(now);
         state.onion_bytes.forget(now);
         let allowed = match (self.listener, self.node) {
-            (Listener::Onion, _) => {
-                state.onion_bytes.total.saturating_add(bytes) <= limits.onion_bytes_per_min
-            }
+            (Listener::Onion, _) => state.onion_bytes.allows(bytes, limits),
             (Listener::Main, Some(node)) => state.table.allows(node, bytes, limits),
             // A connection the full table holds no entry for: R10 alone.
             (Listener::Main, None) => true,
@@ -654,11 +661,7 @@ impl Admission {
         let submitted = submit();
         if submitted.is_ok() {
             match (self.listener, self.node) {
-                (Listener::Onion, _) => {
-                    let onion = &mut state.onion_bytes;
-                    onion.total = onion.total.saturating_add(bytes);
-                    onion.recent.push_back((now, bytes));
-                }
+                (Listener::Onion, _) => state.onion_bytes.publish(bytes, now),
                 (Listener::Main, Some(node)) => state.table.publish(node, bytes, now),
                 (Listener::Main, None) => {}
             }

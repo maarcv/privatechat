@@ -656,14 +656,16 @@ fn is_rate_limited(frame: &Frame, channel_id: [u8; 16], n: u16) -> bool {
 async fn s033_t12_r12_ingest_budgets() {
     let clock = Arc::new(ManualClock::new(T0));
     let budgets = ConnectionLimits {
-        ip_bytes_per_min: 200_000,
+        // The fourth blob refused by one byte, so that a byte less counted
+        // lets it through.
+        ip_bytes_per_min: 4 * 64_673 - 1,
         // Three blobs exactly, so that a byte more counted refuses the third.
         onion_bytes_per_min: 3 * 64_673,
         ..ConnectionLimits::default()
     };
     let server = server(&clock, budgets).await;
     // One address, two of its channels, four connections: three blobs of
-    // 64 673 bytes fit in 200 000, the fourth does not.
+    // 64 673 bytes fit, the fourth does not.
     let mut clients = Vec::new();
     for k in 0..4 {
         clients.push((on(server.address, k % 2 == 1).await, k % 2 == 1));
@@ -767,11 +769,25 @@ fn s033_t12_r12_full_table() {
         held.extend(admit_n(&gate, ipv4(n), 1, 0));
         n += 1;
     }
-    // A new /64 counted in its /48 alone still has its address's budget.
+    // A new /64 counted in its /48 alone still has its address's budget...
     let counted_in_site = admit_n(&gate, v6(7, 1, 1), 1, 0);
     let ok = || Ok::<(), ()>(());
     assert_eq!(counted_in_site[0].publish(300, 0, ok), Some(Ok(())));
     assert_eq!(counted_in_site[0].publish(1, 0, ok), None);
+    // ...and the /48's, when that is the smaller.
+    let gate = Gate::new(ConnectionLimits {
+        ip48_bytes_per_min: 200,
+        ..limits
+    });
+    let _site = admit_n(&gate, v6(7, 0, 1), 1, 0);
+    let mut n = 0;
+    while gate.entries() < IP_TABLE_MAX {
+        held.extend(admit_n(&gate, ipv4(n), 1, 0));
+        n += 1;
+    }
+    let counted_in_site = admit_n(&gate, v6(7, 1, 1), 1, 0);
+    assert_eq!(counted_in_site[0].publish(201, 0, ok), None);
+    assert_eq!(counted_in_site[0].publish(200, 0, ok), Some(Ok(())));
     // A new address with no entry has none: R10 alone bounds it.
     let entry_less = admit_n(&gate, ipv4(n), 1, 0);
     assert_eq!(entry_less[0].publish(1_000, 0, ok), Some(Ok(())));
