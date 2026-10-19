@@ -97,8 +97,18 @@ pub(crate) struct ConnectionLimits { pub(crate) ip_connections: u32, pub(crate) 
                                      pub(crate) ip_bytes_per_min: u64, pub(crate) onion_bytes_per_min: u64,
                                      pub(crate) ip48_connections: u32, pub(crate) ip48_unauth_connections: u32,
                                      pub(crate) ip48_subnets: u32, pub(crate) ip48_bytes_per_min: u64 }
-pub(crate) struct IpTable { /* Mutex<HashMap<IpKey, Entry>>: IPv4 by address, IPv6 by /48 with its /64s inside (≤ `ip48_subnets`), at most IP_TABLE_MAX entries and /64s in all */ }
+struct IpTable { /* IPv4 by address, IPv6 by /48 with its /64s inside (≤ `ip48_subnets`), at most IP_TABLE_MAX entries and /64s in all */ }
+pub(crate) enum Listener { Main, Onion }
+pub(crate) enum Refused { Address /* 429, R8 */, Listener /* 503, R10 */ }
+pub(crate) struct Gate { /* ConnectionLimits, and Mutex of the IpTable and each listener's counts */ }
+impl Gate { pub(crate) fn new(limits: ConnectionLimits) -> Arc<Gate>;
+            pub(crate) fn admit(self: &Arc<Gate>, listener: Listener, address: Option<IpAddr>, now: u64) -> Result<Admission, Refused>;
+            pub(crate) fn forget(&self, now: u64) }
+pub(crate) struct Admission { /* its listener and the id of its entry, never the address (R9); counted until it drops */ }
+impl Admission { pub(crate) fn authenticate(&mut self) }
 ```
+
+`Gate::admit` checks the caps of the listener (R10) before the table (R8), under one lock, and counts nothing it refuses. When the table is full, a new /64 of a /48 that has an entry is counted in the /48 alone, which still checks its bounds. `router(shared, listener)` serves each listener; the main one reads the peer's address through axum's `ConnectInfo`. The deadline task also sweeps the table (R9).
 
 `Writer::spawn` of spec 032 gains a `ChannelLimits` argument. The channel windows live in the writer thread, so the check and the insert happen in one place, in arrival order, with no lock. The ping and write deadlines and every window are measured with `Clock::mono_ms()` and checked by the deadline task of spec 032 R14.
 
