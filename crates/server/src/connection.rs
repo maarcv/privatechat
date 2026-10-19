@@ -404,6 +404,7 @@ impl Connection {
         if !self.publishes.allows(now) {
             return self.enqueue(&refuse(ErrorCode::RateLimited));
         }
+        let bytes = u64::try_from(blob.len()).unwrap_or(u64::MAX);
         let request = WriteRequest {
             connection: self.id,
             client_ref,
@@ -411,12 +412,19 @@ impl Connection {
             ttl_seconds,
             blob,
         };
-        match self.shared.writer.submit(request) {
-            Ok(()) => {
+        // The byte budgets of the address, its /48 or the onion listener
+        // (spec 033 R12), checked and counted with the hand-over.
+        let writer = &self.shared.writer;
+        match self
+            .admission
+            .publish(bytes, now, || writer.submit(request))
+        {
+            None => self.enqueue(&refuse(ErrorCode::RateLimited)),
+            Some(Ok(())) => {
                 self.publishes.handed(now);
                 Flow::Continue
             }
-            Err(refusal) => self.enqueue(&refuse(ErrorCode::from(refusal))),
+            Some(Err(refusal)) => self.enqueue(&refuse(ErrorCode::from(refusal))),
         }
     }
 
