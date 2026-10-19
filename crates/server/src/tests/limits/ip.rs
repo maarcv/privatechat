@@ -268,6 +268,51 @@ fn s033_t08_r08_one_site_cycling_subnets() {
 }
 
 #[test]
+fn s033_t10_r10_each_listener_counted() {
+    let limits = ConnectionLimits {
+        max_connections: 1,
+        onion_max_connections: 1,
+        ..ConnectionLimits::default()
+    };
+    // A subscribed connection still holds its place under the cap.
+    let gate = Gate::new(limits);
+    let mut held = admit_n(&gate, ip("192.0.2.1"), 1, 0);
+    held[0].authenticate();
+    assert_eq!(refused(&gate, ip("192.0.2.2"), 0), Some(Refused::Listener));
+    // An onion close frees an onion place, again and again.
+    for _ in 0..3 {
+        drop(gate.admit(Listener::Onion, None, 0).unwrap());
+    }
+    let _onion = gate.admit(Listener::Onion, None, 0).unwrap();
+    assert_eq!(refused(&gate, ip("192.0.2.2"), 0), Some(Refused::Listener));
+}
+
+#[test]
+fn s033_t08_r08_full_table_edges() {
+    let limits = ConnectionLimits {
+        max_unauth_connections: u32::MAX,
+        max_connections: u32::MAX,
+        ip48_subnets: 1,
+        ..ConnectionLimits::default()
+    };
+    let gate = Gate::new(limits);
+    let ipv4 = |n: usize| Some(IpAddr::V4(Ipv4Addr::from(u32::try_from(n).unwrap())));
+    // A /48 already at `ip48_subnets`.
+    let _site = admit_n(&gate, v6(7, 0, 1), 1, 0);
+    let mut held = Vec::new();
+    let mut n = 0;
+    while gate.entries() < IP_TABLE_MAX - 2 {
+        held.extend(admit_n(&gate, ipv4(n), 1, 0));
+        n += 1;
+    }
+    // Two slots left: a new /48 and its /64 take both.
+    held.extend(admit_n(&gate, v6(8, 0, 1), 1, 0));
+    assert_eq!(gate.entries(), IP_TABLE_MAX);
+    // Full: a new /64 of the /48 at `ip48_subnets` still gets 429.
+    assert_eq!(refused(&gate, v6(7, 1, 1), 0), Some(Refused::Address));
+}
+
+#[test]
 fn s033_t10_r10_unauthenticated_cap() {
     let gate = Gate::new(ConnectionLimits {
         max_unauth_connections: 2,
@@ -392,7 +437,8 @@ async fn s033_t09_r09_ip_forgotten() {
     // On the gate: kept 60 000 ms after it was opened, then removed.
     let gate = Gate::new(ConnectionLimits::default());
     let admission = gate.admit(Listener::Main, ip("192.0.2.1"), 0).unwrap();
-    // The connection holds no address.
+    // The admission, all a connection gets from the gate, holds no
+    // address: its `Debug` names every field.
     assert!(!format!("{admission:?}").contains("192"), "{admission:?}");
     drop(admission);
     gate.forget(60_000);

@@ -534,12 +534,20 @@ pub(crate) struct Admission {
 
 impl fmt::Debug for Admission {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Every field named, so that a new one is a choice: T09 reads this
+        // output for the address it must not hold (R9).
+        let Admission {
+            gate: _,
+            listener,
+            node,
+            authenticated,
+        } = self;
         formatter
             .debug_struct("Admission")
-            .field("listener", &self.listener)
-            .field("node", &self.node)
-            .field("authenticated", &self.authenticated)
-            .finish_non_exhaustive()
+            .field("listener", listener)
+            .field("node", node)
+            .field("authenticated", authenticated)
+            .finish()
     }
 }
 
