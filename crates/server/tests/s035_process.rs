@@ -116,18 +116,36 @@ fn s035_t08_r08_exit_codes_port_in_use() {
     let db = dir.db();
     let taken = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let address = taken.local_addr().unwrap().to_string();
-    let child = start(&[
-        ("PRIVATECHAT_URLS", "wss://127.0.0.1"),
-        ("PRIVATECHAT_DB", &db),
-        ("PRIVATECHAT_LISTEN", &address),
-    ]);
-    assert_eq!(exit_code(child).0, 1);
+    // The main listener's port taken, then the onion listener's.
+    for listener in ["PRIVATECHAT_LISTEN", "PRIVATECHAT_ONION_LISTEN"] {
+        let child = start(&[
+            ("PRIVATECHAT_URLS", "wss://127.0.0.1"),
+            ("PRIVATECHAT_DB", &db),
+            ("PRIVATECHAT_LISTEN", "127.0.0.1:0"),
+            (listener, &address),
+        ]);
+        assert_eq!(exit_code(child).0, 1, "{listener}");
+    }
 }
 
 #[cfg(unix)]
 #[test]
 fn s035_t08_r08_exit_codes_sigterm() {
-    let dir = TestDir::new("sigterm");
+    stopped_by("TERM");
+}
+
+#[cfg(unix)]
+#[test]
+fn s035_t08_r08_exit_codes_sigint() {
+    stopped_by("INT");
+}
+
+/// The binary, once it accepts, sent `signal` → exit code 0.
+// Until the start line of R4 gives the port, the test picks a free one and
+// releases it for the binary to take.
+#[cfg(unix)]
+fn stopped_by(signal: &str) {
+    let dir = TestDir::new(&format!("signal-{signal}"));
     let db = dir.db();
     // A free port, released for the binary to take.
     let address = std::net::TcpListener::bind("127.0.0.1:0")
@@ -147,7 +165,7 @@ fn s035_t08_r08_exit_codes_sigterm() {
         std::thread::sleep(Duration::from_millis(20));
     }
     let killed = Command::new("kill")
-        .args(["-TERM", &child.id().to_string()])
+        .args([&format!("-{signal}"), &child.id().to_string()])
         .status()
         .unwrap();
     assert!(killed.success());
