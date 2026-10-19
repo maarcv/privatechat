@@ -3,15 +3,18 @@
 //! extension and no subprotocol. Any other path or method, and a `GET /`
 //! that is not an upgrade, gets 404; a `GET /` with an `Origin` header gets
 //! 403; both with an empty body. The path and the method are checked first,
-//! then the `Origin`, then the upgrade.
+//! then the `Origin`, then the upgrade, then the caps of the listener and
+//! the bounds of the client address (spec 033-rate-limit-quotas R8, R10),
+//! answered with 503 or 429 and an empty body.
 
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use axum::Router;
-use axum::extract::State;
 use axum::extract::ws::{WebSocketUpgrade, rejection::WebSocketUpgradeRejection};
+use axum::extract::{ConnectInfo, State};
 use axum::http::header::ORIGIN;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -21,7 +24,7 @@ use tokio::sync::broadcast;
 use crate::clock::Clock;
 use crate::connection;
 use crate::hub::Hub;
-use crate::limits::ChannelLimits;
+use crate::limits::{ChannelLimits, ConnectionLimits, Gate, Listener, Refused};
 use crate::store::reader::ReadPool;
 use crate::store::writer::Writer;
 use crate::{DbCause, StartError, StartReason};
@@ -52,6 +55,8 @@ pub(crate) struct Shared {
     pub(crate) pool: ReadPool,
     /// The one writer (spec 032 R4), whose results the hub hands out.
     pub(crate) writer: Writer,
+    /// The listeners' caps and the IP table (spec 033 R8–R10).
+    pub(crate) gate: Arc<Gate>,
     hub: Arc<Mutex<Hub>>,
     next_id: AtomicU64,
     /// The database file, for the tests that plant rows in it.
@@ -63,7 +68,8 @@ pub(crate) struct Shared {
 
 impl Shared {
     /// Opens the database at `db`, starts its writer, whose results go to the
-    /// hub, and opens the read pool.
+    /// hub, and opens the read pool; the connections are admitted under
+    /// `connections`.
     ///
     /// # Errors
     ///
@@ -75,6 +81,7 @@ impl Shared {
         hosts: Vec<String>,
         max_db_bytes: u64,
         limits: ChannelLimits,
+        connections: ConnectionLimits,
     ) -> Result<Arc<Shared>, StartError> {
         let hub = Arc::new(Mutex::new(Hub::default()));
         let results = hub.clone();
@@ -107,6 +114,7 @@ impl Shared {
             ticks,
             pool,
             writer,
+            gate: Gate::new(connections),
             hub,
             next_id: AtomicU64::new(0),
             #[cfg(test)]
@@ -133,19 +141,49 @@ impl Shared {
     }
 }
 
-/// The router of `Shared`.
-pub(crate) fn router(shared: Arc<Shared>) -> Router {
+/// The router of `Shared` on `listener`. The main listener's is served with
+/// the peer's `SocketAddr` as its `ConnectInfo`.
+pub(crate) fn router(shared: Arc<Shared>, listener: Listener) -> Router {
+    let upgrade = match listener {
+        Listener::Main => get(upgrade_main),
+        Listener::Onion => get(upgrade_onion),
+    };
     Router::new()
         // axum's `get` also answers `HEAD`, which must get the 404 too.
-        .route("/", get(upgrade).head(not_found).fallback(not_found))
+        .route("/", upgrade.head(not_found).fallback(not_found))
         // Written out, so that the empty 404 does not rest on axum's default.
         .fallback(not_found)
         .with_state(shared)
 }
 
-async fn upgrade(
+async fn upgrade_main(
+    State(shared): State<Arc<Shared>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+) -> Response {
+    #[cfg(test)]
+    let peer = shared
+        .hooks
+        .peer()
+        .map_or(peer, |ip| SocketAddr::new(ip, 0));
+    upgrade_from(shared, Listener::Main, Some(peer.ip()), &headers, upgrade)
+}
+
+/// The onion listener's connections carry no address (spec 035 R2).
+async fn upgrade_onion(
     State(shared): State<Arc<Shared>>,
     headers: HeaderMap,
+    upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+) -> Response {
+    upgrade_from(shared, Listener::Onion, None, &headers, upgrade)
+}
+
+fn upgrade_from(
+    shared: Arc<Shared>,
+    listener: Listener,
+    address: Option<IpAddr>,
+    headers: &HeaderMap,
     upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Response {
     // No browser client in v1 (ADR 0017): a page of another origin gets
@@ -153,16 +191,23 @@ async fn upgrade(
     if headers.contains_key(ORIGIN) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    match upgrade {
-        Ok(upgrade) => upgrade
-            .max_message_size(MAX_MESSAGE)
-            .max_frame_size(MAX_MESSAGE)
-            .write_buffer_size(WRITE_BUFFER)
-            .max_write_buffer_size(MAX_WRITE_BUFFER)
-            .on_upgrade(move |socket| connection::run(socket, shared)),
+    let upgrade = match upgrade {
+        Ok(upgrade) => upgrade,
         // Not an upgrade: nothing is served, and no text names the framework.
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
-    }
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let now = shared.clock.mono_ms();
+    let admission = match shared.gate.admit(listener, address, now) {
+        Ok(admission) => admission,
+        Err(Refused::Listener) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+        Err(Refused::Address) => return StatusCode::TOO_MANY_REQUESTS.into_response(),
+    };
+    upgrade
+        .max_message_size(MAX_MESSAGE)
+        .max_frame_size(MAX_MESSAGE)
+        .write_buffer_size(WRITE_BUFFER)
+        .max_write_buffer_size(MAX_WRITE_BUFFER)
+        .on_upgrade(move |socket| connection::run(socket, shared, admission))
 }
 
 async fn not_found() -> Response {
@@ -176,8 +221,9 @@ pub(crate) mod test {
     //! read and a failing `relay` call; and the writer: a pause before its
     //! next batch and a `server_id` already used, which it refuses.
 
-    use std::sync::Arc;
+    use std::net::IpAddr;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     use tokio::sync::watch;
 
@@ -207,6 +253,8 @@ pub(crate) mod test {
         pub(crate) fail_relay: AtomicBool,
         /// Held, the writer stops before its next batch and its queue fills.
         pub(crate) writer_pause: Arc<Pause>,
+        /// The client address the main listener sees instead of the peer's.
+        pub(crate) peer: Mutex<Option<IpAddr>>,
         /// How many connection tasks are running.
         pub(crate) tasks: Arc<AtomicUsize>,
         /// After this many fresh `server_id`s, the writer draws the last one
@@ -223,6 +271,7 @@ pub(crate) mod test {
                 fail_reads: AtomicBool::new(false),
                 catch_up_paused: watch::channel(false).0,
                 fail_relay: AtomicBool::new(false),
+                peer: Mutex::new(None),
                 tasks: Arc::new(AtomicUsize::new(0)),
                 writer_pause: Arc::new(Pause::default()),
                 repeat_after: Arc::new(AtomicUsize::new(usize::MAX)),
@@ -233,6 +282,15 @@ pub(crate) mod test {
     impl Hooks {
         pub(crate) fn pause_writes(&self, paused: bool) {
             self.writes_paused.send_replace(paused);
+        }
+
+        /// The next connections on the main listener come from `peer`.
+        pub(crate) fn set_peer(&self, peer: Option<IpAddr>) {
+            *self.peer.lock().unwrap() = peer;
+        }
+
+        pub(crate) fn peer(&self) -> Option<IpAddr> {
+            *self.peer.lock().unwrap()
         }
 
         pub(crate) fn reads(&self) -> usize {

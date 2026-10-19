@@ -1,5 +1,8 @@
 //! Spec 033-rate-limit-quotas over a real socket, with a `ManualClock`: the
-//! limits of one connection.
+//! limits of one connection and of one channel; those of the listeners and
+//! the addresses in `ip`.
+
+mod ip;
 
 use std::sync::Arc;
 use std::time::Duration;

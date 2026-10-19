@@ -17,12 +17,13 @@ use privatechat_core::{Error, Frame, relay};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::auth::{AuthState, Verdict};
+use crate::clock::Clock;
 use crate::frames::{self, ErrorCode};
 use crate::http::Shared;
 use crate::hub::{Encoded, Pending};
 use crate::limits::{
-    MAX_SUBSCRIPTIONS, PING_INTERVAL_MS, PublishWindow, SEND_QUEUE_FRAMES, SUBSCRIBE_GAP_MS,
-    WRITE_TIMEOUT_MS, pong_overdue,
+    Admission, Gate, MAX_SUBSCRIPTIONS, PING_INTERVAL_MS, PublishWindow, SEND_QUEUE_FRAMES,
+    SUBSCRIBE_GAP_MS, WRITE_TIMEOUT_MS, pong_overdue,
 };
 use crate::store::reader::read_page;
 use crate::store::writer::WriteRequest;
@@ -39,12 +40,18 @@ const INTERNAL_ERROR: u16 = 1011;
 const TRY_AGAIN_LATER: u16 = 1013;
 
 /// The one server-wide deadline task: a tick to every connection every 100 ms
-/// of real time, each of which then checks its own deadlines (spec 032 R14).
-pub(crate) fn spawn_deadline_task(ticks: broadcast::Sender<()>) -> tokio::task::JoinHandle<()> {
+/// of real time, each of which then checks its own deadlines (spec 032 R14),
+/// and the sweep of the IP table (spec 033 R9).
+pub(crate) fn spawn_deadline_task(
+    ticks: broadcast::Sender<()>,
+    gate: Arc<Gate>,
+    clock: Arc<dyn Clock>,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(TICK);
         loop {
             interval.tick().await;
+            gate.forget(clock.mono_ms());
             // No connection listening is no reason to stop.
             let _ = ticks.send(());
         }
@@ -95,6 +102,8 @@ struct Connection {
     publishes: PublishWindow,
     /// When the last `subscribe` came, on the monotonic clock (spec 033 R2).
     last_subscribe: Option<u64>,
+    /// Its count on its listener and its address (spec 033 R8, R10).
+    admission: Admission,
 }
 
 /// Forgets the connection in the hub however the task ends (R15).
@@ -109,8 +118,9 @@ impl Drop for Registration {
     }
 }
 
-/// The connection of `socket`, until either side closes it.
-pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
+/// The connection of `socket`, admitted as `admission`, until either side
+/// closes it.
+pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>, admission: Admission) {
     #[cfg(test)]
     let _task = shared.hooks.task();
     let ticks = shared.ticks.subscribe();
@@ -150,6 +160,7 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
         catching: VecDeque::new(),
         publishes: PublishWindow::default(),
         last_subscribe: None,
+        admission,
     };
     let flow = match connection.send(&hello).await {
         Flow::Continue => connection.serve().await,
@@ -158,17 +169,19 @@ pub(crate) async fn run(mut socket: WebSocket, shared: Arc<Shared>) {
     // Forgotten at once, not after the close frame has been sent (R15):
     // the hub's registration, and the nonce, the queue and the catch-ups.
     drop(registration);
-    let (mut socket, shared) = connection.into_socket();
+    let (mut socket, shared, admission) = connection.into_socket();
     if let Flow::Close(code) = flow {
         close(&mut socket, &shared, code).await;
     }
+    // Counted until the socket is done with (spec 033 R10).
+    drop(admission);
 }
 
 impl Connection {
-    /// Its socket, with what a close needs; the rest of its state dropped
-    /// here.
-    fn into_socket(self) -> (WebSocket, Arc<Shared>) {
-        (self.socket, self.shared)
+    /// Its socket, with what a close needs and its admission; the rest of
+    /// its state dropped here.
+    fn into_socket(self) -> (WebSocket, Arc<Shared>, Admission) {
+        (self.socket, self.shared, self.admission)
     }
 
     async fn serve(&mut self) -> Flow {
@@ -281,7 +294,10 @@ impl Connection {
     ) -> Flow {
         for verdict in verdicts {
             let flow = match verdict {
-                Verdict::Accept { channel_id } => self.accept(channel_id, ttl_seconds, since),
+                Verdict::Accept { channel_id } => {
+                    self.admission.authenticate();
+                    self.accept(channel_id, ttl_seconds, since)
+                }
                 Verdict::NonceExpired { channel_id, hello } => {
                     let error = frames::error(ErrorCode::NonceExpired, Some(channel_id), None);
                     match self.enqueue(&error) {

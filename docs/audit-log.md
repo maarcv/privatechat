@@ -2,6 +2,29 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BO
+
+**2026-10-19 — Audit BO, the code audit of the first half of slice (c) of spec 033-rate-limit-quotas (branch `033-c1-ip`): R8–R11, the IP table keyed by IPv4 address or by /64 inside its /48, each listener's caps, the `Gate` that checks both before the upgrade under one lock and answers 503 or 429 with an empty body, the `Admission` that holds a connection's place and no address, the deadline task sweeping the table, and `ConnectionLimits` with the defaults of the table "Limits". Three rounds of three passes.** No production defect a client can reach; one decision of the human on R8's text, two of the advisors, a configured 0 that let a fresh address in, and tests.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BO1 | T08's 257th /64 was refused by `ip48_connections`, never by `ip48_subnets` (A, C) | Medium | Each connection closed at once, so that `ip48_subnets` alone refuses; the open bound tested apart |
+| BO2 | The Interface changed with no History line (A) | Low | History line |
+| BO3 | A new entry skipped its bounds, so a configured 0 still let the first connection of a fresh address or /48 in (B) | Low | `check_new` checks a fresh count before any insert; `ip48_subnets = 0` refuses a new /48 |
+| BO4 | On a full table, a known /48 churning fresh /64s has no per-minute bound and grows the queue of opened connections with its churn (B) | Far-fetched | None: the advisors' decision below, and an address with no entry is under R10 alone already |
+| BO5 | The deadline task held `Shared`, and with it the writer, forever (B) | Low | It takes the ticks, the gate and the clock |
+| BO6 | Untested: a second `authenticate`, an authenticated close on the unauthenticated counts of the listener and of the address, a /48 kept by a /64 in its window, the last one and two slots of the table, a connection counted until its close is written, entry-less connections against the listener's cap, a 503 counted nowhere and before a 429, the sliding minute, a 403 or 404 never counted, a subscribed connection under the open cap, an onion close freeing an onion place, `ip48_subnets` on a full table, and the `Debug` that shows the admission holds no address (A, C, rounds 1–3) | Medium | A test each; `Admission`'s `Debug` names every field |
+| BO7 | R8 said a known /48 on a full table is "checked against all its bounds", while the code counts a new /64 of it in the /48 alone (A, round 2) | Low | The human's decision BO-D-1 |
+| BO8 | A co-tenant of a shared IPv4 address or /48 can count the others' open connections by probing for 429 (B, round 2) | Far-fetched | None: any per-address bound answered before the upgrade shows what is left of it, and only as a count |
+| BO9 | `Counts::nothing`, a one-line `node()`, the /48 key written three times, a second `check_new` that can never fail (C) | Low | `is_empty`, inlined, one key, removed |
+| BO10 | The main router needs `into_make_service_with_connect_info` (C) | Far-fetched | None here: the wiring of spec 035 |
+
+**Advisors' decisions (2026-10-19).** (1) On a full table, a new /64 of a /48 that has an entry is admitted and counted in the /48, whose bounds still apply (two of three; the third preferred a 429, whose risk the /48's bounds answer, and under it a known carrier /48 would fare worse than an unknown one). (2) The listener's caps come before the table, so a 503 never looks the address up (two of three; the order is internal, clients back off alike).
+
+**BO-D-1 (the human's decision, 2026-10-19).** R8 says what decision (1) does: on a full table, a new /64 of a /48 that has an entry is counted in its /48 and checked against the /48's bounds alone. Of keeping the code and amending R8, or answering 429, the human chose the first, which the advisors recommended.
+
+Round 3 ended the audit: pass B found nothing, and passes A and C found only tests that did not pin the code, added before the close. R12 (the byte budgets per address, per /48 and for the onion listener) comes in the second half of slice (c). The pull request is about 1 190 net lines, 630 of them tests: R8–R10 share the gate, the table and its sweep, and split apart they would not each be testable.
+
 ## Audit BN
 
 **2026-10-17 — Audit BN, the code audit of slice (b) of spec 033-rate-limit-quotas (branch `033-b-channel`): R6 and R7, the writer refusing an insert past its channel's 120 blobs or 4 MiB within 60 000 ms, or past the 20 000 blobs or 64 MiB the channel holds, counting the blobs of the same transaction; `ChannelLimits` through `Writer::spawn` and `Shared::open`. Three rounds of three passes.** No defect in the writer's checks; two decisions of the human, one of which changes how the client of spec 028 answers a `rate_limited`, and tests.

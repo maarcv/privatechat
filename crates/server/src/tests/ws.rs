@@ -23,7 +23,7 @@ use crate::clock::{Clock, ManualClock};
 use crate::connection::spawn_deadline_task;
 use crate::frames::{self, ErrorCode};
 use crate::http::{MAX_MESSAGE, Shared, router};
-use crate::limits::{ChannelLimits, SUBSCRIBE_GAP_MS};
+use crate::limits::{ChannelLimits, ConnectionLimits, Listener, SUBSCRIBE_GAP_MS};
 
 pub(super) type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -35,6 +35,8 @@ pub(super) const DAY: u32 = 86_400;
 /// own, gone with it.
 pub(super) struct Server {
     pub(super) address: SocketAddr,
+    /// The onion listener's (spec 035-server-ops R2).
+    pub(super) onion: SocketAddr,
     pub(super) shared: Arc<Shared>,
     _dir: TestDir,
 }
@@ -48,16 +50,41 @@ pub(super) async fn start(clock: &Arc<ManualClock>) -> Server {
 
 /// A server whose channels have `limits`.
 pub(super) async fn start_with(clock: &Arc<ManualClock>, limits: ChannelLimits) -> Server {
+    start_limited(clock, limits, ConnectionLimits::RAISED).await
+}
+
+/// A server whose channels have `limits` and whose listeners and addresses
+/// have `connections`.
+pub(super) async fn start_limited(
+    clock: &Arc<ManualClock>,
+    limits: ChannelLimits,
+    connections: ConnectionLimits,
+) -> Server {
     let n = SERVERS.fetch_add(1, Ordering::SeqCst);
     let dir = TestDir::new(&format!("ws{n}"));
     let clock: Arc<dyn Clock> = clock.clone();
-    let shared = Shared::open(&dir.db(), clock, vec![HOST.to_owned()], 1 << 40, limits).unwrap();
-    spawn_deadline_task(shared.ticks.clone());
+    let hosts = vec![HOST.to_owned()];
+    let shared = Shared::open(&dir.db(), clock, hosts, 1 << 40, limits, connections).unwrap();
+    spawn_deadline_task(
+        shared.ticks.clone(),
+        shared.gate.clone(),
+        shared.clock.clone(),
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    tokio::spawn(axum::serve(listener, router(shared.clone())).into_future());
+    let main = router(shared.clone(), Listener::Main);
+    let main = axum::serve(
+        listener,
+        main.into_make_service_with_connect_info::<SocketAddr>(),
+    );
+    tokio::spawn(main.into_future());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let onion = listener.local_addr().unwrap();
+    let onion_router = router(shared.clone(), Listener::Onion);
+    tokio::spawn(axum::serve(listener, onion_router).into_future());
     Server {
         address,
+        onion,
         shared,
         _dir: dir,
     }
@@ -175,7 +202,7 @@ pub(super) fn channel() -> [u8; 16] {
 }
 
 /// The status line and the headers of a raw HTTP/1.1 request's answer.
-async fn raw(address: SocketAddr, request: &str) -> String {
+pub(super) async fn raw(address: SocketAddr, request: &str) -> String {
     let mut stream = TcpStream::connect(address).await.unwrap();
     stream.write_all(request.as_bytes()).await.unwrap();
     let mut answer = Vec::new();
@@ -222,7 +249,7 @@ async fn close_code(stream: &mut TcpStream) -> Option<u16> {
     (head[0] == 0x88).then(|| u16::from_be_bytes([head[2], head[3]]))
 }
 
-const UPGRADE: &str = "upgrade: websocket\r\nconnection: upgrade\r\nsec-websocket-version: 13\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\n";
+pub(super) const UPGRADE: &str = "upgrade: websocket\r\nconnection: upgrade\r\nsec-websocket-version: 13\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\n";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn s030_t03_r03_route_and_origin() {

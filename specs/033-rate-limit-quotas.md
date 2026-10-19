@@ -34,7 +34,7 @@ Some of these numbers are part of the protocol, because the client of spec 028-s
 
 **Per IP and global (configurable)**
 
-- R8 On the main listener, before the WebSocket upgrade, with the client address of spec 035-server-ops R3 in canonical form (`IpAddr::to_canonical`, so that an IPv4-mapped IPv6 address counts as its IPv4 address), counted by its whole IPv4 address, or for IPv6 by its /64 inside the entry of its /48, which also counts the open connections against `ip48_connections` and those with no accepted `subscribe` against `ip48_unauth_connections`, and holds at most `ip48_subnets` /64s (a new /64 past that gets 429): the server MUST answer HTTP 429 with an empty body, and not upgrade, when that address already has `ip_connections` connections open, or `ip_unauth_connections` open with no accepted `subscribe`, or opened `ip_new_per_min` connections within the preceding 60 000 ms. The table holds IPv4 entries and /48 entries, each /64 counted inside its /48 and toward the table's 65 536; a /64 is never counted without its /48. When the table is full, a connection whose IPv4 address or /48 has an entry is still checked against all its bounds, and only one whose IPv4 address or /48 has none is admitted without an entry, bounded by R10 alone.
+- R8 On the main listener, before the WebSocket upgrade, with the client address of spec 035-server-ops R3 in canonical form (`IpAddr::to_canonical`, so that an IPv4-mapped IPv6 address counts as its IPv4 address), counted by its whole IPv4 address, or for IPv6 by its /64 inside the entry of its /48, which also counts the open connections against `ip48_connections` and those with no accepted `subscribe` against `ip48_unauth_connections`, and holds at most `ip48_subnets` /64s (a new /64 past that gets 429): the server MUST answer HTTP 429 with an empty body, and not upgrade, when that address already has `ip_connections` connections open, or `ip_unauth_connections` open with no accepted `subscribe`, or opened `ip_new_per_min` connections within the preceding 60 000 ms. The table holds IPv4 entries and /48 entries, each /64 counted inside its /48 and toward the table's 65 536; a /64 is never counted without its /48. When the table is full, a connection whose IPv4 address or /48 has an entry is still checked against all its bounds, and only one whose IPv4 address or /48 has none is admitted without an entry, bounded by R10 alone. A new /64 of a /48 that has an entry, which the full table cannot hold, is counted in its /48 and checked against the /48's bounds alone.
 - R9 The server MUST keep a client address only in memory: in the table, while an entry counts an open connection, a connection opened within the last 60 000 ms or bytes published within the last 60 000 ms (R12), and nowhere else. An entry that counts nothing MUST be removed. Connections on the onion listener (spec 035 R2) carry no address and are outside R8.
 - R10 Each listener MUST have its own caps: on the main listener, `max_connections` open and `max_unauth_connections` open with no accepted `subscribe`; on the onion listener, `onion_max_connections` and `max_unauth_connections`. A new upgrade past a cap of its listener MUST get HTTP 503 with an empty body.
 - R11 The values of R6–R8, R10 and R12 MUST come from the configuration of spec 035-server-ops, with the defaults of the table "Limits". The values of R1–R5 MUST be constants in `limits.rs`.
@@ -97,8 +97,18 @@ pub(crate) struct ConnectionLimits { pub(crate) ip_connections: u32, pub(crate) 
                                      pub(crate) ip_bytes_per_min: u64, pub(crate) onion_bytes_per_min: u64,
                                      pub(crate) ip48_connections: u32, pub(crate) ip48_unauth_connections: u32,
                                      pub(crate) ip48_subnets: u32, pub(crate) ip48_bytes_per_min: u64 }
-pub(crate) struct IpTable { /* Mutex<HashMap<IpKey, Entry>>: IPv4 by address, IPv6 by /48 with its /64s inside (≤ `ip48_subnets`), at most IP_TABLE_MAX entries and /64s in all */ }
+struct IpTable { /* IPv4 by address, IPv6 by /48 with its /64s inside (≤ `ip48_subnets`), at most IP_TABLE_MAX entries and /64s in all */ }
+pub(crate) enum Listener { Main, Onion }
+pub(crate) enum Refused { Address /* 429, R8 */, Listener /* 503, R10 */ }
+pub(crate) struct Gate { /* ConnectionLimits, and Mutex of the IpTable and each listener's counts */ }
+impl Gate { pub(crate) fn new(limits: ConnectionLimits) -> Arc<Gate>;
+            pub(crate) fn admit(self: &Arc<Gate>, listener: Listener, address: Option<IpAddr>, now: u64) -> Result<Admission, Refused>;
+            pub(crate) fn forget(&self, now: u64) }
+pub(crate) struct Admission { /* its listener and the id of its entry, never the address (R9); counted until it drops */ }
+impl Admission { pub(crate) fn authenticate(&mut self) }
 ```
+
+`Gate::admit` checks the caps of the listener (R10) before the table (R8), under one lock, and counts nothing it refuses. When the table is full, a new /64 of a /48 that has an entry is counted in the /48 alone, which still checks its bounds. `router(shared, listener)` serves each listener; the main one reads the peer's address through axum's `ConnectInfo`. The deadline task also sweeps the table (R9).
 
 `Writer::spawn` of spec 032 gains a `ChannelLimits` argument. The channel windows live in the writer thread, so the check and the insert happen in one place, in arrival order, with no lock. The ping and write deadlines and every window are measured with `Clock::mono_ms()` and checked by the deadline task of spec 032 R14.
 
@@ -170,3 +180,5 @@ None.
 - 2026-10-16 R7 and T07 amended after audit BN (`docs/audit-log.md`, BN-D-1, the human's decision): R7 is checked before R6, so a blob both would refuse gets `channel_quota`
 - 2026-10-16 Interface and Public API changes after audit BN: `CHANNEL_WINDOW_MS`, and `docs/spec.md` §6 says the retention is checked before the rate
 - 2026-10-17 R7's reason for checking it before R6 worded after spec 028 R16 was amended (BN-D-2): the full channel is told, where `rate_limited` pauses it silently
+- 2026-10-19 Interface after slice (c1) and audit BO (`docs/audit-log.md`, BO2, BO7): `Gate`, `Admission`, `Listener`, `Refused`, `IpTable` private; the listener caps checked before the table, and a full table counts a new /64 of a known /48 in the /48 alone (advisors)
+- 2026-10-19 R8 amended after audit BO (`docs/audit-log.md`, BO-D-1, the human's decision): when the table is full, a new /64 of a /48 that has an entry is counted in its /48 and checked against the /48's bounds alone
