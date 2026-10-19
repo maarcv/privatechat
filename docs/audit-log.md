@@ -2,6 +2,26 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BQ
+
+**2026-10-19 — Audit BQ, the code audit of slice (a) of spec 035-server-ops (branch `035-a-config`): R1, `Settings::from_env` reading the `PRIVATECHAT_` variables of the table and nothing else; R2, the main and the onion listener serving one route, the onion one with no client address; R8, the binary's exit codes; R10, `bind` and `Bound::run`, the `pub` surface and its CI step. Two rounds of three passes.** No defect a client can reach; a SIGTERM race closed before slice (c) would have hit it, one reading of the Interface, and tests.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BQ1 | `Settings::log_level` was a `pub` field the Interface did not show and `api_surface.rs` did not pin (A, C) | Low | Kept `pub` (advisors, two of three), pinned by T10, shown in the Interface with a History line |
+| BQ2 | The signal handlers were installed on `run`'s first poll, after the listeners bound, so a SIGTERM once the port accepted could kill the process with no exit code (A) | Low | `main` builds the runtime and registers SIGTERM and SIGINT before `bind`; T08's SIGTERM clause added |
+| BQ3 | Untested: a variable read into another's limit, a `/0` block with a host bit, `run` without the deadline task, `Stopped` mapped to 1, ports still open after `run` returned, the onion port taken, SIGINT (C, rounds 1–2) | Medium | A test each; `run` awaits the end of its listeners and of the deadline task |
+| BQ4 | T08's SIGTERM clause picks and releases a free port rather than reading it from the start line, which comes with R4 (A, B, round 2) | Low | Kept until slice (c), which switches it to `127.0.0.1:0` and the start line |
+| BQ5 | The diff is far over AGENTS 14's 400 lines (A, round 2) | Low | Justified in the pull request |
+| BQ6 | A name present twice in the environment keeps its last value (B) | Far-fetched | None: only a hand-built `execve` makes one, and its author is the operator (advisors, three of three) |
+| BQ7 | A name in another case, such as `privatechat_max_connections`, is ignored (B) | Far-fetched | None: R1's prefix is literal and environment names are case-sensitive (advisors, three of three) |
+| BQ8 | An unknown name echoes whatever a broken env file glued to it (B); the test helper's no-value check skips values of two bytes or less (A); `LISTEN` and `ONION_LISTEN` compared literally (A); the `Fatal` arm of a listener that ends is unreachable (C) | Far-fetched | None |
+| BQ9 | After `run` returns, upgraded connections still hold the writer; `main` then drops the runtime, joining a writer that may hang with the signal handlers still installed; `PRIVATECHAT_TRUSTED_PROXIES` has no effect yet (B, round 2) | Far-fetched | None here: R7 of slice (d) closes the connections and bounds the stop, and slice (b) reads the proxies, before any image exists (spec 034) |
+
+**Advisors' decisions (2026-10-19).** The readings of R1's table: list elements split on `,` alone with no space trimmed; a CIDR block with a host bit set refused, never masked into a wider trust, and a bare address a block of one; integers of ASCII digits only, no sign (leading zeros accepted, two of three); an empty `PRIVATECHAT_DB` a configuration error (exit 2), not a refused database (exit 3).
+
+Round 2 ended the audit: passes A and B found only far-fetched findings or notes for later slices, and pass C only tests that did not pin the code, added before the close. The pull request is about 1 340 net lines, 660 of them tests: R1's table and its refusals, both listeners and the exit codes over the built binary make one slice of the spec, and the parsing is tested variable by variable.
+
 ## Audit BP
 
 **2026-10-19 — Audit BP, the code audit of the second half of slice (c) of spec 033-rate-limit-quotas (branch `033-c2-budgets`): R12, the bytes an address, its /48 and the whole onion listener hand to the writer per 60 000 ms, checked, handed over and counted under the gate's lock by `Admission::publish`; R9's clause that an entry is kept while its bytes are in the window; spec 033 marked implemented. Two rounds of three passes.** One edge of the full table where the code and R12 disagreed, closed in the code and by a decision of the human, and tests.

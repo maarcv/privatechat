@@ -29,6 +29,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 RUSTFLAGS="--cfg fuzzing" cargo clippy -p privatechat-core -- -D warnings
 cargo build --workspace --all-targets
 cargo test --workspace
+cargo test -p privatechat-server --all-features
 cargo deny --all-features check -D checksum-mismatch
 scripts/check_layout.sh
 scripts/check_core_sources.sh

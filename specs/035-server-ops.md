@@ -144,7 +144,7 @@ crates/server/tests/s035_process.rs       R8 and R9 over the built binary (CARGO
 ```
 
 ```rust
-pub struct Settings { /* hosts, listeners, trusted proxies, db, max_db_bytes, ChannelLimits, ConnectionLimits, log level */ }
+pub struct Settings { /* hosts, listeners, trusted proxies, db, max_db_bytes, ChannelLimits, ConnectionLimits */ pub log_level: Level }   // the level `main.rs` passes to `log::init`
 impl Settings { pub fn from_env(vars: impl Iterator<Item = (OsString, OsString)>) -> Result<Settings, ConfigError>; }
 pub enum ConfigError { /* the variable's name, never its value */ }
 pub struct StartError { pub reason: StartReason }
@@ -268,3 +268,4 @@ None.
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): the clients' logging points to specs 042 and 053; the port fields of the start line, amended on 2026-09-26 under a spec 041-desktop-bridge R18 that no longer exists, are read by spec 042-connection-host R13
 - 2026-09-28 revised after audit P round 2 (`docs/audit-log.md`): Blocks names 066
 - 2026-09-28 accepted (Marc Vilardebó)
+- 2026-10-19 clarified during audit BQ (`docs/audit-log.md`): the Interface shows `Settings::log_level`, the one `pub` field, which `main.rs` reads for `log::init` (a reading of R4 and R10, no new requirement)
