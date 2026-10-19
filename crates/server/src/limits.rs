@@ -207,7 +207,7 @@ struct Counts {
 }
 
 impl Counts {
-    fn nothing(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.open == 0 && self.unauth == 0 && self.opened == 0
     }
 }
@@ -306,7 +306,8 @@ impl IpTable {
                 match self.ids.get(&subnet).copied() {
                     Some(id) => self.check(id, limits).map(|()| id)?,
                     None if self
-                        .node(site)
+                        .nodes
+                        .get(&site)
                         .is_some_and(|site| site.children >= limits.ip48_subnets) =>
                     {
                         return Err(Refused::Address);
@@ -331,14 +332,10 @@ impl IpTable {
 
     /// The bounds of R8 on one more connection of `id`.
     fn check(&self, id: u64, limits: &ConnectionLimits) -> Result<(), Refused> {
-        match self.node(id) {
+        match self.nodes.get(&id) {
             Some(node) if !within(node.key, &node.counts, limits) => Err(Refused::Address),
             _ => Ok(()),
         }
-    }
-
-    fn node(&self, id: u64) -> Option<&Node> {
-        self.nodes.get(&id)
     }
 
     fn insert(&mut self, key: Key, parent: Option<u64>) -> u64 {
@@ -421,7 +418,7 @@ impl IpTable {
         let Some(node) = self.nodes.get(&id) else {
             return;
         };
-        if !node.counts.nothing() || node.children > 0 {
+        if !node.counts.is_empty() || node.children > 0 {
             return;
         }
         let (key, parent) = (node.key, node.parent);

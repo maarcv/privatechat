@@ -5,6 +5,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::SinkExt;
+use tokio_tungstenite::tungstenite::Message;
+
 use super::super::catch_up::{T0, backlog, subscribe_since};
 use super::super::store::writer::request as writer_request;
 use super::super::ws::{
@@ -68,7 +71,8 @@ fn s033_t08_r08_ip_limits() {
     let gate = Gate::new(limits);
     let mut held = admit_n(&gate, address, 20, 0);
     assert_eq!(refused(&gate, address, 0), Some(Refused::Address));
-    // One subscribes: a new one is accepted.
+    // One subscribes, to two channels: one new one is accepted.
+    held[0].authenticate();
     held[0].authenticate();
     held.extend(admit_n(&gate, address, 1, 0));
     assert_eq!(refused(&gate, address, 0), Some(Refused::Address));
@@ -183,10 +187,16 @@ fn s033_t08_r08_full_table() {
     // A /48 known before the table fills, with one /64.
     let mut held = admit_n(&gate, v6(7, 0, 1), 1, 0);
     let mut n = 0;
-    while gate.entries() < IP_TABLE_MAX {
+    while gate.entries() < IP_TABLE_MAX - 1 {
         held.extend(admit_n(&gate, ipv4(n), 1, 0));
         n += 1;
     }
+    // One slot left: a new /48 needs two, and is admitted without an entry.
+    held.extend(admit_n(&gate, v6(6, 0, 1), 1, 0));
+    assert_eq!(gate.entries(), IP_TABLE_MAX - 1);
+    held.extend(admit_n(&gate, ipv4(n), 1, 0));
+    n += 1;
+    assert_eq!(gate.entries(), IP_TABLE_MAX);
     // A new IPv4 address is accepted without an entry...
     held.extend(admit_n(&gate, ipv4(n), 30, 0));
     assert_eq!(gate.entries(), IP_TABLE_MAX);
@@ -237,6 +247,24 @@ fn s033_t08_r08_one_site_cycling_subnets() {
         held.iter_mut().for_each(Admission::authenticate);
     }
     assert_eq!(refused(&gate, v6(9, 256, 1), 0), Some(Refused::Address));
+}
+
+#[test]
+fn s033_t10_r10_unauthenticated_cap() {
+    let gate = Gate::new(ConnectionLimits {
+        max_unauth_connections: 2,
+        ..ConnectionLimits::default()
+    });
+    let _b = admit_n(&gate, ip("192.0.2.1"), 1, 0);
+    // A connection that subscribed frees no unauthenticated slot it does
+    // not hold when it closes.
+    let mut a = admit_n(&gate, ip("192.0.2.2"), 1, 0);
+    a[0].authenticate();
+    drop(a);
+    let _c = admit_n(&gate, ip("192.0.2.3"), 1, 0);
+    assert_eq!(refused(&gate, ip("192.0.2.4"), 0), Some(Refused::Listener));
+    // The onion listener's count is its own.
+    let _onion = gate.admit(Listener::Onion, None, 0).unwrap();
 }
 
 /// Waits up to 5 s of real time for `condition`.
@@ -311,6 +339,14 @@ async fn s033_t09_r09_ip_forgotten() {
     assert_eq!(gate.entries(), 1);
     gate.forget(60_001);
     assert_eq!(gate.entries(), 0);
+    // A /64 kept by the window alone keeps its /48.
+    drop(gate.admit(Listener::Main, v6(1, 1, 1), 0).unwrap());
+    assert_eq!(gate.entries(), 2);
+    let again = gate.admit(Listener::Main, v6(1, 1, 2), 0).unwrap();
+    assert_eq!(gate.entries(), 2);
+    drop(again);
+    gate.forget(60_001);
+    assert_eq!(gate.entries(), 0);
     // An open connection keeps its entry, and its /48's, past the window.
     let held = gate.admit(Listener::Main, v6(1, 1, 1), 0).unwrap();
     gate.forget(120_000);
@@ -376,6 +412,32 @@ async fn s033_t10_r10_listener_caps() {
         let _third = connect(address).await;
         drop(first);
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s033_t10_r10_counted_until_closed() {
+    let clock = Arc::new(ManualClock::new(T0));
+    let caps = ConnectionLimits {
+        max_connections: 1,
+        ..ConnectionLimits::default()
+    };
+    let server = server(&clock, caps).await;
+    let mut client = connect(server.address).await;
+    hello(&mut client).await;
+    // A text frame closes it, but its close frame cannot be written: the
+    // connection still counts.
+    server.shared.hooks.pause_writes(true);
+    client.send(Message::Text("x".into())).await.unwrap();
+    for _ in 0..10 {
+        assert_eq!(
+            status(server.address).await,
+            "http/1.1 503 service unavailable"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    server.shared.hooks.pause_writes(false);
+    until(|| server.shared.hooks.tasks() == 0).await;
+    let _next = connect(server.address).await;
 }
 
 async fn server_unauth(clock: &Arc<ManualClock>) -> Server {
