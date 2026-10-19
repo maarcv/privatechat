@@ -123,3 +123,33 @@ fn s035_t08_r08_exit_codes_port_in_use() {
     ]);
     assert_eq!(exit_code(child).0, 1);
 }
+
+#[cfg(unix)]
+#[test]
+fn s035_t08_r08_exit_codes_sigterm() {
+    let dir = TestDir::new("sigterm");
+    let db = dir.db();
+    // A free port, released for the binary to take.
+    let address = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let listen = address.to_string();
+    let child = start(&[
+        ("PRIVATECHAT_URLS", "wss://127.0.0.1"),
+        ("PRIVATECHAT_DB", &db),
+        ("PRIVATECHAT_LISTEN", &listen),
+        ("PRIVATECHAT_LOG", "info"),
+    ]);
+    let begun = Instant::now();
+    while std::net::TcpStream::connect(address).is_err() {
+        assert!(begun.elapsed() <= EXIT_WITHIN, "the binary never accepted");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let killed = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    assert_eq!(exit_code(child).0, 0);
+}

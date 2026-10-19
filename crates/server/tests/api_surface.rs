@@ -6,6 +6,8 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use tracing::Level;
+
 use privatechat_server::{
     Bound, Clock, ConfigError, DbCause, Outcome, Settings, StartError, StartReason, SystemClock,
     bind,
@@ -16,6 +18,7 @@ fn s035_t10_r10_pub_items() {
     let _: fn(Settings, Arc<dyn Clock>) -> Result<Bound, StartError> = bind;
     let _: fn(std::env::VarsOs) -> Result<Settings, ConfigError> = Settings::from_env;
     let _: fn(&Bound) -> Vec<SocketAddr> = Bound::local_addrs;
+    let _: fn(&Settings) -> Level = |settings| settings.log_level;
     let _: Arc<dyn Clock> = Arc::new(SystemClock);
     let _: [StartReason; 5] = [
         StartReason::Bind,

@@ -3,6 +3,10 @@
 use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
+
+use futures_util::StreamExt;
+use tokio_tungstenite::tungstenite::Message;
 
 use privatechat_core::Frame;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -12,7 +16,7 @@ use super::TestDir;
 use super::ws::{Received, receive};
 use crate::clock::ManualClock;
 use crate::config::{ConfigError, Settings};
-use crate::limits::{ChannelLimits, ConnectionLimits};
+use crate::limits::{ChannelLimits, ConnectionLimits, PING_INTERVAL_MS};
 use crate::serve::{Outcome, bind};
 
 const URLS: &str = "PRIVATECHAT_URLS";
@@ -164,6 +168,56 @@ fn s035_t01_r01_configuration_ranges() {
 }
 
 #[test]
+fn s035_t01_r01_configuration_each_variable_its_limit() {
+    // Distinct values, so that a variable read into another's limit shows.
+    let values: Vec<(&str, String)> = INTEGERS
+        .iter()
+        .enumerate()
+        .map(|(n, (name, least, _))| (*name, (least + 1 + n as u64).to_string()))
+        .collect();
+    let mut pairs = vec![(URLS, "wss://a.org")];
+    pairs.extend(values.iter().map(|(name, value)| (*name, value.as_str())));
+    let settings = from(&pairs).unwrap();
+    let value = |name: &str| -> u64 {
+        values
+            .iter()
+            .find(|(n, _)| *n == name)
+            .unwrap()
+            .1
+            .parse()
+            .unwrap()
+    };
+    let count = |name: &str| u32::try_from(value(name)).unwrap();
+    assert_eq!(settings.max_db_bytes, value("PRIVATECHAT_MAX_DB_BYTES"));
+    assert_eq!(
+        settings.channel,
+        ChannelLimits {
+            publish_per_min: count("PRIVATECHAT_CHANNEL_PUBLISH_PER_MIN"),
+            bytes_per_min: value("PRIVATECHAT_CHANNEL_BYTES_PER_MIN"),
+            max_blobs: count("PRIVATECHAT_CHANNEL_MAX_BLOBS"),
+            max_bytes: value("PRIVATECHAT_CHANNEL_MAX_BYTES"),
+        }
+    );
+    assert_eq!(
+        settings.connections,
+        ConnectionLimits {
+            ip_connections: count("PRIVATECHAT_IP_CONNECTIONS"),
+            ip_unauth_connections: count("PRIVATECHAT_IP_UNAUTH_CONNECTIONS"),
+            ip_new_per_min: count("PRIVATECHAT_IP_NEW_PER_MIN"),
+            max_connections: count("PRIVATECHAT_MAX_CONNECTIONS"),
+            onion_max_connections: count("PRIVATECHAT_ONION_MAX_CONNECTIONS"),
+            max_unauth_connections: count("PRIVATECHAT_MAX_UNAUTH_CONNECTIONS"),
+            ip_bytes_per_min: value("PRIVATECHAT_IP_BYTES_PER_MIN"),
+            onion_bytes_per_min: value("PRIVATECHAT_ONION_BYTES_PER_MIN"),
+            ip48_connections: count("PRIVATECHAT_IP48_CONNECTIONS"),
+            ip48_unauth_connections: count("PRIVATECHAT_IP48_UNAUTH_CONNECTIONS"),
+            ip48_subnets: count("PRIVATECHAT_IP48_SUBNETS"),
+            ip48_bytes_per_min: value("PRIVATECHAT_IP48_BYTES_PER_MIN"),
+        }
+    );
+}
+
+#[test]
 fn s035_t01_r01_configuration_urls() {
     assert_eq!(refused(&[], URLS), ConfigError::Missing(URLS.to_owned()));
     let eight = (0..8)
@@ -249,6 +303,8 @@ fn s035_t01_r01_configuration_trusted_proxies() {
     // A host bit past the prefix is refused, never masked into a wider trust.
     for bad in [
         "10.0.0.1/8",
+        "10.0.0.1/0",
+        "::1/0",
         "10.0.0.0/33",
         "::/129",
         "2001:db8::1/64",
@@ -340,7 +396,7 @@ async fn forwarded(address: SocketAddr) -> super::ws::Client {
 async fn s035_t02_r02_two_listeners() {
     let dir = TestDir::new("s035_t02");
     let clock = Arc::new(ManualClock::new(1_000));
-    let bound = bind(local(&dir), clock).unwrap();
+    let bound = bind(local(&dir), clock.clone()).unwrap();
     let addresses = bound.local_addrs();
     assert_eq!(addresses.len(), 2);
     let (main, onion) = (addresses[0], addresses[1]);
@@ -355,10 +411,21 @@ async fn s035_t02_r02_two_listeners() {
     let _onion_client = forwarded(onion).await;
     assert_eq!(shared.gate.entries(), 0);
     // The main listener counts its peer's.
-    let _main_client = forwarded(main).await;
+    let mut main_client = forwarded(main).await;
     assert_eq!(shared.gate.entries(), 1);
+    // `run` drives the deadlines of spec 033: the ping of R4 comes due.
+    clock.advance_mono(PING_INTERVAL_MS);
+    let ping = tokio::time::timeout(Duration::from_secs(10), main_client.next()).await;
+    assert!(matches!(ping, Ok(Some(Ok(Message::Ping(_))))), "{ping:?}");
     stop.send(()).unwrap();
     assert_eq!(server.await.unwrap(), Outcome::Stopped);
+    // Stopped, it listens no more.
+    for address in [main, onion] {
+        assert!(
+            tokio::net::TcpStream::connect(address).await.is_err(),
+            "{address}"
+        );
+    }
 }
 
 #[test]

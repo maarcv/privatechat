@@ -40,6 +40,21 @@ fn main() -> ExitCode {
             return ExitCode::from(CONFIG_ERROR);
         }
     };
+    let Ok(runtime) = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    else {
+        return ExitCode::from(FATAL);
+    };
+    // Registered before the listeners bind, so that a SIGTERM that comes once
+    // the port accepts stops the server rather than killing it.
+    let shutdown = {
+        let _runtime = runtime.enter();
+        signals()
+    };
+    let Some(shutdown) = shutdown else {
+        return ExitCode::from(FATAL);
+    };
     let bound = match bind(settings, Arc::new(SystemClock)) {
         Ok(bound) => bound,
         Err(StartError {
@@ -49,35 +64,36 @@ fn main() -> ExitCode {
             reason: StartReason::Bind,
         }) => return ExitCode::from(FATAL),
     };
-    let Ok(runtime) = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-    else {
-        return ExitCode::from(FATAL);
-    };
-    match runtime.block_on(bound.run(signal())) {
+    match runtime.block_on(bound.run(shutdown)) {
         Outcome::Stopped => ExitCode::SUCCESS,
         Outcome::Fatal => ExitCode::from(FATAL),
     }
 }
 
-/// Resolves on SIGTERM or SIGINT; without a SIGTERM handler, on SIGINT alone.
-async fn signal() {
-    let interrupt = async {
-        // A SIGINT that cannot be awaited never stops the server by itself.
+/// The shutdown future, resolving on SIGTERM or SIGINT; `None` when their
+/// handlers cannot be installed, since the server could then not stop as R7
+/// says.
+#[cfg(unix)]
+fn signals() -> Option<impl Future<Output = ()> + Send> {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let mut terminate = signal(SignalKind::terminate()).ok()?;
+    let mut interrupt = signal(SignalKind::interrupt()).ok()?;
+    Some(async move {
+        tokio::select! {
+            _ = terminate.recv() => {}
+            _ = interrupt.recv() => {}
+        }
+    })
+}
+
+/// The shutdown future, resolving on Ctrl-C.
+#[cfg(not(unix))]
+fn signals() -> Option<impl Future<Output = ()> + Send> {
+    Some(async {
+        // A Ctrl-C that cannot be awaited never stops the server by itself.
         if tokio::signal::ctrl_c().await.is_err() {
             std::future::pending::<()>().await;
         }
-    };
-    #[cfg(unix)]
-    if let Ok(mut terminate) =
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-    {
-        tokio::select! {
-            _ = terminate.recv() => {}
-            () = interrupt => {}
-        }
-        return;
-    }
-    interrupt.await;
+    })
 }

@@ -113,8 +113,10 @@ impl Bound {
             // A listener serves until it is stopped: one that ends is fatal.
             _ = listeners.join_next() => Outcome::Fatal,
         };
-        listeners.abort_all();
+        // Awaited, so that the ports are closed once `run` returns.
+        listeners.shutdown().await;
         deadlines.abort();
+        let _ = deadlines.await;
         outcome
     }
 
