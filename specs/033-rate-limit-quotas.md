@@ -1,6 +1,6 @@
 # 033 — Rate limits and quotas on the server
 
-Status: accepted
+Status: implemented
 Phase: 3
 Related ADRs: 0008, 0010, 0038
 Depends on: 028-session-sans-io, 030-ws-protocol, 031-auth-channel-signature, 032-storage-ttl
@@ -73,7 +73,9 @@ Some of these numbers are part of the protocol, because the client of spec 028-s
 ```
 crates/server/src/limits.rs              the constants of R1–R5, the per-connection windows, the IP table, the caps, the ingest budgets (R1–R5, R8–R10, R12)
 crates/server/src/store/writer.rs        the channel windows and quota checks, added to spec 032's writer (R6, R7)
-crates/server/src/tests/limits.rs        s033_* tests, with ManualClock
+crates/server/src/tests/limits.rs        s033_* tests, with ManualClock: one connection and one channel (R1–R7)
+crates/server/src/tests/limits/ip.rs     s033_* tests of the listeners, the addresses and the budgets (R8–R12)
+crates/server/src/http.rs                `router(shared, listener)`, the checks of the gate before the upgrade (R8, R10)
 ```
 
 ```rust
@@ -105,10 +107,11 @@ impl Gate { pub(crate) fn new(limits: ConnectionLimits) -> Arc<Gate>;
             pub(crate) fn admit(self: &Arc<Gate>, listener: Listener, address: Option<IpAddr>, now: u64) -> Result<Admission, Refused>;
             pub(crate) fn forget(&self, now: u64) }
 pub(crate) struct Admission { /* its listener and the id of its entry, never the address (R9); counted until it drops */ }
-impl Admission { pub(crate) fn authenticate(&mut self) }
+impl Admission { pub(crate) fn authenticate(&mut self);
+                 pub(crate) fn publish<E>(&self, bytes: u64, now: u64, submit: impl FnOnce() -> Result<(), E>) -> Option<Result<(), E>> }
 ```
 
-`Gate::admit` checks the caps of the listener (R10) before the table (R8), under one lock, and counts nothing it refuses. When the table is full, a new /64 of a /48 that has an entry is counted in the /48 alone, which still checks its bounds. `router(shared, listener)` serves each listener; the main one reads the peer's address through axum's `ConnectInfo`. The deadline task also sweeps the table (R9).
+`Gate::admit` checks the caps of the listener (R10) before the table (R8), under one lock, and counts nothing it refuses. When the table is full, a new /64 of a /48 that has an entry is counted in the /48 alone, which still checks its bounds. `router(shared, listener)` serves each listener; the main one reads the peer's address through axum's `ConnectInfo`. The deadline task also sweeps the table (R9). `Admission::publish` checks the budgets of R12, hands the blob to the writer through `submit` and counts its bytes only when the writer takes it, all under the gate's lock; `None` is R12's refusal. A connection the full table holds no entry for has no budget but R10's caps.
 
 `Writer::spawn` of spec 032 gains a `ChannelLimits` argument. The channel windows live in the writer thread, so the check and the insert happen in one place, in arrival order, with no lock. The ping and write deadlines and every window are measured with `Clock::mono_ms()` and checked by the deadline task of spec 032 R14.
 
@@ -182,3 +185,4 @@ None.
 - 2026-10-17 R7's reason for checking it before R6 worded after spec 028 R16 was amended (BN-D-2): the full channel is told, where `rate_limited` pauses it silently
 - 2026-10-19 Interface after slice (c1) and audit BO (`docs/audit-log.md`, BO2, BO7): `Gate`, `Admission`, `Listener`, `Refused`, `IpTable` private; the listener caps checked before the table, and a full table counts a new /64 of a known /48 in the /48 alone (advisors)
 - 2026-10-19 R8 amended after audit BO (`docs/audit-log.md`, BO-D-1, the human's decision): when the table is full, a new /64 of a /48 that has an entry is counted in its /48 and checked against the /48's bounds alone
+- 2026-10-19 Interface after slice (c2): the test files and `http.rs`, `Admission::publish`, the budgets of R12 counted under the gate's lock with the hand-over to the writer

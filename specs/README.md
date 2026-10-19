@@ -32,7 +32,7 @@ States: `draft` · `in review` · `accepted` · `implemented`.
 | 030 | 030-ws-protocol | 3 | implemented |
 | 031 | 031-auth-channel-signature | 3 | implemented |
 | 032 | 032-storage-ttl | 3 | implemented |
-| 033 | 033-rate-limit-quotas | 3 | accepted |
+| 033 | 033-rate-limit-quotas | 3 | implemented |
 | 034 | 034-docker | 3 | accepted |
 | 035 | 035-server-ops | 3 | accepted |
 | 040 | 040-uniffi | 4 | accepted |

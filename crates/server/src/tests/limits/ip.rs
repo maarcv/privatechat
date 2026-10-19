@@ -5,13 +5,17 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
+use privatechat_core::Frame;
+
 use futures_util::SinkExt;
 use tokio_tungstenite::tungstenite::Message;
 
-use super::super::catch_up::{T0, backlog, subscribe_since};
+use super::super::catch_up::{T0, backlog, other_channel, subscribe_other, subscribe_since};
+use super::super::publish::{blob_of, client_ref, publish};
 use super::super::store::writer::request as writer_request;
 use super::super::ws::{
-    Client, DAY, Server, UPGRADE, channel, connect, hello, raw, send, start_limited,
+    Client, DAY, Received, Server, UPGRADE, channel, connect, hello, raw, receive, send,
+    start_limited,
 };
 use super::limited;
 use crate::clock::ManualClock;
@@ -600,4 +604,164 @@ fn s033_t11_r11_configurable_values() {
         (SEND_QUEUE_FRAMES, SEND_QUEUE_BYTES),
         (256, 4 * 1024 * 1024)
     );
+}
+
+/// A blob of 64 673 bytes, the largest, for `channel_id`.
+fn large(channel_id: [u8; 16]) -> Vec<u8> {
+    let mut blob = blob_of(channel_id, 7);
+    blob.resize(64_673, 7);
+    blob
+}
+
+/// A client of `address` subscribed to the test channel, or the other one.
+async fn on(address: SocketAddr, other: bool) -> Client {
+    let mut client = connect(address).await;
+    let nonce = hello(&mut client).await;
+    let (frame, channel_id) = if other {
+        (subscribe_other(&nonce), other_channel())
+    } else {
+        (subscribe_since(&nonce, None), channel())
+    };
+    send(&mut client, &frame).await;
+    // Through its backlog, whatever it holds, to its `ok`.
+    backlog(&mut client, channel_id).await;
+    client
+}
+
+/// The answer to `client`'s publish of a large blob as `n`, past its echo.
+async fn published(client: &mut Client, channel_id: [u8; 16], n: u16) -> Frame {
+    send(client, &publish(channel_id, n, large(channel_id))).await;
+    loop {
+        match receive(client).await {
+            Received::Frame(Frame::Push { .. }) => {}
+            Received::Frame(frame) => return frame,
+            other => {
+                let unexpected = Some(other);
+                assert!(unexpected.is_none(), "{unexpected:?}");
+            }
+        }
+    }
+}
+
+fn is_ack(frame: &Frame) -> bool {
+    matches!(frame, Frame::Ack { .. })
+}
+
+fn is_rate_limited(frame: &Frame, channel_id: [u8; 16], n: u16) -> bool {
+    matches!(frame, Frame::Error { code, channel_id: Some(of), client_ref: Some(by), .. }
+        if code == "rate_limited" && *of == channel_id && *by == client_ref(n))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn s033_t12_r12_ingest_budgets() {
+    let clock = Arc::new(ManualClock::new(T0));
+    let budgets = ConnectionLimits {
+        ip_bytes_per_min: 200_000,
+        onion_bytes_per_min: 200_000,
+        ..ConnectionLimits::default()
+    };
+    let server = server(&clock, budgets).await;
+    // One address, two of its channels, four connections: three blobs of
+    // 64 673 bytes fit in 200 000, the fourth does not.
+    let mut clients = Vec::new();
+    for k in 0..4 {
+        clients.push((on(server.address, k % 2 == 1).await, k % 2 == 1));
+    }
+    let channel_of = |other: bool| if other { other_channel() } else { channel() };
+    for (n, (client, other)) in clients.iter_mut().enumerate().take(3) {
+        let n = u16::try_from(n).unwrap();
+        assert!(is_ack(&published(client, channel_of(*other), n).await));
+    }
+    let (fourth, other) = &mut clients[3];
+    let refused = published(fourth, channel_of(*other), 3).await;
+    assert!(
+        is_rate_limited(&refused, channel_of(*other), 3),
+        "{refused:?}"
+    );
+    // At the edge of the window still refused; past it, accepted.
+    clock.advance_mono(60_000);
+    let refused = published(fourth, channel_of(*other), 4).await;
+    assert!(
+        is_rate_limited(&refused, channel_of(*other), 4),
+        "{refused:?}"
+    );
+    clock.advance_mono(1);
+    assert!(is_ack(&published(fourth, channel_of(*other), 5).await));
+
+    // Two onion connections share one budget.
+    let mut first = on(server.onion, false).await;
+    let mut second = on(server.onion, true).await;
+    for n in 10..13 {
+        assert!(is_ack(&published(&mut first, channel(), n).await));
+    }
+    let refused = published(&mut second, other_channel(), 13).await;
+    assert!(
+        is_rate_limited(&refused, other_channel(), 13),
+        "{refused:?}"
+    );
+    // The main listener's address is not the onion's.
+    assert!(is_ack(&published(&mut clients[0].0, channel(), 14).await));
+}
+
+#[test]
+fn s033_t12_r12_budgets_on_the_gate() {
+    let limits = ConnectionLimits {
+        ip_bytes_per_min: 300,
+        ip48_bytes_per_min: 500,
+        onion_bytes_per_min: 100,
+        ..ConnectionLimits::default()
+    };
+    let gate = Gate::new(limits);
+    let ok = || Ok::<(), ()>(());
+    let spend = |admission: &Admission, bytes, now| admission.publish(bytes, now, ok);
+    // An address's budget, up to it and not past it.
+    let v4 = admit_n(&gate, ip("192.0.2.1"), 2, 0);
+    assert_eq!(spend(&v4[0], 200, 0), Some(Ok(())));
+    assert_eq!(spend(&v4[1], 100, 0), Some(Ok(())));
+    assert_eq!(spend(&v4[1], 1, 0), None);
+    // Another address has its own.
+    let other = admit_n(&gate, ip("192.0.2.2"), 1, 0);
+    assert_eq!(spend(&other[0], 300, 0), Some(Ok(())));
+    // Two /64s of one /48: 300 each, 500 between them.
+    let a = admit_n(&gate, v6(1, 1, 1), 1, 0);
+    let b = admit_n(&gate, v6(1, 2, 1), 1, 0);
+    assert_eq!(spend(&a[0], 300, 0), Some(Ok(())));
+    assert_eq!(spend(&b[0], 201, 0), None);
+    assert_eq!(spend(&b[0], 200, 0), Some(Ok(())));
+    // A blob the writer refuses is not counted.
+    let full = || Err::<(), ()>(());
+    assert_eq!(other[0].publish(1, 0, full), None);
+    let c = admit_n(&gate, ip("192.0.2.3"), 1, 0);
+    assert_eq!(c[0].publish(300, 0, full), Some(Err(())));
+    assert_eq!(spend(&c[0], 300, 0), Some(Ok(())));
+    // The onion listener's budget is one for all its connections.
+    let onion = [
+        gate.admit(Listener::Onion, None, 0).unwrap(),
+        gate.admit(Listener::Onion, None, 0).unwrap(),
+    ];
+    assert_eq!(spend(&onion[0], 60, 0), Some(Ok(())));
+    assert_eq!(spend(&onion[1], 41, 0), None);
+    assert_eq!(spend(&onion[1], 40, 0), Some(Ok(())));
+    // The window slides at 60 000 ms, the forgotten bytes giving room back.
+    assert_eq!(spend(&v4[0], 1, 60_000), None);
+    assert_eq!(spend(&v4[0], 300, 60_001), Some(Ok(())));
+    assert_eq!(spend(&onion[0], 100, 60_001), Some(Ok(())));
+}
+
+#[test]
+fn s033_t09_r09_kept_while_published() {
+    // An entry counting only bytes published within 60 000 ms is kept, and
+    // removed after.
+    let gate = Gate::new(ConnectionLimits::default());
+    let admission = admit_n(&gate, v6(1, 1, 1), 1, 0);
+    gate.forget(60_001);
+    assert_eq!(
+        admission[0].publish(10, 30_000, || Ok::<(), ()>(())),
+        Some(Ok(()))
+    );
+    drop(admission);
+    gate.forget(90_000);
+    assert_eq!(gate.entries(), 2);
+    gate.forget(90_001);
+    assert_eq!(gate.entries(), 0);
 }
