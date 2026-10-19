@@ -73,7 +73,7 @@ crates/core/src/relay.rs                          check_blob (R2); specs 031 and
 crates/core/src/relay/tests.rs                    s030_* core tests
 crates/core/fuzz/fuzz_targets/relay_check_blob.rs
 crates/server/src/main.rs                         wiring only; spec 035 owns start-up and shutdown
-crates/server/src/http.rs                         the route, the Origin and path checks, the upgrade (R3, R4); `Shared` and its `cfg(test)` hooks, used by the tests of specs 030, 033 and 035: a pause of the socket writes, a pause before a catch-up's `ok`, a count of the backlog reads, a failing read and failing `relay` calls, a pause of the writer and a `server_id` it refuses, a count of the running connection tasks
+crates/server/src/http.rs                         the route, the Origin and path checks, the upgrade (R3, R4); `Shared` and its `cfg(test)` hooks, used by the tests of specs 030, 033 and 035: a pause of the socket writes, a pause before a catch-up's `ok`, a count of the backlog reads, a failing read and failing `relay` calls, a pause of the writer and a `server_id` it refuses, a count of the running connection tasks, a client address in place of the peer's (spec 033)
 crates/server/src/connection.rs                   one task per socket: frames in, frames out, catch-up (R5–R11, R15, R16)
 crates/server/src/hub.rs                          subscriptions per channel, held pushes, fan-out in order (R8, R12)
 crates/server/src/frames.rs                       the frames the server builds: `ok`, `ack`, `push`, `error` with its fixed text (R13, R14)
@@ -172,3 +172,4 @@ None.
 - 2026-10-16 Interface after slice (d): the publish tests in `tests/publish.rs`, the frame builders in `frames.rs`, the writer's test hooks in `http.rs`
 - 2026-10-16 T14 and Vectors after audit BK: the `hello`s of other version lists are left out with `ok_unknown_key`, since the server builds only `[1]`, and the fields are read from the vector's `expected`
 - 2026-10-16 Interface after audit BM: the count of the running connection tasks among the test hooks of `http.rs`
+- 2026-10-19 Interface: the hook that stands in for the peer's address, for the tests of spec 033 R8

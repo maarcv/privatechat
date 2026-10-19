@@ -118,8 +118,8 @@ impl PublishWindow {
 /// (R8).
 pub(crate) const IP_TABLE_MAX: usize = 65_536;
 
-/// The window of R8's new connections, and how long a connection opened
-/// keeps its entry (R9).
+/// The window of R8's new connections and of R12's bytes, and how long
+/// either keeps its entry (R9).
 const ADDRESS_WINDOW_MS: u64 = 60_000;
 
 /// The listener a connection came through (spec 035-server-ops R2).
@@ -204,12 +204,24 @@ struct Counts {
     unauth: u32,
     /// Connections opened within `ADDRESS_WINDOW_MS`.
     opened: u32,
+    /// Bytes of the blobs handed to the writer within `ADDRESS_WINDOW_MS`
+    /// (R12).
+    bytes: u64,
 }
 
 impl Counts {
     fn is_empty(&self) -> bool {
-        self.open == 0 && self.unauth == 0 && self.opened == 0
+        self.open == 0 && self.unauth == 0 && self.opened == 0 && self.bytes == 0
     }
+}
+
+/// What the window of the table holds of one node.
+#[derive(Clone, Copy)]
+enum Event {
+    /// A connection opened (R8).
+    Opened,
+    /// The bytes of a blob handed to the writer (R12).
+    Published(u64),
 }
 
 /// An entry of the table: an IPv4 address, a /48, or a /64 inside its /48.
@@ -261,9 +273,9 @@ struct IpTable {
     ids: HashMap<Key, u64>,
     nodes: HashMap<u64, Node>,
     next: u64,
-    /// The node each connection opened within `ADDRESS_WINDOW_MS` was
-    /// counted in, oldest first.
-    opened: VecDeque<(u64, u64)>,
+    /// What each node counts within `ADDRESS_WINDOW_MS`, and when, oldest
+    /// first.
+    recent: VecDeque<(u64, u64, Event)>,
 }
 
 impl IpTable {
@@ -363,7 +375,34 @@ impl IpTable {
                 counts.opened = counts.opened.saturating_add(1);
             }
         });
-        self.opened.push_back((now, id));
+        self.recent.push_back((now, id, Event::Opened));
+    }
+
+    /// Whether `bytes` more from `id` stay within R12: those of its address
+    /// within `ip_bytes_per_min`, and those of its /48 within
+    /// `ip48_bytes_per_min`. A connection a full table counts in its /48
+    /// alone has its address's budget on the /48's bytes, which hold its
+    /// own.
+    fn allows(&self, id: u64, bytes: u64, limits: &ConnectionLimits) -> bool {
+        let Some(node) = self.nodes.get(&id) else {
+            return true;
+        };
+        let site = match node.key {
+            Key::Site(_) => Some(node),
+            Key::V4(_) | Key::Subnet(_) => node.parent.and_then(|parent| self.nodes.get(&parent)),
+        };
+        node.counts.bytes.saturating_add(bytes) <= limits.ip_bytes_per_min
+            && site.is_none_or(|site| {
+                site.counts.bytes.saturating_add(bytes) <= limits.ip48_bytes_per_min
+            })
+    }
+
+    /// `bytes` handed to the writer at `now` from `id`, in it and its /48.
+    fn publish(&mut self, id: u64, bytes: u64, now: u64) {
+        self.update(id, |counts, _| {
+            counts.bytes = counts.bytes.saturating_add(bytes);
+        });
+        self.recent.push_back((now, id, Event::Published(bytes)));
     }
 
     /// The first `subscribe` of a connection of `id` accepted.
@@ -384,16 +423,24 @@ impl IpTable {
         self.prune(id);
     }
 
-    /// The connections opened more than `ADDRESS_WINDOW_MS` before `now`
-    /// forgotten, and the entries left counting nothing removed (R9).
+    /// The connections opened and the bytes published more than
+    /// `ADDRESS_WINDOW_MS` before `now` forgotten, and the entries left
+    /// counting nothing removed (R9).
     fn forget(&mut self, now: u64) {
-        while let Some(&(at, id)) = self.opened.front() {
+        while let Some(&(at, id, event)) = self.recent.front() {
             if now.saturating_sub(at) <= ADDRESS_WINDOW_MS {
                 break;
             }
-            self.opened.pop_front();
-            if let Some(node) = self.nodes.get_mut(&id) {
-                node.counts.opened = node.counts.opened.saturating_sub(1);
+            self.recent.pop_front();
+            match event {
+                Event::Opened => {
+                    if let Some(node) = self.nodes.get_mut(&id) {
+                        node.counts.opened = node.counts.opened.saturating_sub(1);
+                    }
+                }
+                Event::Published(bytes) => self.update(id, |counts, _| {
+                    counts.bytes = counts.bytes.saturating_sub(bytes);
+                }),
             }
             self.prune(id);
         }
@@ -437,11 +484,41 @@ struct Caps {
     unauth: u32,
 }
 
+/// The bytes all onion connections handed to the writer within
+/// `ADDRESS_WINDOW_MS` (R12).
+#[derive(Default)]
+struct OnionBytes {
+    total: u64,
+    recent: VecDeque<(u64, u64)>,
+}
+
+impl OnionBytes {
+    fn allows(&self, bytes: u64, limits: &ConnectionLimits) -> bool {
+        self.total.saturating_add(bytes) <= limits.onion_bytes_per_min
+    }
+
+    fn publish(&mut self, bytes: u64, now: u64) {
+        self.total = self.total.saturating_add(bytes);
+        self.recent.push_back((now, bytes));
+    }
+
+    fn forget(&mut self, now: u64) {
+        while let Some(&(at, bytes)) = self.recent.front() {
+            if now.saturating_sub(at) <= ADDRESS_WINDOW_MS {
+                break;
+            }
+            self.recent.pop_front();
+            self.total = self.total.saturating_sub(bytes);
+        }
+    }
+}
+
 #[derive(Default)]
 struct GateState {
     table: IpTable,
     main: Caps,
     onion: Caps,
+    onion_bytes: OnionBytes,
 }
 
 impl GateState {
@@ -513,7 +590,11 @@ impl Gate {
 
     /// The deadline task's sweep at `now` (R9).
     pub(crate) fn forget(&self, now: u64) {
-        self.lock().table.forget(now);
+        let mut state = self.lock();
+        state.table.forget(now);
+        // `Admission::publish` forgets them too; this frees their memory
+        // when no onion connection publishes.
+        state.onion_bytes.forget(now);
     }
 
     /// How many entries the table holds.
@@ -552,6 +633,42 @@ impl fmt::Debug for Admission {
 }
 
 impl Admission {
+    /// A blob of `bytes` from this connection at `now`, handed to the
+    /// writer by `submit` when the budgets of R12 allow it, and counted in
+    /// them only when `submit` takes it. `None` when a budget refuses it.
+    /// The check, the hand-over and the count happen under one lock, so
+    /// that two connections of one address cannot both slip under it.
+    pub(crate) fn publish<E>(
+        &self,
+        bytes: u64,
+        now: u64,
+        submit: impl FnOnce() -> Result<(), E>,
+    ) -> Option<Result<(), E>> {
+        let limits = &self.gate.limits;
+        let mut state = self.gate.lock();
+        let state = &mut *state;
+        state.table.forget(now);
+        state.onion_bytes.forget(now);
+        let allowed = match (self.listener, self.node) {
+            (Listener::Onion, _) => state.onion_bytes.allows(bytes, limits),
+            (Listener::Main, Some(node)) => state.table.allows(node, bytes, limits),
+            // A connection the full table holds no entry for: R10 alone.
+            (Listener::Main, None) => true,
+        };
+        if !allowed {
+            return None;
+        }
+        let submitted = submit();
+        if submitted.is_ok() {
+            match (self.listener, self.node) {
+                (Listener::Onion, _) => state.onion_bytes.publish(bytes, now),
+                (Listener::Main, Some(node)) => state.table.publish(node, bytes, now),
+                (Listener::Main, None) => {}
+            }
+        }
+        Some(submitted)
+    }
+
     /// Its first `subscribe` accepted: no longer counted as unauthenticated.
     pub(crate) fn authenticate(&mut self) {
         if std::mem::replace(&mut self.authenticated, true) {

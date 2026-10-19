@@ -1,6 +1,6 @@
 # 033 — Rate limits and quotas on the server
 
-Status: accepted
+Status: implemented
 Phase: 3
 Related ADRs: 0008, 0010, 0038
 Depends on: 028-session-sans-io, 030-ws-protocol, 031-auth-channel-signature, 032-storage-ttl
@@ -38,7 +38,7 @@ Some of these numbers are part of the protocol, because the client of spec 028-s
 - R9 The server MUST keep a client address only in memory: in the table, while an entry counts an open connection, a connection opened within the last 60 000 ms or bytes published within the last 60 000 ms (R12), and nowhere else. An entry that counts nothing MUST be removed. Connections on the onion listener (spec 035 R2) carry no address and are outside R8.
 - R10 Each listener MUST have its own caps: on the main listener, `max_connections` open and `max_unauth_connections` open with no accepted `subscribe`; on the onion listener, `onion_max_connections` and `max_unauth_connections`. A new upgrade past a cap of its listener MUST get HTTP 503 with an empty body.
 - R11 The values of R6–R8, R10 and R12 MUST come from the configuration of spec 035-server-ops, with the defaults of the table "Limits". The values of R1–R5 MUST be constants in `limits.rs`.
-- R12 Before a `publish` goes to the writer, the server MUST refuse it with `error{rate_limited, channel_id, client_ref}` when the blobs handed to the writer within the preceding 60 000 ms from connections of the same address (its IPv4 address or IPv6 /64), plus this one, would exceed `ip_bytes_per_min`, or those of its IPv6 /48 would exceed `ip48_bytes_per_min`, or, for a connection of the onion listener, when those of all onion connections would exceed `onion_bytes_per_min`.
+- R12 Before a `publish` goes to the writer, the server MUST refuse it with `error{rate_limited, channel_id, client_ref}` when the blobs handed to the writer within the preceding 60 000 ms from connections of the same address (its IPv4 address or IPv6 /64), plus this one, would exceed `ip_bytes_per_min`, or those of its IPv6 /48 would exceed `ip48_bytes_per_min`, or, for a connection of the onion listener, when those of all onion connections would exceed `onion_bytes_per_min`. A connection the full table admitted with no entry (R8) has no byte budget, only the caps of R10; one counted in its /48 alone has its address's budget on the /48's bytes, which hold its own.
 
 ## Limits
 
@@ -73,7 +73,9 @@ Some of these numbers are part of the protocol, because the client of spec 028-s
 ```
 crates/server/src/limits.rs              the constants of R1–R5, the per-connection windows, the IP table, the caps, the ingest budgets (R1–R5, R8–R10, R12)
 crates/server/src/store/writer.rs        the channel windows and quota checks, added to spec 032's writer (R6, R7)
-crates/server/src/tests/limits.rs        s033_* tests, with ManualClock
+crates/server/src/tests/limits.rs        s033_* tests, with ManualClock: one connection and one channel (R1–R7)
+crates/server/src/tests/limits/ip.rs     s033_* tests of the listeners, the addresses and the budgets (R8–R12)
+crates/server/src/http.rs                `router(shared, listener)`, the checks of the gate before the upgrade (R8, R10)
 ```
 
 ```rust
@@ -105,10 +107,11 @@ impl Gate { pub(crate) fn new(limits: ConnectionLimits) -> Arc<Gate>;
             pub(crate) fn admit(self: &Arc<Gate>, listener: Listener, address: Option<IpAddr>, now: u64) -> Result<Admission, Refused>;
             pub(crate) fn forget(&self, now: u64) }
 pub(crate) struct Admission { /* its listener and the id of its entry, never the address (R9); counted until it drops */ }
-impl Admission { pub(crate) fn authenticate(&mut self) }
+impl Admission { pub(crate) fn authenticate(&mut self);
+                 pub(crate) fn publish<E>(&self, bytes: u64, now: u64, submit: impl FnOnce() -> Result<(), E>) -> Option<Result<(), E>> }
 ```
 
-`Gate::admit` checks the caps of the listener (R10) before the table (R8), under one lock, and counts nothing it refuses. When the table is full, a new /64 of a /48 that has an entry is counted in the /48 alone, which still checks its bounds. `router(shared, listener)` serves each listener; the main one reads the peer's address through axum's `ConnectInfo`. The deadline task also sweeps the table (R9).
+`Gate::admit` checks the caps of the listener (R10) before the table (R8), under one lock, and counts nothing it refuses. When the table is full, a new /64 of a /48 that has an entry is counted in the /48 alone, which still checks its bounds. `router(shared, listener)` serves each listener; the main one reads the peer's address through axum's `ConnectInfo`. The deadline task also sweeps the table (R9). `Admission::publish` checks the budgets of R12, hands the blob to the writer through `submit` and counts its bytes only when the writer takes it, all under the gate's lock; `None` is R12's refusal. A connection the full table holds no entry for has no budget but R10's caps, and one counted in its /48 alone is checked against `ip_bytes_per_min` on the /48's bytes.
 
 `Writer::spawn` of spec 032 gains a `ChannelLimits` argument. The channel windows live in the writer thread, so the check and the insert happen in one place, in arrival order, with no lock. The ping and write deadlines and every window are measured with `Clock::mono_ms()` and checked by the deadline task of spec 032 R14.
 
@@ -118,7 +121,7 @@ impl Admission { pub(crate) fn authenticate(&mut self) }
 - R6 and R7 run in the writer, which serialises all inserts. Two connections racing on the same channel cannot both slip under a limit.
 - R8 keeps an address in memory while its connections are open and for 60 s after it last opened a connection or published (R9, R12), and never stores or logs it (R9, spec 035 R4). That is what §2 row 1 already says the server sees. An operator can be compelled to log addresses (§2); only Tor prevents that.
 - Counting IPv6 by /64 stops one host from rotating through the 2^64 addresses of its own prefix, and the /48 count stops one site or tunnel broker allocation from spreading over its 65 536 /64s. The canonical form stops a dual-stack listener from putting the whole IPv4 internet in one `::/64` bucket. A full table admits new addresses under the listener's caps instead of refusing them, so filling the table does not lock out honest clients.
-- No server without accounts can stop a distributed attacker from filling its disk: availability is outside the model (§2 "Outside the model"). R12 makes one address, one /48 or the whole onion listener fill it slowly: at the defaults, one address needs about 17 hours to fill 8 GiB, which gives the operator time to see the totals line of spec 035 and act. The per-channel quota and `max_db_bytes` bound the rest.
+- No server without accounts can stop a distributed attacker from filling its disk: availability is outside the model (§2 "Outside the model"). R12 makes one address, one /48 or the whole onion listener fill it slowly, except an address a full table admits with no entry, which only R1 and R10 bound (R12, BP-D-1): at the defaults, one address needs about 17 hours to fill 8 GiB, which gives the operator time to see the totals line of spec 035 and act. The per-channel quota and `max_db_bytes` bound the rest.
 - The onion listener has no per-IP rule, because behind Tor every client shares one address. Its own caps (R10) mean a flood through Tor can fill only the onion listener, never the main one; but within it one Tor client can use up `onion_bytes_per_min` and make every other onion user's publishes wait a minute at a time, and fill its connection caps. That is a documented residual of an address-free listener; `deploy/README.md` names `onion_bytes_per_min` and `onion_max_connections` among the values to raise, and an operator under such a flood can close the onion listener.
 - Tor users of a public `wss://` server share their exit's address, and with a proxy every channel is its own connection (spec 027-core-api R10). After a restart, many of them may reconnect at once and meet R8 for a few minutes, and their clients back off. The same holds for many users behind one carrier-grade NAT or office address, where `ip_connections` also bounds how many can be connected at once, and `ip_bytes_per_min` is shared by all of them: one device publishing large blobs at that rate makes the others' publishes wait a minute at a time. Mobile carriers and some ISPs give each device its own /64 out of a /48 shared by many subscribers, so the /48 values bound all of them together: a few devices in such a /48, or more than `ip48_connections` honest connections, keep the rest of it out. `deploy/README.md` names `ip_connections`, `ip_unauth_connections`, `ip_new_per_min`, `ip_bytes_per_min` and the four `ip48_` values as the ones to raise for a server with many Tor, carrier-NAT, carrier-IPv6 or office users (spec 034-docker R7).
 - R2 and R3 run before the signature check of spec 031, so a flood of `subscribe`s costs one BLAKE2b hash each, not up to 8 signature verifications.
@@ -141,7 +144,7 @@ None in `core`. `docs/spec.md` §6, brought up to date when this spec is accepte
 - T09 (covers R9): `s033_t09_r09_ip_forgotten`: after every connection of an address closes and 60 001 ms pass, the table has no entry for it; no connection state other than the table holds the address; a connection on the onion listener creates no entry.
 - T10 (covers R10): `s033_t10_r10_listener_caps`: with `max_connections = 2` and `onion_max_connections = 1`, two main connections → a third main gets 503, and one onion connection is still accepted; a second onion connection → 503 while the main listener still accepts after one closes; `max_unauth_connections = 2` → the third unauthenticated connection of a listener gets 503.
 - T11 (covers R11): `s033_t11_r11_configurable_values`: a configuration with `channel_publish_per_min = 10` → the 11th refused; the constants of R1–R5 equal the values of the table "Limits" and of spec 028's pacing (30, 16), and `SUBSCRIBE_GAP_MS` (1 000) is below spec 028 R6's 1 100 ms.
-- T12 (covers R12): `s033_t12_r12_ingest_budgets`: with `ip_bytes_per_min = 200 000`, one address publishing 64 673-byte blobs on two of its own channels over four connections → the fourth blob within 60 000 ms `rate_limited` naming both fields; 60 001 ms later → accepted; two onion connections share `onion_bytes_per_min`.
+- T12 (covers R12): `s033_t12_r12_ingest_budgets`: with `ip_bytes_per_min` one byte short of four 64 673-byte blobs, one address publishing 64 673-byte blobs on two of its own channels over four connections → the fourth blob within 60 000 ms `rate_limited` naming both fields; 60 001 ms later → accepted; two onion connections share `onion_bytes_per_min`.
 
 ## Vectors
 
@@ -182,3 +185,6 @@ None.
 - 2026-10-17 R7's reason for checking it before R6 worded after spec 028 R16 was amended (BN-D-2): the full channel is told, where `rate_limited` pauses it silently
 - 2026-10-19 Interface after slice (c1) and audit BO (`docs/audit-log.md`, BO2, BO7): `Gate`, `Admission`, `Listener`, `Refused`, `IpTable` private; the listener caps checked before the table, and a full table counts a new /64 of a known /48 in the /48 alone (advisors)
 - 2026-10-19 R8 amended after audit BO (`docs/audit-log.md`, BO-D-1, the human's decision): when the table is full, a new /64 of a /48 that has an entry is counted in its /48 and checked against the /48's bounds alone
+- 2026-10-19 Interface after slice (c2): the test files and `http.rs`, `Admission::publish`, the budgets of R12 counted under the gate's lock with the hand-over to the writer
+- 2026-10-19 R12 amended after audit BP (`docs/audit-log.md`, BP-D-1, the human's decision): a connection the full table admitted with no entry has no byte budget, only R10's caps; one counted in its /48 alone has its address's budget on the /48's bytes
+- 2026-10-19 T12 worded after audit BP: the address's budget one byte short of four blobs, so that a blob counted a byte short is caught

@@ -2,6 +2,24 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BP
+
+**2026-10-19 — Audit BP, the code audit of the second half of slice (c) of spec 033-rate-limit-quotas (branch `033-c2-budgets`): R12, the bytes an address, its /48 and the whole onion listener hand to the writer per 60 000 ms, checked, handed over and counted under the gate's lock by `Admission::publish`; R9's clause that an entry is kept while its bytes are in the window; spec 033 marked implemented. Two rounds of three passes.** One edge of the full table where the code and R12 disagreed, closed in the code and by a decision of the human, and tests.
+
+| # | Finding | Severity | Change |
+| --- | --- | --- | --- |
+| BP1 | On a full table, a new /64 counted in its /48 alone was checked against `ip48_bytes_per_min` only, not its address's budget (A, B) | Low | The address's budget is checked on the /48's bytes, which hold its own |
+| BP2 | R12's MUST named no exception for a connection the full table admitted with no entry, which has no entry to count its bytes in (A) | Low | The human's decision BP-D-1 |
+| BP3 | Untested: both publish paths of a full table, the /48's budget on a connection counted in it alone, the onion window's edge, a blob counted a byte more or a byte less (A, C, rounds 1–2) | Medium | A test each; T12's budgets fit the blobs to the byte, its text worded so |
+| BP4 | The test module's doc said R8–R11; a test ran the monotonic clock back; Security promised R12's slow fill with no exception (A) | Low | Worded; the clock only moves on |
+| BP5 | A client sharing a budget (the onion listener, an address, a /48) can learn what the others published by spending it (B) | Far-fetched | None: the budget is the requirement, as BO8 |
+| BP6 | The onion sweep in `Gate::forget` is equivalent, since `publish` forgets first; the onion budget handled inline (C) | Far-fetched | Kept with a comment, as it frees memory; `OnionBytes::allows` and `publish` |
+| BP7 | A clock read before the lock can queue window events a few microseconds out of order (C) | Far-fetched | None: on the strict side, as in slice (c1) |
+
+**BP-D-1 (the human's decision, 2026-10-19).** A connection the full table admitted with no entry (R8) has no byte budget, only the caps of R10; one counted in its /48 alone has its address's budget on the /48's bytes. Of amending R12 so, or giving every entry-less connection one shared budget, which an attacker filling the table would spend for the honest newcomers, the human chose the first. R12, the Interface and Security say so.
+
+Round 2 ended the audit: pass B found nothing, pass A only a far-fetched line of text, and pass C only tests that did not pin the code, added before the close. The pull request is about 390 net lines, 210 of them tests.
+
 ## Audit BO
 
 **2026-10-19 — Audit BO, the code audit of the first half of slice (c) of spec 033-rate-limit-quotas (branch `033-c1-ip`): R8–R11, the IP table keyed by IPv4 address or by /64 inside its /48, each listener's caps, the `Gate` that checks both before the upgrade under one lock and answers 503 or 429 with an empty body, the `Admission` that holds a connection's place and no address, the deadline task sweeping the table, and `ConnectionLimits` with the defaults of the table "Limits". Three rounds of three passes.** No production defect a client can reach; one decision of the human on R8's text, two of the advisors, a configured 0 that let a fresh address in, and tests.
