@@ -16,14 +16,14 @@
   "dependencies": {
     "@astrojs/sitemap": "^3.7.4",
     "@tailwindcss/vite": "^4.3.3",
-    "astro": "^7.3.3",
+    "astro": "^7.4.2",
     "tailwindcss": "^4.3.3"
   },
   "allowScripts": {
     "esbuild": true
   },
   "devDependencies": {
-    "@astrojs/check": "^0.9.10",
-    "typescript": "^6.0.3"
+    "@astrojs/check": "^0.9.12",
+    "typescript": "^7.0.2"
   }
 }
