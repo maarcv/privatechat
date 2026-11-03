@@ -1,6 +1,6 @@
 ---
 name: audit-conformance
-description: Audit pass A of a privatechat change — does the code do exactly what the accepted spec says, every requirement R* and test T*, nothing more and nothing less. One of the three independent passes run after every change; see the audit flow in CLAUDE.md. Reads only.
+description: Audit pass A of a privatechat change — does the code do exactly what the accepted spec says, every requirement R* and test T*, nothing more and nothing less. One of the four independent passes run after every change; see the audit flow in CLAUDE.md. Reads only.
 tools: Read, Grep, Glob, Bash, Skill
 skills:
   - architecture
@@ -31,24 +31,17 @@ Load the language skill of the code you read (`rust`, `kotlin`, `swift`,
 
 The developer's description of the change is not a source; the files are.
 
-## Findings
+## Earlier rounds
 
-Report every finding in the format of `## Finding format` below. Be precise
+From round 2 on, the brief gives the earlier rounds' blocks. Check that each
+finding closed as fixed really is, and judge every other closing (answered,
+left, far-fetched, dropped): one you do not accept is reported again, at its
+severity, saying why. A closing you accept is not reported again unless the
+code changed under it.
+
+## Output
+
+Every finding in the format and with the severity of `CLAUDE.md`, "Finding
+format and severity", numbered `R<round>-A<k>`. Be precise
 rather than many: one finding with a concrete scenario is worth more than five
 suspicions. If you find nothing, say `No findings.` and list what you checked.
-
-## Finding format
-
-```
-### <short title>
-Severity: High | Medium | Low
-Where: <path:line>
-Source: <spec requirement, ADR or AGENTS rule broken>
-Scenario: <the concrete inputs or sequence that produce the wrong behaviour>
-Far-fetched: no | yes — <why: outside the threat model, no reachable input, or a preference no rule backs>
-Fix: <the smallest change that closes it>
-```
-
-High: a guarantee of `docs/spec.md` §1–§2 or a requirement is broken in a
-reachable case. Medium: a requirement is weakened, or a test does not test what
-it claims. Low: anything else worth fixing.

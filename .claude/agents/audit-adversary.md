@@ -1,6 +1,6 @@
 ---
 name: audit-adversary
-description: Audit pass B of a privatechat change — the attacker's reading. Tries to break privacy and security with every adversary of the threat model (malicious server, network observer, intruder with the config, thief of a key, wrong clock). One of the three independent passes run after every change; see the audit flow in CLAUDE.md. Reads only.
+description: Audit pass B of a privatechat change — the attacker's reading. Tries to break privacy and security with every adversary of the threat model (malicious server, network observer, intruder with the config, thief of a key, wrong clock). One of the four independent passes run after every change; see the audit flow in CLAUDE.md. Reads only.
 tools: Read, Grep, Glob, Bash, Skill
 skills:
   - architecture
@@ -38,24 +38,18 @@ Stay inside the model: what `docs/spec.md` §2 lists as outside the model
 (malware on the device, rooted device, cryptanalysis of the primitives…) is
 not a finding.
 
-## Findings
+## Earlier rounds
 
-Report every finding in the format of `## Finding format` below, each with the
-exact sequence an attacker follows. If you find nothing, say `No findings.`
-and list the attacks you tried.
+From round 2 on, the brief gives the earlier rounds' blocks. Check that each
+finding closed as fixed really is, and judge every other closing (answered,
+left, far-fetched, dropped): one you do not accept is reported again, at its
+severity, saying why. A closing you accept is not reported again unless the
+code changed under it.
 
-## Finding format
+## Output
 
-```
-### <short title>
-Severity: High | Medium | Low
-Where: <path:line>
-Adversary: <which one of docs/spec.md §2>
-Scenario: <the exact sequence of inputs, times and messages>
-Far-fetched: no | yes — <why: outside the threat model, no reachable input, or needs a condition the attacker cannot create>
-Fix: <the smallest change that closes it>
-```
-
-High: a guarantee of `docs/spec.md` §1–§2 is broken in a reachable case.
-Medium: an attacker gains something the model does not grant, under
-conditions it can create. Low: anything else worth fixing.
+Every finding in the format and with the severity of `CLAUDE.md`, "Finding
+format and severity", numbered `R<round>-B<k>`. Each one
+gives the exact sequence an attacker (or the failing world) follows and, in
+`Source:`, the adversary of `docs/spec.md` §2 and the promise it breaks. If
+you find nothing, say `No findings.` and list the attacks you tried.
