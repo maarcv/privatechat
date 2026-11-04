@@ -42,7 +42,7 @@ The ADRs in `docs/adr/` are the historical context of every decision and the bar
 - T01 (covers R1): `check_s002_t01_r01_adr_files_follow_template` validates the file name `NNNN-<kebab>.md`, line 1, line 3 (`Date · Status [· Supersedes]`), the four sections and the contiguous numbering.
 - T02 (covers R2): `check_s002_t02_r02_adr_index_matches_files_and_spec` compares files ↔ index ↔ §3 (number, title, state).
 - T03 (covers R3): `check_s002_t03_r03_adr_states_are_in_vocabulary`.
-- T04 (covers R4): human review in the PR; item `s002_t04_r04_accepted_adr_only_state_changes` of the PR template. No mechanical check in v1.
+- T04 (covers R4): the review before merging (the audit of `CLAUDE.md` until the first release, then the human reviewer, AGENTS Per-feature flow); item `s002_t04_r04_accepted_adr_only_state_changes` of the PR template. No mechanical check in v1.
 - T05 (covers R5): CI step `s001_t08_r08_protected_paths_require_adr`, also recorded as `s002_t05_r05_format_changes_need_adr`.
 
 ## Vectors
@@ -59,10 +59,11 @@ The ADRs in `docs/adr/` are the historical context of every decision and the bar
 
 ## Open questions
 
-- [x] 002-R4: is a script that detects diffs in accepted ADRs outside the state line worthwhile? Decided in audit P: no script in v1; the Definition of done item "No accepted ADR modified outside its status line" is checked by the human reviewer of every PR, and a script is proposed with a new spec only if a PR is ever found breaking it.
+- [x] 002-R4: is a script that detects diffs in accepted ADRs outside the state line worthwhile? Decided in audit P: no script in v1; the Definition of done item "No accepted ADR modified outside its status line" is checked by the review before merging of every PR (the audit of `CLAUDE.md` until the first release, then the human reviewer), and a script is proposed with a new spec only if a PR is ever found breaking it.
 
 ## History
 
 - 2026-09-20 draft · 2026-09-20 in review · 2026-09-20 accepted (Marc Vilardebó) · 2026-09-20 implemented
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): open question 002-R4 closed: no script, the reviewer checks the Definition of done item
 - 2026-10-01 revised after audit Z (`docs/audit-log.md`): R4 states both exceptions of the README; the count of ADRs leaves the text; the title limit names its one exception; doc_lint reads every file of `docs/adr/`, refuses a misnamed one and a duplicate number
+- 2026-11-04 revised after audit BC (`docs/audit-log.md`): T04 and 002-R4 name the review before merging, the audit of `CLAUDE.md` until the first release, as the check of R4
