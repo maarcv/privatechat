@@ -18,4 +18,4 @@ Requirements covered: R1, R2, …
 - [ ] The `architecture` skill and the language skill followed
 - [ ] Everything in English (AGENTS 11)
 
-<!-- Item 8 is spec 002 T04 (`s002_t04_r04_accepted_adr_only_state_changes`): human review, no mechanical check. -->
+<!-- Item 8 is spec 002 T04 (`s002_t04_r04_accepted_adr_only_state_changes`): checked by the review before merging (the audit of `CLAUDE.md` until the first release, then the human reviewer), no mechanical check. -->
