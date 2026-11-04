@@ -1,6 +1,6 @@
 # Private E2E chat — Specification and plan (SDD)
 
-Version: mvp · Updated: 2026-10-15 · Marc Vilardebó (audits in `docs/audit-log.md`)
+Version: mvp · Updated: 2026-11-04 · Marc Vilardebó (audits in `docs/audit-log.md`)
 
 This file, on the default branch (`mvp` until the first release), is the canonical source of the specification (see §11 "Governance"). Read copy, may lag behind: https://claude.ai/code/artifact/1527bf13-79e8-485a-908d-a515cbd062a4
 
@@ -636,7 +636,7 @@ flowchart LR
     F --> G[Merge]
 ```
 
-Human review at B is mandatory in `core`, `store` and `server`. Until the first release, F is the audit of `CLAUDE.md` (rounds of three independent passes, `docs/audit-log.md`): a human decides what it escalates and approves every ADR, and does not review the PR itself. At the first release F becomes a human review again, mandatory in `core`, `store` and `server`; in the clients it may then be the only review.
+Human review at B is mandatory in `core`, `store` and `server`. Until the first release, F is the audit of `CLAUDE.md` (rounds of four independent passes, `docs/audit-log.md`): a human decides what it escalates and approves every ADR, and does not review the PR itself. At the first release F becomes a human review again, mandatory in `core`, `store` and `server`; in the clients it may then be the only review.
 
 ## 12. Open decisions and risks
 
