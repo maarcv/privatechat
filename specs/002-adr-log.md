@@ -66,4 +66,4 @@ The ADRs in `docs/adr/` are the historical context of every decision and the bar
 - 2026-09-20 draft · 2026-09-20 in review · 2026-09-20 accepted (Marc Vilardebó) · 2026-09-20 implemented
 - 2026-09-28 revised after audit P (`docs/audit-log.md`): open question 002-R4 closed: no script, the reviewer checks the Definition of done item
 - 2026-10-01 revised after audit Z (`docs/audit-log.md`): R4 states both exceptions of the README; the count of ADRs leaves the text; the title limit names its one exception; doc_lint reads every file of `docs/adr/`, refuses a misnamed one and a duplicate number
-- 2026-11-04 revised after audit BC (`docs/audit-log.md`): T04 and 002-R4 name the review before merging, the audit of `CLAUDE.md` until the first release, as the check of R4
+- 2026-11-04 revised after audit BR (`docs/audit-log.md`): T04 and 002-R4 name the review before merging, the audit of `CLAUDE.md` until the first release, as the check of R4

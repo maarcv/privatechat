@@ -2,11 +2,11 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
-## Audit BC
+## Audit BR
 
-**2026-11-04 — Audit BC, PR #94 (`method-leftovers`): the leftovers of PR #92, which aligned the agent method with AgenticPark.** `docs/spec.md` §11 said "rounds of three independent passes"; spec 002 T04, the 002-R4 closing and the PR template gave the check of R4 to a human PR reviewer who does not exist until the first release. Outside the diff, the description of the `adr-not-needed` label said "set by the human reviewer"; it now reads "Protected path, no format change (spec 001 R8); who sets it: AGENTS 18". The first audit in the four-pass format of `CLAUDE.md`.
+**2026-11-04 — Audit BR, PR #94 (`method-leftovers`): the leftovers of PR #92, which aligned the agent method with AgenticPark.** `docs/spec.md` §11 said "rounds of three independent passes"; spec 002 T04, the 002-R4 closing and the PR template gave the check of R4 to a human PR reviewer who does not exist until the first release. Outside the diff, the description of the `adr-not-needed` label said "set by the human reviewer"; it now reads "Protected path, no format change (spec 001 R8); who sets it: AGENTS 18". The first audit in the four-pass format of `CLAUDE.md`.
 
-**The human's decisions.** BC-R2-B1: no audit pass is told yet to check spec 002 R4; it stays out of this PR and goes to a follow-up (a line in `audit-conformance.md`, or a lint check through a new spec).
+**The human's decisions.** BR-R2-B1: no audit pass is told yet to check spec 002 R4; it stays out of this PR and goes to a follow-up (a line in `audit-conformance.md`, or a lint check through a new spec).
 
 Round 1: red
 - R1-A1 Important — Spec 002 T04, 002-R4 and the PR template gave the R4 check to a human PR reviewer — fixed
@@ -21,6 +21,9 @@ Round 2: red
 - R2-D1 Suggestion — Same as R2-B1 — answered with R2-B1
 - R2-A1 Suggestion — The PR description did not mention the spec 002 change (also R2-D2) — fixed: title and body updated
 - R2-C1 Suggestion — The "review before merging" parenthetical is written in three places — left
+
+Round 3: red
+- R3-D1 Important — The letters BC were already taken by the audits on the stacked branches of PRs #83–#90 (BC–BQ) — fixed: this audit is BR
 
 ## Audit BB
 
