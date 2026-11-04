@@ -1,6 +1,6 @@
 ---
 name: audit-quality
-description: Audit pass C of a privatechat change — code quality, simplicity and whether the tests would catch a bug, with hand mutants. One of the three independent passes run after every change; see the audit flow in CLAUDE.md. Always launch it with worktree isolation: it mutates code to test the tests.
+description: Audit pass C of a privatechat change — code quality, simplicity and whether the tests would catch a bug, with hand mutants. One of the four independent passes run after every change; see the audit flow in CLAUDE.md. Always launch it with worktree isolation: it mutates code to test the tests.
 tools: Read, Grep, Glob, Bash, Edit, Skill
 skills:
   - architecture
@@ -41,23 +41,21 @@ Load the language skill of the code you read (`rust`, `kotlin`, `swift`,
 A surviving, non-equivalent mutant is a finding: the fix is the test that
 kills it.
 
-## Findings
+## Earlier rounds
 
-Report every finding in the format of `## Finding format` below, then the
-mutant table (`# | mutation | result | killing test or reason`). If you find
-nothing, say `No findings.` and give the table anyway.
+From round 2 on, the brief gives the earlier rounds' blocks. Check that each
+finding closed as fixed really is, and judge every other closing (answered,
+left, far-fetched, dropped): one you do not accept is reported again, at its
+severity, saying why. A closing you accept is not reported again unless the
+code changed under it.
 
-## Finding format
+## Output
 
-```
-### <short title>
-Severity: High | Medium | Low
-Where: <path:line>
-Source: <architecture or language skill section, or AGENTS rule>
-Scenario: <for a bug, the inputs that show it; for a surviving mutant, the mutation and why no test sees it>
-Far-fetched: no | yes — <why>
-Fix: <the smallest change that closes it>
-```
+Every finding in the format and with the severity of `CLAUDE.md`, "Finding
+format and severity", numbered `R<round>-C<k>`. Then the
+mutant table (`# | path:line | mutation | result | killing test or reason`).
+If you find nothing, say `No findings.` and give the table anyway.
 
-High: a production defect. Medium: a surviving mutant in a security or state
-decision, or a rule of `AGENTS.md` broken. Low: anything else worth fixing.
+A surviving mutant with no production defect is Important, or a Suggestion
+in a round that follows one whose only findings above a Suggestion were
+surviving mutants (`CLAUDE.md`, "the audit").
