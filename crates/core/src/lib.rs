@@ -295,7 +295,16 @@ pub(crate) mod tests {
         assert_eq!(section(deny, "[graph]"), ["all-features = true"]);
         assert_eq!(
             section(deny, "[advisories]"),
-            ["version = 2", "yanked = \"deny\"", "ignore = []"]
+            [
+                "version = 2",
+                "yanked = \"deny\"",
+                "ignore = [",
+                "{ id = \"RUSTSEC-2026-0367\", reason = \"zip runs only in the build script of libsodium-sys-stable, on Windows, on the vendored archive pinned by hash and minisign (spec 042 R15); not shipped (spec 065 R6)\" },",
+                "{ id = \"RUSTSEC-2026-0368\", reason = \"zip runs only in the build script of libsodium-sys-stable, on Windows, on the vendored archive pinned by hash and minisign (spec 042 R15); not shipped (spec 065 R6)\" },",
+                "{ id = \"RUSTSEC-2026-0369\", reason = \"zip runs only in the build script of libsodium-sys-stable, on Windows, on the vendored archive pinned by hash and minisign (spec 042 R15); not shipped (spec 065 R6)\" },",
+                "{ id = \"RUSTSEC-2026-0429\", reason = \"zip runs only in the build script of libsodium-sys-stable, on Windows, on the vendored archive pinned by hash and minisign (spec 042 R15); not shipped (spec 065 R6)\" },",
+                "]",
+            ]
         );
         assert!(section(deny, "[bans]").contains(&"wildcards = \"deny\""));
     }
