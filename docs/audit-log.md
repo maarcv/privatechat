@@ -2,6 +2,26 @@
 
 Findings and applied changes of every audit of the specification, newest first; `docs/spec.md` §13 points here and every PR that changes §3–§6 adds a row.
 
+## Audit BC
+
+**2026-11-04 — Audit BC, PR #94 (`method-leftovers`): the leftovers of PR #92, which aligned the agent method with AgenticPark.** `docs/spec.md` §11 said "rounds of three independent passes"; spec 002 T04, the 002-R4 closing and the PR template gave the check of R4 to a human PR reviewer who does not exist until the first release. Outside the diff, the description of the `adr-not-needed` label said "set by the human reviewer"; it now reads "Protected path, no format change (spec 001 R8); who sets it: AGENTS 18". The first audit in the four-pass format of `CLAUDE.md`.
+
+**The human's decisions.** BC-R2-B1: no audit pass is told yet to check spec 002 R4; it stays out of this PR and goes to a follow-up (a line in `audit-conformance.md`, or a lint check through a new spec).
+
+Round 1: red
+- R1-A1 Important — Spec 002 T04, 002-R4 and the PR template gave the R4 check to a human PR reviewer — fixed
+- R1-B2 Suggestion — Same as R1-A1 — fixed with R1-A1
+- R1-A2 Suggestion — The label description left out the libsodium-bump exception (also R1-B1, R1-D1) — fixed: the label points at AGENTS 18
+- R1-D2 Suggestion — The §11 tree shows neither `.claude/agents/` nor what `CLAUDE.md` holds — left
+- R1-D3 Suggestion — The PR template has no Audit or "Decisions taken without the human" section — left
+- R1-D4 Suggestion — §10's Definition of done and the PR template list different local CI checks — left
+
+Round 2: red
+- R2-B1 Important — Spec 002 names the audit as the check of R4, but no pass is told to make it — answered (the human's decision): out of this PR, a follow-up adds the check
+- R2-D1 Suggestion — Same as R2-B1 — answered with R2-B1
+- R2-A1 Suggestion — The PR description did not mention the spec 002 change (also R2-D2) — fixed: title and body updated
+- R2-C1 Suggestion — The "review before merging" parenthetical is written in three places — left
+
 ## Audit BB
 
 **2026-10-15 — Audit BB, a whole-project audit of everything done up to the close of phase 2 (`mvp` at 2f5dbd2): specs 000–028 against their code, the accepted specs 030–066 against what is implemented, and `docs/spec.md`, the threat model, `AGENTS.md`, the README, the skills and the landing against each other.** Round 1 had eight passes in parallel: A1 conformance of phases 0–1, A2 of 020–024, A3 of 025–028 and of the core's API against what 030–056 call; B1 the adversary on the crypto core, B2 on the session and the store; C1 quality and 43 hand mutants of `core`, C2 of `store`, the fuzz crate, the scripts and the CI (25 mutants); D the coherence of the specification set. Rounds 2–6 had three passes each (A, B, C) on the whole change, rounds 7–13 on the text each previous round changed. No production defect of the core or the store was found; the core's API is what specs 030–056 call. The fixes landed in five pull requests: `bb-docs`, `bb-skills`, `bb-specs`, `bb-core`, `bb-store`.
